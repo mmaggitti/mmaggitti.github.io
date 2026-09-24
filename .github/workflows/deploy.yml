@@ -1,0 +1,69 @@
+name: Deploy to GitHub Pages
+
+# Every push to main: guard → build → phone-size smoke test in WebKit → deploy.
+# Any failing step blocks the deploy, so a leak or a broken page never reaches the site.
+# Pages must be set to Settings → Pages → Source: GitHub Actions.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Re-runs the pre-commit guard. The private deny list comes from an Actions secret;
+      # without it only the generic rules run (the guard says so in the log).
+      - name: Guard — nothing private in a public repo
+        run: node scripts/check-public.mjs
+        env:
+          PUBLIC_GUARD_DENY: ${{ secrets.PUBLIC_GUARD_DENY }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build every project and the launcher
+        run: npm run build
+
+      - name: Install WebKit
+        run: npx playwright install --with-deps webkit
+
+      # WebKit is Safari's engine; the cloud container only has Chromium, so this is the one
+      # place Safari-engine rendering is checked before the phone.
+      - name: Smoke test at phone size (WebKit)
+        run: npm test
+        env:
+          ENGINE: webkit
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
