@@ -68,6 +68,13 @@ for (const name of names) {
 }
 
 writeFileSync(join(OUT, 'index.html'), launcher(cards));
+// The studio's page picker reads this. The studio itself is left out: it can't inspect itself.
+const pages = [
+  { path: '/', title: 'Projects' },
+  { path: '/ds/', title: 'Design system' },
+  ...cards.filter((c) => c.name !== 'studio').map((c) => ({ path: `/${c.name}/`, title: c.title })),
+];
+writeFileSync(join(OUT, 'pages.json'), JSON.stringify(pages, null, 2) + '\n');
 console.log(`launcher: ${cards.length} project(s) → _site/index.html`);
 
 function esc(s) {

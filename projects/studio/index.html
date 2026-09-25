@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Deliberately NOT viewport-fit=cover (an exception to the site rule): WebKit hands the whole
+       page's safe-area insets to same-origin frames, so a framed page would pad itself for a notch
+       it isn't next to. Without cover the studio sits inside the safe area and frames get zero. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="See the live DOM of any page on this site: tap to select, inspect, watch it change.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>Studio — live DOM</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

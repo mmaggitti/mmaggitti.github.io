@@ -28,8 +28,10 @@ Mark to paste them into chat.
 ```
 projects/<name>/          one folder per project. Lowercase, digits, hyphens only.
                           "_name" = draft, not built. Reserved: "crossword-v1" (its own repo), "ds".
+projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see Testing)
+projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
 ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
-scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher
+scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher, pages.json
 scripts/smoke-test.mjs    phone-size check of every built page (+ screenshots in .smoke/)
 scripts/check-public.mjs  the guard
 scripts/check-units.mjs   rem, not px (see Design system)
@@ -64,6 +66,38 @@ Then confirm the "Deploy to GitHub Pages" run went green with the GitHub Actions
 Mark `https://mmaggitti.github.io/<name>/`. If WebKit fails in CI but Chromium passed locally,
 that's a real Safari-engine difference: fix it, don't skip it.
 
+## Testing
+
+`npm test` runs the smoke test over every built page. It then runs each
+`projects/<name>/test/e2e.mjs`, whose default export is `async ({ browser, origin, engine })` and
+throws on failure. That uses Chromium here and WebKit in CI. Assert **where** things draw, not
+only what they show, and prove a new test can fail: break the code on purpose, watch it go red,
+then restore it.
+
+## Studio (`projects/studio/`, at `/studio/`)
+
+Studio shows the **live DOM** of any page on this site. Studio phase 1 is a viewer; later phases
+turn it into a phone-first page and SVG editor.
+
+- **How it works:**
+  - it loads the page in a same-origin iframe; `?page=/hello/` makes a view linkable;
+  - with **Select** on, a tap picks the element under the finger instead of activating it;
+  - the **Tree** tab updates live;
+  - the **Inspect** tab shows attributes, the box model and key styles;
+  - the highlight is an overlay laid exactly over the iframe.
+- **Stack:** React + Vite + TypeScript. It imports `ds/ds.css`.
+- **The rule for studio code:** touch the framed page only through `FrameSession`
+  (`src/frame.ts`). It owns the document, the MutationObserver, pick mode and the version
+  channels (`structure` for the tree, `layout` for highlight and inspector). Editor phases add
+  edits there as undoable commands.
+- **Framed nodes are from another realm.** Never `instanceof Element`; check `nodeType`.
+- **Not `viewport-fit=cover`**, deliberately. WebKit passes the whole page's safe-area insets into
+  same-origin frames.
+- **Known limits:**
+  - an inline element that wraps is outlined as one box;
+  - a transformed element gets no margin/padding shading;
+  - changes inside shadow DOM don't update the tree.
+
 ## Cloud-container limits
 
 - **CDNs are blocked** (jsdelivr, unpkg, esm.sh, cdnjs). Install from npm, which is reachable,
@@ -80,6 +114,8 @@ that's a real Safari-engine difference: fix it, don't skip it.
 
 `ds/ds.css` holds the tokens and components. Browse them on the phone at `/ds/`.
 
+- **Form fields have a 16px text floor** (`input, select, textarea`). iOS zooms the whole page
+  into any focused field under 16px, and at 75% every rem-sized field would be.
 - **Use it.**
   - Static project: `<link rel="stylesheet" href="/ds/ds.css">`.
   - Vite project: `import '../../ds/ds.css'` in the entry file, so it gets bundled and works

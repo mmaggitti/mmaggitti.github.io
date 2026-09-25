@@ -84,6 +84,10 @@ body {
 
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
+/* iOS Safari zooms the whole page into any focused field whose text is under 16px, and at a 75%
+   UI scale every rem-sized field is. So fields get a physical 16px floor. */
+input, select, textarea { font-size: max(16px, 1em); } /* px-ok: iOS focus-zoom floor */
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
   .ds-btn:active { transform: none; }

@@ -18,7 +18,7 @@
 import { existsSync, mkdirSync, readdirSync, readFile } from 'node:fs';
 import http from 'node:http';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, webkit } from 'playwright';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -106,6 +106,23 @@ for (const pg of pages) {
       console.log(`ok   ${label}`);
     }
     await context.close();
+  }
+}
+
+// Project end-to-end tests: projects/<name>/test/e2e.mjs exports default async ({ browser, origin,
+// engine }) and throws on failure. They reuse this server and browser, so they run in Chromium
+// here and WebKit in CI like everything else.
+for (const name of readdirSync(join(ROOT, 'projects')).filter((n) => !/^[_.]/.test(n)).sort()) {
+  const file = join(ROOT, 'projects', name, 'test', 'e2e.mjs');
+  if (!existsSync(file)) continue;
+  try {
+    const { default: run } = await import(pathToFileURL(file).href);
+    await run({ browser, origin, engine: ENGINE });
+    console.log(`ok   e2e ${name} (${ENGINE})`);
+  } catch (e) {
+    failed++;
+    console.log(`FAIL e2e ${name} (${ENGINE})`);
+    console.log(`     ${String(e?.message ?? e).split('\n').join('\n     ')}`);
   }
 }
 
