@@ -4,6 +4,20 @@
   <meta charset="utf-8">
   <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve to real values. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script>
+    // UI scale experiment: shrink the whole page the way a "More Space" display zoom would, by
+    // widening the layout viewport. At 67% a 440-point screen lays out 660 CSS px, and each CSS px
+    // is exactly 2 device pixels on @3x hardware. Runs before first paint so the page never
+    // flashes at 100%. The choice is stored per device.
+    (function () {
+      var s = 1;
+      try { s = Number(localStorage.getItem('hello:ui-scale')) || 1; } catch (e) {}
+      if (s !== 1) {
+        document.querySelector('meta[name="viewport"]').setAttribute('content',
+          'width=' + Math.round(screen.width / s) + ', initial-scale=' + s + ', viewport-fit=cover');
+      }
+    })();
+  </script>
   <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
   <!-- "default", not "black-translucent": translucent leaves a dead band under the status bar. -->
@@ -35,6 +49,11 @@
     .row:first-child { border-top: 0; }
     dt { color: var(--muted); }
     dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .scale { margin: 20px 0 0; }
+    .scale-label { color: var(--muted); margin: 0 0 8px; }
+    .seg { display: flex; gap: 8px; }
+    .seg button { min-height: 44px; font-weight: 500; }
+    .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     .count { font-size: 56px; font-weight: 700; text-align: center; margin: 24px 0 0; font-variant-numeric: tabular-nums; }
     .hint { color: var(--muted); text-align: center; margin: 0; font-size: 15px; }
     /* Actions live in the thumb zone, clear of the home indicator. */
@@ -64,6 +83,10 @@
       <h1>Hello</h1>
       <p class="sub">What this phone reports to a web page.</p>
       <dl id="facts"></dl>
+      <div class="scale">
+        <p class="scale-label" id="scale-label">UI scale (reloads the page)</p>
+        <div class="seg" id="seg" role="group" aria-labelledby="scale-label"></div>
+      </div>
       <p class="count" id="count" aria-live="polite">0</p>
       <p class="hint">Taps, saved on this device only.</p>
     </main>
@@ -91,7 +114,25 @@
     document.getElementById('reset').addEventListener('click', () => { taps = 0; save(taps); render(); });
     render();
 
-    const mq = (q) => matchMedia(q).matches;
+    // The head script already applied the stored scale; this only offers the choice.
+    const SCALE_KEY = 'hello:ui-scale';
+    let current = 1;
+    try { current = Number(localStorage.getItem(SCALE_KEY)) || 1; } catch { /* storage blocked */ }
+    document.getElementById('seg').replaceChildren(...[1, 0.85, 0.75, 0.667].map((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${Math.round(s * 100)}%`;
+      b.setAttribute('aria-pressed', String(s === current));
+      b.addEventListener('click', () => {
+        if (s === current) return;
+        try { localStorage.setItem(SCALE_KEY, String(s)); } catch { /* storage blocked */ }
+        // Navigate, don't reload: a reload restores the previous zoom level and ignores the new one.
+        location.replace(`${location.pathname}?scale=${s}`);
+      });
+      return b;
+    }));
+
+    const mq =(q) => matchMedia(q).matches;
     function facts() {
       const s = getComputedStyle(document.getElementById('probe'));
       const inset = ['Top', 'Right', 'Bottom', 'Left'].map((k) => parseFloat(s[`padding${k}`]) || 0).join(' / ');
