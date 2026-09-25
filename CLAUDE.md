@@ -27,11 +27,13 @@ Mark to paste them into chat.
 
 ```
 projects/<name>/          one folder per project. Lowercase, digits, hyphens only.
-                          "_name" = draft, not built. "crossword-v1" is reserved (its own repo).
-scripts/build-site.mjs    projects/* → _site/<name>/ + generated launcher _site/index.html
+                          "_name" = draft, not built. Reserved: "crossword-v1" (its own repo), "ds".
+ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
+scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher
 scripts/smoke-test.mjs    phone-size check of every built page (+ screenshots in .smoke/)
 scripts/check-public.mjs  the guard
-.github/workflows/deploy.yml   guard → build → WebKit smoke → deploy, on every push to main
+scripts/check-units.mjs   rem, not px (see Design system)
+.github/workflows/deploy.yml   guard → units → build → WebKit smoke → deploy, on every push to main
 ```
 
 A project is one of two kinds:
@@ -51,7 +53,7 @@ CI passes.
 
 ```bash
 npm install                      # once per container
-npm run verify                   # guard + build + smoke test (Chromium here)
+npm run verify                   # guard + units + build + smoke test (Chromium here)
 # send Mark the screenshot(s) from .smoke/chromium/ before pushing
 git add -A && git commit -m "<name>: <what changed>"
 git fetch origin main && git rebase origin/main    # another session may have pushed
@@ -74,6 +76,47 @@ that's a real Safari-engine difference: fix it, don't skip it.
 - **Pillow is not installed.** Start icons as SVG. `pip install pillow` works when PNGs are
   needed.
 
+## Design system (every project uses it)
+
+`ds/ds.css` holds the tokens and components. Browse them on the phone at `/ds/`.
+
+- **Use it.**
+  - Static project: `<link rel="stylesheet" href="/ds/ds.css">`.
+  - Vite project: `import '../../ds/ds.css'` in the entry file, so it gets bundled and works
+    offline.
+- **Size everything in rem, never px.** The UI scales from one knob: `--ui-scale` sets the root
+  font size.
+  - Mark chose **75%** (2026-09-25), so 1rem = 12px.
+  - A raw px value wouldn't scale with everything around it.
+  - `npm run check` and CI fail on any px except 0–3px (hairlines, focus rings) or a line marked
+    `px-ok` with its reason.
+  - Only `.css` files, `<style>` blocks and `style=""` attributes are checked. Canvas and SVG
+    coordinates in JS are fine.
+- **Use the tokens, not new numbers.** Token values are written at a 16px base, so 1.0625rem is
+  "17 at 100%".
+  - **Text:** `--text-sm` (15), `--text-md` (17, body), `--text-lg` (22), `--text-xl` (28),
+    `--text-display` (56).
+  - **Font:** `--font-ui`, `--font-mono`.
+  - **Space:** `--space-1…8` (4, 8, 12, 16, 20, 24, 32, 48).
+  - **Shape:** `--radius-sm`, `--radius`, `--control-h` (52), `--control-h-sm` (44),
+    `--measure`.
+  - **Color:** `--bg`, `--surface`, `--text`, `--text-muted`, `--line`, `--accent`,
+    `--on-accent`, in light and dark automatically.
+- **Tap floor: `--tap-min` is 44px on purpose and never scales.** Size any tappable thing as
+  `min-height: max(var(--tap-min), <rem size>)`. The ds controls already do this.
+- **Components**, prefixed `ds-` so they don't collide with project classes:
+  - `ds-app` (100svh shell with safe areas) and `ds-page` (content column);
+  - `ds-title`, `ds-heading`, `ds-sub`, `ds-muted`, `ds-small`, `ds-num`, `ds-display`, `ds-mono`;
+  - `ds-cards` / `ds-card` (`ds-card-title`, `ds-card-text`) for tappable tiles;
+  - `ds-list` / `ds-row` for key-value rows (`<dl>` with `<div class="ds-row"><dt><dd>`);
+  - `ds-btn` and `ds-btn--primary`;
+  - `ds-seg`, a segmented control where the chosen button has `aria-pressed="true"`;
+  - `ds-bar`, the sticky bottom action bar in the thumb zone.
+- **Changing `ds.css` changes every project at once.** The smoke test covers every page on each
+  deploy. Add a component only when a second project needs it.
+- **Overriding the scale:** set `--ui-scale` on `<html>`. `projects/hello/` has a live preview
+  switch.
+
 ## Phone-first rules (every project)
 
 - **The target is Mark's primary phone: 440×956 points, @3x.** Design for 440px wide first.
@@ -94,11 +137,11 @@ that's a real Safari-engine difference: fix it, don't skip it.
   - pad with `env(safe-area-inset-*)`;
   - no sideways scroll (the smoke test fails it).
 - **Touch:**
-  - tap targets at least 44px (52px for primary buttons);
+  - tap targets never under 44pt: use ds controls, or `max(var(--tap-min), …)`;
   - primary actions in the bottom thumb zone, clear of the home indicator;
   - `touch-action: manipulation` on buttons.
 - **Text and motion:**
-  - 17px body text floor;
+  - body text is `--text-md`, and nothing smaller than `--text-sm`;
   - honor `prefers-reduced-motion` and `prefers-color-scheme`.
 - **Shared origin:** every project, `crossword-v1` included, shares the origin
   `mmaggitti.github.io`.

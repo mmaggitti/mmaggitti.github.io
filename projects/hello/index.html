@@ -5,18 +5,8 @@
   <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve to real values. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script>
-    // UI scale experiment: shrink the whole page the way a "More Space" display zoom would, by
-    // widening the layout viewport. At 67% a 440-point screen lays out 660 CSS px, and each CSS px
-    // is exactly 2 device pixels on @3x hardware. Runs before first paint so the page never
-    // flashes at 100%. The choice is stored per device.
-    (function () {
-      var s = 1;
-      try { s = Number(localStorage.getItem('hello:ui-scale')) || 1; } catch (e) {}
-      if (s !== 1) {
-        document.querySelector('meta[name="viewport"]').setAttribute('content',
-          'width=' + Math.round(screen.width / s) + ', initial-scale=' + s + ', viewport-fit=cover');
-      }
-    })();
+    // Re-apply this page's UI-scale preview before first paint, so it never flashes at the default.
+    try { var s = localStorage.getItem('hello:ui-scale'); if (s) document.documentElement.style.setProperty('--ui-scale', s); } catch (e) {}
   </script>
   <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
@@ -24,52 +14,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="description" content="What this phone reports to a web page. Also proves the build and deploy pipeline.">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ds/ds.css">
   <title>Hello — device check</title>
   <style>
-    :root { --bg: #F6F4EE; --card: #FFFFFF; --text: #1B1B1B; --muted: #5E5A52; --line: #E3DED3; --accent: #233044; --on-accent: #FFFFFF; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #111111; --card: #1C1C1E; --text: #F2F2F2; --muted: #A5A5AA; --line: #2C2C2E; --accent: #9DB4D6; --on-accent: #111111; }
-    }
-    * { box-sizing: border-box; }
-    html { -webkit-text-size-adjust: 100%; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
-    /* svh, never vh: the collapsing address bar makes vh jump mid-scroll. */
-    .app {
-      min-height: 100svh; display: flex; flex-direction: column;
-      padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
-    }
-    main { flex: 1; width: 100%; max-width: 560px; margin: 0 auto; padding: 24px 16px; }
-    h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
-    .sub { color: var(--muted); margin: 0 0 20px; }
-    dl { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-    .row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); }
-    .row:first-child { border-top: 0; }
-    dt { color: var(--muted); }
-    dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-    .scale { margin: 20px 0 0; }
-    .scale-label { color: var(--muted); margin: 0 0 8px; }
-    .seg { display: flex; gap: 8px; }
-    .seg button { min-height: 44px; font-weight: 500; }
-    .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-    .count { font-size: 56px; font-weight: 700; text-align: center; margin: 24px 0 0; font-variant-numeric: tabular-nums; }
-    .hint { color: var(--muted); text-align: center; margin: 0; font-size: 15px; }
-    /* Actions live in the thumb zone, clear of the home indicator. */
-    .bar {
-      position: sticky; bottom: 0; display: flex; gap: 12px; width: 100%; max-width: 560px; margin: 0 auto;
-      padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--bg);
-    }
-    button {
-      flex: 1; min-height: 52px; border-radius: 14px; font: inherit; font-weight: 600;
-      border: 1px solid var(--line); background: var(--card); color: var(--text);
-      touch-action: manipulation; /* no double-tap zoom delay */
-    }
-    button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-    button:active { transform: scale(0.98); }
-    button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-    @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+    .scale { margin: var(--space-5) 0 0; }
+    .scale .ds-muted { margin: 0 0 var(--space-2); }
+    .count { text-align: center; margin: var(--space-6) 0 0; }
+    .hint { text-align: center; margin: 0; }
     /* Probe element: lets JS read what env(safe-area-inset-*) resolves to. */
     #probe {
       position: fixed; visibility: hidden; pointer-events: none;
@@ -78,67 +29,69 @@
   </style>
 </head>
 <body>
-  <div class="app">
-    <main>
-      <h1>Hello</h1>
-      <p class="sub">What this phone reports to a web page.</p>
-      <dl id="facts"></dl>
+  <div class="ds-app">
+    <main class="ds-page">
+      <h1 class="ds-title">Hello</h1>
+      <p class="ds-sub">What this phone reports to a web page.</p>
+      <dl class="ds-list" id="facts"></dl>
       <div class="scale">
-        <p class="scale-label" id="scale-label">UI scale (reloads the page)</p>
-        <div class="seg" id="seg" role="group" aria-labelledby="scale-label"></div>
+        <p class="ds-muted ds-small" id="scale-label">Preview UI scale (this page only; site default 75%)</p>
+        <div class="ds-seg" id="seg" role="group" aria-labelledby="scale-label"></div>
       </div>
-      <p class="count" id="count" aria-live="polite">0</p>
-      <p class="hint">Taps, saved on this device only.</p>
+      <p class="ds-display count" id="count" aria-live="polite">0</p>
+      <p class="ds-muted ds-small hint">Taps, saved on this device only.</p>
     </main>
-    <div class="bar">
-      <button id="reset" type="button">Reset</button>
-      <button id="tap" type="button" class="primary">Tap</button>
+    <div class="ds-bar">
+      <button class="ds-btn" id="reset" type="button">Reset</button>
+      <button class="ds-btn ds-btn--primary" id="tap" type="button">Tap</button>
     </div>
   </div>
   <div id="probe"></div>
 
   <script type="module">
     // Every project shares the mmaggitti.github.io origin, so storage keys carry the project name.
-    const KEY = 'hello:taps';
-    const load = () => {
-      try { return Number(localStorage.getItem(KEY)) || 0; } catch { return 0; }
-    };
-    const save = (n) => {
-      try { localStorage.setItem(KEY, String(n)); } catch { /* private mode / storage blocked */ }
+    const store = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode / storage blocked */ } },
     };
 
-    let taps = load();
+    let taps = Number(store.get('hello:taps')) || 0;
     const countEl = document.getElementById('count');
     const render = () => { countEl.textContent = taps; };
-    document.getElementById('tap').addEventListener('click', () => { taps++; save(taps); render(); });
-    document.getElementById('reset').addEventListener('click', () => { taps = 0; save(taps); render(); });
+    document.getElementById('tap').addEventListener('click', () => { taps++; store.set('hello:taps', String(taps)); render(); });
+    document.getElementById('reset').addEventListener('click', () => { taps = 0; store.set('hello:taps', '0'); render(); });
     render();
 
-    // The head script already applied the stored scale; this only offers the choice.
-    const SCALE_KEY = 'hello:ui-scale';
-    let current = 1;
-    try { current = Number(localStorage.getItem(SCALE_KEY)) || 1; } catch { /* storage blocked */ }
-    document.getElementById('seg').replaceChildren(...[1, 0.85, 0.75, 0.667].map((s) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = `${Math.round(s * 100)}%`;
-      b.setAttribute('aria-pressed', String(s === current));
-      b.addEventListener('click', () => {
-        if (s === current) return;
-        try { localStorage.setItem(SCALE_KEY, String(s)); } catch { /* storage blocked */ }
-        // Navigate, don't reload: a reload restores the previous zoom level and ignores the new one.
-        location.replace(`${location.pathname}?scale=${s}`);
-      });
-      return b;
-    }));
+    // UI-scale preview: --ui-scale sets the root font size, and every rem in ds.css follows it.
+    const root = document.documentElement;
+    const scaleNow = () => Number(getComputedStyle(root).getPropertyValue('--ui-scale'));
+    const seg = document.getElementById('seg');
+    const options = [1, 0.85, 0.75, 0.667];
+    function renderSeg() {
+      const now = scaleNow();
+      seg.replaceChildren(...options.map((s) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = `${Math.round(s * 100)}%`;
+        b.setAttribute('aria-pressed', String(Math.abs(s - now) < 0.001));
+        b.addEventListener('click', () => {
+          root.style.setProperty('--ui-scale', String(s));
+          store.set('hello:ui-scale', String(s));
+          renderSeg();
+          renderFacts();
+        });
+        return b;
+      }));
+    }
 
-    const mq =(q) => matchMedia(q).matches;
+    const mq = (q) => matchMedia(q).matches;
     function facts() {
       const s = getComputedStyle(document.getElementById('probe'));
       const inset = ['Top', 'Right', 'Bottom', 'Left'].map((k) => parseFloat(s[`padding${k}`]) || 0).join(' / ');
       return [
         ['Viewport', `${innerWidth} × ${innerHeight}`],
         ['Screen', `${screen.width} × ${screen.height} @${devicePixelRatio}x`],
+        ['UI scale', `${Math.round(scaleNow() * 100)}% (1rem = ${parseFloat(getComputedStyle(root).fontSize)}px)`],
         ['Safe area (t/r/b/l)', inset],
         ['Opened as', mq('(display-mode: standalone)') || navigator.standalone ? 'Home Screen app' : 'browser tab'],
         ['Color scheme', mq('(prefers-color-scheme: dark)') ? 'dark' : 'light'],
@@ -148,10 +101,9 @@
       ];
     }
     function renderFacts() {
-      const dl = document.getElementById('facts');
-      dl.replaceChildren(...facts().map(([k, v]) => {
+      document.getElementById('facts').replaceChildren(...facts().map(([k, v]) => {
         const row = document.createElement('div');
-        row.className = 'row';
+        row.className = 'ds-row';
         const dt = document.createElement('dt');
         const dd = document.createElement('dd');
         dt.textContent = k;
@@ -160,6 +112,7 @@
         return row;
       }));
     }
+    renderSeg();
     renderFacts();
     addEventListener('resize', renderFacts);
     addEventListener('online', renderFacts);

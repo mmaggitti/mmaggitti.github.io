@@ -22,9 +22,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -35,6 +35,10 @@ jobs:
         run: node scripts/check-public.mjs
         env:
           PUBLIC_GUARD_DENY: ${{ secrets.PUBLIC_GUARD_DENY }}
+
+      # Sizes are rem so the whole UI follows --ui-scale; a raw px value would stay full-size.
+      - name: Design system — rem, not px
+        run: node scripts/check-units.mjs
 
       - name: Install dependencies
         run: npm ci

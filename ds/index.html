@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="The site's design system: rem tokens at a 75% UI scale, and every component.">
+  <link rel="stylesheet" href="/ds/ds.css">
+  <title>Design system</title>
+  <style>
+    .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: var(--space-2); }
+    .swatch { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+    .swatch i { display: block; height: var(--space-8); }
+    .swatch span { display: block; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
+    .space { display: grid; gap: var(--space-2); }
+    .space div { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
+    .space b { display: block; height: var(--space-3); background: var(--accent); border-radius: var(--space-1); }
+    .stack > * + * { margin-top: var(--space-3); }
+  </style>
+</head>
+<body>
+  <div class="ds-app">
+    <main class="ds-page">
+      <h1 class="ds-title">Design system</h1>
+      <p class="ds-sub">Link <code class="ds-mono">/ds/ds.css</code>. Size everything in rem tokens.</p>
+
+      <dl class="ds-list">
+        <div class="ds-row"><dt>UI scale</dt><dd id="scale"></dd></div>
+        <div class="ds-row"><dt>Tap floor</dt><dd>44pt, never scaled</dd></div>
+        <div class="ds-row"><dt>px allowed</dt><dd>0–3px hairlines · <code class="ds-mono">px-ok</code> lines</dd></div>
+      </dl>
+
+      <h2 class="ds-heading">Type</h2>
+      <div class="stack">
+        <p class="ds-display" style="margin:0">56</p>
+        <p class="ds-title">Title · --text-xl</p>
+        <p style="font-size:var(--text-lg); margin:0">Heading · --text-lg</p>
+        <p style="margin:0">Body text · --text-md, the default for everything.</p>
+        <p class="ds-muted ds-small" style="margin:0">Secondary · --text-sm, muted</p>
+        <p class="ds-mono ds-small" style="margin:0">--font-mono 0123456789</p>
+      </div>
+
+      <h2 class="ds-heading">Space</h2>
+      <div class="space" id="space"></div>
+
+      <h2 class="ds-heading">Color</h2>
+      <div class="swatches" id="swatches"></div>
+
+      <h2 class="ds-heading">Cards</h2>
+      <ul class="ds-cards">
+        <li><a class="ds-card" href="/">
+          <span class="ds-card-title">Card title</span>
+          <span class="ds-card-text">A tappable tile, like the launcher's. Opens the launcher.</span>
+        </a></li>
+      </ul>
+
+      <h2 class="ds-heading">List</h2>
+      <dl class="ds-list">
+        <div class="ds-row"><dt>Key</dt><dd>Value</dd></div>
+        <div class="ds-row"><dt>Numbers</dt><dd>1,234.56</dd></div>
+      </dl>
+
+      <h2 class="ds-heading">Segmented</h2>
+      <div class="ds-seg" role="group" aria-label="Example">
+        <button type="button" aria-pressed="false">Day</button>
+        <button type="button" aria-pressed="true">Week</button>
+        <button type="button" aria-pressed="false">Month</button>
+      </div>
+
+      <h2 class="ds-heading">Buttons</h2>
+      <p class="ds-muted ds-small">The bottom bar holds the page's main actions, in the thumb zone.</p>
+    </main>
+    <div class="ds-bar">
+      <button class="ds-btn" type="button">Secondary</button>
+      <button class="ds-btn ds-btn--primary" type="button">Primary</button>
+    </div>
+  </div>
+
+  <script type="module">
+    const root = getComputedStyle(document.documentElement);
+    const scale = Number(root.getPropertyValue('--ui-scale'));
+    document.getElementById('scale').textContent = `${Math.round(scale * 100)}% · 1rem = ${parseFloat(root.fontSize)}px`;
+
+    document.getElementById('space').replaceChildren(...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
+      const row = document.createElement('div');
+      const bar = document.createElement('b');
+      bar.style.width = `var(--space-${n})`;
+      row.append(bar, `--space-${n} · ${root.getPropertyValue(`--space-${n}`).trim()}`);
+      return row;
+    }));
+
+    document.getElementById('swatches').replaceChildren(...['bg', 'surface', 'text', 'text-muted', 'line', 'accent', 'on-accent'].map((t) => {
+      const el = document.createElement('div');
+      el.className = 'swatch';
+      const chip = document.createElement('i');
+      chip.style.background = `var(--${t})`;
+      const label = document.createElement('span');
+      label.textContent = `--${t}`;
+      el.append(chip, label);
+      return el;
+    }));
+
+    // Segmented demo: pressing moves the selection.
+    for (const b of document.querySelectorAll('.ds-seg button')) {
+      b.addEventListener('click', () => {
+        for (const o of b.parentElement.children) o.setAttribute('aria-pressed', String(o === b));
+      });
+    }
+  </script>
+</body>
+</html>

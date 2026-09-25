@@ -1,0 +1,217 @@
+/* mmaggitti.github.io design system — served at /ds/ds.css, specimen at /ds/.
+ *
+ * Everything that should scale is in rem. The whole UI scales from one knob, --ui-scale, which
+ * sets the root font size: at the site default of 0.75, 1rem = 12px. It goes through % of the
+ * browser default rather than a px value, so Safari's own text-size setting still applies.
+ *
+ * px is used only for what must stay physical: hairlines and focus rings (0–3px), and the 44pt
+ * tap floor. `npm run check` fails the deploy on any other px outside a `px-ok` line.
+ *
+ * Token values are written at the 16px design base: 1.0625rem is "17px at 100%".
+ */
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+
+:root {
+  --ui-scale: 0.75;
+
+  /* Type: 15 / 17 / 22 / 28 / 56 at 100% */
+  --text-sm: 0.9375rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.375rem;
+  --text-xl: 1.75rem;
+  --text-display: 3.5rem;
+  --leading: 1.45;
+  --leading-tight: 1.2;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Space: 4 / 8 / 12 / 16 / 20 / 24 / 32 / 48 at 100% */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /* Shape and size */
+  --radius-sm: 0.5rem;
+  --radius: 0.875rem;
+  --control-h: 3.25rem;     /* primary controls: 52 at 100% */
+  --control-h-sm: 2.75rem;  /* secondary controls: 44 at 100% */
+  --measure: 40rem;         /* content column */
+  --tap-min: 44px;          /* px-ok: physical tap floor, never scaled */
+
+  /* Color */
+  --bg: #F6F4EE;
+  --surface: #FFFFFF;
+  --text: #1B1B1B;
+  --text-muted: #5E5A52;
+  --line: #E3DED3;
+  --accent: #233044;
+  --on-accent: #FFFFFF;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111111;
+    --surface: #1C1C1E;
+    --text: #F2F2F2;
+    --text-muted: #A5A5AA;
+    --line: #2C2C2E;
+    --accent: #9DB4D6;
+    --on-accent: #111111;
+  }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-size: calc(var(--ui-scale) * 100%);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--text-md) / var(--leading) var(--font-ui);
+}
+
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  .ds-btn:active { transform: none; }
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+
+/* svh, never vh: the collapsing address bar makes vh jump mid-scroll. */
+.ds-app {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+.ds-page {
+  flex: 1;
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+/* ── Text ───────────────────────────────────────────────────────────────── */
+
+.ds-title { font-size: var(--text-xl); line-height: var(--leading-tight); margin: 0 0 var(--space-1); }
+.ds-heading { font-size: var(--text-lg); line-height: var(--leading-tight); margin: var(--space-7) 0 var(--space-3); }
+.ds-sub { color: var(--text-muted); margin: 0 0 var(--space-5); }
+.ds-muted { color: var(--text-muted); }
+.ds-small { font-size: var(--text-sm); }
+.ds-num { font-variant-numeric: tabular-nums; }
+.ds-display {
+  font-size: var(--text-display);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+}
+.ds-mono { font-family: var(--font-mono); }
+
+/* ── Cards (tappable tiles, e.g. the launcher) ──────────────────────────── */
+
+.ds-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+
+.ds-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: max(var(--tap-min), 4rem);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+.ds-card:active { background: var(--line); }
+.ds-card-title { font-weight: 600; }
+.ds-card-text { color: var(--text-muted); font-size: var(--text-sm); }
+
+/* ── List (key/value rows in one card) ──────────────────────────────────── */
+
+.ds-list {
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ds-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.ds-row:first-child { border-top: 0; }
+.ds-row > :first-child { color: var(--text-muted); margin: 0; }
+.ds-row > :last-child { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.ds-btn {
+  flex: 1;
+  min-height: max(var(--tap-min), var(--control-h));
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  touch-action: manipulation; /* no double-tap zoom delay */
+}
+.ds-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.ds-btn:active { transform: scale(0.98); }
+
+/* Segmented control: a row of buttons, the chosen one aria-pressed="true". */
+.ds-seg { display: flex; gap: var(--space-2); }
+.ds-seg > button {
+  flex: 1;
+  min-height: max(var(--tap-min), var(--control-h-sm));
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  touch-action: manipulation;
+}
+.ds-seg > button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* ── Bottom action bar: primary actions in the thumb zone ───────────────── */
+
+.ds-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  background: var(--bg);
+}
