@@ -70,7 +70,7 @@ export function Tree() {
   };
 
   const summary = stats
-    ? `${plural(stats.elements, 'element')} · deepest ${plural(stats.deepest, 'level')}`
+    ? `${plural(stats.elements, 'element')} · maximum depth ${stats.deepest.toLocaleString()}`
     : '';
 
   return (

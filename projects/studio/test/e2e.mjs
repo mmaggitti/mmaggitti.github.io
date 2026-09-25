@@ -38,7 +38,7 @@ export default async function run({ browser, origin }) {
         return { elements: document.getElementsByTagName('*').length, deepest: depth(document.documentElement) };
       });
     const readout = async () => {
-      const m = (await page.locator('.tree-stats').innerText()).match(/([\d,]+) elements? · deepest ([\d,]+) levels?/);
+      const m = (await page.locator('.tree-stats').innerText()).match(/([\d,]+) elements? · maximum depth ([\d,]+)/);
       must(m, 'no element/depth readout above the tree');
       return { elements: Number(m[1].replace(/,/g, '')), deepest: Number(m[2].replace(/,/g, '')) };
     };
@@ -62,6 +62,24 @@ export default async function run({ browser, origin }) {
       () => `readout did not follow the DOM: ${JSON.stringify(last)} ≠ ${JSON.stringify(after)}`,
     );
     await hello.evaluate(() => document.getElementById('probe-chain').remove());
+
+    // 1c. The readout is a caption, not pinned: scrolling the tree takes it out of view.
+    // Open enough of the tree that it overflows the panel, or there is nothing to scroll.
+    for (const name of ['div.ds-app', 'main.ds-page', 'dl#facts.ds-list']) {
+      await page.getByRole('button', { name: `Expand ${name}` }).tap();
+    }
+    const scrollable = await page.locator('.sheet-body').evaluate((el) => el.scrollHeight > el.clientHeight + 100);
+    must(scrollable, 'test setup: the tree does not overflow the panel, so scrolling proves nothing');
+    await page.locator('.sheet-body').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await waitFor(
+      async () => {
+        const stats = await page.locator('.tree-stats').boundingBox();
+        const body = await page.locator('.sheet-body').boundingBox();
+        return stats && body && stats.y + stats.height <= body.y;
+      },
+      'the readout stayed in view after scrolling the tree (still pinned?)',
+    );
+    await page.locator('.sheet-body').evaluate((el) => el.scrollTo(0, 0));
 
     // 2. Select on: a tap selects instead of activating.
     await page.locator('.studio-select').tap();
