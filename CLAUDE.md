@@ -76,6 +76,14 @@ that's a real Safari-engine difference: fix it, don't skip it.
 
 ## Phone-first rules (every project)
 
+- **The target is Mark's primary phone: 440×956 points, @3x.** Design for 440px wide first.
+  - In a Safari tab the page gets 440×796, because Safari's status and toolbar areas take the
+    rest. That's normal.
+  - Launched from the Home Screen, the page gets the full 956, and the safe-area insets become
+    non-zero.
+  - @3x is the hardware, and CSS never sees it. Work in points.
+  - The smoke test runs at 440×956 @1x.
+
 - **Head:**
   - `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`;
   - light and dark `theme-color` metas;

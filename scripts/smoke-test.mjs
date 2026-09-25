@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Phone-size smoke test over the built site (_site/): the launcher plus every project in it.
 //
-// For each page, at two iPhone viewports with touch on, it fails when:
+// For each page, at Mark's primary phone's viewport with touch on, it fails when:
 //   - the page doesn't load (non-2xx)
 //   - anything logs a console error or throws an uncaught exception
 //   - the page scrolls sideways (content wider than the screen)
 //   - a same-origin request fails or 4xx/5xxs (a wrong asset path, usually a missing BASE_PATH)
-// and saves a screenshot at the first viewport to .smoke/<engine>/<page>.png.
+// and saves a screenshot to .smoke/<engine>/<page>.png — at 1x, so it is 440×956 px, the phone's
+// own point size.
 //
 //   ENGINE=chromium (default; the only engine in the cloud container)
 //   ENGINE=webkit   (CI — Safari's engine; the phone itself is still the final word)
@@ -24,10 +25,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SITE = resolve(ROOT, '_site');
 const ENGINE = process.env.ENGINE ?? 'chromium';
 const SHOTS = join(ROOT, '.smoke', ENGINE);
-const VIEWPORTS = [
-  { name: 'iPhone 13 mini', width: 375, height: 812 },
-  { name: 'iPhone 15 Pro Max', width: 430, height: 932 },
-];
+// Mark's primary device: a 440×956-point screen (@3x hardware). 956 is the full height a Home
+// Screen launch gets; in a Safari tab the browser bars leave 440×796.
+const VIEWPORTS = [{ name: 'primary phone', width: 440, height: 956 }];
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -76,7 +76,7 @@ for (const pg of pages) {
   for (const [i, vp] of VIEWPORTS.entries()) {
     const context = await browser.newContext({
       viewport: { width: vp.width, height: vp.height },
-      deviceScaleFactor: 2,
+      deviceScaleFactor: 1,
       isMobile: true,
       hasTouch: true,
     });
