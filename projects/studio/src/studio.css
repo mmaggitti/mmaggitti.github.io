@@ -122,8 +122,20 @@ body { overflow: hidden; overscroll-behavior: none; }
 
 /* ── Tree ───────────────────────────────────────────────────────────────── */
 
+/* Sticky at the top of the sheet's scroll area; rows scrolled into view clear it. */
+.tree-stats {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
 .tree { list-style: none; margin: 0; padding: var(--space-1) 0; font: var(--text-sm) / 1.3 var(--font-mono); }
-.tree-row { position: relative; display: flex; align-items: center; min-height: var(--tap-min); }
+.tree-row { position: relative; display: flex; align-items: center; min-height: var(--tap-min); scroll-margin-top: 3rem; }
 .tree-row[data-selected] {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   box-shadow: inset 3px 0 0 var(--accent); /* not color alone: a bar marks the selected row */

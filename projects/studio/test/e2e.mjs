@@ -29,6 +29,40 @@ export default async function run({ browser, origin }) {
     must((await row(/^html$/).count()) === 1, 'tree has no html row');
     must((await row(/^head$/).count()) === 1, 'tree has no head row');
 
+    // 1b. The readout matches an independent count, and follows the DOM live.
+    const hello = page.frames().find((f) => f.url().includes('/hello/'));
+    must(hello, 'no frame for /hello/');
+    const truth = () =>
+      hello.evaluate(() => {
+        const depth = (el) => 1 + Math.max(0, ...Array.from(el.children, depth));
+        return { elements: document.getElementsByTagName('*').length, deepest: depth(document.documentElement) };
+      });
+    const readout = async () => {
+      const m = (await page.locator('.tree-stats').innerText()).match(/([\d,]+) elements? · deepest ([\d,]+) levels?/);
+      must(m, 'no element/depth readout above the tree');
+      return { elements: Number(m[1].replace(/,/g, '')), deepest: Number(m[2].replace(/,/g, '')) };
+    };
+    const before = await truth();
+    const shown = await readout();
+    must(
+      shown.elements === before.elements && shown.deepest === before.deepest,
+      `readout ${JSON.stringify(shown)} ≠ actual ${JSON.stringify(before)}`,
+    );
+    await hello.evaluate(() => {
+      const a = document.createElement('div');
+      a.id = 'probe-chain';
+      a.appendChild(document.createElement('div')).appendChild(document.createElement('div'));
+      document.body.appendChild(a);
+    });
+    const after = await truth();
+    must(after.elements === before.elements + 3, 'test setup: chain not added');
+    let last;
+    await waitFor(
+      async () => JSON.stringify((last = await readout())) === JSON.stringify(after),
+      () => `readout did not follow the DOM: ${JSON.stringify(last)} ≠ ${JSON.stringify(after)}`,
+    );
+    await hello.evaluate(() => document.getElementById('probe-chain').remove());
+
     // 2. Select on: a tap selects instead of activating.
     await page.locator('.studio-select').tap();
     await view.locator('#tap').tap();

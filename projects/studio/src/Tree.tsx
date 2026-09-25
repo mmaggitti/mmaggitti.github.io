@@ -1,5 +1,5 @@
-import { useEffect, useReducer, useRef } from 'react';
-import { ancestors, isElement, label, visibleRows, type Row } from './dom';
+import { useEffect, useMemo, useReducer, useRef } from 'react';
+import { ancestors, domStats, isElement, label, visibleRows, type Row } from './dom';
 import { session, useFrameVersion } from './frame';
 import { selection } from './selection';
 import { useStore } from './store';
@@ -48,6 +48,8 @@ export function Tree() {
   const doc = session.document;
   const root = doc?.documentElement;
   const expanded = doc ? expandedFor(doc) : null;
+  // Recounted only when the DOM changes (structure channel), never on scroll.
+  const stats = useMemo(() => (doc ? domStats(doc) : null), [doc, version]);
 
   // The selection's ancestors open so its row is visible (idempotent, so safe during render).
   if (selected && expanded && selected.ownerDocument === doc) {
@@ -67,46 +69,57 @@ export function Tree() {
     redraw();
   };
 
+  const summary = stats
+    ? `${plural(stats.elements, 'element')} · deepest ${plural(stats.deepest, 'level')}`
+    : '';
+
   return (
-    <ul className="tree" aria-label="Live DOM" ref={list}>
-      {rows.map((row) => {
-        const el = elementFor(row.node);
-        const isSel = el !== null && el === selected && isElement(row.node);
-        const flash = session.changedAt.get(row.node) === version;
-        const kind = isElement(row.node) ? 'el' : row.node.nodeType === Node.TEXT_NODE ? 'text' : 'shadow';
-        const indent = { marginLeft: `calc(${row.depth} * var(--space-3))` };
-        return (
-          <li key={keyOf(row.node)} className={`tree-row tree-${kind}`} data-selected={isSel || undefined}>
-            {flash && <span key={version} className="tree-flash" aria-hidden="true" />}
-            {row.hasChildren ? (
+    <>
+      <p className="tree-stats ds-num">{summary}</p>
+      <ul className="tree" aria-label={`Live DOM, ${summary}`} ref={list}>
+        {rows.map((row) => {
+          const el = elementFor(row.node);
+          const isSel = el !== null && el === selected && isElement(row.node);
+          const flash = session.changedAt.get(row.node) === version;
+          const kind = isElement(row.node) ? 'el' : row.node.nodeType === Node.TEXT_NODE ? 'text' : 'shadow';
+          const indent = { marginLeft: `calc(${row.depth} * var(--space-3))` };
+          return (
+            <li key={keyOf(row.node)} className={`tree-row tree-${kind}`} data-selected={isSel || undefined}>
+              {flash && <span key={version} className="tree-flash" aria-hidden="true" />}
+              {row.hasChildren ? (
+                <button
+                  type="button"
+                  className="tree-toggle"
+                  style={indent}
+                  aria-expanded={row.expanded}
+                  aria-label={`${row.expanded ? 'Collapse' : 'Expand'} ${label(row.node)}`}
+                  onClick={() => toggle(row)}
+                >
+                  {row.expanded ? '▾' : '▸'}
+                </button>
+              ) : (
+                <span className="tree-toggle" style={indent} aria-hidden="true" />
+              )}
               <button
                 type="button"
-                className="tree-toggle"
-                style={indent}
-                aria-expanded={row.expanded}
-                aria-label={`${row.expanded ? 'Collapse' : 'Expand'} ${label(row.node)}`}
-                onClick={() => toggle(row)}
+                className="tree-label"
+                aria-current={isSel ? 'true' : undefined}
+                onClick={() => {
+                  if (!el) return;
+                  selection.set(el);
+                  session.reveal(el);
+                }}
               >
-                {row.expanded ? '▾' : '▸'}
+                {label(row.node)}
               </button>
-            ) : (
-              <span className="tree-toggle" style={indent} aria-hidden="true" />
-            )}
-            <button
-              type="button"
-              className="tree-label"
-              aria-current={isSel ? 'true' : undefined}
-              onClick={() => {
-                if (!el) return;
-                selection.set(el);
-                session.reveal(el);
-              }}
-            >
-              {label(row.node)}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
+}
+
+function plural(n: number, word: string): string {
+  return `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
 }

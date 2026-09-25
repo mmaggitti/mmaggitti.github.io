@@ -110,6 +110,30 @@ export function keyStyles(el: Element): Array<[string, string]> {
   return props.map((p) => [p, cs.getPropertyValue(p)]);
 }
 
+export interface DomStats {
+  /** Every element, html included, plus those inside open shadow roots. */
+  elements: number;
+  /** Element nesting levels, html = 1. A shadow root adds no level of its own. */
+  deepest: number;
+}
+
+/** One iterative walk over the whole document (the tree only walks what is expanded). */
+export function domStats(doc: Document): DomStats {
+  const root = doc.documentElement;
+  if (!root) return { elements: 0, deepest: 0 };
+  let elements = 0;
+  let deepest = 0;
+  const stack: Array<[Element, number]> = [[root, 1]];
+  while (stack.length) {
+    const [el, depth] = stack.pop()!;
+    elements++;
+    if (depth > deepest) deepest = depth;
+    for (let c = el.firstElementChild; c; c = c.nextElementSibling) stack.push([c, depth + 1]);
+    for (let c = el.shadowRoot?.firstElementChild; c; c = c.nextElementSibling) stack.push([c, depth + 1]);
+  }
+  return { elements, deepest };
+}
+
 export function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
