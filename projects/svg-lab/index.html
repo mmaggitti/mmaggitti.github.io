@@ -229,7 +229,7 @@ input[type=range]{flex:1;min-width:0;accent-color:var(--ink);height:max(var(--ta
 .legend{flex:1 1 10.625rem;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;font-size:var(--text-sm);color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:.25rem}
 .legend .tk{cursor:default;font-size:var(--text-sm)}
-.cbtn{height:max(var(--tap-min),2.125rem);padding:0 .8125rem;border-radius:.5rem;border:1px solid var(--panel-line);background:transparent;font-weight:600;font-size:var(--text-sm)}
+.cbtn{height:max(var(--tap-min),2.125rem);min-width:var(--tap-min);padding:0 .8125rem;border-radius:.5rem;border:1px solid var(--panel-line);background:transparent;font-weight:600;font-size:var(--text-sm)}
 /* Code rows keep ~24px pitch and ~20px tokens at the 0.75 scale: tokens are the main drag/tap
    targets, under 44pt by necessity (the Sheet they open has full-size controls). */
 pre.src{margin:0;padding:.75rem .875rem 1.125rem;font:400 var(--text-sm)/2.1 var(--mono);color:var(--t-val);white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2}

@@ -225,7 +225,8 @@ async function exportIsClean(browser, origin) {
     const flat = out.replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
     must(!flat.includes('javascript:'), `the exported file keeps a javascript: link:\n${out}`);
     must(!/<h:img|xhtml/i.test(out), `the exported file keeps an XHTML element:\n${out}`);
-    must(/q:href="#keep"/.test(out), `the sanitizer dropped a safe prefixed href:\n${out}`);
+    // any prefix: serializers may rename the one bound to xlink (WebKit writes xlink:)
+    must(/(^|[\s:])href="#keep"/.test(out), `the sanitizer dropped a safe prefixed href:\n${out}`);
   });
 }
 
