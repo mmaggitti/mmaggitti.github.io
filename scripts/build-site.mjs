@@ -65,19 +65,24 @@ for (const name of names) {
       html.match(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i)?.[1] ??
       html.match(/<meta\s+content=["']([^"']*)["']\s+name=["']description["']/i)?.[1] ??
       '',
+    // <meta name="launcher" content="unlisted">: built, deployed and tested, but not on the launcher
+    // (a project that is live for testing before its release).
+    unlisted: /<meta\s+name=["']launcher["']\s+content=["']unlisted["']/i.test(html),
   });
   console.log(`built ${name}`);
 }
 
-writeFileSync(join(OUT, 'index.html'), launcher(cards));
-// The studio's page picker reads this. The studio itself is left out: it can't inspect itself.
+writeFileSync(join(OUT, 'index.html'), launcher(cards.filter((c) => !c.unlisted)));
+// The studio's page picker reads this. Left out: the studio (it can't inspect itself), Draw (an
+// editor holding a GitHub token must never run inside another page's frame) and unlisted projects.
+const NOT_FRAMED = new Set(['studio', 'draw']);
 const pages = [
   { path: '/', title: 'Projects' },
   { path: '/ds/', title: 'Design system' },
-  ...cards.filter((c) => c.name !== 'studio').map((c) => ({ path: `/${c.name}/`, title: c.title })),
+  ...cards.filter((c) => !NOT_FRAMED.has(c.name) && !c.unlisted).map((c) => ({ path: `/${c.name}/`, title: c.title })),
 ];
 writeFileSync(join(OUT, 'pages.json'), JSON.stringify(pages, null, 2) + '\n');
-console.log(`launcher: ${cards.length} project(s) → _site/index.html`);
+console.log(`launcher: ${cards.filter((c) => !c.unlisted).length} project(s) → _site/index.html (${cards.filter((c) => c.unlisted).length} unlisted)`);
 
 function esc(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

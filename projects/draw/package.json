@@ -1,0 +1,23 @@
+{
+  "name": "draw",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node tools/check-sinks.mjs && node tools/ledger-check.mjs && tsc --noEmit && npm run test:unit && vite build && node tools/library-index.mjs",
+    "test:unit": "node --test --test-reporter=dot \"../../engine/test/**/*.test.ts\" \"test/unit/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
+}

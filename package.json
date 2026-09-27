@@ -4,10 +4,10 @@
   "type": "module",
   "description": "Phone-first mini projects, one folder each under projects/, deployed to GitHub Pages.",
   "scripts": {
-    "check": "node scripts/check-public.mjs && node scripts/check-units.mjs",
+    "check": "node scripts/check-public.mjs && node scripts/check-units.mjs && node scripts/check-library.mjs",
     "build": "node scripts/build-site.mjs",
     "test": "node scripts/smoke-test.mjs",
-    "verify": "npm run check && npm run build && npm test"
+    "verify": "npm run check && npm run build && node scripts/check-library.mjs --site _site && npm test"
   },
   "devDependencies": {
     "playwright": "1.56.1"

@@ -1,0 +1,19 @@
+/* Draw: an app shell on the site design system (ds/ds.css). Sizes in rem (ds tokens); px only for
+   the 44pt tap floor and hairlines, per the design system. */
+
+.draw-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.draw-name { font-weight: 700; font-size: var(--text-md); }
+.draw-badge {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}

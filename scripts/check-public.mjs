@@ -18,32 +18,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LINE_RULES, SECRET_FILE } from './lib/public-rules.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-// Generic shapes, checked against the private vault's real content: each catches what it names
-// with little noise, so a hit is worth stopping for.
-const LINE_RULES = [
-  ['anthropic-key', /sk-ant-[\w-]{20,}/],
-  ['github-token', /\bgh[pousr]_[A-Za-z0-9]{36}\b/],
-  ['github-pat', /github_pat_\w{50,}/],
-  ['aws-key-id', /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
-  ['slack-token', /\bxox[baprs]-[\w-]{10,}/],
-  ['private-key-block', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/],
-  ['wireguard-key', /^\s*(?:PrivateKey|PresharedKey)\s*=\s*[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=/],
-  // Passwords are usually too plain for an entropy check; these are the shapes they get written in.
-  ['sudo-password-pipe', /\becho\s+(?!\$)\S+\s*\|\s*sudo\s+-S\b/],
-  ['login-user-slash-password', /\blogin\s+\**(?:`[\w.-]+`\s*\/\s*`[^`\s]+`|[\w.-]+\/[^\s/)]+)/],
-  ['private-ipv4', /\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b/],
-  ['ipv6-ula', /(?<![0-9a-f:])f[cd][0-9a-f]{2}(?::[0-9a-f]{0,4}){2,7}/i],
-  ['ipv6-global', /\b(?!2001:db8)[23][0-9a-f]{3}(?::[0-9a-f]{1,4}){3,7}/i],
-  ['windows-machine-name', /\bDESKTOP-[A-Z0-9]{7}\b/],
-  ['windows-home-path', /\b[A-Za-z]:[\\/]+Users[\\/]+(?!Public\b|Default\b|<|\.\.\.|…)[^\\/\s"'`<]+/i],
-  ['mac-home-path', /\/Users\/(?!Shared\b)[A-Za-z0-9._-]+/],
-  ['linux-home-path', /\/home\/(?!user\b|runner\b)[a-z_][a-z0-9_-]*/],
-  ['ios-device-id', /\b0000\d{4}-[0-9A-F]{16}\b/],
-];
-const SECRET_FILE = /(^|\/)\.env(\.(?!example$)|$)|\.(pem|key|p12|pfx)$/i;
 
 function denyTerms() {
   const raw = process.env.PUBLIC_GUARD_DENY ?? '';

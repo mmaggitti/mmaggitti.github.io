@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    // The engine and the unit tests run under node --test with built-in type stripping, which only
+    // erases types: no enums, namespaces or parameter properties, explicit .ts extensions, and
+    // `import type` for type-only imports. Holding all of Draw to that keeps one set of rules.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    // scripts/lib/*.mjs (the shared guard and profile rules) are plain JS; types are inferred.
+    "allowJs": true,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "test/unit", "../../engine"]
+}

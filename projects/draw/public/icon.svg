@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- House icon style: saturated dark field, chunky light forms, one element lit.
+       A pen nib drawing a curve; the node it is placing is lit. -->
+  <rect width="64" height="64" rx="14" fill="#3a1d5c"/>
+  <path d="M12 46C20 30 34 22 52 20" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="5" stroke-linecap="round"/>
+  <path d="M38 50L50 30L56 34L44 54Z" fill="#fff"/>
+  <path d="M44 54L41 60L38 50Z" fill="#fff"/>
+  <circle cx="12" cy="46" r="6" fill="#ffd166"/>
+</svg>

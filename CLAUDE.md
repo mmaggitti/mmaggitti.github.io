@@ -31,6 +31,10 @@ projects/<name>/          one folder per project. Lowercase, digits, hyphens onl
 projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see Testing)
 projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
+projects/draw/            Draw, the SVG editor (Vite + React + TS); unlisted until Release 1 (see Draw)
+engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
+scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
+scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
 ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
 scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher, pages.json
 scripts/smoke-test.mjs    phone-size check of every built page (+ screenshots in .smoke/)
@@ -102,6 +106,37 @@ turn it into a phone-first page and SVG editor.
   - an inline element that wraps is outlined as one box;
   - a transformed element gets no margin/padding shading;
   - changes inside shadow DOM don't update the tree.
+
+## Draw (`projects/draw/`, at `/draw/`)
+
+Mark's SVG-native design editor, built from SVG Lab. The approved plan (phases P0 to P8, the
+support ledger, the security design) is in the vault's `_audit/2026-09-27 approved-plan draw.md`;
+each phase opens with its own short plan. Until Release 1 it carries
+`<meta name="launcher" content="unlisted">`: deployed and tested, not on the launcher.
+
+- **One render sink.** Document content reaches the page only through
+  `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
+  - `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+    `dangerouslySetInnerHTML`, `srcdoc`, `eval` and `new Function` anywhere;
+  - DOM writes outside the sink and the overlay;
+  - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
+  - a password field outside `src/github/TokenForm.tsx`;
+  - `allow-same-origin` anywhere (the script preview stays an opaque origin).
+- **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
+  `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
+- **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
+  extensions, so `node --test` runs it as-is and any project may import it.
+- **The support ledger** (`engine/ledger/ledger.json`) says what Draw edits, keeps, previews or
+  drops, and which SVG Lab capability lands in which phase. `tools/ledger-check.mjs` gates the
+  build. Rows are never deleted.
+- **The library** (from P2, `projects/draw/public/library/`, served at `/draw/library/`) is public.
+  - Every `.svg` in it, and every `.svg` anywhere on the site, must pass
+    `scripts/lib/svg-profile.mjs` (`scripts/check-library.mjs`, source and `--site` modes, both
+    in CI). A script-bearing design keeps its source only in its escaped `.draw.json` sidecar.
+  - `index.json` is generated at build, never committed.
+  - The GitHub token comes from Mark at run time (Keychain-filled, memory only), never from a file.
+- **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit) → vite build →
+  library-index`. It runs inside `npm run build`, so CI gates all of it.
 
 ## Cloud-container limits
 

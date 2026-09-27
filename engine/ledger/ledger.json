@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "currentPhase": 0,
+    "profileVersion": 1,
+    "note": "Draw's support ledger: what SVG Draw edits, keeps, previews or drops, and which SVG Lab capability lands in which phase. Rows arrive in P0-M2. Rows are never deleted; a superseded row gets a note."
+  },
+  "rows": [],
+  "lessons": []
+}
