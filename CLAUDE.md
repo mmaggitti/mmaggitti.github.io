@@ -30,6 +30,7 @@ projects/<name>/          one folder per project. Lowercase, digits, hyphens onl
                           "_name" = draft, not built. Reserved: "crossword-v1" (its own repo), "ds".
 projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see Testing)
 projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
+projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
 ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
 scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher, pages.json
 scripts/smoke-test.mjs    phone-size check of every built page (+ screenshots in .smoke/)
@@ -73,6 +74,10 @@ that's a real Safari-engine difference: fix it, don't skip it.
 throws on failure. That uses Chromium here and WebKit in CI. Assert **where** things draw, not
 only what they show, and prove a new test can fail: break the code on purpose, watch it go red,
 then restore it.
+
+Measure sideways scroll as `scrollWidth - clientWidth`, never against `innerWidth`: under the
+mobile emulation the tests use, Chromium widens `innerWidth` to the content, so an
+`innerWidth` check can never fail. The smoke test used one until 2026-09-26.
 
 ## Studio (`projects/studio/`, at `/studio/`)
 
@@ -124,8 +129,11 @@ turn it into a phone-first page and SVG editor.
   font size.
   - Mark chose **75%** (2026-09-25), so 1rem = 12px.
   - A raw px value wouldn't scale with everything around it.
-  - `npm run check` and CI fail on any px except 0–3px (hairlines, focus rings) or a line marked
-    `px-ok` with its reason.
+  - `npm run check` and CI fail on any px except whole 0–3px values (hairlines, focus rings) or a
+    line marked `px-ok` with its reason. Decimals such as 1.5px fail: use rem, or a whole px.
+  - `px-ok` exempts the whole line, so put a physical value (a 16px field floor, say) in a rule
+    of its own.
+  - In SVG CSS, write stroke widths unitless: `stroke-width:1.5` is the same user units as 1.5px.
   - Only `.css` files, `<style>` blocks and `style=""` attributes are checked. Canvas and SVG
     coordinates in JS are fine.
 - **Use the tokens, not new numbers.** Token values are written at a 16px base, so 1.0625rem is

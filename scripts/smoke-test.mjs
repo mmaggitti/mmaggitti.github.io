@@ -90,7 +90,9 @@ for (const pg of pages) {
     try {
       const res = await page.goto(origin + pg.path, { waitUntil: 'networkidle' });
       if (!res?.ok()) problems.push(`page returned ${res?.status()}`);
-      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      // clientWidth, not innerWidth: under mobile emulation Chromium widens innerWidth to the content,
+      // so innerWidth-based overflow always reads 0.
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (overflow > 0) problems.push(`scrolls sideways by ${overflow}px`);
       if (i === 0) await page.screenshot({ path: join(SHOTS, `${pg.name}.png`) });
     } catch (e) {

@@ -50,7 +50,9 @@ for (const name of names) {
     npm(['run', 'build']);
     cpSync(join(src, 'dist'), dest, { recursive: true });
   } else {
-    cpSync(src, dest, { recursive: true, filter: (p) => !p.includes(`${sep}node_modules`) });
+    // Tests aren't served (a built project ships only dist/, so the same holds there).
+    const tests = join(src, 'test');
+    cpSync(src, dest, { recursive: true, filter: (p) => !p.includes(`${sep}node_modules`) && p !== tests && !p.startsWith(tests + sep) });
   }
 
   const entry = join(dest, 'index.html');
