@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 
 const DRAW = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(DRAW, '..', '..');
-const SITE_E2E = ['sh', ['-c', 'node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && node scripts/smoke-test.mjs'], REPO];
+// The whole site is built and every page smoke-tested, but only Draw's e2e runs (E2E=draw): the
+// other projects' e2e can't see a break in Draw, and svg-lab's alone takes about two minutes.
+const SITE_E2E = ['sh', ['-c', 'node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && E2E=draw node scripts/smoke-test.mjs'], REPO];
 const engineTests = (file) => ['node', ['--test', '--test-reporter=spec', `../../engine/test/${file}`], DRAW];
 const XML_TESTS = engineTests('xml.test.ts');
 const LEDGER_CHECK = ['node', ['tools/ledger-check.mjs'], DRAW];
@@ -28,6 +30,7 @@ const POLICY_TESTS = engineTests('policy/render-policy.test.ts');
 const CHECK_SINKS = ['node', ['tools/check-sinks.mjs'], DRAW];
 // Keyed patching in Chromium, with the Renderer bundled from source: no site build needed.
 const PATCH_TESTS = ['node', ['test/renderer-patch.mjs'], DRAW];
+const drawTests = (file) => ['node', ['--test', '--test-reporter=spec', `test/unit/${file}`], DRAW];
 
 const BREAKS = [
   {
@@ -325,13 +328,13 @@ const BREAKS = [
   },
   {
     id: 'B58', what: 'a root the canvas refuses reports success', slow: true,
-    file: 'projects/draw/src/panels/Canvas.tsx', from: 'if (!renderer.nodeFor(root.id)) {', to: 'if (false) {',
+    file: 'projects/draw/src/editor.ts', from: 'if (!canvas.nodeFor(root.id)) {', to: 'if (false) {',
     run: SITE_E2E, expect: /not a refused root/,
   },
   {
-    id: 'B59', what: 'a root size that overflows to Infinity is used', slow: true,
-    file: 'projects/draw/src/canvas/renderer.ts', from: 'return v != null && Number.isFinite(v) && v > 0 ? v : null;', to: 'return v && v > 0 ? v : null;',
-    run: SITE_E2E, expect: /a root width of 1e308in: did not render/,
+    id: 'B59', what: 'a root size that overflows to Infinity is used',
+    file: 'projects/draw/src/canvas/artboard.ts', from: 'return v != null && Number.isFinite(v) && v > 0 ? v : null;', to: 'return v && v > 0 ? v : null;',
+    run: drawTests('artboard.test.ts'), expect: /✖ the artboard is the viewBox, else the size/,
   },
   {
     id: 'B60', what: 'reduced motion no longer stops CSS animations', slow: true,
@@ -350,7 +353,7 @@ const BREAKS = [
   },
   {
     id: 'B63', what: 'the corpus check passes on an empty canvas', slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: '    } else if (!set(target, node, a, value)) dropped++;', to: '    } else if (a.ns !== null) return null;\n    else if (!set(target, node, a, value)) dropped++;',
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '    } else if (!set(plan, node, a, value)) dropped++;', to: '    } else if (a.ns !== null) return null;\n    else if (!set(plan, node, a, value)) dropped++;',
     run: SITE_E2E, expect: /rendered nothing|the corpus drew only/,
   },
   {
@@ -374,6 +377,274 @@ const BREAKS = [
     to: "test.skip('every corpus file round-trips byte-identical through the CST and the model',",
     run: EVIDENCE_CHECK,
     expect: /feature:round-trip: cited test did not pass/,
+  },
+  // P0-M3: the interaction spine. Unit and renderer-patch breaks first (quick), then the site e2e.
+  {
+    id: 'B68', what: 'a scrub frame rewrites every attribute of its element',
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '    if (target.getAttributeNS(p.ns, p.local) === p.value) continue;\n', to: '',
+    run: PATCH_TESTS, expect: /a value edit is one attribute mutation/,
+  },
+  {
+    id: 'B69', what: 'the camera is not written to the drawn root',
+    file: 'projects/draw/src/canvas/renderer.ts', from: "if (this.#camera !== null) return [{ local: 'viewBox', value: this.#camera }];", to: '',
+    run: PATCH_TESTS, expect: /a camera on a root with a viewBox: the viewBox/,
+  },
+  {
+    id: 'B70', what: "the canvas's hit test maps a stale node back to a NodeId",
+    file: 'projects/draw/src/canvas/renderer.ts', from: 'return id !== undefined && this.#nodes.get(id)?.dom === dom ? id : undefined;', to: 'return id;',
+    run: PATCH_TESTS, expect: /a node taken off the canvas still maps to its NodeId/,
+  },
+  {
+    id: 'B71', what: "the editor's routing re-renders nested subtrees twice",
+    file: 'projects/draw/src/routing.ts', from: 'const subtrees = [...roots].filter((id) => !under(doc, id, roots, false));', to: 'const subtrees = [...roots];',
+    run: drawTests('routing.test.ts'), expect: /✖ structure: only the topmost subtrees/,
+  },
+  {
+    id: 'B72', what: 'the code view is not patched after an edit',
+    file: 'projects/draw/src/editor.ts', from: '      for (const id of r.code.blocks) this.#patchCode(id);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
+  },
+  {
+    id: 'B73', what: 'every scrub frame re-renders React (a store bump per frame)',
+    file: 'projects/draw/src/editor.ts', from: "if (why.kind !== 'drag') this.#bump();", to: 'this.#bump();',
+    run: drawTests('editor.test.ts'), expect: /✖ a scrub changes only its token bytes/,
+  },
+  {
+    id: 'B74', what: 'a released scrub is thrown away instead of committed',
+    file: 'projects/draw/src/editor.ts', from: '    this.#endLive(committed);', to: '    this.#endLive(false);',
+    run: drawTests('editor.test.ts'), expect: /✖ a scrub changes only its token bytes/,
+  },
+  {
+    id: 'B75', what: 'a parse error in Edit source loses its line',
+    file: 'projects/draw/src/editor.ts', from: '...lineColumn(text, parsed.error.at)', to: 'line: 1, column: 1',
+    run: drawTests('editor.test.ts'), expect: /✖ Edit source replaces the element/,
+  },
+  {
+    id: 'B76', what: 'a canvas tap selects a shape that only draws where it is referenced (a clipPath)',
+    file: 'projects/draw/src/selectable.ts', from: 'GRAPHICS.has(n.local) && !referencedOnly(doc, id);', to: 'GRAPHICS.has(n.local);',
+    run: drawTests('editor.test.ts'), expect: /✖ selection: a canvas tap takes the nearest element/,
+  },
+  {
+    id: 'B77', what: 'a resize throws away the view the user zoomed to',
+    file: 'projects/draw/src/editor.ts', from: 'if (this.#fitted || !(was.width > 0 && was.height > 0)) this.#fitView();', to: 'this.#fitView();',
+    run: drawTests('editor.test.ts'), expect: /✖ zoom and pan move the camera/,
+  },
+  {
+    id: 'B78', what: 'an edit of the root viewBox leaves a fitted view on the old artboard',
+    file: 'projects/draw/src/editor.ts', from: '      if (cs.attrs.has(session.doc.root)) this.#artboardChanged();\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a file placed otherwise/,
+  },
+  {
+    id: 'B79', what: 'a file with its own preserveAspectRatio is shown without the camera that fits it',
+    file: 'projects/draw/src/canvas/artboard.ts', from: 'if (p.align !== DEFAULT_PAR.align || p.meetOrSlice !== DEFAULT_PAR.meetOrSlice) return false;', to: '',
+    run: drawTests('artboard.test.ts'), expect: /✖ a file whose own root shows the fitted view/,
+  },
+  {
+    id: 'B80', what: 'the page zooms under a pinch on the canvas (touch-action removed from the canvas and the app)', slow: true,
+    file: 'projects/draw/src/app.css', from: /  touch-action: none;\n| touch-action: pan-x pan-y;/g, to: '',
+    run: SITE_E2E, expect: /the page zoomed to/,
+  },
+  {
+    id: 'B81', what: "Safari's own pinch events reach the page", slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: "    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) on<Event>(area.ownerDocument, type, (e) => e.preventDefault(), { passive: false });\n", to: '',
+    run: SITE_E2E, expect: /Safari's gesture events are not cancelled on the canvas/,
+  },
+  {
+    id: 'B82', what: 'a wheel zoom goes about the corner, not the pointer', slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: 'this.#editor.zoomAt({ x: e.clientX - box.left, y: e.clientY - box.top },', to: 'this.#editor.zoomAt({ x: 0, y: 0 },',
+    run: SITE_E2E, expect: /after the wheel zoom the document point/,
+  },
+  {
+    id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true,
+    file: 'projects/draw/src/canvas/overlay.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
+    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+  },
+  {
+    id: 'B84', what: 'the outline does not follow the zoom', slow: true,
+    file: 'projects/draw/src/editor.ts', from: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);\n    this.#outline();', to: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);',
+    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+  },
+  {
+    id: 'B85', what: 'a two-finger tap on the canvas no longer undoes', slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: '        return ed.undo();', to: '        return;',
+    run: SITE_E2E, expect: /a two-finger tap on the canvas did not undo/,
+  },
+  {
+    id: 'B86', what: "the canvas's hit test finds nothing", slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: 'ed.tapCanvas(this.#renderer.idFor(hit) ?? null);', to: 'ed.tapCanvas(null);',
+    run: SITE_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
+  },
+  {
+    id: 'B87', what: 'the canvas host is exposed to assistive tech', slow: true,
+    file: 'projects/draw/src/panels/Canvas.tsx', from: ' aria-hidden="true" />', to: ' />',
+    run: SITE_E2E, expect: /the canvas host is not aria-hidden/,
+  },
+  {
+    id: 'B88', what: 'a sheet field drops under 16px', slow: true,
+    file: 'projects/draw/src/app.css', from: '.draw-wide { width: 100%; }', to: '.draw-field { font-size: 0.75rem; }\n.draw-wide { width: 100%; }',
+    run: SITE_E2E, expect: /field\(s\) under 16px/,
+  },
+  {
+    id: 'B89', what: 'the Number sheet refuses a value without saying why', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "setProblem('error' in r ? r.error : null);", to: 'setProblem(null);',
+    run: SITE_E2E, expect: /the Number sheet took "4o" without a word/,
+  },
+  {
+    id: 'B90', what: 'a changed code block no longer flashes', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: "    el.classList.add('cv-flash');\n", to: '',
+    run: SITE_E2E, expect: /the scrubbed block doesn't flash/,
+  },
+  {
+    id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: 'must(bytes <= 250_000,', to: 'must(bytes <= 50_000,',
+    run: SITE_E2E, expect: /over the 250 KB budget/,
+  },
+  // P0-M3 review fixes.
+  {
+    id: 'B92', what: 'Edit source parses with fresh limits (a new entity budget, depth, node count and size)',
+    file: 'engine/model/fragment.ts', from: 'parseDoc(`${head}${text}${tail}`, limits, budget)', to: 'parseDoc(`${head}${text}${tail}`)',
+    run: engineTests('fragment.test.ts'), expect: /✖ Edit source spends what the document has left/,
+  },
+  {
+    id: 'B93', what: "Edit source's node limit counts nodes, not the tokens the parser counts (end tags too)",
+    file: 'engine/model/fragment.ts', from: 'max.maxNodes - tokens(doc)', to: 'max.maxNodes - doc.nodes.size',
+    run: engineTests('fragment.test.ts'), expect: /✖ Edit source spends what the document has left/,
+  },
+  {
+    id: 'B94', what: 'a DOCTYPE is accepted inside an element or after the root (and so through Edit source)',
+    file: 'engine/xml/cst.ts', from: "if (tok.kind === 'doctype' && (stack.length || root)) {", to: "if (tok.kind === 'doctype' && false) {",
+    run: XML_TESTS, expect: /✖ a DOCTYPE outside the prolog/,
+  },
+  {
+    id: 'B95', what: 'an XML declaration is accepted after the start of the document',
+    file: 'engine/xml/cst.ts', from: "tok.start !== (source.charCodeAt(0) === 0xfeff ? 1 : 0)", to: 'false',
+    run: XML_TESTS, expect: /✖ a DOCTYPE outside the prolog, or an XML declaration after the start/,
+  },
+  {
+    id: 'B96', what: 'zooming in on a tiny artboard zooms out (the cap stays at MAX_SCALE below the fit)',
+    file: 'projects/draw/src/canvas/viewport.ts', from: 'Math.min(Math.max(MAX_SCALE, fitScale * MAX_SCALE_FACTOR), ', to: 'Math.min(MAX_SCALE, ',
+    run: drawTests('viewport.test.ts'), expect: /✖ zooming in never zooms out/,
+  },
+  {
+    id: 'B97', what: 'a view whose camera overflows (a hostile viewBox) is applied anyway',
+    file: 'projects/draw/src/editor.ts', from: '    if (!drawable(next, this.#size)) return;\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a hostile viewBox near the float limit/,
+  },
+  {
+    id: 'B98', what: 'a token edit writes a character XML cannot hold (the Text sheet)',
+    file: 'engine/code/edit.ts', from: 'const bad = NOT_XML_CHAR.exec(text);', to: 'const bad = null as RegExpExecArray | null;',
+    run: engineTests('code/edit.test.ts'), expect: /✖ no token takes a character XML 1\.0 cannot hold/,
+  },
+  {
+    id: 'B99', what: "the Color sheet no longer rings the current value when its case differs",
+    file: 'projects/draw/src/color-choices.ts', from: 'a.toLowerCase() === b.toLowerCase()', to: 'a === b',
+    run: drawTests('color-choices.test.ts'), expect: /✖ the Color sheet: a 16-colour palette/,
+  },
+  {
+    id: 'B100', what: 'the ToolRail is 51pt again, not the plan\'s 52', slow: true,
+    file: 'projects/draw/src/app.css', from: 'min-height: max(var(--tap-min), 3.75rem);', to: 'min-height: max(var(--tap-min), 3.5rem);',
+    run: SITE_E2E, expect: /the TopBar, ContextBar and ToolRail are 44, 48 and 51/,
+  },
+  {
+    id: 'B101', what: 'the code breaks numbers and colours across lines (word-break: break-all)', slow: true,
+    file: 'projects/draw/src/app.css', from: '  overflow-wrap: anywhere;\n', to: '  overflow-wrap: anywhere;\n  word-break: break-all;\n',
+    run: SITE_E2E, expect: /token\(s\) split across lines of the code/,
+  },
+  {
+    id: 'B102', what: 'a tap near a wrapped token measures to the box around all its lines', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: 'for (const r of span.getClientRects()) {', to: 'for (const r of [span.getBoundingClientRect()]) {',
+    run: SITE_E2E, expect: /a tap on <\/text>, 40pt from the wrapped text run, opened its Text sheet/,
+  },
+  {
+    id: 'B103', what: 'a selected block scrolls flush against the ContextBar (no scroll padding)', slow: true,
+    file: 'projects/draw/src/app.css', from: '  scroll-padding-block: var(--tap-min);', to: '',
+    run: SITE_E2E, expect: /from the panel's bottom edge, under a finger's width/,
+  },
+  {
+    id: 'B104', what: 'any lift of a finger on the code is a tap, however far it moved', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: 'const tap = this.taps.lift(e.pointerId, e.clientX, e.clientY, cancelled);', to: 'const tap = (this.taps.lift(e.pointerId, e.clientX, e.clientY, cancelled), !cancelled);',
+    run: SITE_E2E, expect: /a swipe that ends on a colour opened a sheet/,
+  },
+  {
+    id: 'B105', what: 'a second finger on the code leaves the first a tap',
+    file: 'projects/draw/src/codeview/scrub.ts', from: '    for (const p of this.down.values()) p.still = false;\n', to: '',
+    run: drawTests('scrub.test.ts'), expect: /✖ a tap on the code is one pointer that stayed put/,
+  },
+  {
+    id: 'B106', what: 'the Scrub strip stays on the old number after a scrub of another',
+    file: 'projects/draw/src/editor.ts', from: '    this.focus.set({ ref: hit.ref, token: t }); // the Scrub strip follows the number being scrubbed\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ the Scrub strip follows the number being scrubbed/,
+  },
+  {
+    id: 'B107', what: 'the editor never tells the code which number the Scrub strip holds',
+    file: 'projects/draw/src/editor.ts', from: 'this.#ports.code.focus(key && index !== -1 ? { key, index } : null);', to: 'this.#ports.code.focus(null);',
+    run: drawTests('editor.test.ts'), expect: /✖ the Scrub strip follows the number being scrubbed/,
+  },
+  {
+    id: 'B108', what: "the code loses the Scrub strip's mark when the number's block is patched", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: '    if (this.focused?.key === b.key) this.markFocus();\n', to: '',
+    run: SITE_E2E, expect: /while the Number sheet writes 95 the mark is/,
+  },
+  {
+    id: 'B109', what: 'a touch drag of the sheet handle swallows the next tap on it', slow: true,
+    file: 'projects/draw/src/panels/CodePanel.tsx', from: '    dragged.current = false; // a touch drag gets no click to clear this, so it would swallow the next tap\n', to: '',
+    run: SITE_E2E, expect: /the drag swallowed it/,
+  },
+  {
+    id: 'B110', what: 'Edit source is offered for the root, which it always refuses',
+    file: 'projects/draw/src/editor.ts', from: 'return !!this.#doc && ids.length === 1 && ids[0] !== this.#doc.root;', to: 'return !!this.#doc && ids.length === 1;',
+    run: drawTests('editor.test.ts'), expect: /✖ Edit source is offered for one element, never the root/,
+  },
+  {
+    id: 'B111', what: 'the ContextBar offers Edit source whatever is selected', slow: true,
+    file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
+    run: SITE_E2E, expect: /Edit source is offered for the root <svg>/,
+  },
+  {
+    id: 'B112', what: 'the page zooms under a pinch off the canvas (no touch-action on the app)', slow: true,
+    file: 'projects/draw/src/app.css', from: ' touch-action: pan-x pan-y;', to: '',
+    run: SITE_E2E, expect: /a pinch on \.draw-[\w-]+ zoomed the page to/,
+  },
+  {
+    id: 'B113', what: "Safari's own pinch events are cancelled on the canvas only", slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: 'on<Event>(area.ownerDocument, type,', to: 'on<Event>(area, type,',
+    run: SITE_E2E, expect: /Safari's gesture events are not cancelled on \.draw-bar/,
+  },
+  {
+    id: 'B114', what: 'a document lifted above the selection outline paints over it (no z-index on the marks)', slow: true,
+    file: 'projects/draw/src/app.css', from: ' z-index: 2147483647;', to: '',
+    run: SITE_E2E, expect: /paints over the selection outline/,
+  },
+  // The correctness review: breaks that every test used to pass.
+  {
+    id: 'B115', what: 'the canvas does not follow an undo or a redo',
+    file: 'projects/draw/src/editor.ts', from: '    session.subscribe((cs: ChangeSet) => {\n      r = route(session.doc, cs);\n', to: "    session.subscribe((cs: ChangeSet, why) => {\n      r = route(session.doc, cs);\n      if (why.kind === 'undo' || why.kind === 'redo') return;\n",
+    run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
+  },
+  {
+    id: 'B116', what: 'the selection outline does not follow a scrub', slow: true,
+    file: 'projects/draw/src/editor.ts', from: '    session.subscribe(() => {\n      const kept =', to: "    session.subscribe((_cs, why) => {\n      if (why.kind === 'drag') return;\n      const kept =",
+    run: SITE_E2E, expect: /after the scrub the outline is [\d.]+pt off the circle/,
+  },
+  {
+    id: 'B117', what: 'the view does not follow the canvas when it changes size', slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: '    ro.observe(host);\n', to: '',
+    run: SITE_E2E, expect: /after the wheel zoom the document point/,
+  },
+  {
+    id: 'B118', what: 'a node an undo took out stays selected',
+    file: 'projects/draw/src/editor.ts', from: '      if (kept.length !== this.selection.get().size) this.selection.set(new Set(kept));\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Edit source replaces the element in one transaction/,
+  },
+  {
+    id: 'B119', what: "the selected element's code block is not marked", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: "      el.classList.toggle('cv-selected', on);\n", to: '',
+    run: SITE_E2E, expect: /the selected circle's block is not marked/,
+  },
+  {
+    id: 'B120', what: 'Enter no longer closes the Text sheet', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "        onKeyDown={(e) => e.key === 'Enter' && close()}\n      />\n      <Problem", to: '      />\n      <Problem',
+    run: SITE_E2E, expect: /Enter did not close the Text sheet/,
   },
 ];
 

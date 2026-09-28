@@ -7,9 +7,10 @@
 // its own spans).
 //
 // Tokens are smaller than a 44pt tap target, so a tap near a token takes the nearest one (within
-// NEAR px). A number token scrubs by dragging sideways (scrub.ts); a vertical drag scrolls.
+// NEAR px). A number token scrubs by dragging sideways (scrub.ts); a vertical drag scrolls. Only a
+// finger that stayed put, alone, is a tap (Taps): a swipe or a pinch over the code edits nothing.
 
-import { ScrubGesture } from './scrub.ts';
+import { ScrubGesture, Taps } from './scrub.ts';
 
 export type TokenKind = 'number' | 'color' | 'enum' | 'text' | 'ref';
 
@@ -24,6 +25,12 @@ export interface ViewBlock {
   node: number; // the NodeId it shows
   text: string;
   tokens: ViewToken[];
+}
+
+/** A token by its block's key and its index among the block's tokens (which an edit keeps). */
+export interface FocusMark {
+  key: string;
+  index: number;
 }
 
 export interface CodeViewHandlers {
@@ -44,6 +51,8 @@ export class CodeView {
   private blocks = new Map<string, { data: ViewBlock; el: HTMLElement }>();
   private order: string[] = [];
   private gesture: { g: ScrubGesture; block: ViewBlock; token: ViewToken; span: HTMLElement; id: number; last: number | null } | null = null;
+  private taps = new Taps();
+  private focused: FocusMark | null = null;
   private off: Array<() => void> = [];
 
   constructor(root: HTMLElement, handlers: CodeViewHandlers) {
@@ -71,17 +80,32 @@ export class CodeView {
       this.blocks.set(b.key, { data: b, el });
       this.order.push(b.key);
     }
+    this.markFocus();
   }
 
-  /** Replace one block after an edit; nothing else in the listing is touched. */
+  /**
+   * Replace one block after an edit; nothing else in the listing is touched. The changed block
+   * flashes (not under reduced motion: ds.css stops animations), and a token being scrubbed stays
+   * marked in its new block.
+   */
   patch(b: ViewBlock): void {
     const cur = this.blocks.get(b.key);
     if (!cur) return;
     if (cur.data.text === b.text && sameTokens(cur.data.tokens, b.tokens)) return;
     const el = this.build(b);
     if (cur.el.classList.contains('cv-selected')) el.classList.add('cv-selected');
+    el.classList.add('cv-flash');
+    const g = this.gesture;
+    if (g && g.block.key === b.key) {
+      const span = el.querySelector<HTMLElement>(`.cv-tok[data-t="${g.span.dataset.t}"]`);
+      if (span) {
+        if (g.span.classList.contains('cv-active')) span.classList.add('cv-active');
+        g.span = span;
+      }
+    }
     cur.el.replaceWith(el);
     this.blocks.set(b.key, { data: b, el });
+    if (this.focused?.key === b.key) this.markFocus();
   }
 
   /** Mark the blocks of the selected nodes, and bring the first into view. */
@@ -94,6 +118,18 @@ export class CodeView {
       if (on && !first) first = el;
     }
     first?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Mark the number the Scrub strip edits (cv-focus), or none; the mark stays through edits of its block. */
+  focus(mark: FocusMark | null): void {
+    this.root.querySelector('.cv-focus')?.classList.remove('cv-focus');
+    this.focused = mark;
+    this.markFocus();
+  }
+
+  private markFocus(): void {
+    const m = this.focused;
+    if (m) this.blocks.get(m.key)?.el.querySelector(`.cv-tok[data-t="${m.index}"]`)?.classList.add('cv-focus');
   }
 
   destroy(): void {
@@ -138,11 +174,14 @@ export class CodeView {
       const entry = this.blocks.get(el.dataset.key ?? '');
       if (!entry) continue;
       for (const span of el.querySelectorAll<HTMLElement>('.cv-tok')) {
-        const r = span.getBoundingClientRect();
-        const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
-        if (d < bestD) {
-          bestD = d;
-          best = { span, token: entry.data.tokens[Number(span.dataset.t)], block: entry.data };
+        // A token that wraps has a box on each line: the distance is to the nearest of those, not
+        // to the one box around them all (which spans whole lines of other text).
+        for (const r of span.getClientRects()) {
+          const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+          if (d < bestD) {
+            bestD = d;
+            best = { span, token: entry.data.tokens[Number(span.dataset.t)], block: entry.data };
+          }
         }
       }
     }
@@ -151,6 +190,7 @@ export class CodeView {
 
   private down(e: PointerEvent): void {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    this.taps.press(e.pointerId, e.clientX, e.clientY);
     const hit = this.locate(e.target);
     if (!hit?.token || hit.token.kind !== 'number' || !hit.span) return;
     const g = new ScrubGesture();
@@ -159,6 +199,7 @@ export class CodeView {
   }
 
   private move(e: PointerEvent): void {
+    this.taps.move(e.pointerId, e.clientX, e.clientY);
     const s = this.gesture;
     if (!s || e.pointerId !== s.id) return;
     const wasScrubbing = s.g.scrubbing;
@@ -178,6 +219,7 @@ export class CodeView {
   }
 
   private up(e: PointerEvent, cancelled: boolean): void {
+    const tap = this.taps.lift(e.pointerId, e.clientX, e.clientY, cancelled);
     const s = this.gesture;
     if (s && e.pointerId === s.id) {
       this.gesture = null;
@@ -185,10 +227,10 @@ export class CodeView {
       this.root.classList.remove('cv-scrubbing');
       const outcome = s.g.up(cancelled);
       if (outcome === 'scrub') this.h.scrubEnd(!cancelled);
-      else if (outcome === 'tap') this.h.tap(s.block, s.token, s.span.getBoundingClientRect());
+      else if (outcome === 'tap' && tap) this.h.tap(s.block, s.token, s.span.getBoundingClientRect());
       return;
     }
-    if (cancelled || e.type !== 'pointerup') return;
+    if (!tap) return;
     // A tap that did not start on a number token: a token (or the nearest one), else the block.
     const hit = this.locate(e.target);
     if (!hit) return;

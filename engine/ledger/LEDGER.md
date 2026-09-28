@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P0**. 1327 rows: 1155 planned, 13 partial, 158 done, 1 superseded.
+Current phase: **P0**. 1327 rows: 1136 planned, 21 partial, 169 done, 1 superseded.
 
 A row is `done` only when the tests it cites passed in the build. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -16,14 +16,14 @@ A row is `done` only when the tests it cites passed in the build. Raising the cu
 | value | 85 | 85 | 0 | 0 | 0 |
 | syntax | 22 | 4 | 2 | 16 | 0 |
 | namespace | 20 | 11 | 2 | 7 | 0 |
-| capability | 479 | 478 | 0 | 0 | 1 |
-| feature | 99 | 93 | 4 | 2 | 0 |
+| capability | 479 | 465 | 9 | 4 | 1 |
+| feature | 99 | 87 | 3 | 9 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| P0 | 246 | 78 | 10 | 158 | 0 |
+| P0 | 246 | 59 | 18 | 169 | 0 |
 | P1 | 320 | 320 | 0 | 0 | 0 |
 | P2 | 74 | 71 | 3 | 0 | 0 |
 | P3 | 161 | 161 | 0 | 0 | 0 |
@@ -90,8 +90,16 @@ Each lesson's capabilities and the phases that deliver them.
 - `syntax:parameter-entities` (P0): recorded and never expanded; the never-expanded half has no test yet
 - `namespace:inkscape` (P2): kept and never rendered; the sidecar arrives with the P2 publish pipeline, the clean-export strip with P0-M4
 - `namespace:other` (P2): kept and never rendered; the sidecar arrives with the P2 publish pipeline, the clean-export strip with P0-M4
-- `feature:safe-viewer` (P0): every corpus file renders through the policy (unit) and on the canvas (e2e); fitting its viewBox with zoom and pan is P0-M3
-- `feature:canvas-root-isolation` (P0): the host resets inherited styles and design tokens (e2e canvasIgnoresTheTheme); aria-hidden on the host is P0-M3
+- `capability:code/live-code` (P0): canvas and code are live views of one model (unit); the flash of a changed block is CSS (cv-flash, stopped under reduced motion by ds.css), checked only in e2e scrubChangesOnlyItsBytes
+- `capability:code/number-sheet` (P0): stepper buttons, a checked numeric field (with a ± key for the decimal keypad) and one history entry per visit are built and unit-tested; hold-to-repeat and the range slider are not built yet
+- `capability:code/enum-cycle` (P0): a tap moves a keyword to its next option, wrapping round, as one history entry (unit); Enter or Space on a focused token is not built (tokens are not focusable yet)
+- `capability:code/text-sheet` (P0): the single-line field, its live edits, its refusals and one history entry per visit are unit-tested; Enter closing it is a key handler, exercised only in e2e sheetsRefuseWhatTheyCantWrite
+- `capability:shared/tap-vs-drag` (P0): a move under 5 px is a tap on the canvas (unit); handle drags that snap to whole units arrive with the P1 handles
+- `capability:shared/reduced-motion` (P0): under reduced motion the canvas's SMIL is paused and its CSS animation stopped (e2e reducedMotionStopsAnimation), and the code's flash on a changed token is a CSS animation that ds.css turns off too; a Play button that starts the motion is not built
+- `capability:shared/bottom-sheet` (P0): the keyboard inset is unit-tested; the dim, Done and Escape are built, and Done is exercised only in e2e (phoneRulesOnTheNewLayout, sheetsRefuseWhatTheyCantWrite)
+- `capability:shared/toast` (P0): refused edits show a short notice above the ContextBar (e2e sheetsRefuseWhatTheyCantWrite); Copied and Downloaded arrive with export in M4
+- `capability:shared/theme` (P0): the app follows the system's light or dark theme (ds.css), and the code's token colours have a dark set that switches with it (app.css), while the canvas stays on white paper in both (e2e canvasIgnoresTheTheme); nothing checks the code's recolouring yet, and there is no data-theme override
+- `feature:canvas-root-isolation` (P0): the host resets inherited styles and design tokens and is aria-hidden (the code panel is the accessible view); proven only in e2e canvasIgnoresTheTheme and phoneRulesOnTheNewLayout
 - `feature:dompurify-opinion` (P0): fail-closed is unit-tested; what DOMPurify refuses (ids naming document properties are kept since SANITIZE_DOM is off, data images on feImage, SMIL from/to) is proven only in the e2e policy-edges case
 - `feature:shadow-root-decision` (P0): decided: the open shadow root. WebKit 26 passes all 24 probe rows (CI run 13); Chromium all but a document’s own @font-face. The probe is e2e (test/probe-shadow.mjs), which the ledger cannot cite as evidence yet
 

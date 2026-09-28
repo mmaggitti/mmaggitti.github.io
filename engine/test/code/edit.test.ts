@@ -135,6 +135,21 @@ test('validation: each kind takes only its own kind of text', () => {
   assert.equal(serialize(doc).includes('abc'), false);
 });
 
+test('no token takes a character XML 1.0 cannot hold, and the refusal names it', () => {
+  const doc = load(`<rect x="1" fill="red" aria-label="hi"/><text>Hello</text>`);
+  const text = [...doc.nodes.values()].find((n): n is LeafNode => n.kind === 'text' && n.raw === 'Hello')!;
+  const [run] = tokenizeText(doc, text.id);
+  const [label] = toks(doc, 'rect', 'aria-label');
+  for (const [bad, code] of [['Dr\u0001aw', '0001'], ['Dr\u000Baw', '000B'], ['Dr\uFFFEaw', 'FFFE'], ['Dr\uFFFFaw', 'FFFF'], ['Dr\uD800aw', 'D800'], ['\u0000', '0000']]) {
+    assert.equal(tokenTextError(run, bad), `XML can't hold the character U+${code}`, JSON.stringify(bad));
+    assert.ok(tokenTextError(label, bad), JSON.stringify(bad));
+    assert.throws(() => applyTokenEdit(doc, text.id, { text: true }, run, bad), TokenEditError);
+  }
+  for (const good of ['tab\there', 'Dr😀aw', '\uE000\uFFFD', 'ünïcødé']) assert.equal(tokenTextError(run, good), null, JSON.stringify(good));
+  assert.ok(tokenTextError(toks(doc, 'rect', 'x')[0], '1\u0001'), 'numbers too');
+  assert.equal(text.raw, 'Hello', 'nothing was written');
+});
+
 test('text is escaped for where it lands: &, < and the attribute’s own quote', () => {
   const doc = load(`<rect aria-label='hi there'/><text>Hello</text><text><![CDATA[raw]]></text>`);
   const rect = first(doc, 'rect');

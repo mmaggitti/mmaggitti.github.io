@@ -2,8 +2,10 @@
 // must equal a fresh render of the same model (the same DOM, the same stats, and a drawn copy of
 // exactly the same NodeIds, each inside the host). Moves, reorders and deletes; an id change that
 // retargets an animation; a subtree moved into a foreignObject. And a render that throws keeps the
-// previous drawing. Nothing in the app edits a document yet (M3 does), so the real Renderer is
-// bundled from source (test/harness/entry.ts) and driven directly.
+// previous drawing. P0-M3 adds the camera (the view as the root's viewBox), an attribute put back
+// in the middle of the list (an undo), a value edit that must be exactly one attribute mutation
+// (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The real Renderer
+// is bundled from source (test/harness/entry.ts) and driven directly.
 //
 // Run by test/e2e.mjs on the /draw/ page (Chromium here, WebKit in CI), or alone, quickly:
 //   node test/renderer-patch.mjs
@@ -41,7 +43,7 @@ export default async function rendererPatch({ browser, origin }) {
 
 // Runs in the page.
 function cases() {
-  const { el, parseDoc, setAttr, removeAttr, Renderer, sinkReady } = window.drawHarness;
+  const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, Renderer, sinkReady } = window.drawHarness;
   const SVG = 'http://www.w3.org/2000/svg';
   const host = () => {
     const div = document.createElement('div');
@@ -52,9 +54,10 @@ function cases() {
   const results = [];
   if (!sinkReady()) return [{ label: 'setup', problems: ['the sink is not ready'] }];
 
-  const check = (label, r, root, doc) => {
+  const check = (label, r, root, doc, camera = null) => {
     const freshRoot = host();
     const fresh = new Renderer(freshRoot);
+    fresh.setCamera(camera);
     fresh.render(doc);
     const problems = [];
     if (root.innerHTML !== freshRoot.innerHTML) problems.push(`DOM differs:\n      patched ${root.innerHTML.slice(0, 300)}\n      fresh   ${freshRoot.innerHTML.slice(0, 300)}`);
@@ -209,6 +212,65 @@ function cases() {
     detach(doc, rect);
     r.patchSubtree(rect.id);
     check("an animation's target deleted", r, root, doc);
+  }
+  // P0-M3: the camera is the root's viewBox, through the sink; the file's own comes back without it.
+  const CAM = { x: -10.5, y: 4, width: 40, height: 30 };
+  for (const [label, text] of [['a camera on a root with a viewBox', TEXT], ['a camera on a root with only a size', TEXT.replace('viewBox="0 0 100 100"', 'width="100" height="100"')]]) {
+    const { r, root, doc } = setup(text);
+    r.setCamera(CAM);
+    check(label, r, root, doc, CAM);
+    const svg = root.querySelector('svg');
+    if (svg.getAttribute('viewBox') !== '-10.5 4 40 30') results.push({ label: `${label}: the viewBox`, problems: [`is ${svg.getAttribute('viewBox')}`] });
+    setAttr(doc, doc.root, null, 'data-x', '1');
+    r.patchAttributes(doc.root);
+    check(`${label}, then a root attribute edit`, r, root, doc, CAM);
+    r.setCamera(null);
+    check(`${label}, then no camera`, r, root, doc);
+  }
+  {
+    // An undo puts an attribute back where it was, in the middle: the canvas matches a fresh render.
+    const { r, root, doc } = setup(TEXT);
+    const n = byId(doc, 'r1');
+    const snap = attrSnapshot(doc, n.id, null, 'width');
+    removeAttr(doc, n.id, null, 'width');
+    r.patchAttributes(n.id);
+    check('an attribute removed', r, root, doc);
+    restoreAttr(doc, n.id, null, 'width', snap);
+    r.patchAttributes(n.id);
+    check('...and put back in the middle', r, root, doc);
+  }
+  {
+    // A value edit (a scrub frame) is one attribute mutation on the canvas, and nothing else.
+    const { r, root, doc } = setup(TEXT);
+    const n = byId(doc, 'r1');
+    const records = [];
+    const mo = new MutationObserver((m) => records.push(...m));
+    mo.observe(root, { subtree: true, attributes: true, childList: true, characterData: true });
+    for (const w of ['6', '7', '8']) {
+      setAttr(doc, n.id, null, 'width', w);
+      r.patchAttributes(n.id);
+    }
+    r.patchAttributes(n.id); // nothing changed
+    records.push(...mo.takeRecords());
+    mo.disconnect();
+    const problems = records.length === 3 && records.every((m) => m.type === 'attributes' && m.attributeName === 'width') ? [] : [`${records.length} mutation(s): ${records.map((m) => `${m.type} ${m.attributeName ?? ''}`).join(', ')}`];
+    results.push({ label: 'a value edit is one attribute mutation', problems });
+    check('...and equals a fresh render', r, root, doc);
+  }
+  {
+    // The hit test's way back: every drawn node maps to its NodeId; a replaced one no longer does.
+    const { r, root, doc } = setup(TEXT);
+    const problems = [];
+    for (const id of doc.nodes.keys()) {
+      const dom = r.nodeFor(id);
+      if (dom && r.idFor(dom) !== id) problems.push(`idFor(nodeFor(${id})) is ${r.idFor(dom)}`);
+    }
+    const g = byId(doc, 'A');
+    const old = r.nodeFor(g.id);
+    r.patchSubtree(g.id);
+    if (r.idFor(old) !== undefined) problems.push('a node taken off the canvas still maps to its NodeId');
+    if (r.idFor(root.host) !== undefined || r.idFor(null) !== undefined) problems.push('something not drawn maps to a NodeId');
+    results.push({ label: 'idFor maps drawn nodes back to their NodeIds', problems });
   }
   // A render that throws leaves the drawing as it was (here: a model missing a child).
   {

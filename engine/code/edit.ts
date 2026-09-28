@@ -4,7 +4,8 @@
 //
 // - The new text is checked against the token's kind first: a number token takes only a number, a
 //   colour token a colour (or one of its keywords), an enum token one of its options, a reference
-//   an id. Text is escaped for where it lands (&, < and the attribute's quote).
+//   an id. Text is escaped for where it lands (&, < and the attribute's quote). A character XML
+//   can't hold at all (a control character, U+FFFE, a lone surrogate) is refused in any token.
 // - For every kind but text, the edited value is then read again: it must hold the same tokens in
 //   the same order, with only this one's text changed. A number glued to its neighbour ('1-2',
 //   '0.5.5') may need a space to stay apart; the space goes inside the replaced span, so bytes
@@ -23,10 +24,15 @@ export type TokenTarget = { attr: AttrRef } | { text: true };
 export class TokenEditError extends Error {}
 
 const NUMBER = /^-?(?:\d+|\d*\.\d+)$/; // plain decimal: no exponent, no leading '+'
+// A character outside XML 1.0's Char: no escape can write one (&#1; is refused too), so a browser
+// would refuse the whole file.
+const NOT_XML_CHAR = /[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
 const ID = /^[A-Za-z_À-￿][\w.\-·À-￿]*$/;
 
 /** Why `text` can't replace this token, or null when it can. */
 export function tokenTextError(token: Token, text: string): string | null {
+  const bad = NOT_XML_CHAR.exec(text);
+  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
   switch (token.kind) {
     case 'number': {
       if (!NUMBER.test(text)) return `${JSON.stringify(text)} is not a number`;

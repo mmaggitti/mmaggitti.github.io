@@ -64,6 +64,14 @@ export function parseCst(source: string, limits: Limits = DEFAULT_LIMITS): Parse
       open.end = tok;
       continue;
     }
+    // A browser refuses a DOCTYPE anywhere but before the root, and an XML declaration anywhere but
+    // the very start (after a BOM); a DOCTYPE in content would also bring its entities with it.
+    if (tok.kind === 'doctype' && (stack.length || root)) {
+      return { ok: false, error: { at: tok.start, message: 'a DOCTYPE is allowed only before the root element' } };
+    }
+    if (tok.kind === 'pi' && tok.target.toLowerCase() === 'xml' && tok.start !== (source.charCodeAt(0) === 0xfeff ? 1 : 0)) {
+      return { ok: false, error: { at: tok.start, message: 'the XML declaration is allowed only at the start of the document' } };
+    }
     const leaf: CstLeaf = { type: 'leaf', tok };
     if (stack.length) stack[stack.length - 1].children.push(leaf);
     else if (tok.kind === 'text' && /\S/.test(source.slice(tok.start, tok.end))) {

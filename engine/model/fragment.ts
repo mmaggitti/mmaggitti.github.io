@@ -1,13 +1,20 @@
 // Parse markup into an existing document: what Edit source applies, and later paste-into and the
-// Insert tool. The text is parsed by the same engine (limits, entity budget, the same errors), with
-// the namespace declarations in scope at the insertion point and the document's own entities; the
-// resulting nodes join the document detached, and an ordinary opInsert puts them in place (so undo
-// removes them as it would any other insert).
+// Insert tool. The text is parsed by the same engine (the same errors), with the namespace
+// declarations in scope at the insertion point and the document's own entities; the resulting nodes
+// join the document detached, and an ordinary opInsert puts them in place (so undo removes them as
+// it would any other insert).
+//
+// The limits are the document's, not fresh ones: the text may add only what the document has left
+// of its size, node count, depth (from the insertion point) and entity budget, so Draw never writes
+// a file it can't open again. What the text spends on entities is charged to the document's budget
+// for good (an undo can bring any version back), and what is left is measured with the element Edit
+// source replaces still in place: both err on the side of refusing.
 //
 // Nodes made here have no source span: serialize writes them from their own raw pieces, which are
 // exactly the text that was parsed.
 
-import { el, parseDoc, type Doc, type ElementNode, type Node, type NodeId } from './doc.ts';
+import { DEFAULT_LIMITS, type Limits } from '../xml/cst.ts';
+import { el, parseDoc, serialize, type Doc, type ElementNode, type Node, type NodeId } from './doc.ts';
 
 const XMLNS = 'http://www.w3.org/2000/xmlns/';
 const WRAPPER = 'draw-fragment';
@@ -23,11 +30,27 @@ export function parseFragment(doc: Doc, scope: NodeId, text: string): FragmentRe
   }
   const doctype = doc.prolog.map((id) => doc.nodes.get(id)!).find((n) => n.kind === 'doctype');
   const head = `${doctype && doctype.kind === 'doctype' ? doctype.raw : ''}<${WRAPPER}${[...decls].map(([q, v]) => ` ${q}=${v}`).join('')}>`;
-  const parsed = parseDoc(`${head}${text}</${WRAPPER}>`);
+  const tail = `</${WRAPPER}>`;
+  // What the document has left, plus what the head and tail take: the DOCTYPE and the wrapper's tags.
+  const max = DEFAULT_LIMITS;
+  const limits: Limits = {
+    maxBytes: max.maxBytes - serialize(doc).length + head.length + tail.length,
+    maxNodes: max.maxNodes - tokens(doc) + (doctype ? 3 : 2),
+    maxDepth: max.maxDepth - depth(doc, scope) + 1,
+  };
+  const budget = { left: doc.budget.left };
+  const parsed = parseDoc(`${head}${text}${tail}`, limits, budget);
   if (!parsed.ok) {
     const at = Math.min(Math.max(0, parsed.error.at - head.length), text.length);
-    return { ok: false, error: { at, message: parsed.error.message } };
+    // A limit is reported as the document's own, not the fragment's share of it.
+    const whole = new Map([
+      [`file is larger than ${limits.maxBytes / 1e6} MB`, `the document would be larger than ${max.maxBytes / 1e6} MB`],
+      [`more than ${limits.maxNodes} nodes`, `the document would have more than ${max.maxNodes} nodes`],
+      [`nesting deeper than ${limits.maxDepth}`, `the document would nest deeper than ${max.maxDepth}`],
+    ]);
+    return { ok: false, error: { at, message: whole.get(parsed.error.message) ?? parsed.error.message } };
   }
+  doc.budget.left = budget.left;
   const frag = parsed.doc;
   const top = el(frag, frag.root).children;
   const adopt = (id: NodeId, parent: NodeId | null): void => {
@@ -41,4 +64,25 @@ export function parseFragment(doc: Doc, scope: NodeId, text: string): FragmentRe
   for (const id of top) adopt(id, null);
   doc.version++;
   return { ok: true, nodes: [...top] };
+}
+
+// The tokens the parser would count in the saved document (every node, and each end tag), so a
+// document and what is parsed into it stay within the node limit together. Text nodes that became
+// neighbours read as one token again, so this can only overcount.
+function tokens(doc: Doc): number {
+  const count = (id: NodeId): number => {
+    const n = doc.nodes.get(id)!;
+    if (n.kind !== 'element') return 1;
+    let k = n.selfClosing && n.children.length === 0 ? 1 : 2;
+    for (const c of n.children) k += count(c);
+    return k;
+  };
+  return doc.prolog.length + doc.epilog.length + count(doc.root);
+}
+
+/** How deep an element is: the root is 1. */
+function depth(doc: Doc, id: NodeId): number {
+  let d = 0;
+  for (let n: ElementNode | null = el(doc, id); n; n = n.parent === null ? null : el(doc, n.parent)) d++;
+  return d;
 }

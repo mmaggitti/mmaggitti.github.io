@@ -8,8 +8,9 @@
 //   from its attributes, and an untouched attribute is re-emitted from its raw text with its own
 //   quote and whitespace, so one edit changes exactly that attribute's bytes.
 // - Every entity reference is expanded once while parsing, against one budget for the document, so
-//   a file that expands too far, or into markup, fails to open instead of failing later. Reads
-//   after that each get their own budget: editing never drains it.
+//   a file that expands too far, or into markup, fails to open instead of failing later. Markup
+//   parsed into the document later (fragment.ts) spends from the same budget. Reads after that
+//   each get their own budget: editing never drains it.
 
 import type { Quote } from '../xml/lex.ts';
 import { parseCst, DEFAULT_LIMITS, type CstElement, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
@@ -78,7 +79,7 @@ export interface Doc {
   prolog: NodeId[];
   epilog: NodeId[];
   entities: EntityTable;
-  budget: Budget; // the entity-expansion budget spent while parsing
+  budget: Budget; // the entity-expansion budget: spent while parsing, and by every fragment parsed in since
   version: number; // bumped by every edit
 }
 
@@ -87,14 +88,15 @@ const newId = (): NodeId => nextId++;
 
 export type BuildResult = { ok: true; doc: Doc } | { ok: false; error: { at: number; message: string } };
 
-export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS): BuildResult {
+/** Parse a document; `budget` is the entity expansion it may spend (a fragment passes what its document has left). */
+export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget: Budget = newBudget()): BuildResult {
   const parsed = parseCst(source, limits);
   if (!parsed.ok) return parsed;
   const { cst } = parsed;
   const nodes = new Map<NodeId, Node>();
   const doctype = cst.prolog.find((l) => l.tok.kind === 'doctype');
   const entities = readEntityTable(doctype && doctype.tok.kind === 'doctype' ? doctype.tok.subset : null);
-  const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget: newBudget(), version: 0 };
+  const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget, version: 0 };
 
   // Expand every reference once, now, against the document's budget (see the header).
   const check = (raw: string, at: number, attr: boolean): void => {

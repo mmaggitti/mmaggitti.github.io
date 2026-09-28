@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { camera, fit, pinch, toDoc, toScreen, zoomAbout, panBy, MAX_SCALE, type View } from '../../src/canvas/viewport.ts';
+import { camera, drawable, fit, pinch, toDoc, toScreen, zoomAbout, panBy, MAX_SCALE, type View } from '../../src/canvas/viewport.ts';
 import { GestureMachine, SLOP, type PointerInput } from '../../src/canvas/gestures.ts';
 import { mulberry32 } from '../../../../engine/test/values/rng.ts';
 
@@ -56,6 +56,24 @@ test('panning moves the drawing with the finger; scale is clamped', () => {
   assert.deepEqual(toScreen(p, HOST, { x: 10, y: 10 }), { x: 220 + 40, y: 276 - 20 });
   assert.equal(zoomAbout(v, HOST, { x: 0, y: 0 }, 1e9).scale, MAX_SCALE);
   assert.equal(zoomAbout(v, HOST, { x: 0, y: 0 }, 1e-9, 4).scale, 4 / 16);
+});
+
+test('zooming in never zooms out: an artboard that fits above MAX_SCALE may still zoom to 16× its fit', () => {
+  const tiny = fit({ x: 0, y: 0, width: 1, height: 1 }, HOST, 16); // viewBox="0 0 1 1": 408 px per unit
+  assert.ok(tiny.scale > MAX_SCALE, 'test setup: the fit is above MAX_SCALE');
+  assert.equal(zoomAbout(tiny, HOST, { x: 220, y: 276 }, 2, tiny.scale).scale, tiny.scale * 2, 'one notch in doubles it');
+  assert.equal(zoomAbout(tiny, HOST, { x: 0, y: 0 }, 1e9, tiny.scale).scale, tiny.scale * 16, 'capped at 16× the fit');
+  for (const f of [1e-3, 0.5, 1, 16, 255, 256, 257, 1000, 1e5]) {
+    const v: View = { cx: 0, cy: 0, scale: f };
+    assert.ok(zoomAbout(v, HOST, { x: 0, y: 0 }, 1.5, f).scale > f, `fit ${f}: a zoom in`);
+    assert.ok(pinch(v, HOST, { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 0 }, { x: 15, y: 0 }, f).scale > f, `fit ${f}: a pinch out`);
+  }
+});
+
+test('a view near the float limit is not drawable (its camera overflows)', () => {
+  assert.ok(drawable({ cx: 1e300, cy: -1e300, scale: 1e-6 }, HOST));
+  assert.ok(!drawable({ cx: Infinity, cy: 0, scale: 1 }, HOST), 'a centre that overflowed (viewBox 1.7e308 …)');
+  assert.ok(!drawable({ cx: 5e307, cy: 5e307, scale: 2.5e-307 }, HOST), 'a camera wider than the largest double (viewBox 0 0 1e308 1e308, zoomed out)');
 });
 
 // ── gestures ───────────────────────────────────────────────────────────────────────────────────

@@ -154,6 +154,27 @@ test('limits: size, node count and depth fail cleanly', () => {
   assert.equal(parseCst('<g>'.repeat(20) + '</g>'.repeat(20), { maxBytes: 1e6, maxNodes: 1e5, maxDepth: 10 }).ok, false);
 });
 
+test('a DOCTYPE outside the prolog, or an XML declaration after the start, is refused as a browser refuses it', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const [src, at] of [
+    [`${svg}<g><!DOCTYPE svg [<!ENTITY x "y">]><text>&x;</text></g></svg>`, svg.length + 3],
+    [`${svg}</svg><!DOCTYPE svg>`, svg.length + 6],
+    [`${svg}<?xml version="1.0"?></svg>`, svg.length],
+    [` <?xml version="1.0"?>${svg}</svg>`, 1],
+    [`<!-- c --><?xml version="1.0"?>${svg}</svg>`, 10],
+    [`${svg}</svg><?xml version="1.0"?>`, svg.length + 6],
+  ] as const) {
+    const r = parseDoc(src);
+    assert.ok(!r.ok, src);
+    assert.equal(r.error.at, at, src);
+  }
+  for (const src of [`<?xml version="1.0"?><!DOCTYPE svg>${svg}</svg>`, `\uFEFF<?xml version="1.0"?>${svg}</svg>`, `${svg}<?xml-stylesheet href="a.css"?></svg>`]) {
+    const r = parseDoc(src);
+    assert.ok(r.ok, src);
+    assert.equal(serialize(r.doc), src);
+  }
+});
+
 test('malformed input is an error with a position, never a throw', () => {
   for (const bad of ['', '<', '<svg', '<svg a=1/>', '<svg></g>', '<svg/><svg/>', 'x<svg/>', '<svg><!-- x', '<svg a="1" a2></svg>', '<svg>\u0000</svg']) {
     const r = parseDoc(bad);

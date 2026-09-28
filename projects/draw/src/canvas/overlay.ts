@@ -58,6 +58,12 @@ export class Overlay {
     });
   }
 
+  /** Outline these drawn elements, measured now against the overlay's own top-left. */
+  outline(elements: readonly SVGGraphicsElement[]): void {
+    const origin = this.svg.getBoundingClientRect();
+    this.show(elements.map((el) => screenQuad(el, origin)).filter((q): q is Quad => q !== null));
+  }
+
   clear(): void {
     this.show([]);
   }

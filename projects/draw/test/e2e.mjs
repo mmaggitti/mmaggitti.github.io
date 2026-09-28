@@ -8,16 +8,21 @@
 // second opinion, SMIL judged against the element the browser animates, <switch>, refused roots),
 // the canvas drawing each static corpus file exactly as the file looks on its own in light and
 // dark, the document's CSS staying inside the canvas, reduced motion, keyed patching
-// (renderer-patch.mjs) and the shadow-root probe. Later milestones add the code panel, files and
-// drafts.
+// (renderer-patch.mjs) and the shadow-root probe. P0-M3 adds the interaction spine: zoom and pan
+// keep the point under the fingers and the page never zooms, the selection outline sits on the
+// element at 400%, a scrub changes only its token's bytes and is one attribute mutation per frame
+// on a 2,000-node drawing, Edit source, undo and redo, the phone rules on the new layout, and the
+// initial JS budget. M4 adds files and drafts.
 
 import { readdirSync, readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROFILE_VERSION } from '../../../scripts/lib/svg-profile.mjs';
 import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
 import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
+import { detentHeights } from '../src/detents.ts';
 import { decodePng } from './probe-helpers/png.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
@@ -60,6 +65,24 @@ export default async function run({ browser, origin }) {
   await check(reducedMotionStopsAnimation);
   await check(function rendererPatchCases(b, o) { return rendererPatch({ browser: b, origin: o }); });
   await check(function shadowRootProbe(b, o) { return probe({ browser: b, origin: o }); });
+  // P0-M3: the interaction spine.
+  for (const height of [956, 796]) await check(phoneRulesOnTheNewLayout, height);
+  await check(zoomKeepsThePointUnderIt);
+  await check(pageNeverZooms);
+  await check(outlineOnTheElementAt400);
+  await check(scrubChangesOnlyItsBytes);
+  await check(scrubFrameIsOneMutation);
+  await check(sheetsRefuseWhatTheyCantWrite);
+  await check(editSourceRoundTrip);
+  await check(undoRedoButtonsAndTwoFingerTap);
+  // The P0-M3 review.
+  for (const height of [956, 796]) await check(edgeTapsTakeTheTokenUnderTheFinger, height);
+  await check(aTapNearAWrappedTokenTakesOnlyWhatIsNear);
+  await check(swipesAndPinchesOverTheCodeEditNothing);
+  await check(theCodeMarksTheStripsNumber);
+  await check(aHandleDragLeavesTheNextTapWorking);
+  await check(theOutlineStaysAboveTheDrawing);
+  await check(initialJsBudget);
   if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
 
@@ -414,9 +437,12 @@ const MAX_DIFFERENT = 0.002; // of the pixels; the app's theme leaking in change
 async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
   const files = corpusFiles().filter((f) => !/<(animate|set|animateTransform|animateMotion|animateColor|script)\b|@keyframes|transition/.test(f.text));
   must(files.length >= 200, `the fidelity check found only ${files.length} static corpus files`);
-  // A small screen whose canvas area splits into two equal halves.
+  // A small screen whose canvas area splits into two equal halves. The code sheet, the ContextBar
+  // and the ToolRail (P0-M3) are put away, so the canvas area is what it was before them. (Chromium
+  // rasterizes some edges differently in a viewport 512 or more tall, so the screen stays small.)
   await withPage(browser, origin, 320, async (page) => {
     const [a, b] = await page.evaluate(() => {
+      for (const sel of ['.draw-sheet', '.draw-context', '.draw-rail']) document.querySelector(sel).style.display = 'none';
       const host = document.querySelector('.draw-host');
       const alone = document.createElement('div');
       alone.id = 'alone';
@@ -426,7 +452,7 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
       document.querySelector('.draw-canvas').style.display = 'flex';
       return [host, alone].map((e) => e.getBoundingClientRect().toJSON());
     });
-    must(a.width === b.width && a.height === b.height && a.width > 150, `test setup: the halves are ${rect(a)} and ${rect(b)}`);
+    must(a.width === b.width && a.height === b.height && a.width > 150 && a.height > 240, `test setup: the halves are ${rect(a)} and ${rect(b)}`);
     const differ = [];
     for (const f of files) {
       const decoded = await page.evaluate(showBoth, f.text);
@@ -521,6 +547,695 @@ async function reducedMotionStopsAnimation(browser, origin) {
       must(reduce ? r.css === 0 : r.css > 0, `reduced motion "${reducedMotion}": the canvas runs ${r.css} CSS animation(s)`);
     }, { reducedMotion });
   }
+}
+
+// ── P0-M3: the interaction spine ───────────────────────────────────────────────────────────────
+
+const SITE_DRAW = join(HERE, '../../../_site/draw');
+
+const chromium = (browser) => browser.browserType().name() === 'chromium';
+const shadowSvg = () => document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+
+// Two fingers on the canvas, from (a0, b0) to (a1, b1) in `steps` moves (0: a tap), in client
+// points. Chromium gets real touch input (CDP), which is what the browser's own page zoom reacts
+// to; WebKit can't synthesize multi-touch, so there the canvas gets the same Pointer Events.
+async function twoFingers(browser, page, a0, b0, a1, b1, steps) {
+  const at = (p, q, k) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+  if (chromium(browser)) {
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (a, b) => [{ x: a.x, y: a.y, id: 1 }, { x: b.x, y: b.y, id: 2 }];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch(a0, b0) });
+    for (let i = 1; i <= steps; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: touch(at(a0, a1, i / steps), at(b0, b1, i / steps)) });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.evaluate(({ a0, b0, a1, b1, steps }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (type, id, p) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+      const at = (p, q, k) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+      fire('pointerdown', 1, a0);
+      fire('pointerdown', 2, b0);
+      for (let i = 1; i <= steps; i++) {
+        fire('pointermove', 1, at(a0, a1, i / steps));
+        fire('pointermove', 2, at(b0, b1, i / steps));
+      }
+      fire('pointerup', 1, steps ? a1 : a0);
+      fire('pointerup', 2, steps ? b1 : b0);
+    }, { a0, b0, a1, b1, steps });
+  }
+  await page.waitForTimeout(50);
+}
+
+// A trackpad pinch or ctrl and the wheel, about a client point: a wheel event with ctrlKey, as
+// both browsers send it (dispatched, so it is the same in both engines).
+async function ctrlWheel(page, x, y, deltaY) {
+  await page.evaluate(([x, y, deltaY]) => {
+    const e = new WheelEvent('wheel', { clientX: x, clientY: y, deltaY, ctrlKey: true, bubbles: true, cancelable: true });
+    document.querySelector('.draw-canvas').dispatchEvent(e);
+    if (!e.defaultPrevented) throw new Error('the canvas let the browser have a ctrl-wheel (page zoom)');
+  }, [x, y, deltaY]);
+}
+
+// Runs in the page: the document point under a client point, and back, through the drawn root.
+function docPoint([x, y]) {
+  const m = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().inverse();
+  const p = new DOMPoint(x, y).matrixTransform(m);
+  return { x: p.x, y: p.y };
+}
+function screenPoint({ x, y }) {
+  const p = new DOMPoint(x, y).matrixTransform(document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM());
+  return { x: p.x, y: p.y };
+}
+
+// The code sheet at half, so the code is on screen.
+async function showCode(page) {
+  if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+  await page.locator('.draw-code .cv-block').first().waitFor();
+}
+
+// Two frames: the page has laid out and delivered its ResizeObserver callbacks (the canvas's view
+// follows its new size there), which a forced layout alone does not wait for.
+const twoFrames = (page) => page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+
+// A code token, brought to the middle of the code panel first (a token at the panel's edge sits
+// under the ContextBar), then tapped.
+async function tapToken(token) {
+  await token.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await token.tap();
+}
+
+const circleCentre = (page) => page.evaluate(() => {
+  const b = document.querySelector('.draw-host').shadowRoot.querySelector('circle').getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+});
+
+// Runs in the page: the phone rules over what is on screen now.
+function rulesNow(min) {
+  const small = [];
+  for (const el of document.querySelectorAll('button, a[href], input, select, textarea, [role="button"]')) {
+    const b = el.getBoundingClientRect();
+    if (b.width && b.height && (b.width < min - 0.5 || b.height < min - 0.5)) small.push(`${el.tagName} ${el.getAttribute('aria-label') ?? el.textContent.trim()} ${Math.round(b.width)}×${Math.round(b.height)}`);
+  }
+  const fields = [...document.querySelectorAll('input, textarea, select')].filter((el) => el.getBoundingClientRect().width && parseFloat(getComputedStyle(el).fontSize) < 16).map((el) => el.getAttribute('aria-label'));
+  const de = document.documentElement;
+  const host = document.querySelector('.draw-host');
+  // A number, colour or keyword broken across two lines of the code (a text run may wrap).
+  const split = [...document.querySelectorAll('.cv-number, .cv-color, .cv-enum, .cv-ref')].filter((t) => t.getClientRects().length > 1).map((t) => t.textContent);
+  return {
+    small, fields, split, sw: de.scrollWidth, cw: de.clientWidth, sh: de.scrollHeight, ch: de.clientHeight,
+    hidden: host.getAttribute('aria-hidden'),
+    touch: [getComputedStyle(host).touchAction, getComputedStyle(document.querySelector('.draw-canvas')).touchAction],
+  };
+}
+
+// The tap floor, 16px fields and no sideways (or page) scroll in every state M3 adds: the code
+// sheet at half and full with a selection, the Scrub strip, the Number, Color and Text sheets, and
+// Edit source. The canvas host is hidden from assistive tech (the code is the document's
+// accessible view) and gives every finger to Draw (touch-action: none). No number, colour or
+// keyword breaks across lines of the code. The bars are the plan's 44, 48 and 52, and the sheet
+// sits at the heights detents.ts gives for the real space and head.
+async function phoneRulesOnTheNewLayout(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const problems = [];
+    const layout = () => page.evaluate(() => {
+      const h = (s) => document.querySelector(s).getBoundingClientRect().height;
+      return { bar: h('.draw-bar'), context: h('.draw-context'), rail: h('.draw-rail'), sheet: h('.draw-sheet'), split: h('.draw-split') };
+    });
+    const peek = await layout();
+    if (peek.bar !== 44 || peek.context !== 48 || peek.rail !== 52) problems.push(`the TopBar, ContextBar and ToolRail are ${peek.bar}, ${peek.context} and ${peek.rail}, not 44, 48 and 52`);
+    const want = detentHeights(peek.split, peek.sheet);
+    const sheetAt = async (detent) => {
+      const got = (await layout()).sheet;
+      if (Math.abs(got - want[detent]) > 0.5) problems.push(`the sheet is ${got} at ${detent}, not ${want[detent]} (detents.ts, from a ${peek.split} space and a ${peek.sheet} head)`);
+    };
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.split.length) problems.push(`${state}: ${r.split.length} token(s) split across lines of the code: ${r.split.slice(0, 5).join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+      if (r.hidden !== 'true') problems.push(`${state}: the canvas host is not aria-hidden`);
+      if (r.touch.some((t) => t !== 'none')) problems.push(`${state}: touch-action on the canvas is ${r.touch.join(', ')}, not none`);
+    };
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    await showCode(page);
+    must(await page.locator('.draw-sel').textContent() === '<circle>', 'test setup: tapping the circle did not select it');
+    await rules('the code sheet at half, with a selection');
+    await sheetAt('half');
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    await tapToken(circle.locator('.cv-number').nth(2));
+    await page.locator('.draw-strip').waitFor();
+    await rules('the Scrub strip');
+    await page.locator('.draw-strip-value').tap();
+    await page.locator('.draw-modal input').first().waitFor();
+    await rules('the Number sheet');
+    await page.locator('.draw-modal-done').tap();
+    await tapToken(circle.locator('.cv-color').first());
+    await page.locator('.draw-swatch').first().waitFor();
+    await rules('the Color sheet');
+    await page.locator('.draw-modal-done').tap();
+    await tapToken(page.locator('.cv-block', { hasText: 'A sun setting' }).locator('.cv-text').first());
+    await page.locator('.draw-modal input').first().waitFor();
+    await rules('the Text sheet');
+    await page.locator('.draw-modal-done').tap();
+    const c2 = await circleCentre(page); // the canvas fitted again when the sheet opened
+    await page.touchscreen.tap(c2.x, c2.y);
+    await page.locator('.draw-action').tap();
+    await page.locator('.draw-source').waitFor();
+    await rules('Edit source');
+    await page.locator('.draw-modal .ds-btn', { hasText: 'Cancel' }).tap();
+    await page.locator('.draw-handle').tap();
+    await rules('the code sheet at full');
+    await sheetAt('full');
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (a) The zoom invariant on the real canvas: a ctrl-wheel about a point, and a two-finger pinch,
+// keep the document point under it (read through the drawn root's getScreenCTM) under it. The code
+// sheet is opened first, so the canvas has changed size and the view must have followed it. (Whole
+// points: Chromium truncates a synthetic WheelEvent's clientX and clientY.)
+async function zoomKeepsThePointUnderIt(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    await twoFrames(page);
+    const S = [300, 260];
+    const P = await page.evaluate(docPoint, S);
+    const v0 = await page.evaluate(() => window.drawTest.view());
+    await ctrlWheel(page, S[0], S[1], -100);
+    const v1 = await page.evaluate(() => window.drawTest.view());
+    must(Math.abs(v1.scale / v0.scale - 2) < 1e-9, `a ctrl-wheel of -100 zoomed ×${v1.scale / v0.scale}, not ×2`);
+    const back = await page.evaluate(screenPoint, P);
+    must(Math.hypot(back.x - S[0], back.y - S[1]) < 0.5, `after the wheel zoom the document point ${JSON.stringify(P)} is at ${JSON.stringify(back)}, not ${S}`);
+    // A pinch about its midpoint: the fingers spread three times as far apart.
+    const M = { x: 220, y: 420 };
+    const Q = await page.evaluate(docPoint, [M.x, M.y]);
+    await twoFingers(browser, page, { x: M.x - 30, y: M.y }, { x: M.x + 30, y: M.y }, { x: M.x - 90, y: M.y }, { x: M.x + 90, y: M.y }, 12);
+    const v2 = await page.evaluate(() => window.drawTest.view());
+    must(Math.abs(v2.scale / v1.scale - 3) < 0.05, `the pinch zoomed ×${(v2.scale / v1.scale).toFixed(3)}, not ×3`);
+    const now = await page.evaluate(screenPoint, Q);
+    must(Math.hypot(now.x - M.x, now.y - M.y) < 1, `after the pinch the point under the fingers is at ${JSON.stringify(now)}, not ${JSON.stringify(M)}`);
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'zooming changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (b) The page never zooms: a two-finger pinch on the canvas (real touch in Chromium) zooms the
+// drawing, and the page's visual viewport stays at scale 1. Safari's own pinch events are
+// cancelled on the canvas too. So is a pinch anywhere else in the app: on the TopBar, the sheet's
+// handle and tabs, the code, the ContextBar and the ToolRail the page stays at scale 1 and Safari's
+// gesture events are cancelled (the pinch is real touch, so Chromium only; WebKit can't make it).
+async function pageNeverZooms(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const gesturesCancelledOn = (sel) => page.evaluate((sel) => ['gesturestart', 'gesturechange'].map((type) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      document.querySelector(sel).dispatchEvent(e);
+      return e.defaultPrevented;
+    }), sel);
+    const before = await page.evaluate(() => window.drawTest.view().scale);
+    await twoFingers(browser, page, { x: 180, y: 400 }, { x: 260, y: 400 }, { x: 60, y: 400 }, { x: 380, y: 400 }, 16);
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => {
+      const prevented = ['gesturestart', 'gesturechange'].map((type) => {
+        const e = new Event(type, { bubbles: true, cancelable: true });
+        document.querySelector('.draw-canvas').dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+      return { scale: window.visualViewport.scale, view: window.drawTest.view().scale, prevented };
+    });
+    must(r.scale === 1, `the page zoomed to ${r.scale} under a pinch on the canvas`);
+    must(r.view > before * 2, `test setup: the pinch did not reach the canvas (view scale ${before} → ${r.view})`);
+    must(r.prevented.every(Boolean), `Safari's gesture events are not cancelled on the canvas (${r.prevented})`);
+    await showCode(page);
+    for (const sel of ['.draw-bar', '.draw-handle', '.draw-tabs', '.draw-code', '.draw-context', '.draw-rail']) {
+      if (chromium(browser)) {
+        const b = await page.locator(sel).boundingBox();
+        const m = { x: b.x + b.width / 2, y: b.y + Math.min(b.height / 2, 60) };
+        await twoFingers(browser, page, { x: m.x - 20, y: m.y }, { x: m.x + 20, y: m.y }, { x: m.x - 120, y: m.y }, { x: m.x + 120, y: m.y }, 16);
+        await page.waitForTimeout(300);
+        const scale = await page.evaluate(() => window.visualViewport.scale);
+        must(scale === 1, `a pinch on ${sel} zoomed the page to ${scale}`);
+      }
+      const prevented = await gesturesCancelledOn(sel);
+      must(prevented.every(Boolean), `Safari's gesture events are not cancelled on ${sel} (${prevented})`);
+    }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (c) The selection outline sits on the element: at 400% zoom, each corner of the overlay's
+// outline is within 1pt of the element's box through its getScreenCTM, and of its client rect.
+async function outlineOnTheElementAt400(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    const before = await page.locator('.draw-outline').first().getAttribute('points');
+    must(before && before.trim(), 'tapping the circle drew no outline');
+    await ctrlWheel(page, c.x, c.y, -100);
+    await ctrlWheel(page, c.x, c.y, -100);
+    const r = await page.evaluate(() => {
+      const circle = document.querySelector('.draw-host').shadowRoot.querySelector('circle');
+      const box = circle.getBBox();
+      const m = circle.getScreenCTM();
+      const want = [[box.x, box.y], [box.x + box.width, box.y], [box.x + box.width, box.y + box.height], [box.x, box.y + box.height]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      const got = document.querySelector('.draw-outline').getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number)).map(([x, y]) => ({ x: x + o.left, y: y + o.top }));
+      const cr = circle.getBoundingClientRect();
+      const view = window.drawTest.view();
+      return { want: want.map((p) => ({ x: p.x, y: p.y })), got, cr: cr.toJSON(), zoom: view.scale / view.fitScale };
+    });
+    must(Math.abs(r.zoom - 4) < 1e-9, `test setup: the zoom is ${r.zoom * 100}%, not 400%`);
+    const err = Math.max(...r.want.map((p, i) => Math.hypot(p.x - r.got[i].x, p.y - r.got[i].y)));
+    must(err <= 1, `at 400% the outline is ${err.toFixed(2)}pt off the circle's getScreenCTM box`);
+    const [tl, , br] = r.got;
+    const off = Math.max(Math.abs(tl.x - r.cr.left), Math.abs(tl.y - r.cr.top), Math.abs(br.x - r.cr.right), Math.abs(br.y - r.cr.bottom));
+    must(off <= 1, `at 400% the outline is ${off.toFixed(2)}pt off the circle's client rect`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Drag a code token sideways with the mouse: past the 7px threshold, then `frames` moves of one
+// step (4px) each. `each` runs after every step's move.
+async function scrubToken(page, token, frames, each = async () => {}) {
+  await token.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const b = await token.boundingBox();
+  const y = b.y + b.height / 2;
+  let x = b.x + b.width / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  x += 8;
+  await page.mouse.move(x, y);
+  for (let i = 1; i <= frames; i++) {
+    x += 4;
+    await page.mouse.move(x, y);
+    await each(i);
+  }
+  await page.mouse.up();
+}
+
+// (d) Scrubbing a number in the code changes only that token's bytes in the file, and one undo
+// (the Undo button) restores the original byte for byte.
+async function scrubChangesOnlyItsBytes(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const original = await page.evaluate(() => window.drawTest.source());
+    must(original === SAMPLE, 'test setup: the sample is not what opened');
+    const at = SAMPLE.indexOf('cx="212"') + 4;
+    const token = page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first();
+    must(await token.textContent() === '212', 'test setup: the first number in the circle is not cx');
+    const seen = [];
+    await scrubToken(page, token, 6, async () => seen.push(await page.evaluate(() => window.drawTest.source())));
+    const after = await page.evaluate(() => window.drawTest.source());
+    for (const [i, s] of [...seen, after].entries()) {
+      const tail = SAMPLE.length - (at + 3);
+      must(s.slice(0, at) === SAMPLE.slice(0, at) && s.slice(s.length - tail) === SAMPLE.slice(at + 3), `frame ${i + 1}: bytes outside cx's token changed`);
+    }
+    must(after.slice(at, at + 3) === '218', `six steps of cx=212 wrote ${after.slice(at, at + 3)}, not 218`);
+    const cx = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('circle').getAttribute('cx'));
+    must(cx === '218', `the canvas's circle has cx=${cx}, not 218`);
+    const flash = await page.locator('.cv-block', { hasText: '<circle' }).evaluate((el) => el.classList.contains('cv-flash'));
+    must(flash, "the scrubbed block doesn't flash (cv-flash)");
+    // The outline followed the scrub: its corners are on the circle where it is drawn now.
+    const off = await page.evaluate(() => {
+      const cr = document.querySelector('.draw-host').shadowRoot.querySelector('circle').getBoundingClientRect();
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      const [tl, , br] = document.querySelector('.draw-outline').getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+      return Math.max(Math.abs(o.left + tl[0] - cr.left), Math.abs(o.top + tl[1] - cr.top), Math.abs(o.left + br[0] - cr.right), Math.abs(o.top + br[1] - cr.bottom));
+    });
+    must(off <= 1, `after the scrub the outline is ${off.toFixed(2)}pt off the circle`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    must(!(await undo.isDisabled()), 'the scrub left nothing to undo');
+    await undo.tap();
+    must(await page.evaluate(() => window.drawTest.source()) === original, 'one undo did not restore the file byte for byte');
+    must(await undo.isDisabled(), 'the scrub was more than one history entry');
+    const back = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('circle').getAttribute('cx'));
+    must(back === '212', `the canvas's circle has cx=${back} after the undo, not 212`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (e) On a 2,000-node drawing, every frame of a scrub is exactly one attribute mutation in the
+// canvas's shadow root (a MutationObserver counts them).
+async function scrubFrameIsOneMutation(browser, origin) {
+  const rects = Array.from({ length: 1999 }, (_, i) => `<rect x="${(i % 50) * 40}" y="${Math.floor(i / 50) * 40}" width="30" height="30" fill="#2a9d8f"/>`);
+  const BIG = `<svg xmlns="${SVG_NS}" viewBox="0 0 2000 1600">\n${rects.join('\n')}\n</svg>\n`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const stats = await page.evaluate((t) => window.drawTest.render(t), BIG);
+    must(stats.ok && stats.rendered === 2000, `test setup: the 2,000-node drawing rendered ${stats.rendered} elements`);
+    await showCode(page);
+    const token = page.locator('.cv-block', { hasText: '<rect' }).nth(3).locator('.cv-number').first();
+    await token.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.evaluate(() => {
+      window.__muts = [];
+      window.__mo = new MutationObserver((ms) => window.__muts.push(...ms));
+      window.__mo.observe(document.querySelector('.draw-host').shadowRoot, { subtree: true, attributes: true, childList: true, characterData: true });
+    });
+    // Each frame's mutations: those delivered to the observer since the last frame, and any queued.
+    const frame = () => page.evaluate(() => window.__muts.splice(0).concat(window.__mo.takeRecords()).map((m) => `${m.type} ${m.attributeName ?? ''}`));
+    const counts = [];
+    await scrubToken(page, token, 12, async () => counts.push(await frame()));
+    must(counts.length === 12 && counts.every((c) => c.length === 1 && c[0] === 'attributes x'), `mutations per scrub frame: ${JSON.stringify(counts)}`);
+    console.log(`     draw: a scrub frame on 2,000 nodes is ${counts[0].length} attribute mutation (${counts.length} frames)`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Scrub strip and the sheets refuse what they can't write: a negative radius, a word in the
+// Number sheet, a colour that doesn't parse, a character XML can't hold in the Text sheet. Each
+// says why, and the file keeps its last good value. Enter closes the Text sheet.
+async function sheetsRefuseWhatTheyCantWrite(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    const src = () => page.evaluate(() => window.drawTest.source());
+    await tapToken(circle.locator('.cv-number').nth(2)); // r="42"
+    await page.locator('.draw-strip').waitFor();
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    must((await src()).includes('r="43"'), 'the strip\'s + did not step r');
+    await page.locator('.draw-strip button', { hasText: '±' }).tap();
+    must((await page.locator('.draw-toast').textContent()).includes('minimum'), 'a negative radius was not refused with a message');
+    must((await src()).includes('r="43"'), 'a refused value was written');
+    await page.locator('.draw-strip-value').tap();
+    const field = page.locator('.draw-modal input').first();
+    await field.fill('4o');
+    must(await page.locator('.draw-problem').isVisible(), 'the Number sheet took "4o" without a word');
+    must((await src()).includes('r="43"'), 'the Number sheet wrote "4o"');
+    await field.fill('12.5');
+    must((await src()).includes('r="12.5"'), 'the Number sheet did not write 12.5 live');
+    await page.locator('.draw-modal-done').tap();
+    await tapToken(circle.locator('.cv-color').first());
+    const custom = page.locator('.draw-custom input').first();
+    await custom.fill('not-a-colour');
+    await page.locator('.draw-use').tap();
+    must(await page.locator('.draw-problem').isVisible(), 'the Color sheet took "not-a-colour" without a word');
+    must((await src()).includes('fill="#ffd166"'), 'the Color sheet wrote a colour that does not parse');
+    await page.locator('.draw-swatch[aria-label="#e76f51"]').tap();
+    must((await src()).includes('fill="#e76f51"'), 'a swatch did not apply');
+    await page.locator('.draw-modal-done').tap();
+    const fill = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('circle').getAttribute('fill'));
+    must(fill === '#e76f51', `the canvas's circle has fill=${fill}`);
+    // The Text sheet refuses a character XML can't hold, and Enter closes it.
+    await tapToken(page.locator('.cv-text', { hasText: /^Draw$/ }));
+    const text = page.locator('.draw-modal input').first();
+    await text.fill('Dr\u0001aw');
+    must(await page.locator('.draw-problem').isVisible(), 'the Text sheet took a control character without a word');
+    must((await src()).includes('>Draw</text>'), 'the Text sheet wrote a character XML cannot hold');
+    await text.fill('Drawn');
+    await text.press('Enter');
+    await page.waitForTimeout(100);
+    must(await page.locator('.draw-modal').count() === 0, 'Enter did not close the Text sheet');
+    must((await src()).includes('>Drawn</text>'), 'the Text sheet did not write "Drawn"');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (f) Edit source: the selected element's source in a sheet; Apply replaces it in one
+// transaction (one undo restores it byte for byte); markup that doesn't parse says where and
+// changes nothing.
+async function editSourceRoundTrip(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    // A tap on the root's end tag selects it, and Edit source, which can't replace the root, is not offered.
+    await showCode(page);
+    const root = page.locator('.cv-block', { hasText: '</svg>' });
+    await root.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await root.tap();
+    must(await page.locator('.draw-label').textContent() === '<svg>', "test setup: a tap on the root's code did not select it");
+    must(await page.locator('.draw-action').count() === 0, 'Edit source is offered for the root <svg>, which it cannot replace');
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    await page.locator('.draw-action').tap();
+    const area = page.locator('.draw-source');
+    const text = await area.inputValue();
+    must(text === '<circle cx="212" cy="134" r="42" fill="#ffd166"/>', `Edit source shows ${JSON.stringify(text)}`);
+    await area.fill('<circle cx="212"\n  cy="134" r=42/>');
+    await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
+    const problem = await page.locator('.draw-problem').textContent();
+    must(/^Line 2, column \d+: /.test(problem), `the parse error says ${JSON.stringify(problem)}`);
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'markup that does not parse changed the file');
+    const edited = '<circle cx="212" cy="134" r="30" fill="#ffd166" opacity="0.8"/>';
+    await area.fill(edited);
+    await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const after = await page.evaluate(() => window.drawTest.source());
+    must(after === SAMPLE.replace('<circle cx="212" cy="134" r="42" fill="#ffd166"/>', edited), 'Apply changed more than the element');
+    const drawn = await page.evaluate(() => {
+      const c = document.querySelector('.draw-host').shadowRoot.querySelector('circle');
+      return `${c.getAttribute('r')} ${c.getAttribute('opacity')}`;
+    });
+    must(drawn === '30 0.8', `the canvas draws the new circle as r/opacity ${drawn}`);
+    must(await page.locator('.draw-sel').textContent() === '<circle>', 'the new element is not selected');
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'one undo did not restore the element byte for byte');
+    must(await page.locator('.draw-sel').textContent() === 'nothing selected', 'the element the undo took out is still selected');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (g) Undo and Redo from the ToolRail follow the history, and a quick two-finger tap on the
+// canvas is undo.
+async function undoRedoButtonsAndTwoFingerTap(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const redo = page.locator('.draw-tool', { hasText: 'Redo' });
+    const src = () => page.evaluate(() => window.drawTest.source());
+    must(await undo.isDisabled() && await redo.isDisabled(), 'Undo or Redo is enabled with no history');
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first()); // stroke-linecap="round"
+    const edited = await src();
+    must(edited === SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="square"'), 'tapping a keyword did not move it to its next option');
+    must(!(await undo.isDisabled()), 'Undo is disabled after an edit');
+    const cap = () => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('polyline').getAttribute('stroke-linecap'));
+    await undo.tap();
+    must(await src() === SAMPLE, 'Undo did not restore the file');
+    must(await cap() === 'round', `after Undo the canvas's polyline has stroke-linecap=${await cap()}, not round`);
+    must(!(await redo.isDisabled()), 'Redo is disabled after an undo');
+    await redo.tap();
+    must(await src() === edited, 'Redo did not re-apply the edit');
+    must(await cap() === 'square', `after Redo the canvas's polyline has stroke-linecap=${await cap()}, not square`);
+    await twoFingers(browser, page, { x: 160, y: 300 }, { x: 260, y: 300 }, null, null, 0);
+    must(await src() === SAMPLE, 'a two-finger tap on the canvas did not undo');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── The P0-M3 review ───────────────────────────────────────────────────────────────────────────
+
+// A token at the code panel's edge takes a tap on it. Selecting on the canvas scrolls its block
+// into view at the panel's bottom edge; the scroll padding keeps the block a finger's width off the
+// ContextBar, so a tap on it lands on the token, not on the Scrub strip. (tapToken scrolls tokens
+// to the middle first; this one taps them where they are.)
+async function edgeTapsTakeTheTokenUnderTheFinger(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    await showCode(page);
+    await page.waitForTimeout(100);
+    const gap = await page.evaluate(() => {
+      const body = document.querySelector('.draw-sheet-body').getBoundingClientRect();
+      const block = [...document.querySelectorAll('.cv-block')].find((b) => b.textContent.startsWith('<circle')).getBoundingClientRect();
+      return body.bottom - block.bottom;
+    });
+    must(gap >= TAP_MIN - 1, `the selected block was scrolled to ${gap.toFixed(1)}pt from the panel's bottom edge, under a finger's width`);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    must(await circle.evaluate((el) => el.classList.contains('cv-selected')), "the selected circle's block is not marked (cv-selected)");
+    const tapWhereItIs = async (token) => {
+      const b = await token.boundingBox();
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+    };
+    await tapWhereItIs(circle.locator('.cv-number').nth(2));
+    must(await page.locator('.draw-strip-name').textContent() === 'r', 'test setup: a tap on r did not open the Scrub strip for r');
+    await tapWhereItIs(circle.locator('.cv-number').first());
+    const name = await page.locator('.draw-strip-name').textContent();
+    const sheet = await page.locator('.draw-modal').count();
+    must(name === 'cx' && sheet === 0, `a tap on cx at the panel's edge ${sheet ? 'opened a sheet' : `left the strip on ${name}`}: it reached the Scrub strip`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A tap near a token that wraps takes it only when near one of its lines. A text run broken by a
+// line end has a box on each line, and the one box around both also covers the next line's
+// </text>: a tap on that end tag, 40pt from the run, selects the element and opens nothing.
+async function aTapNearAWrappedTokenTakesOnlyWhatIsNear(browser, origin) {
+  const WRAPPED = `<svg xmlns="${SVG_NS}">\n<text xmlns="${SVG_NS}">aaaa\nb</text>\n</svg>\n`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const opened = await page.evaluate((t) => window.drawTest.render(t), WRAPPED);
+    must(opened.ok, `test setup: ${opened.error}`);
+    await showCode(page);
+    const r = await page.evaluate(() => {
+      const run = document.querySelector('.draw-code .cv-text');
+      const tag = [...document.querySelectorAll('.cv-block')].find((b) => b.textContent === '</text>').getBoundingClientRect();
+      const lines = new Set([...run.getClientRects()].map((q) => Math.round(q.top))).size;
+      return { lines, box: run.getBoundingClientRect().toJSON(), at: { x: tag.right - 2, y: tag.top + tag.height / 2 } };
+    });
+    must(r.lines === 2, `test setup: the text run is on ${r.lines} line(s), not 2`);
+    must(r.at.x > r.box.left && r.at.x < r.box.right && r.at.y > r.box.top && r.at.y < r.box.bottom, 'test setup: the tap is not inside the box around the wrapped run');
+    await page.touchscreen.tap(r.at.x, r.at.y);
+    await page.waitForTimeout(100);
+    must(await page.locator('.draw-modal').count() === 0, 'a tap on </text>, 40pt from the wrapped text run, opened its Text sheet');
+    must(await page.locator('.draw-sel').textContent() === '<text>', 'the tap on </text> did not select its element');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Only a finger that stayed put, alone, is a tap on the code: a swipe that ends on a colour or a
+// keyword, and two fingers down together on two tokens, open nothing and write nothing.
+async function swipesAndPinchesOverTheCodeEditNothing(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const src = () => page.evaluate(() => window.drawTest.source());
+    const nothing = async (what) => {
+      await page.waitForTimeout(50);
+      const opened = (await page.locator('.draw-modal').count()) + (await page.locator('.draw-strip').count());
+      must(opened === 0, `${what} opened a sheet or the Scrub strip`);
+      must(await src() === SAMPLE, `${what} changed the file`);
+    };
+    // From a block's first characters (plain text, "<circle"), with the mouse, onto a token.
+    const swipe = async (block, token) => {
+      await block.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      const from = await block.evaluate((el) => {
+        const q = el.getClientRects()[0];
+        return { x: q.left + 3, y: q.top + q.height / 2 };
+      });
+      const b = await token.boundingBox();
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 });
+      await page.mouse.up();
+    };
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    await swipe(circle, circle.locator('.cv-color').first());
+    await nothing('a swipe that ends on a colour');
+    const polyline = page.locator('.cv-block', { hasText: '<polyline' });
+    await swipe(polyline, polyline.locator('.cv-enum').first());
+    await nothing('a swipe that ends on a keyword');
+    await circle.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.evaluate(() => {
+      const block = [...document.querySelectorAll('.cv-block')].find((b) => b.textContent.startsWith('<circle'));
+      const fire = (el, type, id) => {
+        const q = el.getBoundingClientRect();
+        el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 21, clientX: q.x + q.width / 2, clientY: q.y + q.height / 2, bubbles: true, cancelable: true }));
+      };
+      const r = block.querySelectorAll('.cv-number')[2];
+      const fill = block.querySelector('.cv-color');
+      fire(r, 'pointerdown', 21);
+      fire(fill, 'pointerdown', 22);
+      fire(r, 'pointerup', 21);
+      fire(fill, 'pointerup', 22);
+    });
+    await nothing('two fingers down together on r and fill');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The code marks the number the Scrub strip is editing: of the polyline's two 91s, the one tapped,
+// through a step of the strip and while the Number sheet edits it, until Done.
+async function theCodeMarksTheStripsNumber(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const numbers = page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-number');
+    must(await numbers.nth(3).textContent() === '91' && await numbers.nth(7).textContent() === '91', 'test setup: the polyline does not have two 91s');
+    await tapToken(numbers.nth(7));
+    await page.locator('.draw-strip').waitFor();
+    const marked = () => page.evaluate(() => {
+      const marks = document.querySelectorAll('.draw-code .cv-focus');
+      const block = [...document.querySelectorAll('.cv-block')].find((b) => b.textContent.startsWith('<polyline'));
+      return { count: marks.length, index: [...block.querySelectorAll('.cv-number')].indexOf(marks[0]), text: marks[0]?.textContent ?? null };
+    });
+    let m = await marked();
+    must(m.count === 1 && m.index === 7, `the code marks ${m.count} number(s) (number ${m.index} of the polyline), not the second 91 the strip holds`);
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    m = await marked();
+    must(m.count === 1 && m.index === 7 && m.text === '92', `after + the mark is ${JSON.stringify(m)}, not on the 92 it wrote`);
+    await page.locator('.draw-strip-value').tap();
+    await page.locator('.draw-modal input').first().fill('95');
+    m = await marked();
+    must(m.count === 1 && m.index === 7 && m.text === '95', `while the Number sheet writes 95 the mark is ${JSON.stringify(m)}`);
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-done').tap();
+    must((await marked()).count === 0, 'Done left a number marked');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// After a touch drag of the code sheet's handle (which the browser follows with no click), the
+// next tap on the handle still steps the detent. Chromium drags with real touch (CDP); WebKit gets
+// the same Pointer Events, as pointer 1 (the mouse's, the one a synthetic event may capture). The
+// tap waits out the double-tap window: in it, Chromium sends a tap after a touch drag no click.
+async function aHandleDragLeavesTheNextTapWorking(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const handle = page.locator('.draw-handle');
+    const detent = () => page.locator('.draw-sheet').evaluate((el) => /draw-sheet--(\w+)/.exec(el.className)[1]);
+    const b = await handle.boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    if (chromium(browser)) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 20 * i }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await cdp.detach();
+    } else {
+      await handle.evaluate((el, [x, y]) => {
+        const fire = (type, dy) => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y - dy, bubbles: true, cancelable: true }));
+        fire('pointerdown', 0);
+        for (let i = 1; i <= 10; i++) fire('pointermove', 20 * i);
+        fire('pointerup', 200);
+      }, [x, y]);
+    }
+    await page.waitForTimeout(800);
+    const dragged = await detent();
+    must(dragged !== 'peek', `test setup: a 200pt drag up left the sheet at ${dragged}`);
+    await handle.tap();
+    const after = await detent();
+    must(after !== dragged, `a tap on the handle after a drag left the sheet at ${after}: the drag swallowed it`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The selection outline stays above the drawing. A document that lifts its root (a style on it, or
+// a :host rule in its own <style>, as high as z-index goes) could otherwise paint over the outline
+// and draw a fake one elsewhere. The test makes the marks hittable to read what paints on top at
+// the outline's own edge.
+async function theOutlineStaysAboveTheDrawing(browser, origin) {
+  const RECT = '<rect x="20" y="30" width="60" height="40" fill="#0f0"/>';
+  const cases = {
+    'a style on its root': svgDoc(RECT, ' style="position:relative;z-index:1"'),
+    'a :host rule': svgDoc(`<style>:host{position:relative!important;z-index:2147483647!important}</style>${RECT}`),
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    await withPage(browser, origin, 956, async (page, errors) => {
+      const opened = await page.evaluate((t) => window.drawTest.render(t), text);
+      must(opened.ok, `test setup (${name}): ${opened.error}`);
+      const c = await page.evaluate(() => {
+        const b = document.querySelector('.draw-host').shadowRoot.querySelector('rect').getBoundingClientRect();
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      });
+      await page.touchscreen.tap(c.x, c.y);
+      const top = await page.evaluate(() => {
+        const outline = document.querySelector('.draw-outline');
+        const [[x0, y0], [x1, y1]] = outline.getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+        const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+        for (const el of [document.querySelector('.draw-marks'), document.querySelector('.draw-overlay')]) el.style.pointerEvents = 'auto';
+        outline.style.pointerEvents = 'stroke';
+        const hit = document.elementFromPoint(o.left + (x0 + x1) / 2, o.top + (y0 + y1) / 2);
+        return hit === outline ? 'outline' : hit?.className || hit?.localName;
+      });
+      must(top === 'outline', `with ${name} lifted, the drawing (${top}) paints over the selection outline`);
+      must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+    });
+  }
+}
+
+// (i) The initial JS (the entry module and what it preloads) is at most 250 KB gzipped.
+async function initialJsBudget() {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  const urls = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
+  must(urls.length >= 1, 'test setup: no script in the built index.html');
+  const bytes = urls.reduce((n, u) => n + gzipSync(readFileSync(join(SITE_DRAW, u.replace(/^\/draw\//, '')))).length, 0);
+  must(bytes <= 250_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 250 KB budget`);
+  console.log(`     draw: initial JS ${(bytes / 1000).toFixed(1)} KB gzipped (${urls.length} file${urls.length === 1 ? '' : 's'})`);
 }
 
 // Runs in the page: open each file through drawTest, then read what reached the shadow root.

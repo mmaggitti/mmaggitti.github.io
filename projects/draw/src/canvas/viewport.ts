@@ -30,6 +30,7 @@ export interface View {
 
 export const MIN_SCALE_FACTOR = 1 / 16; // relative to the fit scale
 export const MAX_SCALE = 256; // canvas pixels per document unit
+export const MAX_SCALE_FACTOR = 16; // relative to the fit scale, when that allows more than MAX_SCALE
 
 /** The whole artboard, centred, with a margin (canvas pixels) on every side. */
 export function fit(artboard: Rect, host: Size, margin = 16): View {
@@ -54,9 +55,15 @@ export function toDoc(view: View, host: Size, s: Point): Point {
   return { x: (s.x - host.width / 2) / view.scale + view.cx, y: (s.y - host.height / 2) / view.scale + view.cy };
 }
 
-/** Clamp a scale between 1/16 of the fit scale and MAX_SCALE. */
+/** Clamp a scale between 1/16 of the fit scale and MAX_SCALE, or 16× the fit scale for an artboard so small that it fits above MAX_SCALE. */
 export function clampScale(scale: number, fitScale: number): number {
-  return Math.min(MAX_SCALE, Math.max(fitScale * MIN_SCALE_FACTOR, scale));
+  return Math.min(Math.max(MAX_SCALE, fitScale * MAX_SCALE_FACTOR), Math.max(fitScale * MIN_SCALE_FACTOR, scale));
+}
+
+/** Can this view be drawn? Near the float limit (a hostile viewBox) its camera overflows to Infinity. */
+export function drawable(view: View, host: Size): boolean {
+  const c = camera(view, host);
+  return [c.x, c.y, c.width, c.height].every(Number.isFinite);
 }
 
 /** Zoom by `factor` about a screen point: the document point under it stays under it. */

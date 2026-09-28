@@ -134,7 +134,12 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every
   reference kind resolves; Chromium alone doesn't load a document's own `@font-face` there).
 - **The renderer (`src/canvas/renderer.ts`) only moves or removes nodes the sink made.** It is
-  keyed by NodeId, and it patches one element or one subtree per change.
+  keyed by NodeId, and it patches one element or one subtree per change (writing only the
+  attributes that differ, so a scrub frame is one mutation).
+- **The editor (`src/editor.ts`) is the one controller.** Every change is a Session transaction
+  (a scrub, or a sheet open on one value, is one drag and one history entry), routed canvas → code
+  view → overlay → stores. Zoom and pan are the rendered root's viewBox, never the file. React
+  panels only read its stores; the canvas and the code view are framework-free.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

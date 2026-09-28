@@ -120,7 +120,10 @@ for (const pg of pages) {
 // Project end-to-end tests: projects/<name>/test/e2e.mjs exports default async ({ browser, origin,
 // engine }) and throws on failure. They reuse this server and browser, so they run in Chromium
 // here and WebKit in CI like everything else.
-for (const name of readdirSync(join(ROOT, 'projects')).filter((n) => !/^[_.]/.test(n)).sort()) {
+// E2E=draw,studio runs only those projects' e2e (the page checks above still run on every page): a
+// local shortcut for tools such as Draw's prove-breaks. CI never sets it.
+const only = process.env.E2E ? new Set(process.env.E2E.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+for (const name of readdirSync(join(ROOT, 'projects')).filter((n) => !/^[_.]/.test(n) && (!only || only.has(n))).sort()) {
   const file = join(ROOT, 'projects', name, 'test', 'e2e.mjs');
   if (!existsSync(file)) continue;
   try {

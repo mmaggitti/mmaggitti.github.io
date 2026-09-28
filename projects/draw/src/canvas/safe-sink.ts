@@ -60,14 +60,46 @@ const isStyle = (n: ElementNode) => n.ns === NS.svg && n.local === 'style';
 // A <style>'s text is judged whole: the served profile's guard, and every url() stays in the file.
 const cssOk = (css: string) => cssAllowed(css) && cssUrlsLocal(css);
 
-// Set one attribute if the policy renders it and DOMPurify agrees; the value is never changed.
-function set(target: Element, node: ElementNode, attr: Pick<Attr, 'ns' | 'local'>, value: string): boolean {
+/** An attribute the renderer supplies (the root's viewBox: the camera), judged like any other. */
+export interface Supplied {
+  local: string;
+  value: string;
+}
+
+interface Judged {
+  ns: string | null;
+  local: string;
+  key: string; // the qualified name it is written under
+  value: string;
+}
+
+// Queue one attribute if the policy renders it and DOMPurify agrees; the value is never changed.
+function set(plan: Judged[], node: ElementNode, attr: Pick<Attr, 'ns' | 'local'>, value: string): boolean {
   const key = attrKey(attr.ns, attr.local);
   const out = key === null ? null : renderValue(node, attr as Attr, value);
   if (out === null || key === null || !purify?.isValidAttribute(node.local, key, out)) return false;
-  if (attr.ns === null) target.setAttribute(attr.local, out);
-  else target.setAttributeNS(attr.ns, key, out);
+  plan.push({ ns: attr.ns, local: attr.local, key, value: out });
   return true;
+}
+
+const keyOf = (ns: string | null, local: string) => `${ns ?? ''} ${local}`;
+
+// Make the element's attributes exactly the judged ones, touching only what differs, so a scrub
+// frame is one attribute mutation. Kept attributes stay where they are and new ones go last; when
+// that would not be the judged order (an undo put one back in the middle), every attribute is
+// written again in order, as a fresh render writes them.
+function write(target: Element, plan: readonly Judged[]): void {
+  const want = new Set(plan.map((p) => keyOf(p.ns, p.local)));
+  for (const a of [...target.attributes]) if (!want.has(keyOf(a.namespaceURI, a.localName))) target.removeAttributeNode(a);
+  const have = [...target.attributes].map((a) => keyOf(a.namespaceURI, a.localName));
+  if (!have.every((k, i) => k === keyOf(plan[i].ns, plan[i].local))) {
+    while (target.attributes.length) target.removeAttributeNode(target.attributes[0]);
+  }
+  for (const p of plan) {
+    if (target.getAttributeNS(p.ns, p.local) === p.value) continue;
+    if (p.ns === null) target.setAttribute(p.local, p.value);
+    else target.setAttributeNS(p.ns, p.key, p.value);
+  }
 }
 
 export interface ElementContext {
@@ -104,13 +136,14 @@ function smilOk(doc: Doc, node: ElementNode, el: Element, ctx: ElementContext): 
 }
 
 /**
- * Replace a rendered element's attributes with the model's: the number the judges dropped, or
- * null when the element must not render at all (one that carries an attribute twice, for one).
- * Namespace declarations aren't attributes here.
+ * Make a rendered element's attributes the model's (plus any the renderer supplies, which replace
+ * the model's own of that name): the number the judges dropped, or null when the element must not
+ * render at all (one that carries an attribute twice, for one). Only attributes that differ are
+ * written. Namespace declarations aren't attributes here.
  */
-export function sinkAttributes(target: Element, doc: Doc, node: ElementNode): number | null {
+export function sinkAttributes(target: Element, doc: Doc, node: ElementNode, supplied: readonly Supplied[] = []): number | null {
   if (!purify || hasDuplicateAttrs(node.attrs)) return null;
-  while (target.attributes.length) target.removeAttributeNode(target.attributes[0]);
+  const plan: Judged[] = [];
   let dropped = 0;
   for (const a of node.attrs) {
     if (a.ns === NS.xmlns) continue;
@@ -121,14 +154,13 @@ export function sinkAttributes(target: Element, doc: Doc, node: ElementNode): nu
       // read as false refuses the element; XHTML, which they read as true, is simply left off.
       if (!extensionsSupported(value)) return null;
       dropped++;
-    } else if (!set(target, node, a, value)) dropped++;
+    } else if (!set(plan, node, a, value)) dropped++;
   }
+  const own = new Set(supplied.map((s) => s.local));
+  const judged = plan.filter((p) => !(p.ns === null && own.has(p.local)));
+  for (const s of supplied) set(judged, node, { ns: null, local: s.local }, s.value);
+  write(target, judged);
   return dropped;
-}
-
-/** Set one attribute the renderer supplies (the root's viewBox), under the same two judges. */
-export function sinkAttribute(target: Element, node: ElementNode, local: string, value: string): boolean {
-  return set(target, node, { ns: null, local }, value);
 }
 
 /** A text or CDATA node's text as a Text node; null for comments, PIs, the DOCTYPE and refused CSS. */

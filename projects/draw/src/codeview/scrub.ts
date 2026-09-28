@@ -1,7 +1,8 @@
 // Scrubbing a number in the code: SVG Lab's rule, kept because it feels right on a phone. A drag
 // becomes a scrub once it has moved SCRUB_START pixels and more sideways than up or down (so a
 // vertical drag still scrolls the code); then every `pps` pixels is one step. Less than that and
-// it was a tap, which opens the Number sheet instead. Pure, so it is unit-tested in node.
+// it may be a tap, which Taps decides for every pointer on the code. Pure, so it is unit-tested
+// in node.
 
 export const SCRUB_START = 7; // px
 export const DEFAULT_PPS = 4; // px per step
@@ -48,6 +49,35 @@ export class ScrubGesture {
     this.active = false;
     if (this.anchor !== null) return 'scrub';
     return cancelled ? 'none' : 'tap';
+  }
+}
+
+/**
+ * Which lifts of a finger (or the mouse) on the code are taps: a pointer that went up within
+ * SCRUB_START of where it went down, having never strayed further, with no other pointer down at
+ * any time in between. A swipe that ends on a token, or a two-finger pinch over the code, is not a
+ * tap on anything.
+ */
+export class Taps {
+  private down = new Map<number, { x: number; y: number; still: boolean }>();
+
+  press(id: number, x: number, y: number): void {
+    this.down.delete(id); // a mouse released outside the code never lifted here
+    for (const p of this.down.values()) p.still = false;
+    this.down.set(id, { x, y, still: this.down.size === 0 });
+  }
+
+  move(id: number, x: number, y: number): void {
+    const p = this.down.get(id);
+    if (p && Math.hypot(x - p.x, y - p.y) >= SCRUB_START) p.still = false;
+  }
+
+  /** The pointer lifted (or was cancelled: never a tap). Was it a tap? */
+  lift(id: number, x: number, y: number, cancelled = false): boolean {
+    this.move(id, x, y);
+    const p = this.down.get(id);
+    this.down.delete(id);
+    return !!p && p.still && !cancelled;
   }
 }
 
