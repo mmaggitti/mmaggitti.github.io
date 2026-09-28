@@ -30,12 +30,14 @@ interface Meta {
 }
 
 export interface State {
-  phase: 'loading' | 'home' | 'review' | 'done';
+  phase: 'loading' | 'home' | 'review' | 'done' | 'browse';
   storage: string;
   cards: Card[];
   reviews: Review[];
   due: number;
   fresh: number;
+  /** Each card's chance of recall right now, by card index; NaN for a card never reviewed. */
+  recall: number[];
   meta: Meta;
   message: Message | null;
   busy: boolean;
@@ -49,7 +51,7 @@ export interface State {
 }
 
 export const store = createStore<State>({
-  phase: 'loading', storage: 'opening…', cards: [], reviews: [], due: 0, fresh: 0, meta: {}, message: null, busy: false,
+  phase: 'loading', storage: 'opening…', cards: [], reviews: [], due: 0, fresh: 0, recall: [], meta: {}, message: null, busy: false,
   queue: [], position: 0, revealed: false, reviewed: 0, again: 0, startedAt: 0,
 });
 
@@ -99,7 +101,7 @@ async function recompute(): Promise<void> {
     if (Number.isNaN(x)) fresh++;
     else if (x < TARGET) due++;
   }
-  store.set({ due, fresh });
+  store.set({ due, fresh, recall: [...r] });
 }
 
 /** Seconds a review takes, from the recent log; 12 until there is one. */
@@ -211,6 +213,11 @@ export const commands = {
 
   home() {
     store.set({ phase: 'home', message: null });
+  },
+
+  /** Read every card, answers and all. Browsing writes nothing: it never counts as a review. */
+  browse() {
+    if (store.get().cards.length) store.set({ phase: 'browse', message: null });
   },
 
   /** Hand a complete backup to the share sheet (Files, iCloud Drive) or a download. */

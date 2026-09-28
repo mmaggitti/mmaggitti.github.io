@@ -1,8 +1,8 @@
 // The panels: React renders what the model holds and sends commands back. They own no state that
 // matters (ADR-004). Primary actions live in the bottom bar, in the thumb zone.
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { backupDue, BUDGET_SECS, commands, currentCard, store, TARGET, type State } from '../core/app';
-import { segments, type Grade } from '../core/deck';
+import { segments, type Card, type Grade } from '../core/deck';
 
 const useApp = (): State => useSyncExternalStore(store.subscribe, store.get);
 
@@ -80,6 +80,7 @@ function Home() {
       )}
       <div className="cs-group cs-stack">
         <button type="button" className="cs-btn" data-action="import" disabled={s.busy} onClick={() => void commands.importFile()}>Import a deck or backup</button>
+        {!empty && <button type="button" className="cs-btn" data-action="browse" onClick={commands.browse}>Browse all cards</button>}
         {!empty && <button type="button" className="cs-btn" data-action="backup-home" onClick={() => void commands.backup()}>Back up to Files</button>}
         <p className="cs-hint">
           Due means below {Math.round(TARGET * 100)}% predicted recall. Sessions run up to {BUDGET_SECS / 60} minutes. Stored here in {s.storage}.
@@ -161,6 +162,77 @@ function Done() {
   );
 }
 
+/** A card's memory in words: new, due, or its chance of recall. */
+function status(recall: number | undefined): string {
+  if (recall === undefined || Number.isNaN(recall)) return 'New';
+  const pct = `${Math.round(recall * 100)}% recall`;
+  return recall < TARGET ? `Due · ${pct}` : pct;
+}
+
+/** Topics in the order the deck first uses them, each with its cards (and their indices). */
+function byTopic(cards: Card[]): Array<[string, Array<[Card, number]>]> {
+  const groups = new Map<string, Array<[Card, number]>>();
+  cards.forEach((c, i) => {
+    const g = groups.get(c.topic);
+    if (g) g.push([c, i]);
+    else groups.set(c.topic, [[c, i]]);
+  });
+  return [...groups];
+}
+
+function Browse() {
+  const s = useApp();
+  // Which answers to show is a reading preference, not app state: it lives here, not in the model.
+  const [showAll, setShowAll] = useState(true);
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  const reveal = (id: string) => setShown((prev) => new Set(prev).add(id));
+  const setMode = (all: boolean) => {
+    setShowAll(all);
+    setShown(new Set());
+  };
+  return (
+    <>
+      <p className="cs-kicker">All cards · {s.cards.length}</p>
+      <h1 className="cs-title">Browse</h1>
+      <p className="cs-sub">Reading here never counts as a review, so it leaves the schedule alone.</p>
+      <div className="cs-seg cs-seg--block srs-browse-mode" role="group" aria-label="Answers">
+        <button type="button" aria-pressed={showAll} data-action="answers-show" onClick={() => setMode(true)}>Show answers</button>
+        <button type="button" aria-pressed={!showAll} data-action="answers-hide" onClick={() => setMode(false)}>Hide answers</button>
+      </div>
+      {byTopic(s.cards).map(([topic, cards]) => (
+        <section key={topic} className="srs-browse-topic">
+          <h2 className="cs-heading">{topic} <span className="cs-muted cs-num">{cards.length}</span></h2>
+          <ol className="srs-browse">
+            {cards.map(([card, i]) => {
+              const open = showAll || shown.has(card.id);
+              return (
+                <li key={card.id} className="cs-panel srs-browse-card" data-check="browse-card" data-card={card.id}>
+                  <p className="srs-browse-front"><Text value={card.fields.front} /></p>
+                  {open ? (
+                    <p className="srs-browse-back" data-check="browse-back"><Text value={card.fields.back} /></p>
+                  ) : (
+                    <button type="button" className="cs-btn cs-btn--sm srs-browse-reveal" data-action="browse-reveal" onClick={() => reveal(card.id)}>Show answer</button>
+                  )}
+                  <p className="cs-small cs-muted srs-browse-meta">
+                    <span data-check="browse-status">{status(s.recall[i])}</span>
+                    {card.source && <> · <Text value={card.source} /></>}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
+      <div className="cs-bar srs-bar">
+        <button type="button" className="cs-btn" data-action="home" onClick={commands.home}>Back</button>
+        <button type="button" className="cs-btn cs-btn--primary" data-action="start" disabled={s.due + s.fresh === 0} onClick={() => void commands.startSession()}>
+          {s.due + s.fresh === 0 ? 'All caught up' : 'Start review'}
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function App() {
   const s = useApp();
   // Mac parity: Space shows the answer, 1–4 grade it.
@@ -182,5 +254,6 @@ export function App() {
   }, []);
   if (s.phase === 'review') return <Review />;
   if (s.phase === 'done') return <Done />;
+  if (s.phase === 'browse') return <Browse />;
   return <Home />;
 }

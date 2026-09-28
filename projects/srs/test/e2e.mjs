@@ -85,6 +85,40 @@ export default async function run({ browser, origin, engine }) {
     const backend = (await page.locator('.cs-hint').innerText()).match(/Stored here in (.+)\.$/)?.[1];
     if (size.name === 'iphone') console.log(`  ${APP}: storage ${backend} (${engine})`);
 
+    // Browse: every card readable without answering, grouped by topic; reading logs nothing.
+    await page.click('[data-action="browse"]');
+    expect(await until(page, 'browse-card', () => true, at('browse opened')), '');
+    const list = await page.evaluate(() => {
+      const d = document.documentElement;
+      const cards = [...document.querySelectorAll('[data-check="browse-card"]')];
+      const bar = document.querySelector('.srs-bar')?.getBoundingClientRect();
+      return {
+        ids: cards.map((c) => c.getAttribute('data-card')),
+        backs: document.querySelectorAll('[data-check="browse-back"]').length,
+        status: [...document.querySelectorAll('[data-check="browse-status"]')].map((e) => e.textContent),
+        overflow: d.scrollWidth - d.clientWidth,
+        outside: cards.filter((c) => { const r = c.getBoundingClientRect(); return r.left < 0 || r.right > d.clientWidth; }).length,
+        barBottom: bar?.bottom ?? -1,
+        height: window.innerHeight,
+      };
+    });
+    // The fixture's topics are contiguous, so topic order is deck order.
+    expect(list.ids.join() === DECK.map((c) => c.id).join(), at(`browse order ${list.ids.join()}`));
+    expect(list.backs === DECK.length, at(`browse shows ${list.backs} answers by default, want ${DECK.length}`));
+    expect(list.status.every((t) => t === 'New'), at(`browse status before any review: ${list.status.join()}`));
+    expect(list.overflow === 0 && list.outside === 0, at(`browse runs off the screen (overflow ${list.overflow}, ${list.outside} card(s))`));
+    expect(Math.abs(list.barBottom - list.height) <= 1, at(`browse bar not on the bottom edge (bottom ${list.barBottom}, viewport ${list.height})`));
+    await page.click('[data-action="answers-hide"]');
+    const hidden = await page.evaluate(() => document.querySelectorAll('[data-check="browse-back"]').length);
+    expect(hidden === 0, at(`${hidden} answer(s) still shown with answers hidden`));
+    const revealOne = page.locator('[data-card="vell-03-signal"] [data-action="browse-reveal"]');
+    if (await revealOne.count()) await revealOne.click();
+    else expect(false, at('a hidden card has no Show answer button'));
+    const revealed = await page.evaluate(() => [...document.querySelectorAll('[data-check="browse-back"]')].map((e) => e.closest('[data-card]')?.getAttribute('data-card')));
+    expect(revealed.join() === 'vell-03-signal', at(`revealing one card showed: ${revealed.join() || 'none'}`));
+    await page.click('[data-action="home"]');
+    expect(await until(page, 'reviews', (t) => t === '0', at('browsing logged a review')), '');
+
     // A session through the whole deck (see ORDER).
     await page.click('[data-action="start"]');
     const grades = [];
@@ -131,6 +165,12 @@ export default async function run({ browser, origin, engine }) {
     expect(await until(page, 'reviews', (t) => t === String(DECK.length + 1), at('reviews after reload')), '');
     expect(await read(page, 'new') === '0', at(`new after reload: ${await read(page, 'new')}`));
     expect(await shown(page, '[data-check="backup-reminder"]'), at('no backup reminder with unsaved reviews'));
+    // Browse now shows each reviewed card's recall instead of "New".
+    await page.click('[data-action="browse"]');
+    expect(await until(page, 'browse-status', () => true, at('browse after the session')), '');
+    const after = await page.evaluate(() => [...document.querySelectorAll('[data-check="browse-status"]')].map((e) => e.textContent));
+    expect(after.length === DECK.length && after.every((t) => /^(Due · )?\d+% recall$/.test(t ?? '')), at(`browse status after the session: ${after.join(' | ')}`));
+    await page.click('[data-action="home"]');
 
     // Back up, then restore into a fresh profile: same cards, same reviews.
     const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10_000 }).catch(() => null), page.click('[data-action="backup-home"]')]);
