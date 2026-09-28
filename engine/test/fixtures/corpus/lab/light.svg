@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <filter id="lit" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.5" result="bump"/>
+      <feDiffuseLighting
+        in="bump"
+        surfaceScale="5"
+        diffuseConstant="1"
+        lighting-color="#ffffff"
+        result="light">
+        <fePointLight x="30" y="26" z="30"/>
+      </feDiffuseLighting>
+      <feComposite in="SourceGraphic" in2="light" operator="arithmetic" k1="1" k2="0" k3="0" k4="0"/>
+    </filter>
+  </defs>
+  <g filter="url(#lit)">
+    <circle cx="50" cy="50" r="30" fill="none" stroke="#e9c46a" stroke-width="8"/>
+    <path d="M 50 35 L 53.8 44.7 L 64.3 45.4 L 56.2 52 L 58.8 62.1 L 50 56.5 L 41.2 62.1 L 43.8 52 L 35.7 45.4 L 46.2 44.7 Z" fill="#e76f51"/>
+  </g>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- outer and inner both run clockwise -->
+  <path
+    d="M 14 50 A 36 36 0 1 1 86 50
+   A 36 36 0 1 1 14 50 Z
+   M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z"
+    fill="#264653"
+    fill-rule="nonzero"/>
+</svg>

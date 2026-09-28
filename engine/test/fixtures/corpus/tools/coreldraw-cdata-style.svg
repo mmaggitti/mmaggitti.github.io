@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Creator: CorelDRAW -->
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="50mm" height="30mm" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
+viewBox="0 0 5000 3000"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:xodm="http://www.corel.com/coreldraw/odm/2003">
+ <defs>
+  <style type="text/css">
+   <![CDATA[
+    .str0 {stroke:#2B2A29;stroke-width:20;stroke-miterlimit:22.9256}
+    .fil1 {fill:none}
+    .fil0 {fill:#F4A261}
+    .fil2 {fill:#264653;fill-rule:nonzero}
+    .fnt0 {font-weight:bold;font-size:423.33px;font-family:'Arial'}
+   ]]>
+  </style>
+ </defs>
+ <g id="Layer_x0020_1">
+  <metadata id="CorelCorpID_0Corel-Layer"/>
+  <rect class="fil0 str0" x="120" y="120" width="4760" height="2760" rx="240" ry="240"/>
+  <path class="fil2" d="M820 900l600 0 0 1200 -600 0 0 -1200zm1000 0l600 0 -300 1200 -300 -1200z"/>
+  <polyline class="fil1 str0" points="2900,900 3400,1500 3900,900 4400,1500 "/>
+  <text x="2900" y="2300"  class="fil2 fnt0">LOGO</text>
+ </g>
+</svg>

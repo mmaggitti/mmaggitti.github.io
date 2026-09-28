@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <foreignObject x="10" y="10" width="80" height="80">
+    <canvas
+      xmlns="http://www.w3.org/1999/xhtml"
+      width="160"
+      height="160"
+      style="width:100%;height:100%;background:#f1faee;touch-action:none"></canvas>
+  </foreignObject>
+  <script>
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.addEventListener('pointerdown', (e) => {
+      const r = canvas.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width * canvas.width;
+      const y = (e.clientY - r.top) / r.height * canvas.height;
+      ctx.fillStyle = '#e76f51';
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  </script>
+</svg>

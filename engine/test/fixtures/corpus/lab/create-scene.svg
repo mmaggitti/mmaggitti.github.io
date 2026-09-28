@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect
+    x="0"
+    y="0"
+    width="100"
+    height="100"
+    rx="0"
+    fill="#a8dadc"
+    stroke="none"/>
+  <circle cx="72" cy="28" r="11" fill="#e9c46a" stroke="none"/>
+  <ellipse cx="30" cy="24" rx="13" ry="5" fill="#f1faee" stroke="none">
+    <animateTransform
+      attributeName="transform"
+      type="translate"
+      values="0 0;0 -5;0 0"
+      dur="5s"
+      repeatCount="indefinite"/>
+  </ellipse>
+  <path
+    d="M 50 44
+   Q 53 39, 56 44
+   Q 59 39, 62 44"
+    fill="none"
+    stroke="#264653"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round">
+    <animateTransform
+      attributeName="transform"
+      type="translate"
+      values="0 0;0 -5;0 0"
+      dur="3s"
+      repeatCount="indefinite"/>
+  </path>
+  <path
+    d="M 0 70
+   Q 45 44, 100 62
+   L 100 100
+   L 0 100
+   Z"
+    fill="#8ab17d"
+    stroke="none"/>
+  <path
+    d="M 0 86
+   C 30 66, 62 96, 100 80
+   L 100 100
+   L 0 100
+   Z"
+    fill="#2a9d8f"
+    stroke="none"/>
+</svg>

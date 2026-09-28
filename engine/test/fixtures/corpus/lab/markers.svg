@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <marker
+      id="arrow"
+      viewBox="0 0 10 10"
+      refX="0"
+      refY="5"
+      markerWidth="6"
+      markerHeight="6"
+      orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#264653"/>
+    </marker>
+  </defs>
+  <g transform="translate(8 16)">
+    <rect width="30" height="16" rx="3" fill="#f1faee" stroke="#264653"/>
+    <text x="15" y="10.5" font-size="6" font-family="sans-serif" text-anchor="middle">Idea</text>
+  </g>
+  <g transform="translate(62 16)">
+    <rect width="30" height="16" rx="3" fill="#f1faee" stroke="#264653"/>
+    <text x="15" y="10.5" font-size="6" font-family="sans-serif" text-anchor="middle">Sketch</text>
+  </g>
+  <g transform="translate(35 68)">
+    <rect width="30" height="16" rx="3" fill="#f1faee" stroke="#264653"/>
+    <text x="15" y="10.5" font-size="6" font-family="sans-serif" text-anchor="middle">SVG</text>
+  </g>
+  <line x1="39.5" y1="24" x2="60.5" y2="24" stroke="#264653" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="72.2" y1="33.3" x2="54.8" y2="66.7" stroke="#264653" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="45.2" y1="66.7" x2="27.8" y2="33.3" stroke="#264653" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+</svg>

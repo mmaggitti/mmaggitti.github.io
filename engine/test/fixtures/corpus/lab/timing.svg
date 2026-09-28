@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g id="go">
+    <rect x="58" y="10" width="32" height="16" rx="8" fill="#264653"/>
+    <text x="74" y="20.5" font-family="sans-serif" font-size="7" font-weight="700" text-anchor="middle" fill="#ffffff">Go</text>
+  </g>
+  <rect x="10" y="8" width="24" height="64" rx="7" fill="#231f20"/>
+  <circle cx="22" cy="20" r="8" fill="#5c2320">
+    <set id="red" attributeName="fill" to="#e63946" begin="go.click" dur="2s"/>
+  </circle>
+  <circle cx="22" cy="40" r="8" fill="#5c4a1e">
+    <set id="amber" attributeName="fill" to="#e9c46a" begin="red.end" dur="1s"/>
+  </circle>
+  <circle cx="22" cy="60" r="8" fill="#1d4d45">
+    <set attributeName="fill" to="#2a9d8f" begin="amber.end" end="go.click"/>
+  </circle>
+  <rect x="0" y="88" width="100" height="8" fill="#8d99ae"/>
+  <g>
+    <rect x="40" y="76" width="20" height="8" rx="3" fill="#e76f51"/>
+    <circle cx="45" cy="85" r="2.6" fill="#231f20"/>
+    <circle cx="55" cy="85" r="2.6" fill="#231f20"/>
+    <animateTransform
+      attributeName="transform"
+      type="translate"
+      from="0 0"
+      to="34 0"
+      begin="amber.end"
+      dur="2s"
+      fill="freeze"/>
+  </g>
+</svg>

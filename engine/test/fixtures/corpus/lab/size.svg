@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="8" y="24" width="84" height="44" fill="#f1faee"/>
+  <svg
+    x="8"
+    y="24"
+    width="84"
+    height="44"
+    viewBox="0 0 100 100"
+    preserveAspectRatio="xMidYMid meet">
+    <circle cx="50" cy="50" r="46" fill="#264653"/>
+    <path d="M 50 20 L 57.6 39.5 L 78.5 40.7 L 62.4 54 L 67.6 74.3 L 50 63 L 32.4 74.3 L 37.6 54 L 21.5 40.7 L 42.4 39.5 Z" fill="#e9c46a"/>
+  </svg>
+</svg>

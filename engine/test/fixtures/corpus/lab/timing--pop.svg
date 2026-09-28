@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- discard was removed from the spec -->
+  <g>
+    <line x1="30" y1="59" x2="30" y2="86" stroke="#8d99ae"/>
+    <ellipse cx="30" cy="42" rx="14" ry="17" fill="#e76f51"/>
+    <discard begin="click"/>
+  </g>
+  <!-- the working way: hide it with set -->
+  <g>
+    <line x1="70" y1="59" x2="70" y2="86" stroke="#8d99ae"/>
+    <ellipse cx="70" cy="42" rx="14" ry="17" fill="#2a9d8f"/>
+    <set attributeName="display" to="none" begin="click"/>
+  </g>
+</svg>

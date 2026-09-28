@@ -1,0 +1,7 @@
+<svg	xmlns="http://www.w3.org/2000/svg"	viewBox="0 0 40 40">
+	<g	id="tabbed"	fill="#264653">
+		<rect	x="2"	y="2"	width	=	"16"	height="16"/>
+		<polygon	points="22,2	38,2	30,18"	/>
+		<text	x="2"	y="34"	xml:space="preserve">a	b		c</text>
+	</g>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="6" y="14" width="88" height="64" rx="5" fill="#264653"/>
+  <foreignObject
+    x="0"
+    y="0"
+    width="320"
+    height="220"
+    transform="translate(10 18) scale(0.25)">
+    <iframe
+      xmlns="http://www.w3.org/1999/xhtml"
+      srcdoc="Hello from a web page inside your drawing."
+      sandbox="allow-same-origin"
+      style="width:100%;height:100%;border:0;background:#fff"></iframe>
+  </foreignObject>
+</svg>

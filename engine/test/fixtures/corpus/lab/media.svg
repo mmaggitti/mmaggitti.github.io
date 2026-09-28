@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <clipPath id="shape">
+      <path d="M 50 20 L 57.6 39.5 L 78.5 40.7 L 62.4 54 L 67.6 74.3 L 50 63 L 32.4 74.3 L 37.6 54 L 21.5 40.7 L 42.4 39.5 Z"/>
+    </clipPath>
+  </defs>
+  <foreignObject x="0" y="0" width="100" height="100" clip-path="url(#shape)">
+    <video
+      xmlns="http://www.w3.org/1999/xhtml"
+      src="clip.mp4"
+      autoplay="autoplay"
+      muted="muted"
+      loop="loop"
+      playsinline="playsinline"
+      style="width:100%;height:100%;object-fit:cover"></video>
+  </foreignObject>
+</svg>

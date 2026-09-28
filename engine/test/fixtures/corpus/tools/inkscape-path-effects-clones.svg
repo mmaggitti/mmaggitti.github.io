@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="120"
+   height="120"
+   viewBox="0 0 120 120"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="effects.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     showgrid="false"
+     inkscape:zoom="4"
+     inkscape:cx="60"
+     inkscape:cy="60"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1">
+    <inkscape:path-effect
+       effect="spiro"
+       id="path-effect1"
+       is_visible="true"
+       lpeversion="1" />
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect2"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,4,0,1 @ F,0,0,1,0,4,0,1 @ F,0,0,1,0,4,0,1 @ F,0,0,1,0,4,0,1"
+       unit="px"
+       method="auto"
+       mode="F"
+       radius="4"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
+    <marker
+       style="overflow:visible"
+       id="ArrowWide"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Wide arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;stroke:context-stroke;stroke-width:1;stroke-linecap:butt"
+         d="M 3,-3 0,0 3,3"
+         transform="rotate(180,0.125,0)"
+         sodipodi:nodetypes="ccc"
+         id="path3" />
+    </marker>
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <g
+       inkscape:groupmode="layer"
+       id="layer5"
+       inkscape:label="Sublayer: shapes">
+      <path
+         style="fill:#90be6d;stroke:#277da1;stroke-width:2"
+         id="rect1"
+         inkscape:path-effect="#path-effect2"
+         inkscape:original-d="M 10,10 H 50 V 50 H 10 Z"
+         d="m 14,10 h 32 a 4,4 45 0 1 4,4 v 32 a 4,4 45 0 1 -4,4 H 14 a 4,4 45 0 1 -4,-4 V 14 a 4,4 45 0 1 4,-4 z" />
+      <path
+         style="fill:none;stroke:#f94144;stroke-width:2;marker-end:url(#ArrowWide)"
+         d="m 60,30 c 8,-12 20,-12 30,0 10,12 20,12 24,0"
+         id="path2"
+         inkscape:path-effect="#path-effect1"
+         inkscape:original-d="m 60,30 c 8,-12 20,-12 30,0 10,12 20,12 24,0"
+         sodipodi:nodetypes="csc" />
+    </g>
+    <use
+       x="0"
+       y="0"
+       xlink:href="#rect1"
+       inkscape:transform-center-x="-5"
+       id="use1"
+       transform="translate(0,60)"
+       style="fill:#f9c74f"
+       width="100%"
+       height="100%"
+       inkscape:tiled-clone-of="#rect1" />
+    <use
+       x="0"
+       y="0"
+       xlink:href="#use1"
+       id="use2"
+       transform="translate(60,60)"
+       width="100%"
+       height="100%" />
+    <g
+       id="g8"
+       inkscape:label="locked group"
+       sodipodi:insensitive="true">
+      <circle
+         style="fill:#577590"
+         id="circle8"
+         cx="90"
+         cy="90"
+         r="4" />
+    </g>
+  </g>
+</svg>

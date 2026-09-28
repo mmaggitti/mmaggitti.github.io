@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path
+    id="route"
+    d="M 10 80
+   C 16 28, 40 20, 50 50
+   S 78 86, 90 24"
+    fill="none"
+    stroke="#8d99ae"
+    stroke-dasharray="3 3"/>
+  <!-- the plane is drawn around 0,0 and animateMotion carries 0,0 along the route -->
+  <path
+    d="M 8 0 L 2 -1.6 L -1 -8 L -3.4 -8 L -2 -1.6 L -6 -1.6 L -8 -4.4 L -9.4 -4.4 L -8.4 0 L -9.4 4.4 L -8 4.4 L -6 1.6 L -2 1.6 L -3.4 8 L -1 8 L 2 1.6 Z"
+    fill="#e76f51">
+    <animateMotion dur="6s" repeatCount="indefinite" rotate="auto">
+      <mpath href="#route"/>
+    </animateMotion>
+  </path>
+</svg>

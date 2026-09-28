@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- before the stylesheet PI -->
+<?xml-stylesheet href="theme.css" type="text/css"?>
+<!---->
+<!-- a comment may hold <svg> markup, > and - but never two dashes in a row -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><!-- right after the root's start tag -->
+  <?editor-state selection="rect1" zoom="2"?>
+  <defs><!-- empty defs, commented --></defs>
+  <style><!-- an XML comment: CSS never sees it -->
+    rect { fill: #264653 }
+    /* a CSS comment <!-- inside the text? no: this is XML, so it would start a comment --> */
+  </style>
+  <rect id="rect1" width="20" height="20"/><!-- between siblings --><circle cx="30" cy="30" r="6"/>
+  <text x="2" y="38">be<!-- mid-word -->fore<?pi mid-text?>after</text>
+  <g>
+    <!--
+      multi-line
+      comment
+    -->
+  </g>
+<?closing-pi?></svg>
+<!-- after the root -->
+<?epilog-pi data?>

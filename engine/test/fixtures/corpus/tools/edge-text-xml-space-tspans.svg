@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 240 160" font-family="sans-serif" font-size="12">
+  <defs>
+    <path id="arc" d="M20,140 A100,100 0 0 1 220,140"/>
+  </defs>
+  <text x="10" y="20" xml:space="preserve">Two  spaces,	a tab, and
+a newline kept.</text>
+  <text x="10" y="40">Collapsed   by   default</text>
+  <text x="10" y="60">Mixed <tspan font-weight="bold">bold</tspan>, <tspan dx="0 2 4 6" dy="-2 2" fill="#e76f51">shifted</tspan> and <tspan baseline-shift="super" font-size="8">sup</tspan> runs</text>
+  <text x="10 20 30 40" y="80" rotate="0 10 20 30">ABCD</text>
+  <text x="10" y="100" xml:lang="fr">Déjà vu · naïve café — «&#160;guillemets&#160;»</text>
+  <text x="10" y="116">日本語 · 한국어 · עברית · العربية · 🎨&#x1F600; · e&#x301; vs é</text>
+  <text x="230" y="132" direction="rtl" unicode-bidi="bidi-override" text-anchor="end">abc</text>
+  <text><textPath xlink:href="#arc" startOffset="50%" text-anchor="middle" xml:space="preserve"> along  the  arc <tspan fill="#2a9d8f">&amp; more</tspan> </textPath></text>
+  <text x="10" y="156" textLength="120" lengthAdjust="spacingAndGlyphs">&lt;fits&gt; exactly</text>
+</svg>

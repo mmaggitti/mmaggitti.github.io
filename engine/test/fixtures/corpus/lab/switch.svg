@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="8" y="32" width="84" height="36" rx="8" fill="#264653"/>
+  <switch>
+    <text systemLanguage="fr" x="50" y="55" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f1faee">Bonjour</text>
+    <text systemLanguage="es" x="50" y="55" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f1faee">Hola</text>
+    <text systemLanguage="ja" x="50" y="55" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f1faee">こんにちは</text>
+    <text x="50" y="55" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f1faee">Welcome</text>
+  </switch>
+</svg>

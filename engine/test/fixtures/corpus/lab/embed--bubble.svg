@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path d="M 16 14 H 84 Q 88 14 88 18 V 49 Q 88 53 84 53 H 42 L 30 65 L 32 53 H 16 Q 12 53 12 49 V 18 Q 12 14 16 14 Z" fill="#ffffff" stroke="#264653"/>
+  <foreignObject x="16" y="17" width="68" height="33">
+    <p
+      xmlns="http://www.w3.org/1999/xhtml"
+      style="margin:0;color:#264653;font:6px/1.35 sans-serif;overflow-wrap:break-word">Text inside foreignObject is real HTML, so it wraps by itself when the bubble gets narrower.</p>
+  </foreignObject>
+</svg>

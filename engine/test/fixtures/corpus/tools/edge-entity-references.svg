@@ -1,0 +1,20 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [
+  <!-- colors used across the drawing -->
+  <!ENTITY accent "#e76f51">
+  <!ENTITY ink '#264653'>
+  <!ENTITY stroke "stroke:&ink;;stroke-width:2">
+  <!ENTITY label "Entities &amp; friends">
+  <!ENTITY % unused "IGNORE">
+  <!ENTITY ext SYSTEM "fragment.xml">
+  <!ATTLIST svg xmlns:xlink CDATA #FIXED "http://www.w3.org/1999/xlink">
+  <!ELEMENT note (#PCDATA)>
+]>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" width="120" height="60">
+  <rect x="4" y="4" width="112" height="52" rx="6" fill="&accent;" style="&stroke;"/>
+  <circle cx="20" cy="20" r="6" fill="&#x23;2a9d8f" stroke="&#35;f1faee"/>
+  <text x="30" y="24" fill="&ink;" font-size="10">&label;</text>
+  <text x="30" y="40" fill="#fff" font-size="8">&lt;tag&gt; &amp;amp; &quot;q&quot; &apos;a&apos; &#169; &#x2014; &#8364;</text>
+  <desc>Attribute values with references: <![CDATA[&accent; is not expanded here]]></desc>
+  <g data-a="&quot;&lt;&gt;&amp;" data-b='&apos;&#9;&#10;&#13;'/>
+</svg>

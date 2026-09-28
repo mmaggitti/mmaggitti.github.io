@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:l="http://www.w3.org/1999/xlink" xmlns:ex="urn:example:app-data" xmlns:unused="urn:example:never-used" viewBox="0 0 80 40" ex:version="3">
+  <ex:settings grid="8" snap="true">
+    <ex:swatch name="accent" value="#e76f51"/>
+    <ex:note>Editor data the renderer ignores, kept as written.</ex:note>
+  </ex:settings>
+  <a l:href="#target" l:title="prefix is l, namespace is XLink"><rect id="target" width="30" height="30" fill="#2a9d8f" ex:locked="true"/></a>
+  <g xmlns:l="urn:example:rebound">
+    <rect x="40" width="30" height="30" l:href="#not-xlink-here" fill="#e9c46a"/>
+  </g>
+  <foreignObject x="0" y="32" width="80" height="8">
+    <p xmlns="http://www.w3.org/1999/xhtml" style="margin:0;font:6px sans-serif">XHTML <b>inside</b> SVG</p>
+  </foreignObject>
+</svg>

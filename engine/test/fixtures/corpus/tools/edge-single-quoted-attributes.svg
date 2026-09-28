@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 100 60' width='100' height='60'>
+  <text x='6' y='20' font-family='"Helvetica Neue", Helvetica, Arial, sans-serif' font-size='10'>It&apos;s "quoted"</text>
+  <text x="6" y='36' font-family="'Times New Roman', serif" data-note='mixed "double" &amp; &apos;single&apos;'>Both</text>
+  <rect x='6' y='44' width='40' height='10' style='fill:#e9c46a;stroke:#264653;font-family:"Fira Code"'/>
+  <a xlink:href='#top' xlink:title='say "hi"'><circle cx='80' cy='48' r='6' fill='#e76f51'/></a>
+</svg>

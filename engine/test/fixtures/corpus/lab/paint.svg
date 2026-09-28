@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient
+      id="gloss"
+      cx="0.5"
+      cy="0.5"
+      r="0.5"
+      fx="0.35"
+      fy="0.3"
+      spreadMethod="pad">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4" stop-color="#e76f51"/>
+      <stop offset="1" stop-color="#7a2e1c"/>
+    </radialGradient>
+  </defs>
+  <circle cx="50" cy="50" r="30" fill="url(#gloss)"/>
+</svg>

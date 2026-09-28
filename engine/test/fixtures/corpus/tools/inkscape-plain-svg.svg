@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="64"
+   height="64"
+   viewBox="0 0 64 64"
+   version="1.1"
+   id="svg5"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs2">
+    <radialGradient
+       id="radialGradient1"
+       cx="24"
+       cy="22"
+       fx="20"
+       fy="18"
+       r="28"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         style="stop-color:#ffffff;stop-opacity:0.9"
+         offset="0"
+         id="stop1" />
+      <stop
+         style="stop-color:#8ecae6;stop-opacity:1"
+         offset="0.6"
+         id="stop2" />
+      <stop
+         style="stop-color:#219ebc;stop-opacity:1"
+         offset="1"
+         id="stop5" />
+    </radialGradient>
+  </defs>
+  <g
+     id="layer1">
+    <circle
+       style="fill:url(#radialGradient1);fill-opacity:1;stroke:#023047;stroke-width:2;stroke-opacity:1"
+       id="path846"
+       cx="32"
+       cy="32"
+       r="26" />
+    <ellipse
+       style="fill:#ffffff;fill-opacity:0.35;stroke:none"
+       id="path848"
+       cx="24.5"
+       cy="19.75"
+       rx="9.25"
+       ry="5.5"
+       transform="rotate(-30,24.5,19.75)" />
+    <path
+       style="fill:none;stroke:#023047;stroke-width:2;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:2, 4;stroke-dashoffset:1"
+       d="M 12,44 C 20,50 44,50 52,44"
+       id="path850" />
+  </g>
+</svg>

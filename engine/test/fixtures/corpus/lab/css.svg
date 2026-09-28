@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <style>
+    .logo {
+      color: #e76f51;
+      --paper: #f1faee;
+    }
+    .logo.night {
+      color: #e9c46a;
+      --paper: #264653;
+    }
+    .tile { fill: var(--paper); }
+    .glyph, .caption {
+      fill: currentColor;
+    }
+    .glyph:hover { opacity: 0.6; }
+  </style>
+  <g class="logo">
+    <rect class="tile" x="14" y="14" width="72" height="72" rx="12" fill="#8d99ae"/>
+    <path class="glyph" d="M12 20.5 C5 15.5 2.5 12 2.5 8.5 C2.5 5.5 4.8 3.5 7.5 3.5 C9.5 3.5 11 4.6 12 6.2 C13 4.6 14.5 3.5 16.5 3.5 C19.2 3.5 21.5 5.5 21.5 8.5 C21.5 12 19 15.5 12 20.5 Z" transform="translate(32 20) scale(1.5)"/>
+    <text class="caption" x="50" y="72" font-family="sans-serif" font-size="10" font-weight="700" text-anchor="middle">Loved</text>
+  </g>
+</svg>

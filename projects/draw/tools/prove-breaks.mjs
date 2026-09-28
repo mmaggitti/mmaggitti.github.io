@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 const DRAW = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(DRAW, '..', '..');
 const SITE_E2E = ['sh', ['-c', 'node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && node scripts/smoke-test.mjs'], REPO];
+const engineTests = (file) => ['node', ['--test', '--test-reporter=spec', `../../engine/test/${file}`], DRAW];
+const XML_TESTS = engineTests('xml.test.ts');
 
 const BREAKS = [
   {
@@ -76,6 +78,37 @@ const BREAKS = [
     id: 'B11', what: 'a control drops under the 44pt floor', slow: true,
     file: 'projects/draw/src/panels/App.tsx', from: '<span className="draw-badge ds-small">preview</span>', to: '<span className="draw-badge ds-small">preview</span><button style={{ width: 20, height: 20 }}>x</button>',
     run: SITE_E2E, expect: /tap targets under 44pt/,
+  },
+  // P0-M1: the engine's round trip and limits.
+  {
+    id: 'B12', what: 'the serializer drops a byte from untouched subtrees',
+    file: 'engine/model/doc.ts', from: 'doc.source.slice(n.src!.whole.start, n.src!.whole.end)', to: 'doc.source.slice(n.src!.whole.start, n.src!.whole.end - 1)',
+    run: XML_TESTS, expect: /✖ every corpus file round-trips/,
+  },
+  {
+    id: 'B13', what: 'an attribute edit re-spaces the whole start tag',
+    file: 'engine/model/doc.ts', from: 's += `${a.lead}${a.qname}', to: 's += ` ${a.qname}',
+    run: XML_TESTS, expect: /✖ one attribute edit changes exactly that attribute/,
+  },
+  {
+    id: 'B14', what: 'entity expansion loses its size budget',
+    file: 'engine/xml/entities.ts', from: 'if (budget.left < 0) throw', to: 'if (false) throw',
+    run: XML_TESTS, expect: /✖ a wide, shallow expansion hits the size budget/,
+  },
+  {
+    id: 'B15', what: 'entity expansion loses its depth limit',
+    file: 'engine/xml/entities.ts', from: 'if (depth > ENTITY_DEPTH) throw', to: 'if (false) throw',
+    run: XML_TESTS, expect: /✖ a deep chain of tiny entities hits the depth limit/,
+  },
+  {
+    id: 'B16', what: 'the number formatter falls back to exponent notation',
+    file: 'engine/values/number-format.ts', from: 'if (Math.abs(n) >= 1e21) return BigInt(n).toString();', to: '',
+    run: engineTests('values/number-format.test.ts'), expect: /✖ fmt never writes -0 or an exponent/,
+  },
+  {
+    id: 'B17', what: 'the path parser drops the text after an error',
+    file: 'engine/path/parse.ts', from: "if ('message' in r) return { segs, tail: d.slice(pos), error: r };", to: "if ('message' in r) return { segs, tail: '', error: r };",
+    run: engineTests('path/parse.test.ts'), expect: /✖ (fuzz: any string|parsing stops at the first error)/,
   },
 ];
 

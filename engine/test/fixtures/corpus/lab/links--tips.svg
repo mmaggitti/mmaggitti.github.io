@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g class="bars" fill="#2a9d8f">
+    <rect x="12" y="62" width="10" height="28" data-v="40"/>
+    <rect x="28" y="39.6" width="10" height="50.4" data-v="72"/>
+    <rect x="44" y="51.5" width="10" height="38.5" data-v="55"/>
+    <rect x="60" y="28.4" width="10" height="61.6" data-v="88"/>
+    <rect x="76" y="45.2" width="10" height="44.8" data-v="64"/>
+  </g>
+  <g id="tipbox" visibility="hidden">
+    <rect width="30" height="12" rx="3" fill="#231f20"/>
+    <text x="15" y="8.2" font-family="sans-serif" font-size="6" font-weight="700" text-anchor="middle" fill="#ffffff"></text>
+  </g>
+  <script>
+    const tip = document.getElementById('tipbox');
+    for (const bar of document.querySelectorAll('.bars rect')) {
+      bar.addEventListener('click', () => {
+        const x = Number(bar.getAttribute('x'));
+        const y = Number(bar.getAttribute('y'));
+        tip.setAttribute('transform',
+          `translate(${x - 10} ${y - 15})`);
+        tip.querySelector('text').textContent =
+          'Sales: ' + bar.dataset.v;
+        tip.setAttribute('visibility', 'visible');
+      });
+    }
+  </script>
+</svg>

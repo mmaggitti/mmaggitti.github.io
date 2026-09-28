@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <filter id="tiles" x="0" y="0" width="100%" height="100%">
+      <feImage href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='5' fill='%23e76f51'/%3E%3C/svg%3E" x="0" y="0" width="20" height="20" result="tile"/>
+      <feTile in="tile"/>
+    </filter>
+  </defs>
+  <g filter="url(#tiles)">
+    <rect width="100" height="100" fill="#f1faee"/>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <filter id="emboss" x="0" y="0" width="100%" height="100%">
+      <feConvolveMatrix order="3" kernelMatrix="-2 -1 0
+              -1 1 1
+              0 1 2" preserveAlpha="true"/>
+    </filter>
+  </defs>
+  <g filter="url(#emboss)">
+    <rect width="100" height="100" fill="#a8dadc"/>
+    <circle cx="70" cy="30" r="12" fill="#e9c46a"/>
+    <path d="M 0 70 Q 45 44 100 62 V 100 H 0 Z" fill="#8ab17d"/>
+    <path d="M 0 86 C 30 66 62 96 100 80 V 100 H 0 Z" fill="#2a9d8f"/>
+  </g>
+</svg>

@@ -1,0 +1,3 @@
+# Round-trip fixtures: their exact bytes are the test. Never convert line endings (CRLF and
+# lone-CR files are deliberate), whatever core.autocrlf says on the machine that commits them.
+* -text

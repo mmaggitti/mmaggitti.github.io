@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="t">
+  <title id="t">Pulsing dots</title>
+  <style>
+    svg > g circle { transform-box: fill-box; transform-origin: center; }
+    .dot { fill: #6d597a; animation: pulse 1.2s ease-in-out infinite both; }
+    .dot:nth-child(2) { animation-delay: .15s; fill: #b56576; }
+    .dot:nth-child(3) { animation-delay: .3s; fill: #e56b6f; }
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.6); opacity: .5 }
+      50% { transform: scale(1); opacity: 1 }
+    }
+    .ring { fill: none; stroke: #355070; stroke-width: 4; stroke-dasharray: 60 200; animation: spin 2s linear infinite; transform-origin: 60px 60px; }
+    @keyframes spin { to { transform: rotate(1turn) } }
+    @media (prefers-reduced-motion: reduce) {
+      .dot, .ring { animation: none }
+    }
+  </style>
+  <style type="text/css"><![CDATA[
+    /* a selector with < and & only survives inside CDATA */
+    .ring:not([data-x="a<b&c"]) { stroke-linecap: round; }
+  ]]></style>
+  <circle class="ring" cx="60" cy="60" r="44"/>
+  <g>
+    <circle class="dot" cx="36" cy="60" r="8"/>
+    <circle class="dot" cx="60" cy="60" r="8"/>
+    <circle class="dot" cx="84" cy="60" r="8"/>
+  </g>
+</svg>

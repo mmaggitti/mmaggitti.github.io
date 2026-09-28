@@ -1,0 +1,33 @@
+<!-- Three-dot loader, hand-written in the common style: one attribute group per line, " />" closers. -->
+<svg width="96" height="24" viewBox="0 0 96 24" xmlns="http://www.w3.org/2000/svg" fill="#355070">
+    <circle cx="12" cy="12" r="10">
+        <animate attributeName="r"
+                 begin="0s" dur="0.9s"
+                 values="10;6;10" calcMode="linear"
+                 repeatCount="indefinite" />
+        <animate attributeName="fill-opacity"
+                 begin="0s" dur="0.9s"
+                 values="1;.4;1" calcMode="linear"
+                 repeatCount="indefinite" />
+    </circle>
+    <circle cx="48" cy="12" r="6" fill-opacity="0.4">
+        <animate attributeName="r"
+                 begin="0s" dur="0.9s"
+                 values="6;10;6" calcMode="linear"
+                 repeatCount="indefinite" />
+        <animate attributeName="fill-opacity"
+                 begin="0s" dur="0.9s"
+                 values=".4;1;.4" calcMode="linear"
+                 repeatCount="indefinite" />
+    </circle>
+    <circle cx="84" cy="12" r="10">
+        <animate attributeName="r"
+                 begin="0s" dur="0.9s"
+                 values="10;6;10" calcMode="linear"
+                 repeatCount="indefinite" />
+        <animate attributeName="fill-opacity"
+                 begin="0s" dur="0.9s"
+                 values="1;.4;1" calcMode="linear"
+                 repeatCount="indefinite" />
+    </circle>
+</svg>
