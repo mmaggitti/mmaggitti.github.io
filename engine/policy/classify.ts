@@ -30,6 +30,9 @@ export function classifyElement(ns: string | null, local: string): Classified {
 export function classifyAttribute(elNs: string | null, elLocal: string, attrNs: string | null, attrLocal: string): Classified | null {
   if (attrNs === NS.xmlns) return null;
   if (/^on/i.test(attrLocal)) return { cls: ATTRIBUTE_CLASS.get('svg:on*') ?? 'active', exact: true };
+  // A plain attribute belongs to its element's vocabulary: on anything but an SVG or XHTML element
+  // (sodipodi:namedview's pagecolor, inkscape:grid's color) it is that element's data, not SVG's.
+  if (attrNs === null && elNs !== NS.svg && elNs !== NS.xhtml) return classifyElement(elNs, elLocal);
   const scope = elNs === NS.xhtml ? 'xhtml' : 'svg';
   let name: string;
   if (attrNs === null) name = attrLocal;

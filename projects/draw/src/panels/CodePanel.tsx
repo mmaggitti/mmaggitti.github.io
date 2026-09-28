@@ -1,4 +1,4 @@
-// The split sheet under the canvas: its handle, the Code and Inspect tabs, and the code view. Three
+// The split sheet under the canvas: its handle, the Code, Inspect and Support tabs, and the code view. Three
 // detents (peek, half, full): drag the handle between them, or tap it to step through them; the
 // canvas takes whatever height the sheet leaves. The code view is framework-free (codeview/): React
 // owns only its container, which stays mounted while hidden so edits keep patching it.
@@ -11,9 +11,12 @@ import { CodeView } from '../codeview/code-view.ts';
 import { detentHeights, dragHeight, nextDetent, settle, TAP_SLOP, type Detent, type Heights } from '../detents.ts';
 import { elementLabel } from './label.ts';
 import { useStore } from './store.ts';
+import { Support } from './Support.tsx';
+import { Guard } from './Guard.tsx';
 import type { Views } from './views.ts';
 
 const HANDLE_LABEL: Record<Detent, string> = { peek: 'Show the code', half: 'Expand the code', full: 'Collapse the code' };
+type Tab = 'code' | 'inspect' | 'support';
 
 interface Press {
   id: number;
@@ -25,14 +28,14 @@ interface Press {
   moved: boolean;
 }
 
-export function CodePanel({ editor, views }: { editor: Editor; views: Views }) {
+export function CodePanel({ editor, views, files }: { editor: Editor; views: Views; files: () => void }) {
   const sheet = useRef<HTMLElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const code = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   const dragged = useRef(false);
   const [detent, setDetent] = useState<Detent>('peek');
-  const [tab, setTab] = useState<'code' | 'inspect'>('code');
+  const [tab, setTab] = useState<Tab>('code');
   const [heights, setHeights] = useState<Heights | null>(null);
   const [live, setLive] = useState<number | null>(null); // the height while the handle is dragged
 
@@ -101,7 +104,7 @@ export function CodePanel({ editor, views }: { editor: Editor; views: Views }) {
     }
     setDetent(nextDetent(detent));
   };
-  const show = (t: 'code' | 'inspect') => {
+  const show = (t: Tab) => {
     setTab(t);
     if (detent === 'peek') setDetent('half');
   };
@@ -131,13 +134,19 @@ export function CodePanel({ editor, views }: { editor: Editor; views: Views }) {
             <button type="button" aria-pressed={tab === 'inspect'} onClick={() => show('inspect')}>
               Inspect
             </button>
+            <button type="button" aria-pressed={tab === 'support'} onClick={() => show('support')}>
+              Support
+            </button>
           </div>
           <SelectionLabel editor={editor} />
         </div>
       </div>
       <div className="draw-sheet-body" hidden={detent === 'peek' && live === null}>
         <div ref={code} className="draw-code" role="region" aria-label="SVG source" hidden={tab !== 'code'} />
-        {tab === 'inspect' && <Inspect editor={editor} />}
+        <Guard files={files}>
+          {tab === 'inspect' && <Inspect editor={editor} />}
+          {tab === 'support' && <Support />}
+        </Guard>
       </div>
     </section>
   );

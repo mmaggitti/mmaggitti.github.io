@@ -7,8 +7,9 @@
 //
 // Every change is a named Session transaction (or a drag: a scrub, or a sheet open for one value,
 // which commits as ONE history entry). Each emit is routed in the plan's fixed order: the canvas
-// patch, the code view patch, the overlay, then the store bumps (M4's draft autosave subscribes
-// after them). The view is applied as the rendered root's viewBox, never written to the file.
+// patch, the code view patch, the overlay, the store bumps, then the change listeners (the draft
+// autosave, src/workspace.ts). The view is applied as the rendered root's viewBox, never written
+// to the file. A draft another tab holds opens read-only: every edit is refused, with a notice.
 
 import { NS, el, parseDoc, serialize, serializeNode, type Doc, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
@@ -91,6 +92,7 @@ export type Sheet =
 type TokenSheet = Extract<Sheet, { ref: TokenRef }>;
 
 const NO_STATS: RenderStats = { rendered: 0, skippedElements: 0, droppedAttributes: 0 };
+export const READ_ONLY = 'This drawing is open in another tab, so it is read-only here';
 const NO_HISTORY: HistoryState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
 
 /** 1-based line and column of an offset (CRLF, CR and LF each end a line). */
@@ -114,6 +116,8 @@ export class Editor {
   readonly notice: Store<string | null> = createStore<string | null>(null);
   /** Bumped on every change to the document (the Inspect tab and labels re-read it). */
   readonly version: Store<number> = createStore(0);
+  /** True while another tab holds this document's draft: every edit is refused. */
+  readonly readOnly: Store<boolean> = createStore(false);
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -127,6 +131,7 @@ export class Editor {
   #fitScale = 1;
   #fitted = true; // true until the user zooms or pans: a resize then fits again
   #navStart: View | null = null;
+  #listeners = new Set<() => void>();
 
   constructor(ports: EditorPorts) {
     this.#ports = ports;
@@ -148,18 +153,36 @@ export class Editor {
     return this.#doc ? serialize(this.#doc) : '';
   }
 
+  /**
+   * Hear every change to the open document, after the canvas, the code, the overlay and the
+   * stores: each committed edit, undo and redo, and the end of a drag (a scrub, a sheet), never a
+   * drag's frames or an open. Returns the unsubscribe.
+   */
+  onChange(fn: () => void): () => void {
+    this.#listeners.add(fn);
+    return () => this.#listeners.delete(fn);
+  }
+
+  #changed(): void {
+    for (const fn of [...this.#listeners]) fn();
+  }
+
   // ── opening ────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Open a document: the engine's parser, then the renderer and the sink. A file that can't be
-   * drawn says so: one that fails to parse or throws while drawing (the previous document and
-   * drawing stay), and one whose root the canvas refuses (nothing would show).
+   * Open a document: the engine's parser (src/import.ts parses first and passes the Doc), then the
+   * renderer and the sink. A file that can't be drawn says so: one that fails to parse or throws
+   * while drawing (the previous document and drawing stay), and one whose root the canvas refuses
+   * (nothing would show).
    */
-  open(text: string): OpenResult {
+  open(input: string | Doc): OpenResult {
     if (!this.#ports.sinkReady()) return { ok: false, error: 'DOMPurify is unavailable, so nothing renders', ...NO_STATS };
-    const parsed = parseDoc(text);
-    if (!parsed.ok) return { ok: false, error: parsed.error.message, ...NO_STATS };
-    const doc = parsed.doc;
+    let doc: Doc;
+    if (typeof input === 'string') {
+      const parsed = parseDoc(input);
+      if (!parsed.ok) return { ok: false, error: parsed.error.message, ...NO_STATS };
+      doc = parsed.doc;
+    } else doc = input;
     this.#endLive(false);
     const canvas = this.#ports.canvas;
     try {
@@ -192,7 +215,7 @@ export class Editor {
     return { ok: true, ...canvas.stats() };
   }
 
-  // The fixed order of the plan's data flow: canvas → code view → overlay → stores (→ drafts, M4).
+  // The fixed order of the plan's data flow: canvas → code view → overlay → stores → drafts.
   #wire(session: Session): void {
     let r: Route = { attrs: [], subtrees: [], code: { reset: false, blocks: [] } };
     session.subscribe((cs: ChangeSet) => {
@@ -214,6 +237,10 @@ export class Editor {
     // A drag's frames change no store: a scrub renders nothing in React until it ends.
     session.subscribe((_cs, why) => {
       if (why.kind !== 'drag') this.#bump();
+    });
+    // Last, the change listeners (the draft autosave). A drag tells them when it ends (#endLive).
+    session.subscribe((_cs, why) => {
+      if (why.kind !== 'drag') this.#changed();
     });
   }
 
@@ -301,18 +328,25 @@ export class Editor {
   // ── history ────────────────────────────────────────────────────────────────────────────────
 
   undo(): void {
-    if (this.#live || !this.#session?.canUndo) return;
+    if (this.#live || !this.#session?.canUndo || !this.#writable()) return;
     this.#session.undo();
   }
 
   redo(): void {
-    if (this.#live || !this.#session?.canRedo) return;
+    if (this.#live || !this.#session?.canRedo || !this.#writable()) return;
     this.#session.redo();
+  }
+
+  // A read-only document refuses every edit, and says why.
+  #writable(): boolean {
+    if (!this.readOnly.get()) return true;
+    this.notice.set(READ_ONLY);
+    return false;
   }
 
   /** Run one named transaction; a refused edit becomes the notice and changes nothing. */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live) return false;
+    if (!this.#session || this.#live || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       return true;
@@ -402,7 +436,7 @@ export class Editor {
     if (!doc || this.#live || !this.#session) return;
     const hit = this.#resolve(block, token);
     const t = hit?.bt.token;
-    if (!hit || t?.kind !== 'number') return;
+    if (!hit || t?.kind !== 'number' || !this.#writable()) return;
     const own = elementOf(doc, hit.ref.node);
     if (own !== null) this.select([own]);
     this.focus.set({ ref: hit.ref, token: t }); // the Scrub strip follows the number being scrubbed
@@ -420,7 +454,7 @@ export class Editor {
   }
 
   #openSheet(sheet: TokenSheet): void {
-    if (!this.#session || this.#live) return;
+    if (!this.#session || this.#live || !this.#writable()) return;
     this.#live = { drag: this.#session.drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
     this.sheet.set(sheet);
     this.#bump();
@@ -475,6 +509,7 @@ export class Editor {
     if (commit) live.drag.commit();
     else live.drag.cancel();
     this.#bump();
+    this.#changed();
   }
 
   // ── Edit source ────────────────────────────────────────────────────────────────────────────
@@ -489,7 +524,7 @@ export class Editor {
   openSource(): void {
     const doc = this.#doc;
     const ids = [...this.selection.get()];
-    if (!doc || this.#live || ids.length !== 1) return;
+    if (!doc || this.#live || ids.length !== 1 || !this.#writable()) return;
     if (ids[0] === doc.root) return void this.notice.set('The root <svg> can’t be replaced here yet');
     this.focus.set(null);
     this.sheet.set({ kind: 'source', node: ids[0], text: serializeNode(doc, ids[0]) });
@@ -504,6 +539,7 @@ export class Editor {
     const doc = this.#doc;
     const n = doc?.nodes.get(node);
     if (!doc || !n || n.parent === null || !attached(doc, node)) return { message: 'That element is no longer in the document', at: 0, line: 1, column: 1 };
+    if (this.readOnly.get()) return { message: READ_ONLY, at: 0, line: 1, column: 1 };
     const parent = n.parent;
     const parsed = parseFragment(doc, parent, text);
     if (!parsed.ok) return { message: parsed.error.message, at: parsed.error.at, ...lineColumn(text, parsed.error.at) };

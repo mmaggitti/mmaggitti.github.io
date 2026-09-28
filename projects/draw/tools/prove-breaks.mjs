@@ -646,6 +646,345 @@ const BREAKS = [
     file: 'projects/draw/src/panels/Sheets.tsx', from: "        onKeyDown={(e) => e.key === 'Enter' && close()}\n      />\n      <Problem", to: '      />\n      <Problem',
     run: SITE_E2E, expect: /Enter did not close the Text sheet/,
   },
+  // P0-M4: files, drafts and export.
+  {
+    id: 'B121', what: 'the app reads the clipboard outside platform/',
+    file: 'projects/draw/src/panels/App.tsx', append: "\nexport const peek = (e: ClipboardEvent) => e.clipboardData?.getData('text/plain');\n",
+    run: CHECK_SINKS, expect: /App\.tsx:\d+ {2}file-api/,
+  },
+  {
+    id: 'B122', what: 'a file that fails to parse no longer says where',
+    file: 'projects/draw/src/import.ts', from: 'return failed(input, parsed.error.message, text, parsed.error.at);', to: 'return failed(input, parsed.error.message);',
+    run: drawTests('import.test.ts'), expect: /✖ a file that fails to parse opens nowhere/,
+  },
+  {
+    id: 'B123', what: 'the importer hands the editor a root that is not <svg>',
+    file: 'projects/draw/src/import.ts', from: "if (root.ns !== NS.svg || root.local !== 'svg') {", to: 'if (false) {',
+    run: drawTests('import.test.ts'), expect: /✖ a file that fails to parse opens nowhere/,
+  },
+  {
+    id: 'B124', what: 'export writes UTF-8 whatever encoding the file came in',
+    file: 'projects/draw/src/platform/files.ts', from: '  if (SINGLE_BYTE.test(encoding)) {', to: '  if (false) {',
+    run: drawTests('files.test.ts'), expect: /✖ encodeSvg writes a file back in the encoding it came in/,
+  },
+  {
+    id: 'B125', what: 'the autosave saves every change at once (no debounce)',
+    file: 'projects/draw/src/autosave.ts', from: 'this.#delay = options.delay ?? SAVE_DELAY_MS;', to: 'this.#delay = 0;',
+    run: drawTests('autosave.test.ts'), expect: /✖ an import is a draft at once; changes save once/,
+  },
+  {
+    id: 'B126', what: 'a flush (pagehide, the page hidden) drops the pending change',
+    file: 'projects/draw/src/autosave.ts', from: '      if (this.#b) retry.add(this.#b);\n', to: '',
+    run: drawTests('autosave.test.ts'), expect: /✖ flush saves a pending change at once/,
+  },
+  {
+    id: 'B127', what: "opening another document loses the pending change of the one before",
+    file: 'projects/draw/src/autosave.ts', from: '      if (prev) retry.add(prev);\n', to: '',
+    run: drawTests('autosave.test.ts'), expect: /✖ opening another document saves the pending change of the one before/,
+  },
+  {
+    id: 'B128', what: 'a draft another tab holds is written anyway (the lock is ignored)',
+    file: 'projects/draw/src/autosave.ts', from: '        if (!release) {', to: '        if (false) {',
+    run: drawTests('autosave.test.ts'), expect: /✖ a draft another tab holds opens read-only/,
+  },
+  {
+    id: 'B129', what: 'a full quota hides behind the next change',
+    file: 'projects/draw/src/autosave.ts', from: '    if (b === this.#b && !this.#unsaved.size) this.state.set(s);', to: '    if (b === this.#b) this.state.set(s);',
+    run: drawTests('autosave.test.ts'), expect: /✖ a full quota is a loud failure that stays until a save succeeds/,
+  },
+  {
+    id: 'B130', what: 'the draft autosave hears a change before the stores',
+    file: 'projects/draw/src/editor.ts', from: "      if (why.kind !== 'drag') this.#bump();\n", to: "      if (why.kind !== 'drag') this.#changed();\n      if (why.kind !== 'drag') this.#bump();\n",
+    run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
+  },
+  {
+    id: 'B131', what: 'the end of a scrub or a sheet is never saved',
+    file: 'projects/draw/src/editor.ts', from: '    this.#bump();\n    this.#changed();\n', to: '    this.#bump();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
+  },
+  {
+    id: 'B132', what: 'a read-only document takes edits',
+    file: 'projects/draw/src/editor.ts', from: '    if (!this.readOnly.get()) return true;', to: '    return true;',
+    run: drawTests('editor.test.ts'), expect: /✖ a read-only document refuses every edit/,
+  },
+  {
+    id: 'B133', what: 'the autosave hears changes to a document it is not bound to',
+    file: 'projects/draw/src/workspace.ts', from: 'if (editor.doc && editor.doc === this.#doc) this.autosave.changed();', to: 'if (editor.doc) this.autosave.changed();',
+    run: drawTests('workspace.test.ts'), expect: /✖ the autosave hears a change last, after the stores; only for the document it is bound to/,
+  },
+  {
+    id: 'B134', what: 'an #import fragment stays in the URL (a reload imports it again)',
+    file: 'projects/draw/src/workspace.ts', from: '    clearFragment();\n', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ an #import link opens with its report/,
+  },
+  {
+    id: 'B135', what: 'the as-is export normalizes line ends',
+    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: "encodeSvg((clean ? clean.text : serialize(doc)).replace(/\\r\\n/g, '\\n'), read)",
+    run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
+  },
+  {
+    id: 'B136', what: 'a cancelled share counts as an export',
+    file: 'projects/draw/src/workspace.ts', from: "    if (outcome === 'cancelled') return;\n", to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
+  },
+  {
+    id: 'B137', what: 'the import report no longer lists external entities',
+    file: 'engine/report/import-report.ts', from: '  if (external.length) notes.push(', to: '  if (false) notes.push(',
+    run: engineTests('report/import-report.test.ts'), expect: /✖ external entities a DOCTYPE declares are listed in the notes/,
+  },
+  {
+    id: 'B138', what: 'the Support search looks only at ids',
+    file: 'projects/draw/src/support.ts', from: "const haystack = (r: LedgerRow): string => [r.id, r.name,", to: "const haystack = (r: LedgerRow): string => [r.id].join('') || [r.id, r.name,",
+    run: drawTests('support.test.ts'), expect: /✖ the search finds rows by every word, in any field/,
+  },
+  {
+    id: 'B139', what: 'the import report sheet drops the attributes',
+    file: 'projects/draw/src/files-view.ts', from: "attributes: pick('attribute')", to: 'attributes: []',
+    run: drawTests('files-view.test.ts'), expect: /✖ the report sheet shows all four buckets with their counts, and every item once/,
+  },
+  {
+    id: 'B140', what: 'the "not exported" reminder counts from the last edit',
+    file: 'projects/draw/src/files-view.ts', from: '(now - (d.exported ?? d.created))', to: '(now - d.updated)',
+    run: drawTests('files-view.test.ts'), expect: /✖ the draft list: newest first as given/,
+  },
+  {
+    id: 'B150', what: "a draft's pending save reads whatever document is open by then",
+    file: 'projects/draw/src/workspace.ts', from: 'text: () => serialize(doc),', to: 'text: () => this.#editor.source(),',
+    run: drawTests('workspace.test.ts'), expect: /✖ a change still waiting when another document opens is saved to its own draft/,
+  },
+  {
+    id: 'B141', what: 'the file input no longer lists .svg (iOS offers only what it lists)', slow: true,
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: 'accept=".svg,.svgz,image/svg+xml"', to: 'accept="image/svg+xml"',
+    run: SITE_E2E, expect: /the file input does not list \.svg/,
+  },
+  {
+    id: 'B142', what: 'a paste outside a field opens nothing', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: "    window.addEventListener('paste', paste);\n", to: '',
+    run: SITE_E2E, expect: /a paste of image\/svg\+xml was not taken/,
+  },
+  {
+    id: 'B143', what: 'the canvas refuses a dragged file', slow: true,
+    file: 'projects/draw/src/panels/Canvas.tsx', from: '      onDragOver={(e: ReactDragEvent) => onDrag(e.nativeEvent)}\n', to: '',
+    run: SITE_E2E, expect: /the canvas does not accept a dragged file/,
+  },
+  {
+    id: 'B144', what: 'pagehide does not save the pending change', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: "    window.addEventListener('pagehide', flush);\n", to: '',
+    run: SITE_E2E, expect: /pagehide did not save at once/,
+  },
+  {
+    id: 'B145', what: 'the drafts live in memory, so a reload loses them', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: 'new DraftStore(idbKV())', to: 'new DraftStore({ get: async () => undefined, set: async () => {}, del: async () => {}, keys: async () => [] })',
+    run: SITE_E2E, expect: /the edit made just before a real reload was lost|timed out waiting until the edited link reopens as a draft/,
+  },
+  {
+    id: 'B146', what: 'a second tab takes the lock too (no Web Locks)', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: 'lock: lockDraft, sample', to: 'lock: async () => () => {}, sample',
+    run: SITE_E2E, expect: /the second page does not say the drawing is read-only/,
+  },
+  {
+    id: 'B147', what: 'a full quota shows as a quiet notice, not a loud alert', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: '<div className="draw-alert draw-alert--loud" role="alert">', to: '<div className="draw-alert" role="status">',
+    run: SITE_E2E, expect: /a full quota shows no alert/,
+  },
+  {
+    id: 'B148', what: 'the ledger is in the initial bundle', slow: true,
+    file: 'projects/draw/src/panels/Support.tsx', from: 'let loading: Promise<Ledger> | null = null;', to: "import LEDGER_RAW from '../../../../engine/ledger/ledger.json?raw';\nlet loading: Promise<Ledger> | null = Promise.resolve(JSON.parse(LEDGER_RAW) as Ledger);",
+    run: SITE_E2E, expect: /the ledger is in the initial JS/,
+  },
+  {
+    id: 'B149', what: "a draft's Delete drops under the 44pt floor", slow: true,
+    file: 'projects/draw/src/app.css', from: '.draw-draft-delete { align-self: center; font-size: var(--text-sm); }', to: '.draw-draft-delete { align-self: center; font-size: var(--text-sm); min-height: 2rem; }',
+    run: SITE_E2E, expect: /the Files menu with drafts: tap targets under 44pt/,
+  },
+  // The P0-M4 review.
+  {
+    id: 'B151', what: 'RDF metadata counts as editable again (the class a whole namespace takes)',
+    file: 'engine/policy/tables.ts', from: "['http://www.w3.org/1999/02/22-rdf-syntax-ns#', 'preserve-hidden'],", to: "['http://www.w3.org/1999/02/22-rdf-syntax-ns#', 'edit'],",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ metadata \(RDF, Dublin Core, Creative Commons\) is kept as-is/,
+  },
+  {
+    id: 'B152', what: "a plain attribute on an Inkscape element is looked up as an SVG attribute",
+    file: 'engine/policy/classify.ts', from: '  if (attrNs === null && elNs !== NS.svg && elNs !== NS.xhtml) return classifyElement(elNs, elLocal);\n', to: '',
+    run: engineTests('report/import-report.test.ts'), expect: /✖ a plain attribute on a foreign element takes that element's class/,
+  },
+  {
+    id: 'B153', what: "a record that isn't a draft is read as one (IndexedDB is shared by the whole origin)",
+    file: 'projects/draw/src/platform/drafts.ts', from: '  return (\n    d.id === id &&', to: '  return true || (\n    d.id === id &&',
+    run: drawTests('drafts.test.ts'), expect: /✖ a record that isn't a draft Draw wrote is listed as unreadable/,
+  },
+  {
+    id: 'B154', what: 'boot reopens the newest record, readable or not',
+    file: 'projects/draw/src/workspace.ts', from: 'latest = (await this.#store.list()).find((d) => !d.unreadable)?.id;', to: 'latest = (await this.#store.list())[0]?.id;',
+    run: drawTests('workspace.test.ts'), expect: /✖ a record that isn't a draft never reaches the app/,
+  },
+  {
+    id: 'B155', what: 'a draft save reads the record before writing it (a pagehide flush then lands too late)',
+    file: 'projects/draw/src/autosave.ts', from: '      } else if (b.draft) {', to: '      } else if (b.draft && (await this.#store.load(b.id))) {',
+    run: drawTests('autosave.test.ts'), expect: /✖ a save writes the record the binding holds: no read first/,
+  },
+  {
+    id: 'B156', what: 'a draft write waits for the task to end to commit (a real unload loses it)', slow: true,
+    file: 'projects/draw/src/platform/drafts.ts', from: '        s.transaction.commit?.();\n', to: '',
+    run: SITE_E2E, expect: /the edit made just before a real reload was lost/,
+  },
+  {
+    id: 'B157', what: "opening another drawing doesn't try the failed save again",
+    file: 'projects/draw/src/autosave.ts', from: '    const retry = new Set(this.#unsaved);\n    if (this.#timer !== null) {\n      this.#timers.clear(this.#timer);\n      this.#timer = null;\n      if (prev) retry.add(prev);', to: '    const retry = new Set<Binding>();\n    if (this.#timer !== null) {\n      this.#timers.clear(this.#timer);\n      this.#timer = null;\n      if (prev) retry.add(prev);',
+    run: drawTests('autosave.test.ts'), expect: /✖ a failed save names its drawing and stays up while another is open/,
+  },
+  {
+    id: 'B158', what: 'reopening a draft whose save failed opens the older stored text',
+    file: 'projects/draw/src/workspace.ts', from: '    if (unsaved) return this.#open(', to: '    if (false) return this.#open(',
+    run: drawTests('workspace.test.ts'), expect: /✖ a failed save stays loud while another draft is open, and reopening its draft brings the unsaved edit back/,
+  },
+  {
+    id: 'B159', what: 'reopening a draft whose save failed here finds its own lock taken (read-only)',
+    file: 'projects/draw/src/autosave.ts', from: '    const heir = to.id === null ? undefined : [...this.#unsaved].find((u) => u.id === to.id);', to: '    const heir = undefined as Binding | undefined;',
+    run: drawTests('autosave.test.ts'), expect: /✖ a failed save names its drawing and stays up while another is open/,
+  },
+  {
+    id: 'B160', what: "the failure alert doesn't say which drawing isn't saved",
+    file: 'projects/draw/src/autosave.ts', from: "  const which = name ? `“${name}”` : 'this drawing';", to: "  const which = 'this drawing';",
+    run: drawTests('autosave.test.ts'), expect: /✖ a failed save names its drawing and stays up while another is open/,
+  },
+  {
+    id: 'B161', what: 'export re-derives the encoding from the text (UTF-16 without a declaration becomes UTF-8)',
+    file: 'projects/draw/src/workspace.ts', from: "current?.encoding ?? undefined", to: 'undefined',
+    run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
+  },
+  {
+    id: 'B162', what: 'encodeSvg ignores the encoding the file was read in',
+    file: 'projects/draw/src/platform/files.ts', from: "  let encoding = read ?? 'utf-8';\n  if (read === undefined && m) {", to: "  let encoding = 'utf-8';\n  if (m) {",
+    run: drawTests('files.test.ts'), expect: /✖ a file is written back as decodeSvg read it/,
+  },
+  {
+    id: 'B163', what: 'bytes that are not valid become U+FFFD silently',
+    file: 'projects/draw/src/platform/files.ts', from: '{ ignoreBOM: true, fatal: true }', to: '{ ignoreBOM: true }',
+    run: drawTests('files.test.ts'), expect: /✖ a file is written back as decodeSvg read it/,
+  },
+  {
+    id: 'B164', what: 'a file past the size limit is read whole before it is refused',
+    file: 'projects/draw/src/platform/files.ts', from: '  if (file.size > MAX_SVG_BYTES) throw new FileTooLargeError', to: '  if (false) throw new FileTooLargeError',
+    run: drawTests('files.test.ts'), expect: /✖ a file past the size limit is refused before it is read/,
+  },
+  {
+    id: 'B165', what: "a file that can't be read throws instead of saying so",
+    file: 'projects/draw/src/import.ts', from: '      return failed(input, `it could not be read (${why(e)})`);', to: '      throw e;',
+    run: drawTests('import.test.ts'), expect: /✖ a picked or dropped file is read by the importer/,
+  },
+  {
+    id: 'B166', what: 'an #import link drops a UTF-8 BOM',
+    file: 'projects/draw/src/platform/files.ts', from: "new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)", to: "new TextDecoder('utf-8').decode(bytes)",
+    run: drawTests('files.test.ts'), expect: /✖ #import links round-trip a file/,
+  },
+  {
+    id: 'B167', what: 'a BOM counts as a column on line 1',
+    file: 'projects/draw/src/import.ts', from: '    if (text.charCodeAt(0) === 0xfeff && at > 0) [text, at] = [text.slice(1), at - 1];\n', to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a BOM is not a column/,
+  },
+  {
+    id: 'B168', what: "a drawing's name keeps a bidi override from its <title>",
+    file: 'projects/draw/src/import.ts', from: 'const FORMAT = /\\p{Cf}/gu;', to: 'const FORMAT = /(?!)/gu;',
+    run: drawTests('import.test.ts'), expect: /✖ a drawing name drops format characters/,
+  },
+  {
+    id: 'B169', what: 'an export file name keeps a bidi override',
+    file: 'projects/draw/src/export/svg.ts', from: ".replace(/\\p{Cf}/gu, '')", to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a drawing name drops format characters/,
+  },
+  {
+    id: 'B170', what: 'an #import link is stored as a draft at once (a large one slows every later load)',
+    file: 'projects/draw/src/workspace.ts', from: "await this.#open({ via: 'link', name: '', text }, { show: true })", to: "await this.#open({ via: 'link', name: '', text }, { show: true, create: true })",
+    run: drawTests('workspace.test.ts'), expect: /✖ an #import link opens with its report, and becomes a draft on its first change/,
+  },
+  {
+    id: 'B171', what: 'a link that arrives while Draw is open opens without a tap',
+    file: 'projects/draw/src/workspace.ts', from: "    this.offer.set(fragment);\n    this.show('link');", to: "    void this.openLink(fragment, () => {});",
+    run: drawTests('workspace.test.ts'), expect: /✖ a link that arrives while Draw is open waits for Open/,
+  },
+  {
+    id: 'B172', what: 'a failure without a line starts in lower case',
+    file: 'projects/draw/src/files-view.ts', from: 'f.message.charAt(0).toUpperCase() + f.message.slice(1)', to: 'f.message',
+    run: drawTests('files-view.test.ts'), expect: /✖ why an open failed reads as one sentence/,
+  },
+  {
+    id: 'B173', what: 'a PNG is reported as a parse error at line 1, column 1',
+    file: 'projects/draw/src/import.ts', from: "  if (!/^\\uFEFF?\\s*</.test(text)) return failed(input, 'this isn’t an SVG file');\n", to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a file that isn't markup \(a PNG, a text file\) says so/,
+  },
+  {
+    id: 'B174', what: 'an error in parentheses keeps its own period (".)." at the end)',
+    file: 'projects/draw/src/import.ts', from: ".replace(/\\.+$/, '');", to: ';',
+    run: drawTests('import.test.ts'), expect: /✖ a picked or dropped file is read by the importer/,
+  },
+  {
+    id: 'B175', what: 'hiding the page (visibilitychange) does not save the pending change', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: "    document.addEventListener('visibilitychange', hidden);\n", to: '',
+    run: SITE_E2E, expect: /hiding the page did not save at once/,
+  },
+  // The unit test stops the site build first, so this one runs there; e2e exportIsTheFileByteForByte
+  // ("the draft still says it was not exported") catches it too, in a build without the unit run.
+  {
+    id: 'B176', what: "an export no longer resets the draft's reminder",
+    file: 'projects/draw/src/workspace.ts', from: '    await this.autosave.markExported();\n', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
+  },
+  {
+    id: 'B177', what: 'the as-is export writes the file as opened, not as edited',
+    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: 'encodeSvg(clean ? clean.text : doc.source, read)',
+    run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
+  },
+  {
+    id: 'B178', what: 'a link that arrives in the open tab (a page that opened Draw) opens without a tap', slow: true,
+    file: 'projects/draw/src/panels/App.tsx', from: 'const link = () => void workspace.offerLink(fragment(), clearFragment);', to: 'const link = () => void workspace.openLink(fragment(), clearFragment);',
+    run: SITE_E2E, expect: /a link that arrived in the open tab was not offered first/,
+  },
+  {
+    id: 'B179', what: 'a notice raised from the Files menu is hidden under it', slow: true,
+    file: 'projects/draw/src/app.css', from: '  z-index: 12; /* above the modal sheets', to: '  z-index: 5; /* above the modal sheets',
+    run: SITE_E2E, expect: /the notice is under/,
+  },
+  {
+    id: 'B180', what: 'with the keyboard up, a tall sheet goes off the top of the screen', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: 'style={inset ? { bottom: inset, maxHeight: `calc(85svh - ${inset}px)` } : undefined}', to: 'style={inset ? { bottom: inset } : undefined}',
+    run: SITE_E2E, expect: /is off the screen left above the keyboard/,
+  },
+  {
+    id: 'B181', what: "Support rows don't show a capability's or a feature's name", slow: true,
+    file: 'projects/draw/src/panels/Support.tsx', from: "{(r.kind === 'capability' || r.kind === 'feature') && <span", to: '{false && <span',
+    run: SITE_E2E, expect: /does not show its name/,
+  },
+  {
+    id: 'B182', what: 'the Support summary stays between the search and the rows it found', slow: true,
+    file: 'projects/draw/src/panels/Support.tsx', from: '{!query.trim() && (', to: '{true && (',
+    run: SITE_E2E, expect: /the summary stays between the search and the rows it found/,
+  },
+  {
+    id: 'B183', what: 'the Export sheet calls the plain .svg of a .svgz "exactly as it is"', slow: true,
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: 'say: (_removed, gzip) => (gzip ?', to: 'say: (_removed, gzip) => (false ?',
+    run: SITE_E2E, expect: /the sheet says ".*" for a \.svgz/,
+  },
+  {
+    id: 'B184', what: 'a panel that throws blanks the app (no error boundary)', slow: true,
+    file: 'projects/draw/src/panels/Guard.tsx', from: '  static getDerivedStateFromError(', to: '  static notAnErrorBoundary(',
+    run: SITE_E2E, expect: /a panel that threw left no message/,
+  },
+  {
+    id: 'B185', what: 'an unreadable draft is offered to open', slow: true,
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: '{d.unreadable ? (', to: '{false ? (',
+    run: SITE_E2E, expect: /an unreadable draft can be opened/,
+  },
+  {
+    id: 'B186', what: 'a paste opens without its import report',
+    file: 'projects/draw/src/workspace.ts', from: 'return this.#open({ via, name, text }, { show: true, create: true });', to: "return this.#open({ via, name, text }, { show: via !== 'paste', create: true });",
+    run: drawTests('workspace.test.ts'), expect: /✖ a paste opens like any file: through the importer, with its report/,
+  },
+  {
+    id: 'B187', what: 'Clean counts each removed element twice',
+    file: 'engine/export/clean.ts', from: '      removedElements++;', to: '      removedElements += 2;',
+    run: engineTests('export/clean.test.ts'), expect: /✖ Inkscape and Illustrator files lose exactly their editor markup/,
+  },
 ];
 
 const args = process.argv.slice(2);

@@ -58,3 +58,73 @@ test('reports name what matters in real files', () => {
   const icon = importReport(load('icons/lucide/' + readdirSync(new URL('icons/lucide/', CORPUS)).find((f) => f.endsWith('.svg'))));
   assert.equal(icon.totals.preview + icon.totals.unclassified, 0, 'a plain icon is all editable or kept');
 });
+
+test("what only a fallback row names is listed as unclassified, and the literal <unknown> element as kept", () => {
+  const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="http://www.w3.org/1999/xhtml">
+  <sparkle glow="1"/><unknown/><rect made-up="1" width="1"/>
+  <foreignObject><x:div><x:marquee>hi</x:marquee></x:div></foreignObject>
+</svg>`);
+  assert.ok(r.ok);
+  const report = importReport(r.doc);
+  const find = (kind: string, name: string) => report.items.find((i) => i.kind === kind && i.name === name);
+  assert.equal(find('element', 'sparkle')?.bucket, 'unclassified', 'element:svg/*');
+  assert.equal(find('element', 'xhtml:marquee')?.bucket, 'unclassified', 'element:xhtml/*');
+  assert.equal(find('attribute', 'made-up')?.bucket, 'unclassified', 'attribute:(other)');
+  assert.equal(find('attribute', 'glow')?.bucket, 'unclassified');
+  assert.equal(find('element', 'unknown')?.bucket, 'kept', 'element:unknown has its own row');
+  assert.equal(find('element', 'xhtml:div')?.bucket, 'editable');
+  assert.equal(report.totals.unclassified, 4);
+  assert.ok(report.notes.includes('Unclassified content is kept byte for byte and never drawn.'));
+});
+
+test('external entities a DOCTYPE declares are listed in the notes: never fetched, left as written', () => {
+  const r = parseDoc(`<!DOCTYPE svg [
+  <!ENTITY logo SYSTEM "logo.xml">
+  <!ENTITY ad PUBLIC "-//X//EN" "https://example.com/ad.xml">
+  <!ENTITY name "Draw">
+]>
+<svg xmlns="http://www.w3.org/2000/svg"><text>&name; &logo;</text></svg>`);
+  assert.ok(r.ok);
+  assert.ok(importReport(r.doc).notes.includes('2 external entities are declared (ad, logo); Draw never fetches them, and references to them stay as written.'));
+  const corpusFile = importReport(load('tools/edge-entity-references.svg'));
+  assert.ok(corpusFile.notes.some((n) => n.startsWith('1 external entity is declared (ext)')), corpusFile.notes.join(' | '));
+  assert.ok(!importReport(load('tools/inkscape-plain-svg.svg')).notes.some((n) => /external entit/.test(n)), 'a file without any says nothing');
+});
+
+test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is, never editable', () => {
+  const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:cc="http://creativecommons.org/ns#" xmlns:ccl="http://web.resource.org/cc/">
+  <metadata><rdf:RDF><cc:Work rdf:about=""><dc:format>image/svg+xml</dc:format><dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/><dcterms:created>2026</dcterms:created><cc:license rdf:resource="http://creativecommons.org/licenses/by/4.0/"/></cc:Work>
+  <cc:License rdf:about="http://creativecommons.org/licenses/by/4.0/"><cc:permits rdf:resource="http://creativecommons.org/ns#Reproduction"/></cc:License><ccl:Work/></rdf:RDF></metadata>
+  <rect width="1" height="1"/>
+</svg>`);
+  assert.ok(r.ok);
+  const report = importReport(r.doc);
+  const metadata = report.items.filter((i) => /^(rdf|dc|dcterms|cc|ccl):/.test(i.name));
+  assert.deepEqual([...new Set(metadata.map((i) => i.bucket))], ['kept'], metadata.map((i) => `${i.name} ${i.bucket}`).join(', '));
+  assert.equal(metadata.reduce((n, i) => n + i.count, 0), 14, 'every metadata element (9) and attribute (5) is counted');
+  assert.deepEqual(report.items.filter((i) => i.bucket === 'editable').map((i) => i.name).sort(), ['height', 'metadata', 'rect', 'svg', 'width']);
+
+  // A real Inkscape file: its Creative Commons block and its own settings are all kept; nothing is unclassified.
+  const ink = importReport(load('tools/inkscape-1x-layers.svg'));
+  const editable = ink.items.filter((i) => i.bucket === 'editable').map((i) => i.name);
+  assert.deepEqual(editable.filter((n) => /^(rdf|dc|dcterms|cc|inkscape|sodipodi):/.test(n)), [], 'no metadata or editor data under Editable');
+  assert.deepEqual(ink.totals, { editable: 93, kept: 72, preview: 0, unclassified: 0 });
+});
+
+test("a plain attribute on a foreign element takes that element's class, not an SVG attribute's", () => {
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const sodipodi = 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd';
+  const inkscape = 'http://www.inkscape.org/namespaces/inkscape';
+  // Inkscape's page and grid settings are editor data: kept, like the element that holds them.
+  assert.deepEqual(classifyAttribute(sodipodi, 'namedview', null, 'pagecolor'), { cls: 'preserve-hidden', exact: true });
+  assert.deepEqual(classifyAttribute(inkscape, 'grid', null, 'color'), { cls: 'preserve-hidden', exact: true });
+  assert.deepEqual(classifyAttribute(inkscape, 'path-effect', null, 'radius'), { cls: 'preserve-hidden', exact: true });
+  // An unknown namespace's element is unclassified, and so are its plain attributes.
+  assert.deepEqual(classifyAttribute('https://example.com/ns', 'settings', null, 'x'), { cls: 'preserve-hidden', exact: false });
+  // SVG's own attributes are unchanged.
+  assert.deepEqual(classifyAttribute(svgNs, 'rect', null, 'x'), { cls: 'edit', exact: true });
+  const r = importReport(load('tools/inkscape-092-flowtext-arcs.svg'));
+  const pagecolor = r.items.find((i) => i.kind === 'attribute' && i.name === 'pagecolor');
+  assert.equal(pagecolor?.bucket, 'kept');
+  assert.deepEqual(r.items.filter((i) => i.bucket === 'unclassified').map((i) => i.name).sort(), ['flowPara', 'flowRegion', 'flowRoot'], 'only the SVG 1.2 flow elements no row names');
+});

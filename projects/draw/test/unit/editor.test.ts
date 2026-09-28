@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { Editor, lineColumn, type CanvasPort } from '../../src/editor.ts';
+import { Editor, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { camera, fit, toDoc, toScreen, type Rect } from '../../src/canvas/viewport.ts';
 import { artboard } from '../../src/canvas/artboard.ts';
@@ -149,6 +149,69 @@ test('an edit reaches the canvas, then the code, then the overlay, then the stor
   assert.equal(r.editor.applySource(poly.id, '<circle r="3"/>'), null);
   assert.deepEqual(r.log.slice(0, 2), [`canvas subtree ${doc(r).root}`, 'code set']);
   assert.equal(text(r), r.editor.source());
+});
+
+test('change listeners (the draft autosave) hear every change last: edits, undo, redo and the end of a drag, never its frames or an open', () => {
+  const r = rig();
+  r.editor.onChange(() => r.log.push('drafts'));
+  r.editor.open(SAMPLE);
+  assert.ok(!r.log.includes('drafts'), 'opening is not a change');
+  const poly = element(doc(r), (n) => n.local === 'polyline');
+  const { block, token } = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.log.length = 0;
+  r.editor.tapToken(block, token);
+  const i = r.log.indexOf(`canvas attrs ${poly.id}`);
+  assert.deepEqual(r.log.slice(i), [`canvas attrs ${poly.id}`, `code patch ${poly.id}:start`, 'overlay', 'stores', 'drafts'], 'after the stores');
+  for (const step of ['undo', 'redo'] as const) {
+    r.log.length = 0;
+    r.editor[step]();
+    assert.equal(r.log.at(-1), 'drafts', step);
+    assert.equal(r.log.filter((l) => l === 'drafts').length, 1, step);
+  }
+  const num = tokenIn(r, circleOf(r).id, 'number');
+  r.log.length = 0;
+  r.editor.scrubStart(num.block, num.token);
+  for (const steps of [1, 2, 3]) r.editor.scrub(steps);
+  assert.ok(!r.log.includes('drafts'), "a drag's frames are not changes");
+  r.editor.scrubEnd(true);
+  assert.equal(r.log.filter((l) => l === 'drafts').length, 1, 'its end is one');
+  r.log.length = 0;
+  r.editor.scrubStart(num.block, num.token);
+  r.editor.scrub(5);
+  r.editor.scrubEnd(false);
+  assert.equal(r.log.filter((l) => l === 'drafts').length, 1, 'a cancelled drag is heard too (the text is back)');
+});
+
+test('a read-only document refuses every edit and says why; selection and the view still work', () => {
+  const r = rig();
+  r.editor.open(SAMPLE);
+  r.editor.readOnly.set(true);
+  const c = circleOf(r);
+  const num = tokenIn(r, c.id, 'number');
+  const col = tokenIn(r, c.id, 'color');
+  const poly = element(doc(r), (n) => n.local === 'polyline');
+  const kw = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.editor.tapToken(kw.block, kw.token);
+  assert.equal(r.editor.notice.get(), READ_ONLY);
+  r.editor.notice.set(null);
+  r.editor.tapToken(col.block, col.token);
+  assert.equal(r.editor.sheet.get(), null, 'no sheet opens');
+  r.editor.tapToken(num.block, num.token);
+  r.editor.stepFocus(1);
+  r.editor.scrubStart(num.block, num.token);
+  r.editor.scrub(4);
+  r.editor.scrubEnd(true);
+  r.editor.select([c.id]);
+  r.editor.openSource();
+  assert.equal(r.editor.applySource(c.id, '<circle/>')?.message, READ_ONLY);
+  assert.equal(r.editor.source(), SAMPLE, 'nothing was written');
+  assert.equal(r.editor.notice.get(), READ_ONLY);
+  assert.deepEqual([...r.editor.selection.get()], [c.id], 'selection still works');
+  r.editor.zoomAt({ x: 10, y: 10 }, 2);
+  assert.equal(r.editor.view.scale, r.editor.fitScale * 2, 'and so does the view');
+  r.editor.readOnly.set(false);
+  r.editor.stepFocus(1);
+  assert.notEqual(r.editor.source(), SAMPLE, 'editable again');
 });
 
 // ── scrubbing ──────────────────────────────────────────────────────────────────────────────────

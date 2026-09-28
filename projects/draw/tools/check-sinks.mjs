@@ -34,6 +34,9 @@ const BANS = [
   ['dom-text', /\b(createElement|createTextNode|createDocumentFragment)\s*\(|\.(textContent|nodeValue|innerText|outerText)\s*=(?!=)/,
     ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts', 'projects/draw/src/codeview/']],
   ['storage', /\b(localStorage|sessionStorage|indexedDB|caches)\b|navigator\.storage/, ['projects/draw/src/platform/']],
+  // Files, the clipboard, the share sheet, Web Locks and the URL: read and written only in
+  // platform/ (the picker's File is handed there; the importer takes bytes and text).
+  ['file-api', /\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\b|\.arrayBuffer\s*\(|navigator\.(clipboard|share|canShare|locks)\b|history\.(replaceState|pushState)\s*\(/, ['projects/draw/src/platform/']],
   ['fetch', /\bfetch\s*\(|XMLHttpRequest|navigator\.sendBeacon|\bWebSocket\b|\bEventSource\b/, ['projects/draw/src/platform/', 'projects/draw/src/github/', 'projects/draw/src/export/']],
   ['password-field', /type\s*[=:]\s*["']password["']/, ['projects/draw/src/github/TokenForm.tsx']],
 ];

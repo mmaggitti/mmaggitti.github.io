@@ -12,7 +12,16 @@
 // keep the point under the fingers and the page never zooms, the selection outline sits on the
 // element at 400%, a scrub changes only its token's bytes and is one attribute mutation per frame
 // on a 2,000-node drawing, Edit source, undo and redo, the phone rules on the new layout, and the
-// initial JS budget. M4 adds files and drafts.
+// initial JS budget. P0-M4 adds files: opening through the file picker (.svg, .svgz, Latin-1), a
+// paste, a drop and an #import link, the import report, as-is and clean export byte for byte,
+// drafts that survive a reload and lock a second tab out, nothing opened any way running or
+// loading, the phone rules on the new sheets, a loud full quota, and the ledger loaded only for
+// the Support tab. The P0-M4 review adds: an edit made just before a real reload survives it, and
+// hiding the page saves; a link that arrives in an open tab waits for Open, and one only looked at
+// is not stored; UTF-16, .svgz and invalid bytes on export; the reminder an export clears; no
+// metadata under Editable; a failed save that stays loud across other drawings; a damaged draft
+// record and a panel that throws never blank the app; notices over the Files menu; the Files sheet
+// above the keyboard; and the Support search first, with each row's name.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
@@ -23,6 +32,9 @@ import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RE
 import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
 import { detentHeights } from '../src/detents.ts';
+import { encodeImport } from '../src/platform/files.ts';
+import { parseDoc } from '../../../engine/model/doc.ts';
+import { importReport } from '../../../engine/report/import-report.ts';
 import { decodePng } from './probe-helpers/png.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
@@ -83,6 +95,23 @@ export default async function run({ browser, origin }) {
   await check(aHandleDragLeavesTheNextTapWorking);
   await check(theOutlineStaysAboveTheDrawing);
   await check(initialJsBudget);
+  // P0-M4: files, drafts and export.
+  await check(openThroughTheFilePicker);
+  await check(pasteOpensSvg);
+  await check(dropOnTheCanvasOpens);
+  await check(importLinkRoundTrip);
+  await check(importReportBuckets);
+  await check(exportIsTheFileByteForByte);
+  await check(draftSurvivesReloadAndLocks);
+  await check(nothingOpenedRuns);
+  for (const height of [956, 796]) await check(phoneRulesOnTheFileSheets, height);
+  await check(aFullQuotaIsLoud);
+  await check(theLedgerLoadsOnlyForSupport);
+  // The P0-M4 review.
+  await check(aFailedSaveSurvivesSwitchingDrawings);
+  await check(aDamagedDraftNeverBlanksTheApp);
+  await check(noticesShowOverTheFilesMenu);
+  await check(theFilesSheetStaysAboveTheKeyboard);
   if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
 
@@ -1236,6 +1265,807 @@ async function initialJsBudget() {
   const bytes = urls.reduce((n, u) => n + gzipSync(readFileSync(join(SITE_DRAW, u.replace(/^\/draw\//, '')))).length, 0);
   must(bytes <= 250_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 250 KB budget`);
   console.log(`     draw: initial JS ${(bytes / 1000).toFixed(1)} KB gzipped (${urls.length} file${urls.length === 1 ? '' : 's'})`);
+}
+
+// ── P0-M4: files, drafts and export ────────────────────────────────────────────────────────────
+
+const corpusBytes = (rel) => readFileSync(join(CORPUS, rel));
+const corpusText = (rel) => readFileSync(join(CORPUS, rel), 'utf8');
+// A file that says ISO-8859-1 (read as windows-1252, as browsers do): é, and 0x80, which is €.
+const LATIN1 = Buffer.concat([
+  Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40"><title>Caf'),
+  Buffer.from([0xe9]),
+  Buffer.from('</title><text x="10" y="25">Caf'),
+  Buffer.from([0xe9, 0x20, 0x80]),
+  Buffer.from('</text></svg>\n'),
+]);
+// UTF-16 bytes, in either byte order.
+const utf16 = (text, le) => {
+  const out = Buffer.alloc(text.length * 2);
+  for (let i = 0; i < text.length; i++) (le ? out.writeUInt16LE : out.writeUInt16BE).call(out, text.charCodeAt(i), i * 2);
+  return out;
+};
+// Script in every form a file can carry it, and things that would load from elsewhere.
+const ACTIVE = `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" onload="window.__pwned='onload'">
+  <script>window.__pwned = 'script'</script>
+  <rect width="100" height="100" fill="#8ecae6" onclick="window.__pwned='onclick'"/>
+  <image href="https://example.com/x.png" width="10" height="10"/>
+  <use xlink:href="https://example.com/sprite.svg#a"/>
+  <a href="javascript:window.__pwned='link'"><circle cx="50" cy="50" r="20"/></a>
+  <foreignObject width="50" height="50"><iframe xmlns="${XHTML_NS}" src="https://example.com/"/></foreignObject>
+</svg>`;
+
+const firstIcon = () => 'icons/lucide/' + readdirSync(join(CORPUS, 'icons/lucide')).filter((f) => f.endsWith('.svg')).sort()[0];
+const source = (page) => page.evaluate(() => window.drawTest.source());
+const drawnCount = (page) => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelectorAll('svg, svg *').length);
+const bucketCounts = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.draw-bucket')].map((b) => [b.dataset.bucket, Number(b.dataset.count)])));
+
+async function openFilesMenu(page) {
+  await page.locator('.draw-files').tap();
+  await page.locator('.draw-open').waitFor();
+}
+
+// The Files menu's Open…: the picker's file input (accept lists .svg for iOS).
+async function pickFile(page, name, buffer) {
+  await openFilesMenu(page);
+  const input = page.locator('.draw-modal input[type="file"]');
+  must((await input.getAttribute('accept'))?.split(',').includes('.svg'), 'the file input does not list .svg (iOS offers only what it lists)');
+  await input.setInputFiles({ name, mimeType: 'image/svg+xml', buffer });
+  await page.locator('.draw-bucket, .draw-failure').first().waitFor();
+}
+
+async function closeModal(page) {
+  await page.locator('.draw-modal-done').tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+
+// Poll from node (the app's CSP blocks string predicates in the page).
+async function until(what, fn, ms = 3000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting until ${what}`);
+    await new Promise((ok) => setTimeout(ok, 50));
+  }
+}
+
+// Runs in the page: a paste event with this clipboard data, where a ⌘V (or the paste menu) sends it.
+function firePaste({ selector, data }) {
+  const dt = new DataTransfer();
+  for (const [type, text] of Object.entries(data)) dt.setData(type, text);
+  const e = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  (selector ? document.querySelector(selector) : document).dispatchEvent(e);
+  return e.defaultPrevented;
+}
+
+// Runs in the page: a file dropped on the canvas (dragover, then drop). WebKit builds without
+// DataTransferItemList.add fall back to the SVG as data, which the drop reads the same way.
+function fireDrop({ name, text }) {
+  const dt = new DataTransfer();
+  let file = true;
+  try {
+    dt.items.add(new File([text], name, { type: 'image/svg+xml' }));
+  } catch {
+    file = false;
+    dt.setData('image/svg+xml', text);
+  }
+  const area = document.querySelector('.draw-canvas');
+  const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+  area.dispatchEvent(over);
+  const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+  area.dispatchEvent(drop);
+  return { file, accepted: over.defaultPrevented, taken: drop.defaultPrevented };
+}
+
+// (a) Open… through the file input: a plain .svg, a gzip .svgz and a Latin-1 file each open whole
+// (the editor holds the file's text, the canvas draws it), named after the file, with the report.
+async function openThroughTheFilePicker(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const cases = [
+      ['a plain .svg', 'layers.svg', corpusBytes('tools/inkscape-1x-layers.svg'), corpusText('tools/inkscape-1x-layers.svg')],
+      ['a gzip .svgz', 'spinner.svgz', gzipSync(corpusBytes('lab/spin--js.svg')), corpusText('lab/spin--js.svg')],
+      ['a Latin-1 file', 'café.svg', LATIN1, new TextDecoder('windows-1252').decode(LATIN1)],
+    ];
+    for (const [what, name, buffer, text] of cases) {
+      await pickFile(page, name, buffer);
+      if (await page.locator('.draw-failure').count()) throw new Error(`${what}: ${await page.locator('.draw-failure').textContent()}`);
+      must(await source(page) === text, `${what}: the editor does not hold the file's text`);
+      must(await page.locator('.draw-name').textContent() === name.replace(/\.svgz?$/, ''), `${what}: the drawing is named ${await page.locator('.draw-name').textContent()}`);
+      must(await drawnCount(page) > 1, `${what}: the canvas draws nothing`);
+      await closeModal(page);
+    }
+    const drawn = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('text').textContent);
+    must(drawn === 'Café €', `the Latin-1 file's text draws as ${JSON.stringify(drawn)}`);
+    // A file that fails opens nowhere: the error and where, and the drawing that was open stays.
+    const before = await source(page);
+    await pickFile(page, 'broken.svg', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg">\n<rect width="1" height="1">\n</svg>'));
+    const said = await page.locator('.draw-failure').textContent();
+    must(said === 'Line 3, column 1: </svg> closes <rect>.', `a file that fails says ${JSON.stringify(said)}`);
+    must(await source(page) === before && await page.locator('.draw-name').textContent() === 'café', 'a file that fails replaced the drawing');
+    await closeModal(page);
+    // A file that isn't markup at all (a PNG) says so, not "line 1, column 1" over its bytes.
+    await pickFile(page, 'photo.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]));
+    const png = await page.locator('.draw-failure').textContent();
+    must(png === 'This isn’t an SVG file.', `a PNG says ${JSON.stringify(png)}`);
+    must(await page.locator('.draw-excerpt').count() === 0, 'a PNG shows an excerpt of its bytes');
+    await closeModal(page);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (b) Paste: the paste event's own clipboard data (no clipboard-read permission prompt). ⌘V outside
+// a field opens SVG (image/svg+xml before text/plain) and ignores plain words; the Files menu's
+// field takes a long-press paste on the phone; a paste that fails says where and keeps the drawing.
+async function pasteOpensSvg(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const icon = corpusText(firstIcon());
+    const taken = await page.evaluate(firePaste, { selector: null, data: { 'text/plain': 'just words' } });
+    must(!taken && await source(page) === SAMPLE, 'a paste of plain words outside a field did something');
+    must(await page.evaluate(firePaste, { selector: null, data: { 'text/plain': 'not this', 'image/svg+xml': icon } }), 'a paste of image/svg+xml was not taken');
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === icon, 'the pasted image/svg+xml did not open');
+    must(await page.locator('.draw-name').textContent() === 'Pasted drawing', 'a paste is not named "Pasted drawing"');
+    await closeModal(page);
+
+    const figma = corpusText('tools/figma-card-drop-shadow.svg');
+    await openFilesMenu(page);
+    await page.evaluate(firePaste, { selector: '.draw-paste', data: { 'text/plain': figma } });
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === figma, "the Files menu's paste field did not open what was pasted into it");
+    await closeModal(page);
+
+    const bad = '<svg xmlns="http://www.w3.org/2000/svg">\n  <g>\n    <rect width="4" height="4"/>\n  </svg>\n';
+    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': bad } });
+    await page.locator('.draw-failure').waitFor();
+    const said = await page.locator('.draw-failure').textContent();
+    must(said === 'Line 4, column 3: </svg> closes <g>.', `a paste that fails says ${JSON.stringify(said)}`);
+    must((await page.locator('.draw-excerpt').textContent()).includes('</svg>\n  ^'), 'the failure does not point at where it failed');
+    must(await source(page) === figma, 'a paste that fails changed the drawing');
+    await closeModal(page);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (c) A file dropped on the canvas opens (iPad, desktop): the canvas accepts the drag and takes the drop.
+async function dropOnTheCanvasOpens(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const text = corpusText('tools/sketch-symbol-mask.svg');
+    const r = await page.evaluate(fireDrop, { name: 'dropped-card.svg', text });
+    must(r.accepted, 'the canvas does not accept a dragged file (dragover not cancelled)');
+    must(r.taken, 'the canvas left the drop to the browser');
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === text, 'the dropped file did not open');
+    if (r.file) must(await page.locator('.draw-name').textContent() === 'dropped-card', 'a dropped file is not named after itself');
+    must(await drawnCount(page) > 1, 'the canvas draws nothing');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (d) An #import link (SVG Lab's "Open in Draw"): encoded here with the app's own encodeImport, it
+// opens on load with its report, and the fragment is gone from the URL at once. Only looked at, it
+// is not stored, so a reload shows the sample and imports nothing again; edited, it is a draft that
+// a reload reopens. One that arrives in an open tab (a hash change, which a page that opened Draw
+// can cause) opens only on Open: until then nothing changes, and Not now keeps the drawing.
+async function importLinkRoundTrip(browser, origin) {
+  const text = corpusText('tools/figma-gradient-mask-pattern.svg');
+  const link = `${origin}/draw/#${await encodeImport(text)}`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.goto('about:blank');
+    await page.goto(link, { waitUntil: 'networkidle' });
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === text, 'the #import link did not open its file');
+    must(await page.evaluate(() => location.hash) === '' && page.url() === `${origin}/draw/`, `the fragment is still in the URL: ${page.url().slice(0, 80)}`);
+    await closeModal(page);
+    await page.waitForTimeout(300);
+    must(await page.locator('.draw-save').count() === 0, 'a link only looked at became a draft');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(300);
+    must(await source(page) === SAMPLE, 'the reload did not show the sample: it imported the link again, or stored it');
+    must(await page.locator('.draw-modal').count() === 0, 'the reload showed a report: it imported the link again');
+
+    // Edited, the link is a draft, and the reload reopens it.
+    const linked = SAMPLE.replace('<title>A sun setting over two hills</title>', '<title>A linked sunset</title>');
+    await page.goto('about:blank');
+    await page.goto(`${origin}/draw/#${await encodeImport(linked)}`, { waitUntil: 'networkidle' });
+    await page.locator('.draw-bucket').first().waitFor();
+    await closeModal(page);
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    const edited = await source(page);
+    must(edited !== linked, 'test setup: the keyword did not change');
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await page.reload({ waitUntil: 'networkidle' });
+    await until('the edited link reopens as a draft', async () => (await source(page)) === edited);
+    must(await page.locator('.draw-name').textContent() === 'A linked sunset', 'the draft is not named by its <title>');
+    await openFilesMenu(page);
+    await page.locator('.draw-draft').first().waitFor();
+    must(await page.locator('.draw-draft').count() === 1, `the reload made ${await page.locator('.draw-draft').count()} drafts, not 1`);
+    await closeModal(page);
+
+    // A link that arrives in the open tab: offered, cleared from the URL at once, opened only on Open.
+    const icon = corpusText(firstIcon());
+    for (const t of [text, icon]) await page.evaluate((frag) => (location.hash = frag), await encodeImport(t));
+    await page.locator('.draw-link-open').waitFor({ timeout: 3000 }).catch(() => {
+      throw new Error('a link that arrived in the open tab was not offered first (Open, Not now)');
+    });
+    must(await page.evaluate(() => location.hash) === '', 'that fragment stayed in the URL');
+    must(await source(page) === edited, 'a link that arrived in the open tab opened without a tap');
+    await page.locator('.draw-link-not').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === edited, 'Not now changed the drawing');
+    await page.evaluate((frag) => (location.hash = frag), await encodeImport(icon));
+    await page.locator('.draw-link-open').tap();
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === icon, 'Open did not open the link');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (e) The import report after every open: the four buckets with the ledger's counts (the engine's
+// importReport, run here on the same file), a script under preview-only, Inkscape's data kept, the
+// notes; and the Files menu shows it again.
+async function importReportBuckets(browser, origin) {
+  const expect = (rel) => {
+    const r = parseDoc(corpusText(rel));
+    must(r.ok, `test setup: ${rel} does not parse`);
+    return importReport(r.doc);
+  };
+  await withPage(browser, origin, 956, async (page, errors) => {
+    for (const [rel, bucket, items] of [['lab/spin--js.svg', 'preview', ['<script>']], ['tools/inkscape-1x-layers.svg', 'kept', ['inkscape:label', '<rdf:RDF>', 'rdf:about']]]) {
+      await pickFile(page, rel.split('/').pop(), corpusBytes(rel));
+      const want = expect(rel);
+      const got = await bucketCounts(page);
+      must(JSON.stringify(got) === JSON.stringify(want.totals), `${rel}: the report shows ${JSON.stringify(got)}, not ${JSON.stringify(want.totals)}`);
+      must(got[bucket] > 0, `${rel}: nothing is ${bucket}`);
+      const listed = await page.locator(`.draw-group[data-bucket="${bucket}"] .draw-item`).allTextContents();
+      for (const item of items) must(listed.some((t) => t.startsWith(item)), `${rel}: ${item} is not listed under ${bucket} (${listed.slice(0, 6).join(', ')})`);
+      const notes = await page.locator('.draw-notes li').allTextContents();
+      must(JSON.stringify(notes) === JSON.stringify(want.notes), `${rel}: the notes are ${JSON.stringify(notes)}`);
+      // The file's Creative Commons block (RDF, Dublin Core) is metadata Draw keeps, never edits.
+      const editable = await page.locator('.draw-group[data-bucket="editable"] .draw-item .ds-mono').allTextContents();
+      const metadata = editable.filter((t) => /^<?(rdf|dc|dcterms|cc):/.test(t));
+      must(metadata.length === 0, `${rel}: metadata is listed as editable: ${metadata.join(', ')}`);
+      await closeModal(page);
+    }
+    await openFilesMenu(page);
+    await page.locator('.draw-report-again').tap();
+    await page.locator('.draw-bucket').first().waitFor();
+    must(JSON.stringify(await bucketCounts(page)) === JSON.stringify(expect('tools/inkscape-1x-layers.svg').totals), 'the Files menu does not show the open file\'s report again');
+    await closeModal(page);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (f) Export, captured as downloads (the share sheet is taken away, as on a desktop browser): the
+// as-is file is byte-identical to the file opened (CRLF and entities, a BOM, Latin-1, UTF-16 in
+// either byte order with or without a declaration), Save to Files too for now, and Clean has no
+// inkscape: or sodipodi: left and keeps the rest. Each export says so and closes the sheet. A .svgz
+// exports as its plain .svg (the sheet says uncompressed); a file with bytes that weren't valid
+// says the export differs. After an edit, as-is is what the editor holds; and an export clears
+// the draft's "not exported" reminder in the Files menu.
+async function exportIsTheFileByteForByte(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+    });
+    const exportAs = async (kind) => {
+      await page.locator('.draw-export').tap();
+      const go = page.locator(`.draw-export-go[data-kind="${kind}"]`);
+      await go.waitFor();
+      const [download] = await Promise.all([page.waitForEvent('download'), go.tap()]);
+      return { name: download.suggestedFilename(), bytes: readFileSync(await download.path()) };
+    };
+    // ASCII names: Chromium on Linux names a download "download" when its name can't be written in
+    // the system's locale (C in the container and in CI), which is no fault of Draw's.
+    for (const [name, bytes] of [['entities-crlf.svg', corpusBytes('tools/illustrator-cs6-entities-pgf.svg')], ['bom.svg', corpusBytes('tools/edge-utf8-bom.svg')], ['cafe-latin1.svg', LATIN1], ['wide-le.svg', utf16(`\uFEFF${SAMPLE}`, true)], ['wide-be.svg', utf16(`\uFEFF<?xml version="1.0" encoding="UTF-16"?>\n${SAMPLE}`, false)]]) {
+      await pickFile(page, name, bytes);
+      await closeModal(page);
+      for (const kind of ['as-is', 'working']) {
+        const got = await exportAs(kind);
+        must(got.name === name, `${kind}: the file is named ${got.name}, not ${name}`);
+        must(got.bytes.equals(bytes), `${name}: the ${kind} export differs from the file opened (${got.bytes.length} bytes, not ${bytes.length})`);
+        await page.locator('.draw-modal').waitFor({ state: 'detached' });
+        must(await page.locator('.draw-toast').textContent() === `Downloaded ${name}`, `${kind}: no "Downloaded" notice`);
+      }
+    }
+    await pickFile(page, 'poster.svg', corpusBytes('tools/inkscape-1x-layers.svg'));
+    await closeModal(page);
+    const clean = await exportAs('clean');
+    const text = clean.bytes.toString('utf8');
+    must(clean.name === 'poster-clean.svg', `the clean file is named ${clean.name}`);
+    must(!/inkscape:|sodipodi:/.test(text), 'the clean export still has inkscape: or sodipodi:');
+    must(text.includes('<dc:title>Poster</dc:title>') && text.includes('Summer  Fair'), 'the clean export lost more than editor data');
+
+    // A .svgz: as-is is the plain file, and the sheet says so.
+    await pickFile(page, 'spinner.svgz', gzipSync(corpusBytes('lab/spin--js.svg')));
+    await closeModal(page);
+    await page.locator('.draw-export').tap();
+    const say = await page.locator('.draw-export-go[data-kind="as-is"] + .draw-export-say').textContent();
+    must(/uncompressed/.test(say), `the sheet says "${say}" for a .svgz`);
+    await closeModal(page);
+    const plain = await exportAs('as-is');
+    must(plain.name === 'spinner.svg' && plain.bytes.equals(corpusBytes('lab/spin--js.svg')), `a .svgz exports as ${plain.name}, ${plain.bytes.length} bytes`);
+
+    // A byte that wasn't valid UTF-8 can't be written back: the sheet says the files differ there.
+    await pickFile(page, 'bad-byte.svg', Buffer.concat([Buffer.from(`<svg xmlns="${SVG_NS}" viewBox="0 0 10 10"><title>Caf`), Buffer.from([0xe9]), Buffer.from('</title></svg>')]));
+    must((await page.locator('.draw-notes li').first().textContent()).startsWith('Some bytes in the file aren’t valid UTF-8'), 'the report does not say some bytes were not valid');
+    await closeModal(page);
+    await page.locator('.draw-export').tap();
+    await page.locator('.draw-lossy').waitFor({ timeout: 2000 }).catch(() => {
+      throw new Error('the Export sheet does not say the files differ where bytes were not valid');
+    });
+    await closeModal(page);
+
+    // After an edit, as-is is the edited file, byte for byte; and an export clears the draft's
+    // "not exported" reminder (six days on, by the page's clock: set before a reload, so the app
+    // reads time from it).
+    await page.clock.setFixedTime(new Date());
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+    });
+    await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    const edited = await source(page);
+    must(edited !== SAMPLE, 'test setup: the keyword did not change');
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await page.clock.setFixedTime(new Date(Date.now() + 6 * 86_400_000));
+    const reminder = async () => {
+      await openFilesMenu(page);
+      const row = page.locator('.draw-draft', { hasText: 'sunset' });
+      await row.waitFor();
+      const said = await row.locator('.draw-draft-remind').textContent({ timeout: 500 }).catch(() => null);
+      await closeModal(page);
+      return said;
+    };
+    const before = await reminder();
+    must(before === 'Never exported for 6 days', `six days on, the draft says ${JSON.stringify(before)}`);
+    const asIs = await exportAs('as-is');
+    must(asIs.bytes.toString('utf8') === edited, 'the as-is export is not what the editor holds after an edit');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await reminder() === null, 'the draft still says it was not exported, after an export');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (g) Drafts: an opened file is a draft at once, an edit is saved at once on pagehide and when the
+// page is hidden (not a second later), and one made just before a real reload (the page unloading,
+// as on closing the tab) is there when it reopens (IndexedDB). A second page in the same browser
+// opens the same draft read-only (Web Locks): it says so, and refuses an edit with a notice.
+async function draftSurvivesReloadAndLocks(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first()); // stroke-linecap
+    // At once, well inside the debounce: pagehide must save now, not a second after the edit.
+    const was = await page.evaluate(() => {
+      const was = document.querySelector('.draw-save').dataset.save;
+      window.dispatchEvent(new PageTransitionEvent('pagehide'));
+      return was;
+    });
+    must(was === 'pending', `an edit did not wait for the debounce (the save state was ${was})`);
+    await page.locator('.draw-save[data-save="saved"]').waitFor({ timeout: 600 }).catch(() => {
+      throw new Error('pagehide did not save at once (the debounce is 1 s)');
+    });
+    must(await source(page) === SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="square"'), 'test setup: the keyword did not change');
+
+    // The page hidden (the app switcher, a locked phone): saved at once too.
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    const hid = await page.evaluate(() => {
+      const was = document.querySelector('.draw-save').dataset.save;
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      return was;
+    });
+    must(hid === 'pending', `an edit did not wait for the debounce (the save state was ${hid})`);
+    await page.locator('.draw-save[data-save="saved"]').waitFor({ timeout: 600 }).catch(() => {
+      throw new Error('hiding the page did not save at once (the debounce is 1 s)');
+    });
+    await page.evaluate(() => delete document.visibilityState);
+
+    // A real unload, right after an edit: the save pagehide starts must land though the page goes.
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').nth(1)); // stroke-linejoin
+    const edited = await source(page);
+    must(await page.locator('.draw-save').getAttribute('data-save') === 'pending', 'test setup: the last edit is not waiting for the debounce');
+    await page.reload({ waitUntil: 'networkidle' });
+    await until('the draft reopens after the reload', async () => (await source(page)) === edited).catch(async () => {
+      throw new Error(`the edit made just before a real reload was lost (the draft reopened ${(await source(page)) === SAMPLE ? 'as the sample' : 'without it'})`);
+    });
+    must(await page.locator('.draw-name').textContent() === 'sunset', 'the reopened draft lost its name');
+
+    const second = await context.newPage();
+    const errors2 = [];
+    second.on('pageerror', (e) => errors2.push(`uncaught: ${e.message}`));
+    second.on('console', (m) => m.type() === 'error' && errors2.push(`console error: ${m.text()}`));
+    await second.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
+    await until('the second page opens the draft', async () => (await source(second)) === edited);
+    await second.locator('.draw-alert', { hasText: 'read-only' }).waitFor({ timeout: 5000 }).catch(() => {
+      throw new Error('the second page does not say the drawing is read-only (Web Locks)');
+    });
+    must(await second.locator('.draw-save').textContent() === 'Read-only', 'the second page does not say Read-only');
+    await showCode(second);
+    await tapToken(second.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    must(await source(second) === edited, 'the read-only page wrote an edit');
+    must((await second.locator('.draw-toast').textContent()).includes('read-only'), 'the refused edit says nothing');
+    await second.close();
+    must(errors.length + errors2.length === 0, `errors:\n${[...errors, ...errors2].join('\n')}`);
+  });
+}
+
+// (h) Nothing opened runs script, loads from elsewhere or violates the CSP, whichever way it comes
+// in: the file picker, a paste, a drop and an #import link, each with a script, handlers, a
+// javascript: link, and images, a <use> and an iframe pointing at another origin.
+async function nothingOpenedRuns(browser, origin) {
+  const link = `${origin}/draw/#${await encodeImport(ACTIVE)}`;
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    const quiet = watch(page, context, origin);
+    const ways = {
+      'the file picker': () => pickFile(page, 'active.svg', Buffer.from(ACTIVE)),
+      'a paste': () => page.evaluate(firePaste, { selector: null, data: { 'text/plain': ACTIVE } }),
+      'a drop': () => page.evaluate(fireDrop, { name: 'active.svg', text: ACTIVE }),
+    };
+    for (const [way, open] of Object.entries(ways)) {
+      await open();
+      await page.locator('.draw-bucket').first().waitFor();
+      must(await source(page) === ACTIVE, `${way}: the file did not open`);
+      await closeModal(page);
+      await page.touchscreen.tap(220, 300); // on the drawing: its onclick and its link, if they were there
+      const r = await page.evaluate(() => {
+        const root = document.querySelector('.draw-host').shadowRoot;
+        const bad = [...root.querySelectorAll('*')].filter((el) => /^(script|iframe)$/i.test(el.localName) || [...el.attributes].some((a) => /^on/i.test(a.name) || /javascript:/i.test(a.value)));
+        return { pwned: window.__pwned ?? null, bad: bad.map((el) => el.localName) };
+      });
+      must(r.pwned === null, `${way}: script ran (${r.pwned})`);
+      must(r.bad.length === 0, `${way}: the canvas holds ${r.bad.join(', ')}`);
+    }
+    await quiet('files opened three ways');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.goto('about:blank');
+    const away = [];
+    page.on('request', (r) => !/^(data|blob):/.test(r.url()) && !r.url().startsWith(`${origin}/`) && away.push(r.url().slice(0, 80)));
+    await page.goto(link, { waitUntil: 'networkidle' });
+    await page.locator('.draw-bucket').first().waitFor();
+    must(await source(page) === ACTIVE, 'the #import link did not open');
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({ pwned: window.__pwned ?? null, violations: window.__violations }));
+    must(r.pwned === null, `the #import link ran script (${r.pwned})`);
+    must(away.length === 0, `the #import link loaded from elsewhere: ${away.join(', ')}`);
+    must(r.violations.length === 0, `the #import link violated the CSP: ${r.violations.join(', ')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (i) The phone rules on every new sheet and state: the Files menu with drafts, the import report,
+// a failed open, Export, the Open link sheet, the Support tab at half and full, and the read-only
+// alert; each modal sits inside the screen.
+async function phoneRulesOnTheFileSheets(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors, context) => {
+    const problems = [];
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+      const modal = await page.evaluate(() => document.querySelector('.draw-modal')?.getBoundingClientRect().toJSON() ?? null);
+      if (modal && (modal.top < 0 || modal.bottom > r.ch + 0.5 || modal.left < 0 || modal.right > r.cw + 0.5)) problems.push(`${state}: the sheet ${rect(modal)} is not inside the screen`);
+    };
+    await pickFile(page, 'spinner.svg', corpusBytes('lab/spin--js.svg'));
+    await rules('the import report');
+    await closeModal(page);
+    await pickFile(page, 'layers.svg', corpusBytes('tools/inkscape-1x-layers.svg'));
+    await closeModal(page);
+    await openFilesMenu(page);
+    await page.locator('.draw-draft-delete').first().waitFor();
+    await rules('the Files menu with drafts');
+    await page.locator('.draw-draft-delete').first().tap();
+    must(await page.locator('.draw-draft-delete').first().textContent() === 'Delete?', 'Delete does not ask again first');
+    await rules('the Files menu asking to delete');
+    await closeModal(page);
+    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>' } });
+    await page.locator('.draw-failure').waitFor();
+    await rules('a failed open');
+    await closeModal(page);
+    await page.locator('.draw-export').tap();
+    await page.locator('.draw-export-go').first().waitFor();
+    await rules('Export');
+    await closeModal(page);
+    await page.evaluate((frag) => (location.hash = frag), await encodeImport(SAMPLE));
+    await page.locator('.draw-link-open').waitFor();
+    await rules('the Open link sheet');
+    await page.locator('.draw-link-not').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Support' }).tap();
+    await page.locator('.draw-ledger-row').first().waitFor();
+    await rules('the Support tab at half');
+    await page.locator('.draw-handle').tap();
+    await rules('the Support tab at full');
+    const second = await context.newPage();
+    await second.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
+    await second.locator('.draw-alert').waitFor();
+    const r = await second.evaluate(rulesNow, TAP_MIN);
+    if (r.small.length || r.sw > r.cw || r.sh > r.ch) problems.push(`the read-only alert: ${JSON.stringify({ small: r.small, sw: r.sw, cw: r.cw, sh: r.sh, ch: r.ch })}`);
+    await second.close();
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A full quota is loud and stays: when IndexedDB refuses a write for lack of space, an alert under
+// the top bar says to export now (with a button that opens Export) and stays through the next
+// change, until a save succeeds.
+async function aFullQuotaIsLoud(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      const put = IDBObjectStore.prototype.put;
+      window.__full = true;
+      IDBObjectStore.prototype.put = function (...args) {
+        if (window.__full) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        return put.apply(this, args);
+      };
+    });
+    await pickFile(page, 'big.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    const alert = page.locator('.draw-alert--loud');
+    await alert.waitFor({ timeout: 5000 }).catch(() => {
+      throw new Error('a full quota shows no alert');
+    });
+    must((await alert.textContent()).includes('export this drawing now'), `the alert says ${JSON.stringify(await alert.textContent())}`);
+    must((await alert.textContent()).includes('“big”'), `the alert does not say which drawing isn't saved: ${JSON.stringify(await alert.textContent())}`);
+    must(await alert.getAttribute('role') === 'alert', 'the quota message is not an alert');
+    must(await page.locator('.draw-save').textContent() === 'Not saved', 'the top bar does not say Not saved');
+    const r = await page.evaluate(rulesNow, TAP_MIN);
+    must(r.small.length === 0 && r.sh <= r.ch && r.sw <= r.cw, `the alert breaks the phone rules: ${JSON.stringify(r.small)} ${r.sw}/${r.cw} ${r.sh}/${r.ch}`);
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    await page.waitForTimeout(1500);
+    must(await alert.isVisible(), 'the alert went away while nothing was saved');
+    await page.locator('.draw-alert-go').tap();
+    await page.locator('.draw-export-go').first().waitFor();
+    await closeModal(page);
+    await page.evaluate(() => (window.__full = false));
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    must(await alert.count() === 0, 'the alert stayed after a save succeeded');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// (j) The ledger (about 400 KB) is not in the initial JS: it loads when the Support tab first
+// opens, which then summarizes it and searches its rows (the search first, each capability and
+// feature row with its name).
+async function theLedgerLoadsOnlyForSupport(browser, origin) {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  const initial = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
+  for (const u of initial) must(!readFileSync(join(SITE_DRAW, u.replace(/^\/draw\//, '')), 'utf8').includes('feature:support-tab'), `the ledger is in the initial JS (${u})`);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const loaded = [];
+    page.on('request', (r) => loaded.push(r.url()));
+    await page.waitForTimeout(300);
+    const before = loaded.length;
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Support' }).tap();
+    await page.locator('.draw-ledger-row').first().waitFor();
+    const fetched = loaded.slice(before).filter((u) => u.endsWith('.js'));
+    must(fetched.length >= 1, 'the Support tab showed the ledger without loading it: it was in the initial bundle');
+    const phase = await page.locator('.draw-tally[data-tally="phase"] .ds-row').allTextContents();
+    must(phase.some((t) => t.startsWith('P0')), `the summary by phase shows ${phase.join(' | ')}`);
+    // The search is on the first screen of the tab at half, above the summary, not screens down.
+    const at = await page.evaluate(() => {
+      const body = document.querySelector('.draw-sheet-body').getBoundingClientRect();
+      const field = document.querySelector('.draw-ledger-search').getBoundingClientRect();
+      const tally = document.querySelector('.draw-tally').getBoundingClientRect();
+      return { fieldBottom: field.bottom - body.top, bodyHeight: body.height, aboveTally: field.bottom <= tally.top };
+    });
+    must(at.fieldBottom <= at.bodyHeight && at.aboveTally, `the search is ${Math.round(at.fieldBottom)}pt into a ${Math.round(at.bodyHeight)}pt tab, ${at.aboveTally ? 'above' : 'below'} the summary`);
+    await page.locator('.draw-ledger-search').fill('feature:support-tab');
+    await until('the search narrows the rows', async () => (await page.locator('.draw-ledger-row').count()) === 1);
+    const row = await page.locator('.draw-ledger-row').textContent();
+    must(row.includes('feature:support-tab') && row.includes('P0'), `the search found ${row}`);
+    must(row.includes('the ledger in the app'), `a feature row does not show its name: ${row}`);
+    must(await page.locator('.draw-tally').count() === 0, 'the summary stays between the search and the rows it found');
+    await page.locator('.draw-ledger-search').fill('capability:code/download');
+    await until('the search finds the capability', async () => (await page.locator('.draw-ledger-row').count()) === 1);
+    must((await page.locator('.draw-ledger-row').textContent()).includes('Download (shown only when downloads are available'), 'a capability row does not show its name');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The P0-M4 review: a drawing whose save failed stays loud while another is open (the alert names
+// it and offers Files), and reopening its draft brings its unsaved changes back; freeing space
+// stores them.
+async function aFailedSaveSurvivesSwitchingDrawings(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await pickFile(page, 'other.svg', Buffer.from(`<svg xmlns="${SVG_NS}" viewBox="0 0 10 10"><rect width="5" height="5"/></svg>`));
+    await closeModal(page);
+    await pickFile(page, 'mine.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await page.evaluate(() => {
+      const put = IDBObjectStore.prototype.put;
+      window.__full = true;
+      IDBObjectStore.prototype.put = function (...args) {
+        if (window.__full) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        return put.apply(this, args);
+      };
+    });
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    const unsaved = await source(page);
+    const alert = page.locator('.draw-alert--loud');
+    await alert.waitFor({ timeout: 5000 });
+    await openFilesMenu(page);
+    await page.locator('.draw-draft', { hasText: 'other' }).locator('.draw-draft-open').tap();
+    await until('the other drawing opens', async () => (await page.locator('.draw-name').textContent()) === 'other');
+    await page.waitForTimeout(300);
+    must(await alert.isVisible(), 'opening another drawing hid the alert while the first one is not saved');
+    const said = await alert.textContent();
+    must(said.includes('your last changes to “mine” aren’t saved') && (await page.locator('.draw-alert-go').textContent()) === 'Files', `the alert over another drawing says ${JSON.stringify(said)}`);
+    await page.locator('.draw-alert-go').tap();
+    await page.locator('.draw-draft', { hasText: 'mine' }).locator('.draw-draft-open').tap();
+    await until('the drawing reopens with its unsaved change', async () => (await source(page)) === unsaved).catch(() => {
+      throw new Error('reopening the drawing whose save failed lost its change');
+    });
+    must((await page.locator('.draw-alert-go').textContent()) === 'Export now', 'the alert about the open drawing does not offer Export now');
+    must(await page.locator('.draw-save').textContent() !== 'Read-only', 'the drawing reopened read-only (its own lock)');
+    await page.evaluate(() => (window.__full = false));
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first());
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    must(await alert.count() === 0, 'the alert stayed after the save succeeded');
+    const kept = await page.evaluate(() => window.drawTest.source());
+    await page.reload({ waitUntil: 'networkidle' });
+    await until('the saved drawing reopens', async () => (await source(page)) === kept);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The P0-M4 review: IndexedDB is shared by every project on this origin, so a record there that
+// isn't a draft Draw wrote must never reach the app: Draw loads, and the Files menu lists it as
+// unreadable with Delete only. And a panel that throws while it renders shows a message and Files
+// (the error boundary), never a blank page; the drawing stays.
+async function aDamagedDraftNeverBlanksTheApp(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => new Promise((ok, bad) => {
+      const r = indexedDB.open('draw');
+      r.onupgradeneeded = () => r.result.createObjectStore('drafts');
+      r.onsuccess = () => {
+        const tx = r.result.transaction('drafts', 'readwrite');
+        tx.objectStore('drafts').put({ id: 'evil', name: { x: 1 }, text: 42, created: 0, updated: 9e15, exported: null, versions: [] }, 'draft:evil');
+        tx.oncomplete = () => (r.result.close(), ok());
+        tx.onerror = () => bad(tx.error);
+      };
+      r.onerror = () => bad(r.error);
+    }));
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(300);
+    must(await source(page) === SAMPLE && await page.locator('.draw-name').textContent() === 'Sample', 'a damaged record changed what opened');
+    await openFilesMenu(page);
+    const row = page.locator('.draw-draft[data-unreadable]');
+    await row.waitFor();
+    must((await row.textContent()).startsWith('Unreadable draft'), `the damaged record is listed as ${JSON.stringify(await row.textContent())}`);
+    must(await row.locator('.draw-draft-open').evaluate((el) => el.tagName) !== 'BUTTON', 'an unreadable draft can be opened');
+    await row.locator('.draw-draft-delete').tap();
+    await row.locator('.draw-draft-delete').tap(); // Delete? — yes
+    await row.waitFor({ state: 'detached' });
+    await closeModal(page);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+
+    // A crash while a sheet renders (injected: the failure sheet's caret throws).
+    await page.evaluate(() => {
+      const repeat = String.prototype.repeat;
+      String.prototype.repeat = function (n) {
+        if (window.__crash) throw new Error('injected crash');
+        return repeat.call(this, n);
+      };
+      window.__crash = true;
+    });
+    errors.length = 0;
+    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': `<svg xmlns="${SVG_NS}"><g></svg>` } });
+    const crash = page.locator('.draw-crash');
+    await crash.waitFor({ timeout: 3000 }).catch(() => {
+      throw new Error('a panel that threw left no message');
+    });
+    await page.evaluate(() => (window.__crash = false));
+    must((await crash.textContent()).includes('injected crash'), `the message says ${JSON.stringify(await crash.textContent())}`);
+    must(await page.evaluate(() => document.getElementById('root').childElementCount) > 0, 'the page went blank');
+    must(await source(page) === SAMPLE && await drawnCount(page) > 1, 'the drawing did not stay');
+    must(errors.every((e) => e.includes('injected crash') || e.includes('The above error occurred')), `errors other than the injected one:\n${errors.join('\n')}`);
+    const r = await page.evaluate(rulesNow, TAP_MIN);
+    must(r.small.length === 0 && r.sw <= r.cw && r.sh <= r.ch, `the message breaks the phone rules: ${JSON.stringify(r.small)} ${r.sw}/${r.cw} ${r.sh}/${r.ch}`);
+    await crash.locator('.draw-alert-go').tap();
+    await page.locator('.draw-open').waitFor({ timeout: 3000 }).catch(() => {
+      throw new Error('Files in the message does not open the Files menu');
+    });
+    must(await crash.count() === 0, 'the message stayed after Files');
+  });
+}
+
+// The P0-M4 review: a notice raised from inside the Files menu ("That draft is gone") shows above
+// the sheet, not hidden under it.
+async function noticesShowOverTheFilesMenu(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await pickFile(page, 'gone.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await pickFile(page, 'kept.svg', Buffer.from(`<svg xmlns="${SVG_NS}" viewBox="0 0 10 10"/>`));
+    await closeModal(page);
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await openFilesMenu(page);
+    await page.locator('.draw-draft', { hasText: 'gone' }).waitFor();
+    // Another tab deletes it while this menu is open.
+    await page.evaluate(() => new Promise((ok) => {
+      const r = indexedDB.open('draw');
+      r.onsuccess = () => {
+        const store = r.result.transaction('drafts', 'readwrite').objectStore('drafts');
+        const all = store.getAll();
+        all.onsuccess = () => {
+          const d = all.result.find((x) => x.name === 'gone');
+          store.delete(`draft:${d.id}`).onsuccess = () => (r.result.close(), ok());
+        };
+      };
+    }));
+    await page.locator('.draw-draft', { hasText: 'gone' }).locator('.draw-draft-open').tap();
+    const toast = page.locator('.draw-toast');
+    await toast.waitFor();
+    must((await toast.textContent()) === 'That draft is gone', `the notice says ${JSON.stringify(await toast.textContent())}`);
+    must(await page.locator('.draw-modal').count() === 1, 'test setup: the Files menu closed');
+    const top = await toast.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      el.style.pointerEvents = 'auto'; // the notice takes no taps; this only asks what is on top there
+      const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      el.style.pointerEvents = '';
+      return hit === el || el.contains(hit) ? null : `${hit?.tagName}.${hit?.className}`;
+    });
+    must(top === null, `the notice is under ${top}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The P0-M4 review: with the on-screen keyboard up (the visual viewport 336pt shorter, as iOS
+// reports it), the Files sheet sits above the keyboard and inside what is left of the screen: its
+// Done and its paste field are visible, with ten drafts listed.
+async function theFilesSheetStaysAboveTheKeyboard(browser, origin) {
+  await withPage(browser, origin, 796, async (page, errors) => {
+    await page.evaluate(() => new Promise((ok) => {
+      const r = indexedDB.open('draw');
+      r.onupgradeneeded = () => r.result.createObjectStore('drafts');
+      r.onsuccess = () => {
+        const tx = r.result.transaction('drafts', 'readwrite');
+        const now = Date.now();
+        for (let i = 0; i < 10; i++) {
+          const text = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="${i + 1}" height="1"/></svg>`;
+          tx.objectStore('drafts').put({ id: `d${i}`, name: `Drawing ${i}`, text, created: now, updated: now - i, exported: null, versions: [{ at: now, text }] }, `draft:d${i}`);
+        }
+        tx.oncomplete = () => (r.result.close(), ok());
+      };
+    }));
+    await openFilesMenu(page);
+    await until('ten drafts are listed', async () => (await page.locator('.draw-draft').count()) === 10);
+    await page.locator('.draw-paste').focus();
+    const KB = 336;
+    await page.evaluate((h) => {
+      const vv = window.visualViewport;
+      Object.defineProperty(vv, 'height', { get: () => h, configurable: true });
+      vv.dispatchEvent(new Event('resize'));
+    }, 796 - KB);
+    await twoFrames(page);
+    const r = await page.evaluate(() => {
+      const box = (sel) => document.querySelector(sel).getBoundingClientRect();
+      return { modal: box('.draw-modal').toJSON(), done: box('.draw-modal-done').toJSON(), paste: box('.draw-paste').toJSON(), visible: window.visualViewport.height };
+    });
+    must(r.modal.bottom <= r.visible + 0.5, `the sheet's bottom (${Math.round(r.modal.bottom)}) is under the keyboard (the screen above it is ${r.visible})`);
+    for (const [what, b] of [['the sheet', r.modal], ['Done', r.done], ['the paste field', r.paste]]) {
+      must(b.top >= 0 && b.bottom <= r.visible + 0.5, `${what} (${Math.round(b.top)}–${Math.round(b.bottom)}) is off the screen left above the keyboard (0–${r.visible})`);
+    }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
 }
 
 // Runs in the page: open each file through drawTest, then read what reached the shadow root.

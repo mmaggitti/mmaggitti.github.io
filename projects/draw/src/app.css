@@ -16,13 +16,28 @@
 .draw-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   min-height: var(--tap-min);
-  padding: 0 0 0 var(--space-4);
-  box-shadow: inset 0 -1px 0 var(--line); /* a hairline inside the 44pt, which the Fit button fills */
+  padding: 0;
+  box-shadow: inset 0 -1px 0 var(--line); /* a hairline inside the 44pt, which the bar's buttons fill */
   background: var(--bg);
 }
-.draw-name { font-weight: 700; font-size: var(--text-md); }
+/* The drawing's name and its save state take what the buttons leave, cut short with an ellipsis. */
+.draw-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); overflow: hidden; }
+.draw-name { min-width: 0; font-weight: 700; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draw-save { flex: 0 0 auto; color: var(--text-muted); }
+.draw-save[data-save="failed"] { color: #b3261e; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .draw-save[data-save="failed"] { color: #f2b8b5; } }
+.draw-bar-btn {
+  flex: 0 0 auto;
+  min-width: max(var(--tap-min), 4.5rem);
+  min-height: var(--tap-min);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 600 var(--text-sm) / 1 var(--font-ui);
+  touch-action: manipulation;
+}
 .draw-badge {
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
@@ -212,7 +227,7 @@
   left: var(--space-3);
   right: var(--space-3);
   bottom: calc(100% + var(--space-2));
-  z-index: 5;
+  z-index: 12; /* above the modal sheets (scrim 10, sheet 11): a notice raised from the Files menu shows */
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
@@ -331,3 +346,117 @@
 .draw-problem { margin: var(--space-2) 0 0; color: #b3261e; font-size: var(--text-sm); }
 @media (prefers-color-scheme: dark) { .draw-problem { color: #f2b8b5; } }
 .draw-actions { display: flex; gap: var(--space-3); margin-top: var(--space-3); }
+
+/* ── Alerts under the top bar: storage failed (loud), or read-only here ───── */
+
+.draw-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.draw-alert-text { flex: 1; min-width: 0; margin: 0; }
+.draw-alert--loud { background: #b3261e; color: #fff; border-color: #b3261e; font-weight: 600; }
+.draw-alert--loud .draw-alert-go { background: #fff; color: #b3261e; border-color: #fff; font-size: var(--text-sm); }
+
+/* ── The file sheets: Files, the import report, Export ─────────────────────── */
+
+.draw-modal .draw-actions:first-child { margin-top: 0; }
+.draw-paste {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  resize: none;
+  font-family: var(--font-ui);
+  line-height: 1.2;
+}
+.draw-report-again { display: block; width: 100%; margin-top: var(--space-3); }
+.draw-subhead { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-md); }
+.draw-hint-text { margin: 0 0 var(--space-2); }
+.draw-drafts, .draw-exports, .draw-notes, .draw-ledger { margin: 0; padding: 0; list-style: none; }
+.draw-draft { display: flex; align-items: stretch; gap: var(--space-2); border-top: 1px solid var(--line); }
+.draw-draft[data-open] .draw-draft-name::after { content: " ●"; color: var(--accent); }
+.draw-draft-open {
+  flex: 1;
+  min-width: 0;
+  min-height: max(var(--tap-min), var(--control-h));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.125rem;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  touch-action: manipulation;
+}
+.draw-draft-name { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draw-draft-meta { color: var(--text-muted); }
+.draw-draft-remind { color: #8a5a00; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .draw-draft-remind { color: #f2c94c; } }
+.draw-draft-delete { align-self: center; font-size: var(--text-sm); }
+
+.draw-buckets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.draw-bucket {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.draw-bucket[data-count="0"] { color: var(--text-muted); }
+.draw-bucket-count { font-size: var(--text-lg); font-weight: 700; }
+.draw-notes { margin-top: var(--space-3); font-size: var(--text-sm); }
+.draw-notes li { margin: var(--space-1) 0; padding-left: var(--space-3); border-left: 3px solid var(--line); }
+.draw-group { margin-top: var(--space-2); }
+.draw-items { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); padding: 0; list-style: none; }
+.draw-item {
+  display: inline-flex;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 0.125rem var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.draw-item, .draw-bucket-label { overflow-wrap: anywhere; }
+.draw-item-count { color: var(--text-muted); }
+.draw-excerpt {
+  max-width: 100%;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  white-space: pre;
+}
+.draw-failure { margin-top: 0; font-size: var(--text-md); }
+
+.draw-export-row { padding: var(--space-2) 0; border-top: 1px solid var(--line); }
+.draw-export-row:first-child { border-top: 0; padding-top: 0; }
+.draw-export-go { display: block; width: 100%; }
+.draw-export-say { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+
+/* ── The Support tab: the ledger in the app ─────────────────────────────────── */
+
+.draw-support { padding: var(--space-3) var(--space-4) var(--space-6); }
+.draw-support-pad { margin: var(--space-4); }
+.draw-support-lead { margin: 0; }
+.draw-tally { margin: 0; font-size: var(--text-sm); }
+.draw-ledger-search { margin-top: var(--space-4); }
+.draw-ledger-count { margin: var(--space-2) 0; }
+.draw-ledger-row { display: flex; flex-direction: column; gap: 0.125rem; padding: var(--space-2) 0; border-top: 1px solid var(--line); }
+.draw-ledger-id { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.draw-ledger-name { overflow-wrap: anywhere; }
+.draw-ledger-meta { color: var(--text-muted); }
+.draw-ledger-note { overflow-wrap: anywhere; }

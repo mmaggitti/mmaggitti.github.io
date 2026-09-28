@@ -127,6 +127,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
     parsing and stylesheet writes (`dom-write`). Plain elements and text (`dom-text`) are also
     allowed in `src/codeview/`, which shows the source as text and never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
+  - file, clipboard, drag-and-drop, share, Web Locks and history APIs outside `src/platform/`
+    (`file-api`);
   - a password field outside `src/github/TokenForm.tsx`;
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
 - **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every
@@ -151,6 +153,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
     in CI). A script-bearing design keeps its source only in its escaped `.draw.json` sidecar.
   - `index.json` is generated at build, never committed.
   - The GitHub token comes from Mark at run time (Keychain-filled, memory only), never from a file.
+- **Device checks:** `projects/draw/DEVICE-CHECKS.md` lists what CI can't prove (gesture feel, iOS
+  pickers and share sheets, the keyboard, storage); Mark signs it on his phone for each phase.
 - **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit) → vite build →
   library-index`. It runs inside `npm run build`, so CI gates all of it.
 

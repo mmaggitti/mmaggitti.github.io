@@ -7,8 +7,12 @@
 //   overwrite each other; the second tab opens it read-only.
 // - A full storage quota is an error the UI must show, never a silent loss.
 // - The storage is a small key-value interface: IndexedDB (idb-keyval) in the app, memory in tests.
+// - A record is read as a draft only when it is one: every project on this origin can write Draw's
+//   IndexedDB, so a record that isn't what Draw writes is listed as unreadable (to delete), and
+//   loading it throws. Nothing downstream ever sees a name or a text that isn't a string.
+// - A write commits at once, so one started while the page goes away (pagehide) still lands.
 
-import { createStore, del, get, keys, set } from 'idb-keyval';
+import { createStore, del, get, keys, promisifyRequest } from 'idb-keyval';
 
 export interface KV {
   get<T>(key: string): Promise<T | undefined>;
@@ -21,7 +25,14 @@ export function idbKV(): KV {
   const store = createStore('draw', 'drafts');
   return {
     get: (k) => get(k, store),
-    set: (k, v) => set(k, v, store),
+    // idb-keyval's set, plus commit(): the page may be going away (pagehide), and a transaction left
+    // to auto-commit at the end of the task is lost with it.
+    set: (k, v) =>
+      store('readwrite', (s) => {
+        s.put(v, k);
+        s.transaction.commit?.();
+        return promisifyRequest(s.transaction);
+      }),
     del: (k) => del(k, store),
     keys: async () => (await keys(store)).map(String),
   };
@@ -58,14 +69,38 @@ export interface Draft {
 export interface DraftSummary {
   id: string;
   name: string;
+  created: number;
   updated: number;
   exported: number | null;
   remind: boolean; // not exported for REMIND_AFTER_DAYS
+  /** A record under a draft key that is not a draft Draw wrote: it can only be deleted. */
+  unreadable?: true;
 }
 
 export class QuotaError extends Error {}
 
-const key = (id: string) => `draft:${id}`;
+/** A record under a draft's key that is not a draft (another script on the origin, or damage). */
+export class UnreadableDraftError extends Error {}
+
+const PREFIX = 'draft:';
+const key = (id: string) => `${PREFIX}${id}`;
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** A draft only if every field is what Draw writes, and it is stored under its own id. */
+export function isDraft(v: unknown, id: string): v is Draft {
+  if (typeof v !== 'object' || v === null) return false;
+  const d = v as Record<string, unknown>;
+  return (
+    d.id === id &&
+    typeof d.name === 'string' &&
+    typeof d.text === 'string' &&
+    finite(d.created) &&
+    finite(d.updated) &&
+    (d.exported === null || finite(d.exported)) &&
+    Array.isArray(d.versions) &&
+    d.versions.every((x: unknown) => typeof x === 'object' && x !== null && finite((x as Version).at) && typeof (x as Version).text === 'string')
+  );
+}
 
 export class DraftStore {
   private kv: KV;
@@ -83,8 +118,12 @@ export class DraftStore {
     return d;
   }
 
-  load(id: string): Promise<Draft | undefined> {
-    return this.kv.get<Draft>(key(id));
+  /** The draft, or undefined when there is none; throws UnreadableDraftError for a record that isn't one. */
+  async load(id: string): Promise<Draft | undefined> {
+    const v = await this.kv.get<unknown>(key(id));
+    if (v === undefined) return undefined;
+    if (!isDraft(v, id)) throw new UnreadableDraftError('its record is damaged, or was not written by Draw');
+    return v;
   }
 
   /** Save the current text; a changed text also becomes a new version (the ring keeps 20). */
@@ -99,6 +138,28 @@ export class DraftStore {
     if (d.versions.length > VERSIONS) d.versions.splice(0, d.versions.length - VERSIONS);
     await this.put(d);
     return d;
+  }
+
+  /**
+   * Save over a draft this tab already holds (the autosave's, under its lock): the same as save,
+   * but with no read first, so a save started as the page goes away is written within the event.
+   */
+  async saveOver(d: Draft, text: string): Promise<Draft> {
+    if (d.text === text) {
+      await this.put(d); // written again even so: it may have been deleted meanwhile
+      return d;
+    }
+    const t = this.now();
+    const next: Draft = { ...d, text, updated: t, versions: [...d.versions, { at: t, text }].slice(-VERSIONS) };
+    await this.put(next);
+    return next;
+  }
+
+  /** Record an export of a draft this tab holds: the reminder resets. */
+  async exportedOver(d: Draft): Promise<Draft> {
+    const next: Draft = { ...d, exported: this.now() };
+    await this.put(next);
+    return next;
   }
 
   async rename(id: string, name: string): Promise<void> {
@@ -123,9 +184,11 @@ export class DraftStore {
   async list(): Promise<DraftSummary[]> {
     const out: DraftSummary[] = [];
     for (const k of await this.kv.keys()) {
-      if (!k.startsWith('draft:')) continue;
-      const d = await this.kv.get<Draft>(k);
-      if (d) out.push({ id: d.id, name: d.name, updated: d.updated, exported: d.exported, remind: this.needsReminder(d) });
+      if (!k.startsWith(PREFIX)) continue;
+      const id = k.slice(PREFIX.length);
+      const d = await this.kv.get<unknown>(k);
+      if (isDraft(d, id)) out.push({ id, name: d.name, created: d.created, updated: d.updated, exported: d.exported, remind: this.needsReminder(d) });
+      else if (d !== undefined) out.push({ id, name: 'Unreadable draft', created: 0, updated: 0, exported: null, remind: false, unreadable: true });
     }
     return out.sort((a, b) => b.updated - a.updated);
   }

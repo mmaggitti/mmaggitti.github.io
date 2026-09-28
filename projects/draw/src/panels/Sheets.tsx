@@ -39,7 +39,8 @@ function Body({ editor, sheet, close }: { editor: Editor; sheet: Sheet; close: (
   }
 }
 
-function Modal({ title, onClose, done, children }: { title: string; onClose: () => void; done: boolean; children: ReactNode }) {
+/** A sheet over a dimmed canvas (the token sheets here, and the Files, report and Export sheets in FileSheets.tsx). */
+export function Modal({ title, onClose, done, mono = true, children }: { title: string; onClose: () => void; done: boolean; mono?: boolean; children: ReactNode }) {
   const opened = useRef(performance.now());
   const [inset, setInset] = useState(0);
   useEffect(() => {
@@ -59,9 +60,10 @@ function Modal({ title, onClose, done, children }: { title: string; onClose: () 
   return (
     <>
       <div className="draw-scrim" aria-hidden="true" onClick={() => performance.now() - opened.current > GHOST_CLICK_MS && onClose()} />
-      <section className="draw-modal" role="dialog" aria-modal="true" aria-label={title} style={inset ? { bottom: inset } : undefined}>
+      {/* Above the keyboard, and no taller than the room left there, so Done never goes off the top. */}
+      <section className="draw-modal" role="dialog" aria-modal="true" aria-label={title} style={inset ? { bottom: inset, maxHeight: `calc(85svh - ${inset}px)` } : undefined}>
         <div className="draw-modal-head">
-          <h2 className="draw-modal-title ds-mono">{title}</h2>
+          <h2 className={`draw-modal-title${mono ? ' ds-mono' : ''}`}>{title}</h2>
           {done && (
             <button type="button" className="ds-btn ds-btn--primary draw-modal-done" onClick={onClose}>
               Done

@@ -40,12 +40,18 @@ test('every corpus file cleans to a file with no editor data, and a file without
 
 test('Inkscape and Illustrator files lose exactly their editor markup', () => {
   const ink = readFileSync(new URL('tools/inkscape-1x-layers.svg', CORPUS), 'utf8');
-  const out = cleanExport((parseDoc(ink) as { ok: true; doc: never }).doc).text;
+  const inkOut = cleanExport((parseDoc(ink) as { ok: true; doc: never }).doc);
+  // The counts the Export sheet shows: the namedview (its grid goes with it); 18 inkscape: and
+  // sodipodi: attributes and the 2 declarations nothing uses any more.
+  assert.deepEqual([inkOut.removedElements, inkOut.removedAttributes], [1, 20]);
+  const out = inkOut.text;
   assert.ok(!/inkscape:|sodipodi:/.test(out));
   assert.ok(out.includes('<dc:title>Poster</dc:title>'), 'descriptive metadata stays');
   assert.ok(out.includes('Summer  Fair'), 'content stays byte for byte');
   const ai = readFileSync(new URL('tools/illustrator-cs6-entities-pgf.svg', CORPUS), 'utf8');
-  const aiOut = cleanExport((parseDoc(ai) as { ok: true; doc: never }).doc).text;
+  const aiClean = cleanExport((parseDoc(ai) as { ok: true; doc: never }).doc);
+  assert.deepEqual([aiClean.removedElements, aiClean.removedAttributes], [3, 10], 'Illustrator: <sfw>, <i:pgf> and <i:pgfRef>; 7 i: attributes and 3 declarations');
+  const aiOut = aiClean.text;
   assert.ok(!/<i:pgf|i:layer|xmlns:i=/.test(aiOut), 'Illustrator data and its entity-declared namespace go');
   assert.ok(aiOut.includes('.st1{fill:#E63946'), 'styles stay');
 });

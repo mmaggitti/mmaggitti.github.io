@@ -3,16 +3,16 @@
 // React owns only these elements; the framework-free renderer owns everything inside the host (every
 // node it draws comes through the safe sink), and the stage turns the canvas's input into the
 // editor's view and the Select tool. The host is hidden from assistive tech: the code panel is the
-// accessible view of the document.
+// accessible view of the document. A file (or SVG text) dropped on the canvas opens (iPad, desktop).
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type DragEvent as ReactDragEvent } from 'react';
 import type { Editor } from '../editor.ts';
 import { Renderer } from '../canvas/renderer.ts';
 import { Overlay } from '../canvas/overlay.ts';
 import { Stage } from '../canvas/stage.ts';
 import type { Views } from './views.ts';
 
-export function Canvas({ editor, views, error }: { editor: Editor; views: Views; error: string | null }) {
+export function Canvas({ editor, views, error, onDrag, onDrop }: { editor: Editor; views: Views; error: string | null; onDrag: (e: DragEvent) => void; onDrop: (e: DragEvent) => void }) {
   const area = useRef<HTMLElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const marks = useRef<HTMLDivElement>(null);
@@ -32,7 +32,13 @@ export function Canvas({ editor, views, error }: { editor: Editor; views: Views;
   }, [editor, views]);
 
   return (
-    <main ref={area} className="draw-canvas">
+    <main
+      ref={area}
+      className="draw-canvas"
+      onDragEnter={(e: ReactDragEvent) => onDrag(e.nativeEvent)}
+      onDragOver={(e: ReactDragEvent) => onDrag(e.nativeEvent)}
+      onDrop={(e: ReactDragEvent) => onDrop(e.nativeEvent)}
+    >
       <div ref={host} className="draw-host" aria-hidden="true" />
       <div ref={marks} className="draw-marks" />
       {error && <p className="draw-error ds-small">Can&rsquo;t show the drawing: {error}.</p>}

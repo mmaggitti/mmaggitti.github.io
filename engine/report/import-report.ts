@@ -5,7 +5,8 @@
 // - preview: active content, kept but only ever run in the sandboxed preview (active);
 // - unclassified: no ledger row names it; only a fallback row caught it (kept, never rendered).
 //
-// Plus notes on things that change what the file looks like in Draw or in another browser.
+// Plus notes on things that change what the file looks like in Draw or in another browser, and on
+// the external entities a DOCTYPE declares (never fetched).
 
 import { descendants, NS, type Doc, type ElementNode } from '../model/doc.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
@@ -67,6 +68,8 @@ export function importReport(doc: Doc): ImportReport {
   for (const i of items) totals[i.bucket] += i.count;
 
   const notes: string[] = [];
+  const external = [...doc.entities.external].sort();
+  if (external.length) notes.push(`${external.length} external entit${external.length > 1 ? 'ies are' : 'y is'} declared (${external.slice(0, 5).join(', ')}${external.length > 5 ? ', …' : ''}); Draw never fetches them, and references to them stay as written.`);
   const refs = buildRefIndex(doc);
   const dup = duplicateIds(refs);
   if (dup.length) notes.push(`${dup.length} id${dup.length > 1 ? 's are' : ' is'} used more than once (${dup.slice(0, 5).join(', ')}${dup.length > 5 ? ', …' : ''}); browsers use the first.`);
