@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P0**. 1327 rows: 1156 planned, 12 partial, 158 done, 1 superseded.
+Current phase: **P0**. 1327 rows: 1155 planned, 13 partial, 158 done, 1 superseded.
 
 A row is `done` only when the tests it cites passed in the build. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -17,13 +17,13 @@ A row is `done` only when the tests it cites passed in the build. Raising the cu
 | syntax | 22 | 4 | 2 | 16 | 0 |
 | namespace | 20 | 11 | 2 | 7 | 0 |
 | capability | 479 | 478 | 0 | 0 | 1 |
-| feature | 99 | 94 | 3 | 2 | 0 |
+| feature | 99 | 93 | 4 | 2 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| P0 | 246 | 79 | 9 | 158 | 0 |
+| P0 | 246 | 78 | 10 | 158 | 0 |
 | P1 | 320 | 320 | 0 | 0 | 0 |
 | P2 | 74 | 71 | 3 | 0 | 0 |
 | P3 | 161 | 161 | 0 | 0 | 0 |
@@ -93,6 +93,7 @@ Each lesson's capabilities and the phases that deliver them.
 - `feature:safe-viewer` (P0): every corpus file renders through the policy (unit) and on the canvas (e2e); fitting its viewBox with zoom and pan is P0-M3
 - `feature:canvas-root-isolation` (P0): the host resets inherited styles and design tokens (e2e canvasIgnoresTheTheme); aria-hidden on the host is P0-M3
 - `feature:dompurify-opinion` (P0): fail-closed is unit-tested; what DOMPurify refuses (ids naming document properties are kept since SANITIZE_DOM is off, data images on feImage, SMIL from/to) is proven only in the e2e policy-edges case
+- `feature:shadow-root-decision` (P0): decided: the open shadow root. WebKit 26 passes all 24 probe rows (CI run 13); Chromium all but a document’s own @font-face. The probe is e2e (test/probe-shadow.mjs), which the ledger cannot cite as evidence yet
 
 ## Superseded rows
 

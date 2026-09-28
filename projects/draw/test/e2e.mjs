@@ -400,6 +400,14 @@ const LOOKS_DIFFERENT = new Map([
   ['lab/media--audio.svg', 'its <video> is refused'],
   ['lab/texture--tiles.svg', 'its tile is a data: SVG on feImage, which the canvas does not load'],
 ]);
+// Differences one engine shows because its <img> reference differs from the file opened on its own;
+// the canvas is right in each. By browser, then file; `scheme` limits one to light or dark.
+const LOOKS_DIFFERENT_IN = {
+  webkit: new Map([
+    ['lab/media--iframe.svg', { why: 'WebKit draws an <iframe> box inside an SVG <img>; the canvas never renders iframes' }],
+    ['tools/svgo-gradient-style-classes.svg', { scheme: 'dark', why: "WebKit's SVG <img> ignores the page's dark preference; the canvas follows it, as the file opened on its own does" }],
+  ]),
+};
 const PIXEL_TOLERANCE = 24; // per channel
 const MAX_DIFFERENT = 0.002; // of the pixels; the app's theme leaking in changed 0.4% to 11%
 
@@ -433,10 +441,15 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
       }
       const share = n / (a.width * shot.height);
       if (!decoded) differ.push(`${f.name}: test setup: the file did not load as an <img>`);
-      else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
+      else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
     }
     must(differ.length === 0, `${colorScheme}: ${differ.length} corpus file(s) look different on the canvas than on their own:\n${differ.join('\n')}`);
   }, { colorScheme, viewport: { width: 456, height: 320 } });
+}
+
+function knownIn(browser, name, colorScheme) {
+  const known = LOOKS_DIFFERENT_IN[browser.browserType().name()]?.get(name);
+  return !!known && (!known.scheme || known.scheme === colorScheme);
 }
 
 // Runs in the page: the file on the canvas, and beside it the file itself as an <img>, its root
@@ -444,7 +457,8 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
 async function showBoth(text) {
   window.drawTest.render(text);
   const drawn = document.querySelector('.draw-host').shadowRoot.firstElementChild;
-  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+  // A byte-order mark marks the encoding, not content; WebKit's DOMParser refuses one in a string.
+  const doc = new DOMParser().parseFromString(text.replace(/^\uFEFF/, ''), 'image/svg+xml');
   const svg = doc.documentElement;
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '100%');

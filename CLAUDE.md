@@ -124,6 +124,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
   - a password field outside `src/github/TokenForm.tsx`;
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
+- **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every
+  reference kind resolves; Chromium alone doesn't load a document's own `@font-face` there).
 - **The renderer (`src/canvas/renderer.ts`) only moves or removes nodes the sink made.** It is
   keyed by NodeId, and it patches one element or one subtree per change.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
