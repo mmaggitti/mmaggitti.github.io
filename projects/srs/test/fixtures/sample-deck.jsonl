@@ -1,8 +1,0 @@
-{"id":"vell-01-capital","type":"fact@1","topic":"invented/vell","fields":{"front":"What is the capital of the invented island of Vell?","back":"Harrowmere, on the north shore."},"source":"Made-up test deck"}
-{"id":"vell-02-tides","type":"fact@1","topic":"invented/vell","fields":{"front":"How many tides a day does Vell's lagoon have?","back":"Three: the lagoon has a third, shallow tide at noon."},"source":"Made-up test deck"}
-{"id":"vell-03-signal","type":"fact@1","topic":"invented/vell","fields":{"front":"What does the harbour signal `LX-3` mean?","back":"Hold at the outer buoy until `LX-0` is shown."},"source":"Made-up test deck"}
-{"id":"vell-04-bird","type":"fact@1","topic":"invented/vell","fields":{"front":"Which bird nests only on Vell's cliffs?","back":"The grey tern-lark."},"source":"Made-up test deck"}
-{"id":"vell-05-currency","type":"fact@1","topic":"invented/vell","fields":{"front":"What is Vell's currency made of?","back":"Pierced slate discs, strung in tens."},"source":"Made-up test deck"}
-{"id":"vell-06-festival","type":"fact@1","topic":"invented/vell-customs","fields":{"front":"When is the Lantern Night festival held?","back":"On the first calm night after the autumn gales."},"source":"Made-up test deck"}
-{"id":"vell-07-greeting","type":"fact@1","topic":"invented/vell-customs","fields":{"front":"How do islanders of Vell greet a stranger?","back":"By offering a pinch of salt from the left hand."},"source":"Made-up test deck"}
-{"id":"vell-08-law","type":"fact@1","topic":"invented/vell-customs","fields":{"front":"What may never be sold on Vell?","back":"Fresh water: it is only ever given."},"source":"Made-up test deck"}

@@ -34,8 +34,6 @@ projects/studio/          the live-DOM studio, a tool rather than a mini project
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
 projects/draw/            Draw, the SVG editor (Vite + React + TS); unlisted until Release 1 (see Draw)
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
-projects/srs/             Flashcards: FSRS-6 in Rust → WASM, JSONL decks, OPFS, backups to Files; the
-                          public repo holds only made-up fixture decks (tools/fsrs-vectors: CI never builds it)
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
@@ -258,7 +256,7 @@ source).
 - **Unlisted until it's an app:** `<meta name="launcher" content="unlisted">`.
 - **Storage in tests:** Chromium runs the OPFS path. CI's WebKit (Playwright, Linux) has no OPFS at
   all (`navigator.storage.getDirectory` is missing), so it runs the IndexedDB fallback. Between them
-  both paths are tested. What an iPhone gets, the app says: Flashcards shows it in its storage hint.
+  both paths are tested. What a real iPhone gets, cs-probe's Storage row says.
 
 ## Phone-first rules (every project)
 

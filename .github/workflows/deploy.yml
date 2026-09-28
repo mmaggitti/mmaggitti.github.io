@@ -70,7 +70,6 @@ jobs:
         with:
           workspaces: |
             projects/cs-probe -> target
-            projects/srs -> target
 
       - name: Build every project and the launcher
         run: npm run build

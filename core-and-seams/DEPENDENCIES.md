@@ -31,7 +31,7 @@ Status: **adopted** (in use), **planned** (named by the approved plan, not yet a
 |---|---|---|---|---|---|---|
 | `wasm-bindgen` | `=0.2.129` | adopted (S3) | every `-wasm` crate | The Rust↔JS binding (ADR-003); shared with cad-kernel | Fails: glue generation, type descriptors, the CLI | ADR-003's trigger |
 | `js-sys` / `web-sys` | lockstep `0.3.106` | planned, only if a crate calls browser APIs | `-wasm` crates that need them | Typed browser API bindings | Fails: API surface | A crate uses them for one call; replace it with a JS import |
-| `fsrs` | `=6.6.2`, no features | **dev** (S4) | `projects/srs/tools/fsrs-vectors` only: a generator CI never builds | The oracle for the FSRS-6 port (ADR-013): it writes srs-core's reference vectors, which the port matches within 1e-4 | Not applicable: it is the reference | FSRS-7, or training moves into a CLI |
+| `fsrs` | `=6.6.2`, no features | **retired** 2026-09-28 | was `projects/srs/tools/fsrs-vectors` only | The oracle for the FSRS-6 port (ADR-013). Retired with the Flashcards app, which Mark deleted | — | An app ports FSRS again |
 | `tauri`, `tauri-build` | `=2.12.0`, `=2.7.0` | adopted (S3; built on the Mac in S6) | `src-tauri/` | The native shell (platform) | Fails: platform | Tauri 3 stable |
 | `tauri-plugin-dialog` | `=2.8.0` | adopted (S3; built in S6) | `src-tauri/` | Native file pickers for the files seam | Fails: platform bindings | The files seam gets a native Swift plugin |
 | `objc2` | `=0.6.4` | adopted (S3; built in S6), iOS only | `src-tauri/` | The iOS scroll-view inset fix (the second full-screen fix) | Fails: safe Obj-C messaging | wry sets `contentInsetAdjustmentBehavior` itself |
