@@ -1,0 +1,17 @@
+[package]
+name = "srs-cli"
+description = "Flashcards: a command-line consumer of the core (tests, batch jobs)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "srs"
+path = "src/main.rs"
+
+[dependencies]
+srs-core = { workspace = true }
+
+[lints]
+workspace = true

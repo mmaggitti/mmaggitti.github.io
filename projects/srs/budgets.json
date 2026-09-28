@@ -1,0 +1,6 @@
+{
+  "$description": "gzip -9 byte ceilings; build.mjs fails past them. Set at the first build + 10%.",
+  "wasmGzip": 18931,
+  "jsGzip": 85754,
+  "cssGzip": 4275
+}

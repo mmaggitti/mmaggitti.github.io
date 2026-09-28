@@ -1,0 +1,13 @@
+# Generates srs-core's FSRS-6 reference vectors from the official fsrs-rs. Not part of the app's
+# workspace (the empty [workspace] below), so CI never builds it. See README.md.
+[package]
+name = "fsrs-vectors"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace]
+
+[dependencies]
+fsrs = { version = "=6.6.2", default-features = false }

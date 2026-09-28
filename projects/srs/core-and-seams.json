@@ -1,0 +1,17 @@
+{
+  "$description": "This project is a Core & Seams app. The site's scripts/check-deps.mjs reads this file's presence; new-app.mjs wrote it. Seams list the implementation chosen for each seam (see Core & Seams SEAMS.md).",
+  "name": "srs",
+  "title": "Flashcards",
+  "template": 1,
+  "hue": "slate",
+  "uiScale": 0.75,
+  "seams": {
+    "ui": "react-panels",
+    "renderer": "none",
+    "storage": "opfs",
+    "files": "web",
+    "moduleHost": "none",
+    "shell": "pwa",
+    "hosting": "github-pages"
+  }
+}

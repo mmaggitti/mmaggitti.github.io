@@ -29,3 +29,6 @@ scope.onmessage = async (e: MessageEvent) => {
     scope.postMessage({ type: 'result', id: m.id, ok: false, error: { kind, message: String(err) } });
   }
 };
+
+// A module, not a script: its top-level names stay out of the global scope other workers share.
+export {};

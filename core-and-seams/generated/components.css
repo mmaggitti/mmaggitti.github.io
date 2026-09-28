@@ -266,6 +266,11 @@ a.cs-row:active, button.cs-row:active { background: var(--surface-subtle); }
   border-top: var(--hairline) solid var(--border);
 }
 .cs-bar > .cs-btn { flex: 1; }
+/* Inside a page, the bar still reaches the bottom edge when the content is short: the page becomes
+   a column, the bar takes the space left above it, and its negative margin spends the page's bottom
+   padding. Without this a sticky bar sits wherever the content ends, mid-screen on a short page. */
+.cs-page:has(> .cs-bar) { display: flex; flex-direction: column; }
+.cs-page > .cs-bar { margin-top: auto; margin-bottom: calc(-1 * var(--space-8)); }
 
 /* ── css/sheet.css ── */
 /* Sheet (<dialog class="cs-sheet">): a bottom sheet on narrow screens, a side panel on wide ones.

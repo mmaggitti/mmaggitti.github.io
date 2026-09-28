@@ -1,0 +1,6 @@
+# Pinned toolchain: rustup installs it on the first cargo call, in cloud sessions and in CI.
+[toolchain]
+channel = "1.98.1"
+targets = ["wasm32-unknown-unknown"]
+components = ["clippy", "rustfmt"]
+profile = "minimal"

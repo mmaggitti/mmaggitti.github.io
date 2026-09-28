@@ -34,6 +34,8 @@ projects/studio/          the live-DOM studio, a tool rather than a mini project
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
 projects/draw/            Draw, the SVG editor (Vite + React + TS); unlisted until Release 1 (see Draw)
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
+projects/srs/             Flashcards: FSRS-6 in Rust → WASM, JSONL decks, OPFS, backups to Files; the
+                          public repo holds only made-up fixture decks (tools/fsrs-vectors: CI never builds it)
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
