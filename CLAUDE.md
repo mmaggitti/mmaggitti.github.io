@@ -27,7 +27,8 @@ Mark to paste them into chat.
 
 ```
 projects/<name>/          one folder per project. Lowercase, digits, hyphens only.
-                          "_name" = draft, not built. Reserved: "crossword-v1" (its own repo), "ds".
+                          "_name" = draft, not built. Reserved: "crossword-v1" and "ios-html-viewer"
+                          (their own repos), "ds", "core-and-seams".
 projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see Testing)
 projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
@@ -36,10 +37,13 @@ engine/                   Draw's SVG engine: DOM-free, dependency-free TS, teste
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
 ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
-scripts/build-site.mjs    projects/* → _site/<name>/, ds/ → _site/ds/, generated launcher, pages.json
+core-and-seams/           Core & Seams, the system for Rust/WASM + TS apps: GENERATED, published from
+                          its private source; never edit here (see Design system); specimen at /core-and-seams/
+scripts/build-site.mjs    projects/* → _site/<name>/, ds/ and core-and-seams/ → _site/, launcher, pages.json
 scripts/smoke-test.mjs    phone-size check of every built page (+ screenshots in .smoke/)
 scripts/check-public.mjs  the guard
 scripts/check-units.mjs   rem, not px (see Design system)
+scripts/check-deps.mjs    Core & Seams apps: every direct dependency registered and pinned exactly
 .github/workflows/deploy.yml   guard → units → build → WebKit smoke → deploy, on every push to main
 ```
 
@@ -156,7 +160,7 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Pillow is not installed.** Start icons as SVG. `pip install pillow` works when PNGs are
   needed.
 
-## Design system (every project uses it)
+## Design system (every project uses `ds.css` or Core & Seams)
 
 `ds/ds.css` holds the tokens and components. Browse them on the phone at `/ds/`.
 
@@ -202,6 +206,25 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Overriding the scale:** set `--ui-scale` on `<html>`. `projects/hello/` has a live preview
   switch.
 
+### Core & Seams (apps with a Rust/WASM core)
+
+Core & Seams is the design system and app architecture for this site's Rust/WASM + TypeScript apps
+(Mark, 2026-09-28). It builds on the same rules and density as `ds.css`: rem × `--ui-scale` (0.75),
+the 44px tap floor, the 16px field floor. It adds more roles, a hue per app, input density and `cs-`
+components.
+
+- **`core-and-seams/` is generated.** It is published from the system's private source by its
+  `tools/publish.mjs`. Change tokens or components there and republish; never edit this folder.
+- **An app opts in** with `projects/<name>/core-and-seams.json`. Then `scripts/check-deps.mjs`
+  requires every direct npm and Cargo dependency to be in `core-and-seams/DEPENDENCIES.md` and pinned
+  exactly.
+- **Use it:** link or import `core-and-seams/generated/core-and-seams.css`, then
+  `generated/components.css`, then the app's `generated/hues/<hue>.css`. A Vite app imports them
+  from `../../core-and-seams/generated/` so they are bundled and work offline.
+- **Density follows input.** Wherever a coarse pointer exists (`any-pointer: coarse`: phone, iPad
+  even with a trackpad), controls keep the 44px floor. Compact controls apply only when no coarse
+  pointer exists (a Mac).
+
 ## Phone-first rules (every project)
 
 - **The target is Mark's primary phone: 440×956 points, @3x.** Design for 440px wide first.
@@ -222,7 +245,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   - pad with `env(safe-area-inset-*)`;
   - no sideways scroll (the smoke test fails it).
 - **Touch:**
-  - tap targets never under 44pt: use ds controls, or `max(var(--tap-min), …)`;
+  - tap targets never under 44pt: use ds or cs controls, or `max(var(--tap-min), …)`. Core & Seams
+    applies the floor wherever a coarse pointer exists;
   - primary actions in the bottom thumb zone, clear of the home indicator;
   - `touch-action: manipulation` on buttons.
 - **Text and motion:**

@@ -17,13 +17,17 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECTS = join(ROOT, 'projects');
 const OUT = join(ROOT, '_site');
-// Paths a project can't take: crossword-v1 is served by its own repo on this origin (project sites
-// win over the user site), and ds/ is the shared design system.
-const RESERVED = new Set(['crossword-v1', 'ds']);
+// Paths a project can't take: crossword-v1 and ios-html-viewer are served by their own repos on this
+// origin (project sites win over the user site), ds/ is the shared design system, and core-and-seams/
+// holds the published outputs of Core & Seams, the design system for Rust/WASM + TypeScript apps.
+const RESERVED = new Set(['crossword-v1', 'ios-html-viewer', 'ds', 'core-and-seams']);
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT);
 cpSync(join(ROOT, 'ds'), join(OUT, 'ds'), { recursive: true });
+// Core & Seams is published into core-and-seams/ from its private source; served as-is (its README
+// stays out of the site).
+cpSync(join(ROOT, 'core-and-seams'), join(OUT, 'core-and-seams'), { recursive: true, filter: (p) => !p.endsWith(`${sep}README.md`) });
 
 const names = existsSync(PROJECTS)
   ? readdirSync(PROJECTS, { withFileTypes: true })
@@ -79,6 +83,7 @@ const NOT_FRAMED = new Set(['studio', 'draw']);
 const pages = [
   { path: '/', title: 'Projects' },
   { path: '/ds/', title: 'Design system' },
+  { path: '/core-and-seams/', title: 'Core & Seams' },
   ...cards.filter((c) => !NOT_FRAMED.has(c.name) && !c.unlisted).map((c) => ({ path: `/${c.name}/`, title: c.title })),
 ];
 writeFileSync(join(OUT, 'pages.json'), JSON.stringify(pages, null, 2) + '\n');

@@ -44,6 +44,10 @@ jobs:
       - name: Library — served SVG must be inert (sources)
         run: node scripts/check-library.mjs
 
+      # Core & Seams apps: every direct dependency is in the register and pinned; every action is registered.
+      - name: Dependencies — registered and pinned (Core & Seams)
+        run: node scripts/check-deps.mjs
+
       - name: Install dependencies
         run: npm ci
 

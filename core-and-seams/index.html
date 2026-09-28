@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FBF9F4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="launcher" content="unlisted">
+  <title>Core &amp; Seams</title>
+  <meta name="description" content="Core &amp; Seams specimen: tokens, hues and components for Rust/WASM + TypeScript apps, on phone, tablet and desktop.">
+  <link rel="stylesheet" href="generated/core-and-seams.css">
+  <link rel="stylesheet" href="generated/components.css">
+  <link rel="stylesheet" href="generated/hues/blue.css" id="hue-css">
+  <style>
+    .spec-controls { display: grid; gap: var(--space-4); }
+    .spec-controls .cs-field + .cs-field { margin-top: 0; }
+    .spec-mocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--space-4); }
+    .spec-mock { display: flex; flex-direction: column; gap: var(--space-3); }
+    .spec-mock .cs-title { font-size: var(--text-lg); }
+    .spec-mock__link { color: var(--accent-deepest); font-weight: var(--weight-semibold); }
+    .spec-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: var(--space-2); }
+    .spec-swatch { border: var(--hairline) solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+    .spec-swatch__chip { height: 3rem; }
+    .spec-swatch__meta { padding: var(--space-2); font-size: var(--text-sm); line-height: 1.35; }
+    .spec-type > * { margin: 0 0 var(--space-3); }
+    .spec-space { display: grid; gap: var(--space-2); }
+    .spec-space__row { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
+    .spec-space__bar { height: 0.75rem; background: var(--accent-soft); border-radius: var(--radius-sm); }
+    .spec-row-wrap { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+    .spec-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: var(--space-4); }
+    .spec-note { font-size: var(--text-sm); color: var(--muted); margin: var(--space-2) 0 0; }
+  </style>
+</head>
+<body>
+<div class="cs-app">
+  <header class="cs-toolbar">
+    <span class="cs-toolbar__title">Core &amp; Seams</span>
+    <span class="cs-small cs-muted" id="pointer-note"></span>
+  </header>
+
+  <main class="cs-page cs-page--wide">
+    <p class="cs-kicker">Specimen</p>
+    <h1 class="cs-title">Core &amp; Seams</h1>
+    <p class="cs-sub">Tokens, hues and components for apps built on a Rust/WASM core with a TypeScript/HTML UI. Interpretable, interoperable, extensible.</p>
+
+    <section class="cs-panel spec-controls" aria-label="Preview settings">
+      <div class="cs-field">
+        <span class="cs-label" id="theme-label">Theme</span>
+        <div class="cs-seg cs-seg--block" role="group" aria-labelledby="theme-label" data-control="theme">
+          <button type="button" data-value="auto">Auto</button>
+          <button type="button" data-value="light">Light</button>
+          <button type="button" data-value="dark">Dark</button>
+        </div>
+      </div>
+      <div class="cs-field">
+        <span class="cs-label" id="scale-label">UI scale</span>
+        <div class="cs-seg cs-seg--block" role="group" aria-labelledby="scale-label" data-control="scale">
+          <button type="button" data-value="0.75">75%</button>
+          <button type="button" data-value="0.875">87.5%</button>
+          <button type="button" data-value="1">100%</button>
+        </div>
+      </div>
+      <div class="cs-field">
+        <span class="cs-label" id="hue-label">Page hue</span>
+        <div class="cs-seg cs-seg--block" role="group" aria-labelledby="hue-label" data-control="hue" id="hue-seg"></div>
+      </div>
+    </section>
+
+    <h2 class="cs-heading">Hue candidates</h2>
+    <p class="cs-sub">Each app gets its own hue on one shared role system. Every ramp here clears the tiered contrast gates in light and dark. Pick one for Flashcards and one for CAD.</p>
+    <div class="spec-mocks" id="mocks"></div>
+
+    <h2 class="cs-heading">Colour</h2>
+    <p class="cs-kicker">Neutrals</p>
+    <div class="spec-swatches" id="neutrals"></div>
+    <p class="cs-kicker" style="margin-top: var(--space-5)">Status (fills, with ink text)</p>
+    <div class="spec-swatches" id="status"></div>
+    <p class="cs-kicker" style="margin-top: var(--space-5)">Data pack</p>
+    <div class="spec-swatches" id="data"></div>
+    <p class="spec-note" id="data-note"></p>
+
+    <h2 class="cs-heading">Type</h2>
+    <div class="spec-type">
+      <p class="cs-display">56 Display</p>
+      <p class="cs-title">28 Title — Week 4: control flow</p>
+      <p style="font-size: var(--text-lg); font-weight: var(--weight-semibold)">22 Heading</p>
+      <p>17 Body. Structured control flow means every branch targets a label, so a validator can check the whole function in one pass.</p>
+      <p class="cs-small cs-muted">15 Small, auxiliary — the floor. Nothing is smaller.</p>
+      <p class="cs-mono">br_if 0 (local.get $n) ;; mono</p>
+    </div>
+
+    <h2 class="cs-heading">Space</h2>
+    <div class="spec-space" id="space"></div>
+
+    <h2 class="cs-heading">Components</h2>
+    <div class="cs-stack">
+      <p class="cs-kicker">Buttons</p>
+      <div class="spec-row-wrap">
+        <button class="cs-btn cs-btn--primary" type="button">Start review</button>
+        <button class="cs-btn" type="button">Import deck</button>
+        <button class="cs-btn cs-btn--quiet" type="button">Skip</button>
+        <button class="cs-btn cs-btn--sm" type="button">Small</button>
+        <button class="cs-btn" type="button" disabled>Disabled</button>
+      </div>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Fields</p>
+      <div class="cs-panel">
+        <div class="cs-field">
+          <label class="cs-label" for="f-name">Deck name</label>
+          <input class="cs-input" id="f-name" value="WASM weeks 1–4">
+          <span class="cs-hint">Shown on the Home Screen card.</span>
+        </div>
+        <div class="cs-field">
+          <label class="cs-label" for="f-budget">Session budget</label>
+          <select class="cs-select" id="f-budget"><option>10 minutes</option><option selected>15 minutes</option><option>20 minutes</option></select>
+        </div>
+        <div class="cs-field">
+          <label class="cs-label" for="f-note">Note</label>
+          <textarea class="cs-textarea" id="f-note" aria-invalid="true">A note that is too long.</textarea>
+          <span class="cs-error">Keep notes under 280 characters.</span>
+        </div>
+      </div>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Segmented control and tabs</p>
+      <div class="cs-seg" role="group" aria-label="Grade"><button type="button">Again</button><button type="button">Hard</button><button type="button" aria-pressed="true">Good</button><button type="button">Easy</button></div>
+      <div class="cs-tabs" role="tablist" aria-label="Views"><button role="tab" aria-selected="true" type="button">Review</button><button role="tab" aria-selected="false" type="button">Cards</button><button role="tab" aria-selected="false" type="button">Topics</button></div>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Rows</p>
+      <dl class="cs-list">
+        <div class="cs-row"><dt>Cards due</dt><dd>12</dd></div>
+        <div class="cs-row"><dt>Retention (30 d)</dt><dd>91.4%</dd></div>
+        <div class="cs-row"><dt>Last backup</dt><dd>today 08:12</dd></div>
+      </dl>
+      <div class="cs-list">
+        <button class="cs-row cs-row--nav" type="button">Week 3 · Memory and data</button>
+        <button class="cs-row cs-row--nav" type="button">Week 4 · Control flow</button>
+      </div>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Status, tags, meters</p>
+      <div class="spec-row-wrap">
+        <span class="cs-status cs-status--ok">Backed up</span>
+        <span class="cs-status cs-status--warn">No backup in 7 days</span>
+        <span class="cs-status cs-status--danger">Import failed</span>
+        <span class="cs-tag" style="--tag: var(--data-mint)">binary format</span>
+        <span class="cs-tag" style="--tag: var(--data-amber)">control flow</span>
+      </div>
+      <span class="cs-meter" role="progressbar" aria-label="Session progress" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100"><span style="--value: 40%"></span></span>
+      <span class="cs-meter cs-meter--warn" role="meter" aria-label="Storage used" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100"><span style="--value: 72%"></span></span>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Panels</p>
+      <div class="cs-panel cs-panel--tint">A tinted panel for a callout: the accent's softest step behind ink text.</div>
+      <div class="cs-panel"><p class="cs-empty">No cards yet. Import a deck to start.</p></div>
+
+      <p class="cs-kicker" style="margin-top: var(--space-5)">Sheet and dialog</p>
+      <div class="spec-row-wrap">
+        <button class="cs-btn" type="button" data-open="sheet">Open sheet</button>
+        <button class="cs-btn" type="button" data-open="dialog">Open dialog</button>
+      </div>
+      <p class="spec-note">The sheet rises from the bottom on narrow screens and slides in from the side on wide ones: same feature, adapted layout.</p>
+    </div>
+
+    <h2 class="cs-heading">Density</h2>
+    <p class="cs-sub">Density follows the input. Touch keeps the 44pt tap floor; a Mac with a trackpad gets compact controls. Both are shown here regardless of this device.</p>
+    <div class="spec-density">
+      <div class="cs-panel cs-stack" id="dense-comfortable">
+        <p class="cs-kicker">Comfortable (touch)</p>
+        <button class="cs-btn cs-btn--primary" type="button">Start review</button>
+        <dl class="cs-list"><div class="cs-row"><dt>Due</dt><dd>12</dd></div><div class="cs-row"><dt>New</dt><dd>5</dd></div></dl>
+      </div>
+      <div class="cs-panel cs-stack" id="dense-compact">
+        <p class="cs-kicker">Compact (mouse, trackpad)</p>
+        <button class="cs-btn cs-btn--primary" type="button">Start review</button>
+        <dl class="cs-list"><div class="cs-row"><dt>Due</dt><dd>12</dd></div><div class="cs-row"><dt>New</dt><dd>5</dd></div></dl>
+      </div>
+    </div>
+  </main>
+
+  <div class="cs-bar" style="--bar-max: var(--wide)">
+    <button class="cs-btn" type="button" data-open="dialog">Secondary</button>
+    <button class="cs-btn cs-btn--primary" type="button">Primary action</button>
+  </div>
+</div>
+
+<dialog class="cs-sheet" id="sheet">
+  <h2 class="cs-heading" style="margin-top: 0">Session settings</h2>
+  <div class="cs-field"><label class="cs-label" for="s-budget">Budget</label><select class="cs-select" id="s-budget"><option>15 minutes</option></select></div>
+  <div class="cs-bar" style="position: static; padding-inline: 0; border: 0; background: none"><button class="cs-btn cs-btn--primary" type="button" data-close>Done</button></div>
+</dialog>
+
+<dialog class="cs-dialog" id="dialog">
+  <h2 class="cs-heading" style="margin-top: 0">Export a backup?</h2>
+  <p>Saves every card and review to a file you can keep in iCloud Drive.</p>
+  <div class="cs-dialog__actions"><button class="cs-btn cs-btn--quiet" type="button" data-close>Cancel</button><button class="cs-btn cs-btn--primary" type="button" data-close>Export</button></div>
+</dialog>
+
+<script type="module" src="specimen/specimen.js"></script>
+</body>
+</html>

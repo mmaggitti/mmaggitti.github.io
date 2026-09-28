@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Design-system check: sizes are rem, not px.
 //
-//   node scripts/check-units.mjs         scan ds/ and projects/ (exit 1 on findings)
+//   node scripts/check-units.mjs         scan ds/, core-and-seams/ and projects/ (exit 1 on findings)
 //   node scripts/check-units.mjs <dir>   scan another folder
 //
 // The UI scales from one knob (--ui-scale in ds/ds.css), and only rem follows it; a raw px value
@@ -16,7 +16,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'target']);
 const PX = /(?<![\w.#])-?(\d*\.?\d+)px\b/g;
 const ALLOWED = new Set(['0', '1', '2', '3']);
 
@@ -55,7 +55,7 @@ function check(file) {
   return findings;
 }
 
-const dirs = process.argv[2] ? [resolve(process.argv[2])] : ['ds', 'projects'].map((d) => join(ROOT, d));
+const dirs = process.argv[2] ? [resolve(process.argv[2])] : ['ds', 'core-and-seams', 'projects'].map((d) => join(ROOT, d));
 let total = 0;
 for (const dir of dirs) {
   let files;
