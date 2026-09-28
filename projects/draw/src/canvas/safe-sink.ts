@@ -1,0 +1,157 @@
+// The safe sink: the only code that writes document content into the page.
+//
+// Draw renders files it did not write, on an origin every project on the site shares, so nothing
+// from a document reaches the DOM except through here (tools/check-sinks.mjs bans making or filling
+// nodes, attributes, text and stylesheets everywhere else). Every write asks two independent judges:
+// - the render policy (engine/policy/render-policy.ts, built from the support ledger): which
+//   elements, which attributes, which URLs and which CSS;
+// - DOMPurify's isValidAttribute, a second opinion from a different codebase. Both must agree.
+// Without a working DOMPurify the sink renders nothing: it fails closed.
+//
+// Values are the engine's decoded values (what a browser's parser would have produced), text goes
+// in as text nodes, and comments, processing instructions, the DOCTYPE and CDATA markers never
+// reach the page. The canvas's own stylesheet is made here too: app CSS, never document content,
+// but it is a stylesheet write, and those live only here.
+
+import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
+import { NS, findAttr, type Attr, type Doc, type ElementNode, type LeafNode, textContent } from '../../../../engine/model/doc.ts';
+import { decodeAttr } from '../../../../engine/xml/entities.ts';
+import {
+  animatesAttribute, attrKey, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue,
+  smilTargetAllowed,
+} from '../../../../engine/policy/render-policy.ts';
+
+// DOMPurify's own instance, so no other code can change its config. ADD_ATTR widens its allowlist
+// only for SVG presentation attributes it does not list yet; each takes keywords, angles or a
+// string, never a URL or CSS:
+// - glyph-orientation-horizontal, glyph-orientation-vertical (angles);
+// - text-overflow (clip, ellipsis or a string);
+// - unicode-bidi, white-space (keywords).
+// Everything else it refuses stays refused, including SMIL from/to/calcMode, fr, the light
+// source's pointsAt*/limitingConeAngle, textPath side/spacing, requiredFeatures/Extensions and
+// xml:lang.
+// SANITIZE_DOM is off: it drops ordinary ids that happen to name a document or form property
+// (close, blur, title), which breaks every url(#…) and href="#…" to them, and it protects nothing
+// here. An element in a shadow tree is never a named property of window or document, and the
+// policy never renders `name`. (A light-DOM fallback would rely on its id prefixes instead.)
+const CONFIG: Config = {
+  USE_PROFILES: { svg: true, svgFilters: true, html: true },
+  ADD_ATTR: ['glyph-orientation-horizontal', 'glyph-orientation-vertical', 'text-overflow', 'unicode-bidi', 'white-space'],
+  SANITIZE_DOM: false,
+};
+
+function load(): Purifier | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const p = DOMPurify(window);
+    if (!p.isSupported || typeof p.isValidAttribute !== 'function') return null;
+    p.setConfig(CONFIG);
+    return p;
+  } catch {
+    return null;
+  }
+}
+const purify = load();
+
+/** False when DOMPurify is missing or unsupported: then the sink renders nothing. */
+export const sinkReady = (): boolean => purify !== null;
+
+const isStyle = (n: ElementNode) => n.ns === NS.svg && n.local === 'style';
+// A <style>'s text is judged whole: the served profile's guard, and every url() stays in the file.
+const cssOk = (css: string) => cssAllowed(css) && cssUrlsLocal(css);
+
+// Set one attribute if the policy renders it and DOMPurify agrees; the value is never changed.
+function set(target: Element, node: ElementNode, attr: Pick<Attr, 'ns' | 'local'>, value: string): boolean {
+  const key = attrKey(attr.ns, attr.local);
+  const out = key === null ? null : renderValue(node, attr as Attr, value);
+  if (out === null || key === null || !purify?.isValidAttribute(node.local, key, out)) return false;
+  if (attr.ns === null) target.setAttribute(attr.local, out);
+  else target.setAttributeNS(attr.ns, key, out);
+  return true;
+}
+
+export interface ElementContext {
+  inForeignObject: boolean;
+  /**
+   * For an attribute animation, the elements it can drive, given the ids its kept href can name
+   * (null when it keeps no href, so it animates its parent). Null back refuses it: a fragment that
+   * names nothing must not fall back to "renders on some element". Without this, the animated
+   * attribute must render on some SVG element.
+   */
+  smilTargets?: (node: ElementNode, ids: readonly string[] | null) => readonly ElementNode[] | null;
+}
+
+/** A rendered copy of a document element with every attribute both judges allow, or null if it is refused. */
+export function sinkElement(doc: Doc, node: ElementNode, ctx: ElementContext): { el: Element; dropped: number } | null {
+  if (!purify || node.ns === null || !elementRenders(node.ns, node.local, ctx.inForeignObject)) return null;
+  if (isStyle(node) && !cssOk(textContent(doc, node.id))) return null;
+  const el = document.createElementNS(node.ns, node.local);
+  const dropped = sinkAttributes(el, doc, node);
+  return dropped === null || !smilOk(doc, node, el, ctx) ? null : { el, dropped };
+}
+
+// An attribute animation renders only if what it animates renders on every element it can drive.
+// Its target is read from what was just set (the plain href wins over xlink:href only when both
+// are on the element), so the judge and the browser resolve the same one.
+function smilOk(doc: Doc, node: ElementNode, el: Element, ctx: ElementContext): boolean {
+  if (!animatesAttribute(node)) return true;
+  const a = findAttr(node, null, 'attributeName');
+  const name = a ? decodeAttr(a.raw, doc.entities) : '';
+  if (!ctx.smilTargets) return smilTargetAllowed(node, name);
+  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');
+  const targets = ctx.smilTargets(node, kept === null ? null : hrefFragmentIds(kept));
+  return targets !== null && targets.every((t) => smilTargetAllowed(node, name, t));
+}
+
+/**
+ * Replace a rendered element's attributes with the model's: the number the judges dropped, or
+ * null when the element must not render at all (one that carries an attribute twice, for one).
+ * Namespace declarations aren't attributes here.
+ */
+export function sinkAttributes(target: Element, doc: Doc, node: ElementNode): number | null {
+  if (!purify || hasDuplicateAttrs(node.attrs)) return null;
+  while (target.attributes.length) target.removeAttributeNode(target.attributes[0]);
+  let dropped = 0;
+  for (const a of node.attrs) {
+    if (a.ns === NS.xmlns) continue;
+    const value = decodeAttr(a.raw, doc.entities);
+    if (a.ns === null && a.local === 'requiredExtensions') {
+      // DOMPurify never sets it, and leaving it off makes the element unconditional (Illustrator's
+      // private-data foreignObject would beat the artwork in its <switch>). So an extension browsers
+      // read as false refuses the element; XHTML, which they read as true, is simply left off.
+      if (!extensionsSupported(value)) return null;
+      dropped++;
+    } else if (!set(target, node, a, value)) dropped++;
+  }
+  return dropped;
+}
+
+/** Set one attribute the renderer supplies (the root's viewBox), under the same two judges. */
+export function sinkAttribute(target: Element, node: ElementNode, local: string, value: string): boolean {
+  return set(target, node, { ns: null, local }, value);
+}
+
+/** A text or CDATA node's text as a Text node; null for comments, PIs, the DOCTYPE and refused CSS. */
+export function sinkText(doc: Doc, node: LeafNode, parent: ElementNode): Text | null {
+  if (!purify || (node.kind !== 'text' && node.kind !== 'cdata')) return null;
+  if (isStyle(parent) && !cssOk(textContent(doc, parent.id))) return null;
+  return document.createTextNode(textContent(doc, node.id));
+}
+
+// The app's own rules for the canvas's shadow root, adopted by the renderer. As !important author
+// rules they outrank the document's normal CSS (its own !important inline styles can still win):
+// - the rendered root fills the host whatever the document sizes it to;
+// - reduced motion stops CSS animations and transitions, as ds.css does for the app (its rule
+//   can't cross the shadow boundary; the renderer pauses SMIL).
+const CANVAS_CSS = `:host > svg { width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important } }`;
+let canvas: CSSStyleSheet | null = null;
+
+/** The canvas's own stylesheet (made once, on first use). */
+export function canvasSheet(): CSSStyleSheet {
+  if (!canvas) {
+    canvas = new CSSStyleSheet();
+    canvas.replaceSync(CANVAS_CSS);
+  }
+  return canvas;
+}

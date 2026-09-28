@@ -23,3 +23,12 @@ test('ids and every kind of reference are indexed', () => {
   assert.deepEqual(idx.dangling.map((x) => x.id).sort(), ['a1', 'missing']);
   assert.deepEqual(duplicateIds(idx), ['t']);
 });
+
+test('url() fragments may be quoted with spaces and are percent-decoded, as browsers match ids', () => {
+  const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg"><g id="a b"/><g id="é"/><rect fill="url('#a b')" stroke="url(#%C3%A9)"/><use href="#a%20b"/></svg>`);
+  assert.ok(r.ok);
+  const idx = buildRefIndex(r.doc);
+  assert.deepEqual(idx.refs.get('a b')!.map((x) => x.kind).sort(), ['href', 'url']);
+  assert.equal(idx.refs.get('é')!.length, 1);
+  assert.deepEqual(idx.dangling, []);
+});

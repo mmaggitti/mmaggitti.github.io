@@ -21,9 +21,18 @@ const BANS = [
   ['eval', /\beval\s*\(|\bnew\s+Function\s*\(|setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`]/, []],
   // The script preview (P5) must stay an opaque origin.
   ['allow-same-origin', /allow-same-origin/, []],
-  // Document elements and attributes are created only by the sink. The overlay draws the app's
-  // own handles (never document content), so it may create its own elements.
-  ['dom-write', /\b(createElementNS|setAttributeNS?|setAttribute)\s*\(/, ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts']],
+  // Document elements, attributes, markup and CSS are made only by the sink. The overlay draws the
+  // app's own handles (never document content), so it may make its own. Elsewhere (the renderer)
+  // code only inserts, moves and removes nodes the sink returned. A regex can't see a string passed
+  // to append/before/replaceWith (which makes a text node), so that part is review, not this check.
+  ['dom-write', new RegExp([
+    /\b(createElementNS|createAttribute|createAttributeNS|createContextualFragment|setHTMLUnsafe|parseHTMLUnsafe|insertRule|replaceSync)\s*\(/,
+    /\b(setAttribute|setAttributeNS|setAttributeNode|setAttributeNodeNS)\s*\(/, /\bDOMParser\b/, /\.cssText\s*=(?!=)/,
+  ].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts']],
+  // Plain HTML elements and text: the sink, the overlay, and the code view, which shows the source
+  // as text in its own spans (text is never markup).
+  ['dom-text', /\b(createElement|createTextNode|createDocumentFragment)\s*\(|\.(textContent|nodeValue|innerText|outerText)\s*=(?!=)/,
+    ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts', 'projects/draw/src/codeview/']],
   ['storage', /\b(localStorage|sessionStorage|indexedDB|caches)\b|navigator\.storage/, ['projects/draw/src/platform/']],
   ['fetch', /\bfetch\s*\(|XMLHttpRequest|navigator\.sendBeacon|\bWebSocket\b|\bEventSource\b/, ['projects/draw/src/platform/', 'projects/draw/src/github/', 'projects/draw/src/export/']],
   ['password-field', /type\s*[=:]\s*["']password["']/, ['projects/draw/src/github/TokenForm.tsx']],

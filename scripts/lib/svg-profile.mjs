@@ -12,9 +12,10 @@
 //
 // Plain, dependency-free ESM, shared by scripts/check-library.mjs and projects/draw.
 
-import { ELEMENTS, METADATA_NS, XHTML_ELEMENTS, SMIL_ELEMENTS } from './svg-profile-tables.mjs';
+import { ACTIVE_ATTRIBUTES, ELEMENTS, METADATA_NS, XHTML_ELEMENTS, SMIL_ELEMENTS } from './svg-profile-tables.mjs';
 
-export const PROFILE_VERSION = 1;
+// 2: the tables are generated from Draw's support ledger, and its active attributes are refused.
+export const PROFILE_VERSION = 2;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -245,6 +246,7 @@ function checkAttribute(el, attr, rawValue, add, at) {
   const local = attr.local.toLowerCase();
   if (local.startsWith('on')) { add('event-handler', at); return; }
   if (attr.ns === XML_NS && local === 'base') { add('xml-base', at); return; }
+  if (attr.ns == null && ACTIVE_ATTRIBUTES.has(attr.local)) { add('active-attribute', at); return; }
   if (attr.ns != null && attr.ns !== XLINK_NS && attr.ns !== XML_NS && !METADATA_NS.has(attr.ns)) {
     add('foreign-attribute', at); // inkscape:*, sodipodi:*, i:*, x:* are editor data, not served
     return;

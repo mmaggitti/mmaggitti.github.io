@@ -102,6 +102,44 @@ test('a deep chain of tiny entities hits the depth limit', () => {
   assert.throws(() => decode('&e1;', readEntityTable(subset)), /nested deeper than 8/);
 });
 
+test('a name like toString is an unknown entity, not an object property', () => {
+  const unresolved = new Set<string>();
+  assert.equal(decode('&toString;&constructor;', readEntityTable(null), newBudget(), 0, unresolved), '&toString;&constructor;');
+  assert.deepEqual([...unresolved].sort(), ['constructor', 'toString']);
+});
+
+test('a document that expands too far, or into markup, fails to open', () => {
+  let subset = '<!ENTITY a "' + 'x'.repeat(1000) + '"><!ENTITY b "' + '&a;'.repeat(1100) + '">';
+  const far = parseDoc(`<!DOCTYPE svg [${subset}]><svg><text>&b;</text></svg>`);
+  assert.equal(far.ok, false);
+  assert.match(!far.ok ? far.error.message : '', /over 1000000 characters/);
+  subset = `<!ENTITY m "<circle r='4'/>">`;
+  for (const body of ['<text>&m;</text>', '<g id="&m;"/>']) {
+    const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg>${body}</svg>`);
+    assert.equal(r.ok, false, body);
+    assert.match(!r.ok ? r.error.message : '', /expands to markup/);
+  }
+});
+
+test('reading values after parsing never drains the entity budget', () => {
+  const r = parseDoc(`<!DOCTYPE svg [<!ENTITY a "${'x'.repeat(1000)}">]><svg data-a="&a;"/>`);
+  assert.ok(r.ok);
+  const root = el(r.doc, r.doc.root);
+  for (let i = 0; i < 2000; i++) assert.equal(attrValue(r.doc, root, null, 'data-a')?.length, 1000); // 2 MB read in total
+});
+
+test('values are normalized as an XML processor reports them', () => {
+  const src = '<!DOCTYPE svg [<!ENTITY sp "a\tb&#10;c">]><svg a="x\r\ny\tz" b="&#9;&#10;" c="&sp;"><text>1\r\n2\r3</text></svg>';
+  const r = parseDoc(src);
+  assert.ok(r.ok);
+  const root = el(r.doc, r.doc.root);
+  assert.equal(attrValue(r.doc, root, null, 'a'), 'x y z'); // CRLF is one space, tab is a space
+  assert.equal(attrValue(r.doc, root, null, 'b'), '\t\n'); // character references keep what they name
+  assert.equal(attrValue(r.doc, root, null, 'c'), 'a b c'); // entity text: expanded at declaration, then normalized
+  assert.equal(textContent(r.doc, r.doc.root), '1\n2\n3');
+  assert.equal(serialize(r.doc), src); // the source itself is never rewritten
+});
+
 test('Illustrator-style DOCTYPE entities resolve namespaces', () => {
   const src = `<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n  <!ENTITY ns_svg "http://www.w3.org/2000/svg">\n]>\n<svg xmlns="&ns_svg;"><rect/></svg>`;
   const r = parseDoc(src);

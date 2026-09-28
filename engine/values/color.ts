@@ -11,6 +11,7 @@
 //   color-mix(), relative colors (`from`), calc(), system colors and CSS comments.
 
 import { fmt } from './number-format.ts';
+import { decodeFragment } from './url.ts';
 
 export type ColorSpace = 'srgb' | 'hsl' | 'hwb' | 'lab' | 'lch' | 'oklab' | 'oklch';
 
@@ -166,20 +167,6 @@ export function parsePaint(input: string): Paint | null {
   const fallback = rest === '' ? null : rest.toLowerCase() === 'none' ? 'none' : parseColor(rest);
   if (rest && !fallback) return null;
   return { kind: 'url', id: decodeFragment(ref.slice(1)), fallback };
-}
-
-/**
- * Percent-decode a fragment the way browsers match it to an id: url(#a%20b) is id "a b" and
- * %C3%A9 is "é". A malformed escape, or a run that is not UTF-8, stays as written.
- */
-function decodeFragment(f: string): string {
-  return f.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
 }
 
 // ── output ───────────────────────────────────────────────────────────────────────────────────────

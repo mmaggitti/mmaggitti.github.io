@@ -5,7 +5,8 @@
 // whose ids collide, deleting a def, or deciding whether a <use> points inside the document all
 // need to know who points at what. XML ids are data (Draw's own identity is the NodeId).
 
-import { decode } from '../xml/entities.ts';
+import { decodeAttr } from '../xml/entities.ts';
+import { decodeFragment } from '../values/url.ts';
 import { NS, type Doc, type ElementNode, type NodeId } from './doc.ts';
 
 export type RefKind = 'url' | 'href' | 'aria' | 'smil';
@@ -23,7 +24,8 @@ export interface RefIndex {
   dangling: Ref[]; // references to ids that don't exist in this document
 }
 
-const URL_REF = /url\(\s*(['"]?)#([^'")\s]+)\1\s*\)/g;
+// url(#id), url('#id') and url("#id with spaces"); the id is percent-decoded as browsers match it.
+const URL_REF = /url\(\s*(?:(['"])#([^'"]+)\1|#([^'")\s]+))\s*\)/g;
 // SMIL syncbase and event values: "spin.end+1s", "go.click", "a.begin; b.end".
 const SMIL_REF = /(?:^|;)\s*([A-Za-z_][\w-]*)\.(?:begin|end|click|mouseover|mouseout|mousedown|mouseup|focusin|focusout|activate|repeat(?:\(\d+\))?)\b/g;
 
@@ -50,7 +52,7 @@ export function buildRefIndex(doc: Doc): RefIndex {
 function visit(doc: Doc, n: ElementNode, ids: Map<string, NodeId[]>, add: (r: Ref) => void): void {
   for (const a of n.attrs) {
     if (a.ns === NS.xmlns) continue;
-    const value = decode(a.raw, doc.entities, doc.budget);
+    const value = decodeAttr(a.raw, doc.entities);
     if (a.local === 'id' && (a.ns === null || a.ns === NS.xml)) {
       const list = ids.get(value);
       if (list) list.push(n.id);
@@ -59,7 +61,7 @@ function visit(doc: Doc, n: ElementNode, ids: Map<string, NodeId[]>, add: (r: Re
     }
     if (a.local === 'href' && (a.ns === null || a.ns === NS.xlink)) {
       const v = value.trim();
-      if (v.startsWith('#') && v.length > 1) add({ from: n.id, attr: a.qname, kind: 'href', id: v.slice(1) });
+      if (v.startsWith('#') && v.length > 1) add({ from: n.id, attr: a.qname, kind: 'href', id: decodeFragment(v.slice(1)) });
       continue;
     }
     if (a.ns === null && (a.local === 'aria-labelledby' || a.local === 'aria-describedby')) {
@@ -70,7 +72,7 @@ function visit(doc: Doc, n: ElementNode, ids: Map<string, NodeId[]>, add: (r: Re
       for (const m of value.matchAll(SMIL_REF)) add({ from: n.id, attr: a.qname, kind: 'smil', id: m[1] });
       continue;
     }
-    if (value.includes('url(')) for (const m of value.matchAll(URL_REF)) add({ from: n.id, attr: a.qname, kind: 'url', id: m[2] });
+    if (value.includes('url(')) for (const m of value.matchAll(URL_REF)) add({ from: n.id, attr: a.qname, kind: 'url', id: decodeFragment(m[2] ?? m[3]) });
   }
 }
 

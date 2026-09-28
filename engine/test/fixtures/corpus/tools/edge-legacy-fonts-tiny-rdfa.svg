@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64">
+  <!-- Legacy, SVG Tiny 1.2 and RDFa markup Draw keeps byte for byte and never renders. -->
+  <altGlyphDef/>
+  <altGlyphItem/>
+  <animateColor color-profile="x" enable-background="x" externalResourcesRequired="x" requiredFonts="x" requiredFormats="x"/>
+  <canvas/>
+  <color-profile local="x" name="x" rendering-intent="x"/>
+  <cursor externalResourcesRequired="x"/>
+  <discard requiredFonts="x" requiredFormats="x"/>
+  <font color-profile="x" enable-background="x" externalResourcesRequired="x" horiz-adv-x="1" horiz-origin-x="1" horiz-origin-y="1" vert-adv-y="1" vert-origin-x="1" vert-origin-y="1"/>
+  <font-face accent-height="1" alphabetic="1" ascent="1" bbox="1" cap-height="1" descent="1" externalResourcesRequired="x" hanging="1" ideographic="1" mathematical="1" overline-position="1" overline-thickness="1" panose-1="1" slope="1" stemh="1" stemv="1" strikethrough-position="1" strikethrough-thickness="1" underline-position="1" underline-thickness="1" unicode-range="x" units-per-em="1" v-alphabetic="1" v-hanging="1" v-ideographic="1" v-mathematical="1" widths="1" x-height="1"/>
+  <font-face-format string="x"/>
+  <font-face-name name="x"/>
+  <font-face-src/>
+  <font-face-uri externalResourcesRequired="x"/>
+  <glyph arabic-form="x" color-profile="x" enable-background="x" glyph-name="x" horiz-adv-x="1" orientation="x" unicode="x" vert-adv-y="1" vert-origin-x="1" vert-origin-y="1"/>
+  <glyphRef color-profile="x" enable-background="x" format="x" glyphRef="x"/>
+  <hkern g1="1" g2="1" k="1" u1="1" u2="1"/>
+  <missing-glyph color-profile="x" enable-background="x" horiz-adv-x="1" vert-adv-y="1" vert-origin-x="1" vert-origin-y="1"/>
+  <solidColor/>
+  <tbreak requiredFonts="x" requiredFormats="x"/>
+  <textArea editable="x" focusHighlight="x" focusable="x" nav-down="x" nav-down-left="x" nav-down-right="x" nav-left="x" nav-next="x" nav-prev="x" nav-right="x" nav-up="x" nav-up-left="x" nav-up-right="x" requiredFonts="x" requiredFormats="x"/>
+  <unknown/>
+  <vkern g1="1" g2="1" k="1" u1="1" u2="1"/>
+  <g about="x" content="x" datatype="x" property="x" rel="x" resource="x" rev="x" typeof="x" xlink:show="x" xlink:actuate="x" xlink:type="x" xlink:role="x" xlink:arcrole="x" xml:id="x"/>
+  <prefetch bandwidth="1" mediaCharacterEncoding="x" mediaContentEncodings="x" mediaSize="1" mediaTime="x"/>
+  <svg baseProfile="x" contentScriptType="x" contentStyleType="x" playbackOrder="x" playbackorder="x" snapshotTime="x" syncBehaviorDefault="x" syncToleranceDefault="x" timelineBegin="x" timelinebegin="x" version="x" zoomAndPan="x"/>
+  <feImage crossorigin="x"/>
+  <filter filterRes="x"/>
+  <animation initialVisibility="x" syncBehavior="x" syncMaster="x" syncTolerance="x"/>
+  <animateMotion origin="x"/>
+  <video overlay="x" transformBehavior="x"/>
+  <image type="x"/>
+  <view viewTarget="x"/>
+  <foreignObject width="64" height="16">
+    <time xmlns="http://www.w3.org/1999/xhtml" datetime="x">datetime</time>
+    <q xmlns="http://www.w3.org/1999/xhtml" cite="x">cite</q>
+  </foreignObject>
+</svg>

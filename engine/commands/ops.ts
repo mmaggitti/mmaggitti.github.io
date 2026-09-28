@@ -1,0 +1,132 @@
+// Edits as reversible operations. Every change to a document goes through an Op that records the
+// state before and after, so undo and redo restore the exact bytes: an attribute comes back with
+// its quote, whitespace and position, and a removed node comes back as the same node (same NodeId,
+// same subtree), never as a re-parsed copy.
+
+import {
+  attachNode, attrSnapshot, detachNode, el, restoreAttr, setAttr, setAttrRaw, setLeafRaw,
+  type Attr, type Doc, type NodeId,
+} from '../model/doc.ts';
+
+export interface AttrSnap {
+  index: number;
+  attr: Attr;
+}
+export interface Place {
+  parent: NodeId;
+  index: number;
+}
+
+export type Op =
+  | { kind: 'attr'; id: NodeId; ns: string | null; local: string; before: AttrSnap | null; after: AttrSnap | null }
+  | { kind: 'text'; id: NodeId; before: string; after: string } // a text or CDATA leaf's raw text
+  | { kind: 'place'; id: NodeId; before: Place | null; after: Place | null }; // null = detached
+
+/** What an applied batch of ops touched, for the renderer, the code view and the overlay. */
+export interface ChangeSet {
+  attrs: Set<NodeId>; // start tags to re-render
+  texts: Set<NodeId>; // text leaves to re-render
+  structure: Set<NodeId>; // parents whose child list changed
+}
+
+export const emptyChangeSet = (): ChangeSet => ({ attrs: new Set(), texts: new Set(), structure: new Set() });
+
+export function noteChange(cs: ChangeSet, op: Op): void {
+  if (op.kind === 'attr') cs.attrs.add(op.id);
+  else if (op.kind === 'text') cs.texts.add(op.id);
+  else {
+    if (op.before) cs.structure.add(op.before.parent);
+    if (op.after) cs.structure.add(op.after.parent);
+  }
+}
+
+// ── intents: each applies itself and returns the op that undoes or redoes it ───────────────────
+
+/** Set an attribute's value (unescaped); null removes it. */
+export function opSetAttr(doc: Doc, id: NodeId, ns: string | null, local: string, value: string | null, qname?: string): Op {
+  const before = attrSnapshot(doc, id, ns, local);
+  if (value === null) restoreAttr(doc, id, ns, local, null);
+  else setAttr(doc, id, ns, local, value, qname);
+  return { kind: 'attr', id, ns, local, before, after: attrSnapshot(doc, id, ns, local) };
+}
+
+/** Replace an attribute's raw text: the byte-exact edit a code token makes. */
+export function opSetAttrRaw(doc: Doc, id: NodeId, ns: string | null, local: string, raw: string): Op {
+  const before = attrSnapshot(doc, id, ns, local);
+  setAttrRaw(doc, id, ns, local, raw);
+  return { kind: 'attr', id, ns, local, before, after: attrSnapshot(doc, id, ns, local) };
+}
+
+/** Replace a text or CDATA leaf's raw text (a CDATA leaf's includes its delimiters). */
+export function opSetLeafRaw(doc: Doc, id: NodeId, raw: string): Op {
+  const n = doc.nodes.get(id);
+  if (!n || (n.kind !== 'text' && n.kind !== 'cdata')) throw new Error(`opSetLeafRaw: node ${id} is not text or CDATA`);
+  const before = n.raw;
+  setLeafRaw(doc, id, raw);
+  return { kind: 'text', id, before, after: raw };
+}
+
+/** Kept for text leaves; opSetLeafRaw covers CDATA too. */
+export const opSetTextRaw = opSetLeafRaw;
+
+/** Detach a node; undo puts the same node back where it was. */
+export function opRemove(doc: Doc, id: NodeId): Op {
+  if (id === doc.root) throw new Error('opRemove: the root element cannot be removed');
+  const before = detachNode(doc, id);
+  return { kind: 'place', id, before, after: null };
+}
+
+/** Attach a detached node (a node from opRemove, or one built by the importer) under a parent. */
+export function opInsert(doc: Doc, id: NodeId, parent: NodeId, index: number): Op {
+  if (isInside(doc, parent, id)) throw new Error('opInsert: a node cannot be inserted inside itself');
+  attachNode(doc, id, parent, index);
+  return { kind: 'place', id, before: null, after: { parent, index: el(doc, parent).children.indexOf(id) } };
+}
+
+function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {
+  for (let n = doc.nodes.get(id); n; n = n.parent === null ? undefined : doc.nodes.get(n.parent)) if (n.id === ancestor) return true;
+  return false;
+}
+
+// ── replay ─────────────────────────────────────────────────────────────────────────────────────
+
+function place(doc: Doc, id: NodeId, to: Place | null): void {
+  const n = doc.nodes.get(id)!;
+  if (n.parent !== null) detachNode(doc, id);
+  if (to) attachNode(doc, id, to.parent, to.index);
+}
+
+/** Put an op's `after` state back (redo). */
+export function redoOp(doc: Doc, op: Op): void {
+  if (op.kind === 'attr') restoreAttr(doc, op.id, op.ns, op.local, op.after);
+  else if (op.kind === 'text') setLeafRaw(doc, op.id, op.after);
+  else place(doc, op.id, op.after);
+}
+
+/** Put an op's `before` state back (undo). */
+export function undoOp(doc: Doc, op: Op): void {
+  if (op.kind === 'attr') restoreAttr(doc, op.id, op.ns, op.local, op.before);
+  else if (op.kind === 'text') setLeafRaw(doc, op.id, op.before);
+  else place(doc, op.id, op.before);
+}
+
+/**
+ * Collapse a run of ops into the fewest that have the same effect: consecutive edits of one
+ * attribute or text keep the first `before` and the last `after` (a drag of a hundred frames is
+ * one change). Ops that end where they started are dropped.
+ */
+export function coalesce(ops: readonly Op[]): Op[] {
+  const out: Op[] = [];
+  const last = new Map<string, number>(); // key → index in out
+  for (const op of ops) {
+    const key = op.kind === 'attr' ? `a${op.id}|${op.ns ?? ''}|${op.local}` : op.kind === 'text' ? `t${op.id}` : null;
+    const i = key === null ? undefined : last.get(key);
+    if (key !== null && i !== undefined && i === out.length - 1) {
+      out[i] = { ...out[i], after: op.after } as Op;
+      continue;
+    }
+    out.push(op);
+    if (key !== null) last.set(key, out.length - 1);
+  }
+  return out.filter((op) => !(op.kind !== 'place' && JSON.stringify(op.before) === JSON.stringify(op.after)));
+}

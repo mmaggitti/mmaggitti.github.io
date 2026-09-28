@@ -110,18 +110,22 @@ turn it into a phone-first page and SVG editor.
 ## Draw (`projects/draw/`, at `/draw/`)
 
 Mark's SVG-native design editor, built from SVG Lab. The approved plan (phases P0 to P8, the
-support ledger, the security design) is in the vault's `_audit/2026-09-27 approved-plan draw.md`;
-each phase opens with its own short plan. Until Release 1 it carries
+support ledger, the security design) is in the vault's `_audit/2026-09-27 approved-plan draw.md`,
+with dated revisions beside it; each phase opens with its own short plan. Until Release 1 it carries
 `<meta name="launcher" content="unlisted">`: deployed and tested, not on the launcher.
 
 - **One render sink.** Document content reaches the page only through
   `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
   - `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
     `dangerouslySetInnerHTML`, `srcdoc`, `eval` and `new Function` anywhere;
-  - DOM writes outside the sink and the overlay;
+  - DOM writes outside the sink and the overlay: namespaced elements and attributes, markup
+    parsing and stylesheet writes (`dom-write`). Plain elements and text (`dom-text`) are also
+    allowed in `src/codeview/`, which shows the source as text and never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
   - a password field outside `src/github/TokenForm.tsx`;
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
+- **The renderer (`src/canvas/renderer.ts`) only moves or removes nodes the sink made.** It is
+  keyed by NodeId, and it patches one element or one subtree per change.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

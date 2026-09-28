@@ -41,7 +41,7 @@ test('every folder holds the files it should', () => {
   // (tools/capture-lab-corpus.mjs). tools: hand-written (tools/README.md). A re-capture that adds
   // or loses a lab mode changes this count on purpose.
   const sets = ['bootstrap', 'feather', 'heroicons', 'lucide', 'simple-icons', 'tabler'];
-  assert.deepEqual(counts, { ...Object.fromEntries(sets.map((s) => [`icons/${s}`, 25])), lab: 66, tools: 36 });
+  assert.deepEqual(counts, { ...Object.fromEntries(sets.map((s) => [`icons/${s}`, 25])), lab: 66, tools: 37 });
   for (const s of sets) assert.ok(readFileSync(`${CORPUS}icons/${s}/LICENSE.txt`, 'utf8').length > 0, `icons/${s} has its license`);
 });
 
@@ -97,8 +97,8 @@ test('every path in the corpus parses without error', () => {
 
 // XML 1.0 §2.11 and §3.3.3: a processor turns CRLF and lone CR into LF, then every TAB, CR and LF
 // in an attribute value into a space; text keeps its LFs. The expected strings are what expat
-// reports for these files. engine/xml and engine/model don't normalize yet (their owner's fix).
-test('decoded values match an XML processor: line ends and attribute whitespace', { todo: 'engine/xml + engine/model: XML 1.0 end-of-line and attribute-value normalization' }, () => {
+// reports for these files.
+test('decoded values match an XML processor: line ends and attribute whitespace', () => {
   const cases: [string, string, string | null, string][] = [
     ['tools/edge-crlf-line-endings.svg', 'path', 'd', 'M4 28            L16 4            L28 28 Z'],
     ['tools/edge-crlf-line-endings.svg', 'text', null, 'line one\nline two'],

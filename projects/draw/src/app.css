@@ -1,6 +1,9 @@
 /* Draw: an app shell on the site design system (ds/ds.css). Sizes in rem (ds tokens); px only for
    the 44pt tap floor and hairlines, per the design system. */
 
+/* A fixed-height column (ds-app is only a minimum), so the canvas takes exactly what the bar leaves. */
+.draw { height: 100svh; }
+
 .draw-bar {
   display: flex;
   align-items: center;
@@ -15,5 +18,41 @@
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+/* The document's own CSS applies inside the host's shadow root, where it can still style the host
+   (:host) and position things fixed. Strict containment on this wrapper, which that CSS can't
+   select, keeps everything it draws inside the canvas: fixed and absolute boxes are placed
+   against it, painting is clipped to it, and no z-index lifts anything over the chrome. */
+.draw-canvas {
+  flex: 1;
+  min-height: 0;
+  contain: strict;
+  padding: var(--space-4) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
+  background: var(--surface);
+}
+/* The document draws as it would on its own, not in the app's theme: nothing the app sets inherits
+   into it (color and so currentColor, fonts, color-scheme; the ds tokens, which `all` leaves
+   alone, so a var() fallback in the document stays its own), and it sits on white paper in
+   light and dark alike. */
+.draw-host {
+  all: initial;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  --ui-scale: initial; --text-sm: initial; --text-md: initial; --text-lg: initial; --text-xl: initial;
+  --text-display: initial; --leading: initial; --leading-tight: initial; --font-ui: initial;
+  --font-mono: initial; --space-1: initial; --space-2: initial; --space-3: initial; --space-4: initial;
+  --space-5: initial; --space-6: initial; --space-7: initial; --space-8: initial; --radius-sm: initial;
+  --radius: initial; --control-h: initial; --control-h-sm: initial; --measure: initial;
+  --tap-min: initial; --bg: initial; --surface: initial; --text: initial; --text-muted: initial;
+  --line: initial; --accent: initial; --on-accent: initial;
+}
+.draw-error {
+  position: absolute;
+  inset: auto var(--space-4) var(--space-4);
+  margin: 0;
   color: var(--text-muted);
 }
