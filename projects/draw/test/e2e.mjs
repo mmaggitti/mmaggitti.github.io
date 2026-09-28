@@ -35,21 +35,32 @@ const TABLES = {
   xhtmlAttributes: [...RENDER_XHTML_ATTRIBUTES],
 };
 
+// Every check runs even after one fails, and the run fails with all their messages: WebKit runs
+// only in CI, so one run should show everything it disagrees with.
 export default async function run({ browser, origin }) {
-  await cspIsFirstAndEnforced(browser, origin);
-  await unlistedAndNeverFramed(browser, origin);
-  await libraryIndexServed(browser, origin);
-  for (const height of [956, 796]) await phoneRules(browser, origin, height);
-  await sampleRenders(browser, origin);
-  await corpusStaysInert(browser, origin);
-  await policyEdges(browser, origin);
-  await moreEdges(browser, origin);
-  await canvasIgnoresTheTheme(browser, origin);
-  for (const colorScheme of ['light', 'dark']) await corpusLooksAsItDoesAlone(browser, origin, colorScheme);
-  await documentCssStaysInside(browser, origin);
-  await reducedMotionStopsAnimation(browser, origin);
-  await rendererPatch({ browser, origin });
-  await probe({ browser, origin });
+  const failures = [];
+  const check = async (fn, ...args) => {
+    try {
+      await fn(browser, origin, ...args);
+    } catch (e) {
+      failures.push(`${fn.name}${args.length ? ` (${args.join(', ')})` : ''}: ${e.message}`);
+    }
+  };
+  await check(cspIsFirstAndEnforced);
+  await check(unlistedAndNeverFramed);
+  await check(libraryIndexServed);
+  for (const height of [956, 796]) await check(phoneRules, height);
+  await check(sampleRenders);
+  await check(corpusStaysInert);
+  await check(policyEdges);
+  await check(moreEdges);
+  await check(canvasIgnoresTheTheme);
+  for (const colorScheme of ['light', 'dark']) await check(corpusLooksAsItDoesAlone, colorScheme);
+  await check(documentCssStaysInside);
+  await check(reducedMotionStopsAnimation);
+  await check(function rendererPatchCases(b, o) { return rendererPatch({ browser: b, origin: o }); });
+  await check(function shadowRootProbe(b, o) { return probe({ browser: b, origin: o }); });
+  if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
 
 // The meta CSP is the first element in <head>, so nothing before it can run, and it blocks an

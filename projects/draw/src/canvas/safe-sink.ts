@@ -155,3 +155,21 @@ export function canvasSheet(): CSSStyleSheet {
   }
   return canvas;
 }
+
+/**
+ * Keep the app's font out of the drawing where `all: initial` can't. app.css resets the canvas host
+ * with `all: initial`, but WebKit keeps the inherited font-family for it (its initial family list is
+ * empty), so a font-less <text> would take the app's font instead of the one it has opened on its
+ * own. Test whether the reset really stops an inherited family; where it doesn't, name the standard
+ * font the way WebKit reports it for a file on its own (-webkit-standard). A no-op in Chromium.
+ */
+export function resetInheritedFont(root: ShadowRoot): void {
+  const outer = document.createElement('span');
+  outer.style.fontFamily = 'draw-probe';
+  const inner = outer.appendChild(document.createElement('span'));
+  inner.style.setProperty('all', 'initial');
+  root.append(outer);
+  const kept = getComputedStyle(inner).fontFamily === 'draw-probe';
+  outer.remove();
+  if (kept && root.host instanceof HTMLElement) root.host.style.fontFamily = '-webkit-standard';
+}

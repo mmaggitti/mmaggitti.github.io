@@ -19,7 +19,7 @@ import { buildRefIndex } from '../../../../engine/model/refs.ts';
 import { animatesAttribute } from '../../../../engine/policy/render-policy.ts';
 import { parseLength, toUserUnits } from '../../../../engine/values/length.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
-import { canvasSheet, sinkAttribute, sinkAttributes, sinkElement, sinkText } from './safe-sink.ts';
+import { canvasSheet, resetInheritedFont, sinkAttribute, sinkAttributes, sinkElement, sinkText } from './safe-sink.ts';
 
 export interface RenderStats {
   rendered: number; // elements on the canvas
@@ -50,6 +50,7 @@ export class Renderer {
   constructor(host: ShadowRoot) {
     this.#host = host;
     host.adoptedStyleSheets = [canvasSheet()];
+    resetInheritedFont(host);
   }
 
   /** Draw the whole document, replacing whatever the host held. If drawing throws, the previous drawing stays. */
