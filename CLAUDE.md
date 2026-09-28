@@ -33,6 +33,7 @@ projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see T
 projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
 projects/draw/            Draw, the SVG editor (Vite + React + TS); unlisted until Release 1 (see Draw)
+projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
@@ -224,6 +225,30 @@ components.
 - **Density follows input.** Wherever a coarse pointer exists (`any-pointer: coarse`: phone, iPad
   even with a trackpad), controls keep the 44px floor. Compact controls apply only when no coarse
   pointer exists (a Mac).
+
+#### Rust/WASM apps
+
+`projects/cs-probe/` is the reference: the starter kit stamped once, every seam exercised by its
+e2e. New apps are stamped from the same kit (the system's `tools/new-app.mjs`, in the private
+source).
+
+- **Layout.** A Cargo workspace (`crates/<app>-core` pure Rust, `-wasm` the wasm-bindgen binding,
+  `-cli`), `web/` for the TS UI, and `src-tauri/` for the native shell. The shell stays outside the
+  workspace, so `cargo test` never builds Tauri. Rust is pinned in `rust-toolchain.toml`.
+- **`npm run build` runs `build.mjs`:**
+  - clippy with `-D warnings`, then `cargo test`: CI gates Rust through the normal build;
+  - the WASM build with `--remap-path-prefix`, then a check that no home path is left in it;
+  - wasm-bindgen: downloaded at the version in `Cargo.lock` and sha256-checked. A new version needs
+    its sums added to `build.mjs`;
+  - `wasm-opt`, then `tsc` and Vite;
+  - gzip budgets from `budgets.json`. Past a budget the build fails. Shrink the output, or raise
+    the budget on purpose in its own commit.
+- **Never commit build output.** `target/`, `web/pkg/` and `dist/` are ignored, and CI builds from
+  source. The guard also reads the strings inside any committed `.wasm`.
+- **CI:** add each new Rust app to the `Swatinem/rust-cache` `workspaces:` list in `deploy.yml`.
+- **The app's CSP blocks eval**, so an e2e must not rebuild functions from strings inside the page
+  (`new Function`, string predicates). Poll from Node instead, as `cs-probe`'s `until` does.
+- **Unlisted until it's an app:** `<meta name="launcher" content="unlisted">`.
 
 ## Phone-first rules (every project)
 

@@ -1,0 +1,17 @@
+[package]
+name = "cs-probe-wasm"
+description = "Seams probe: the WASM binding over the core (wasm-bindgen, pinned exactly)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cs-probe-core = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+[lints]
+workspace = true

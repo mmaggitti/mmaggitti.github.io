@@ -1,0 +1,22 @@
+{
+  "name": "cs-probe",
+  "private": true,
+  "type": "module",
+  "description": "The Core and Seams starter kit, built and tested: a Rust core in WebAssembly, every seam exercised once.",
+  "scripts": {
+    "dev": "vite",
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "binaryen": "132.0.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}

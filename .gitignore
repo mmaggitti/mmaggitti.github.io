@@ -3,3 +3,5 @@ _site/
 .smoke/
 dist/
 .DS_Store
+# Rust build output (Core & Seams apps): large, and dx/cargo write build-environment files here
+target/

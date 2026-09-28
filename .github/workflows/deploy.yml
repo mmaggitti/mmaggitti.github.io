@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned, so a runner-image upgrade is a deliberate change
     steps:
       - uses: actions/checkout@v5
 
@@ -36,6 +36,11 @@ jobs:
         env:
           PUBLIC_GUARD_DENY: ${{ secrets.PUBLIC_GUARD_DENY }}
 
+      # The guard reads the strings inside .wasm files (a build can embed absolute source paths).
+      # This plants one in a scratch checkout and fails if the scan misses it.
+      - name: Guard self-test — the .wasm scan still finds a planted path
+        run: node scripts/check-public.mjs --self-test
+
       # Sizes are rem so the whole UI follows --ui-scale; a raw px value would stay full-size.
       - name: Design system — rem, not px
         run: node scripts/check-units.mjs
@@ -50,6 +55,21 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Core & Seams apps pin Rust in rust-toolchain.toml; rustup installs it on the first cargo call.
+      # This makes that visible (and fails early) before the build.
+      - name: Rust toolchains (Core & Seams apps)
+        run: |
+          for f in projects/*/rust-toolchain.toml; do
+            [ -e "$f" ] || continue
+            (cd "$(dirname "$f")" && echo "== $(dirname "$f")" && cargo --version && rustup target list --installed)
+          done
+
+      # Caches each Rust app's target/ and the cargo registry; add a line per app (new-app.mjs says so).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            projects/cs-probe -> target
 
       - name: Build every project and the launcher
         run: npm run build
@@ -77,7 +97,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned, so a runner-image upgrade is a deliberate change
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

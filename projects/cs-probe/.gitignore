@@ -1,0 +1,6 @@
+node_modules/
+target/
+dist/
+web/pkg/
+src-tauri/target/
+src-tauri/gen/

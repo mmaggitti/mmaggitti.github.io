@@ -5,6 +5,7 @@
 //   node scripts/check-public.mjs          scan this repo (tracked + untracked, minus .gitignore)
 //   node scripts/check-public.mjs <dir>    scan another git checkout or a subfolder of one
 //   node scripts/check-public.mjs --hook   Claude Code PreToolUse hook: block `git commit` / `git push`
+//   node scripts/check-public.mjs --self-test   prove the .wasm scan still finds a planted home path
 //
 // Findings print as `path:line  rule` and NEVER include the matched text, so a CI log or a chat
 // transcript can't become the leak. A line containing `public-ok` is exempt — use it for a real
@@ -15,7 +16,8 @@
 // secret, never in a file here: a deny list committed to a public repo would publish the list.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LINE_RULES, SECRET_FILE } from './lib/public-rules.mjs';
@@ -53,8 +55,14 @@ function scan(dir) {
       if (file.toLowerCase().includes(t)) findings.push(`${file}  deny-list term #${i + 1} (in path)`);
     });
     const buf = readFileSync(join(dir, file));
-    if (buf.subarray(0, 8000).includes(0)) continue; // binary
-    const lines = buf.toString('utf8').split('\n');
+    let lines;
+    if (buf.subarray(0, 8000).includes(0)) {
+      // Binary. A .wasm is scanned by its printable strings: a build can embed absolute source
+      // paths (panic locations), so a Mac-built module would publish a home path. Other binaries
+      // (fonts, images) are skipped.
+      if (!file.endsWith('.wasm')) continue;
+      lines = buf.toString('latin1').match(/[\x20-\x7e]{6,}/g) ?? [];
+    } else lines = buf.toString('utf8').split('\n');
     lines.forEach((line, n) => {
       if (line.includes('public-ok')) return;
       for (const [rule, re] of LINE_RULES) if (re.test(line)) findings.push(`${file}:${n + 1}  ${rule}`);
@@ -95,9 +103,27 @@ async function hook() {
   return 2; // exit 2 = block the tool call and hand stderr to Claude
 }
 
+/** Plant a home path inside a fake .wasm in a scratch checkout; the scan must find it. */
+function selfTest() {
+  const dir = mkdtempSync(join(tmpdir(), 'check-public-'));
+  try {
+    execFileSync('git', ['init', '-q', dir]);
+    const fake = Buffer.concat([Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]), Buffer.from('src at /Users/someone/project/lib.rs line 1')]); // public-ok: planted on purpose
+    writeFileSync(join(dir, 'planted.wasm'), fake);
+    const { findings } = scan(dir);
+    const ok = findings.some((f) => f.startsWith('planted.wasm') && f.includes('mac-home-path'));
+    console.log(ok ? 'check-public: self-test ok — the .wasm scan found the planted path' : 'check-public: self-test FAILED — the .wasm scan missed a planted home path');
+    return ok ? 0 : 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv[2] === '--hook') {
     process.exitCode = await hook();
+  } else if (process.argv[2] === '--self-test') {
+    process.exitCode = selfTest();
   } else {
     const dir = resolve(process.argv[2] ?? REPO);
     const result = scan(dir);

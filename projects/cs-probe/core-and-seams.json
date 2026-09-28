@@ -1,0 +1,17 @@
+{
+  "$description": "This project is a Core & Seams app. The site's scripts/check-deps.mjs reads this file's presence; new-app.mjs wrote it. Seams list the implementation chosen for each seam (see Core & Seams SEAMS.md).",
+  "name": "cs-probe",
+  "title": "Seams probe",
+  "template": 1,
+  "hue": "blue",
+  "uiScale": 0.75,
+  "seams": {
+    "ui": "react-panels",
+    "renderer": "none",
+    "storage": "opfs",
+    "files": "web",
+    "moduleHost": "webview",
+    "shell": "pwa",
+    "hosting": "github-pages"
+  }
+}

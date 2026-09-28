@@ -1,0 +1,36 @@
+# Seams probe — the native shell (Tauri 2). Its own package, outside the app's Cargo workspace, so
+# `cargo test` in the app never compiles Tauri (Core & Seams DOCTRINE §1). Built on the Mac (S6).
+[workspace]
+
+[package]
+name = "cs-probe-shell"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[lib]
+# `_lib` keeps the library name distinct from the binary (Windows, rust-lang/cargo#8519).
+# crate-type is the iOS door: iOS links the staticlib; desktop needs only rlib.
+name = "cs_probe_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.0", features = [] }
+
+[dependencies]
+# `devtools`: the release Inspector. tauri-v2-sandbox also found release bundles rendering blank
+# without it (A/B 3/3); html-pkm did not. Kept on until that is explained.
+tauri = { version = "=2.12.0", features = ["devtools"] }
+tauri-plugin-dialog = "=2.8.0"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# The one Objective-C call Tauri doesn't make: the full-screen inset fix (lib.rs).
+objc2 = "=0.6.4"
+
+# Pinned: a panic in a command is caught by catch_unwind and returned as an error (sandbox ADR-003).
+[profile.release]
+panic = "unwind"
+lto = true
+codegen-units = 1
+strip = true

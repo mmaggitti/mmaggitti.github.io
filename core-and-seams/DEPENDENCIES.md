@@ -29,22 +29,23 @@ Status: **adopted** (in use), **planned** (named by the approved plan, not yet a
 
 | Crate | Pin | Status | Used by | Why it's here | Afternoon test | Revisit when |
 |---|---|---|---|---|---|---|
-| `wasm-bindgen` | `=0.2.129` | planned (S3) | every `-wasm` crate | The Rust↔JS binding (ADR-003); shared with cad-kernel | Fails: glue generation, type descriptors, the CLI | ADR-003's trigger |
+| `wasm-bindgen` | `=0.2.129` | adopted (S3) | every `-wasm` crate | The Rust↔JS binding (ADR-003); shared with cad-kernel | Fails: glue generation, type descriptors, the CLI | ADR-003's trigger |
 | `js-sys` / `web-sys` | lockstep `0.3.106` | planned, only if a crate calls browser APIs | `-wasm` crates that need them | Typed browser API bindings | Fails: API surface | A crate uses them for one call; replace it with a JS import |
 | `fsrs` | exact, current | planned **dev** (S4) | `sr-core` tests | Oracle for the FSRS-6 port (ADR-013) | Not applicable: it is the reference | FSRS-7, or training moves into a CLI |
-| `tauri`, `tauri-build` | `=2.12.0` | planned (S3/S6) | `src-tauri/` | The native shell (platform) | Fails: platform | Tauri 3 stable |
-| `tauri-plugin-dialog` | exact, 2.x | planned (S3/S6) | `src-tauri/` | Native file pickers for the files seam | Fails: platform bindings | The files seam gets a native Swift plugin |
-| `objc2` | exact, 0.6.x | planned (S3/S6), iOS only | `src-tauri/` | The iOS scroll-view inset fix (the second full-screen fix) | Fails: safe Obj-C messaging | wry sets `contentInsetAdjustmentBehavior` itself |
+| `tauri`, `tauri-build` | `=2.12.0`, `=2.7.0` | adopted (S3; built on the Mac in S6) | `src-tauri/` | The native shell (platform) | Fails: platform | Tauri 3 stable |
+| `tauri-plugin-dialog` | `=2.8.0` | adopted (S3; built in S6) | `src-tauri/` | Native file pickers for the files seam | Fails: platform bindings | The files seam gets a native Swift plugin |
+| `objc2` | `=0.6.4` | adopted (S3; built in S6), iOS only | `src-tauri/` | The iOS scroll-view inset fix (the second full-screen fix) | Fails: safe Obj-C messaging | wry sets `contentInsetAdjustmentBehavior` itself |
 
 ## npm packages
 
 | Package | Pin | Status | Used by | Why it's here | Afternoon test | Revisit when |
 |---|---|---|---|---|---|---|
-| `vite` | exact, 8.3.x (site) | planned (S3) | `web/` | Dev server and bundler; the site's built-project contract | Fails: platform | — |
-| `typescript` | exact, 7.0.x (site) | planned (S3) | `web/` | Type checking | Fails: platform | — |
-| `react`, `react-dom` | exact, 19.3.x | planned (S3) | `web/panels/` only | Panels (ADR-004) | Fails: reconciler, focus management | ADR-004's trigger |
+| `vite` | `8.3.1` | adopted (S3) | `web/` | Dev server and bundler; the site's built-project contract | Fails: platform | — |
+| `typescript` | `7.0.2` | adopted (S3) | `web/` | Type checking | Fails: platform | — |
+| `react`, `react-dom` | `19.3.0` | adopted (S3) | `web/panels/` only | Panels (ADR-004) | Fails: reconciler, focus management | ADR-004's trigger |
+| `@types/react`, `@types/react-dom` | `19.3.0` | **dev** (S3) | `web/` type checking | React's types; the React packages ship none | Fails: the whole JSX and DOM type surface | React ships its own types, or React leaves (ADR-004) |
 | `three` | exact, 0.186.x | planned (S5) | renderer seam | Default renderer: WebGPU with WebGL2 fallback, picking, clipping | Fails: two GPU backends | A second renderer ships |
-| `binaryen` | exact, 132.x | planned **dev** (S3) | `build.mjs` | `wasm-opt` for size (about 50% smaller measured) | Fails: an optimiser | wasm-bindgen gains an equivalent pass |
+| `binaryen` | `132.0.0` | **dev** (S3) | `build.mjs` | `wasm-opt` for size (about 50% smaller measured) | Fails: an optimiser | wasm-bindgen gains an equivalent pass |
 | `@tauri-apps/cli` | exact, 2.12.x | planned **dev** (S3/S6) | Tauri builds | Tauri's CLI | Fails: platform | Tauri 3 stable |
 
 ## GitHub Actions (site CI)
@@ -56,13 +57,13 @@ Status: **adopted** (in use), **planned** (named by the approved plan, not yet a
 | `actions/configure-pages` | `v5` | adopted (site) | Pages deploy setup | Hosting moves off GitHub Pages |
 | `actions/upload-pages-artifact` | `v3` | adopted (site) | Uploads `_site/` | Hosting moves off GitHub Pages |
 | `actions/deploy-pages` | `v4` | adopted (site) | Deploys to Pages | Hosting moves off GitHub Pages |
-| `Swatinem/rust-cache` | full SHA of v2.x | planned (S3) | Caches `target/` and the registry per Rust project; each uncached deploy otherwise adds 25–60 s | Deploy time stops mattering |
+| `Swatinem/rust-cache` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` (v2.9.2) | adopted (S3) | Caches `target/` and the registry per Rust project; each uncached deploy otherwise adds 25–60 s | Deploy time stops mattering |
 
 ## Downloaded tools
 
 | Tool | Pin | Status | Why it's here | How it's fetched | Revisit when |
 |---|---|---|---|---|---|
-| `wasm-bindgen-cli` | `0.2.129` (read from `Cargo.lock`) | planned (S3) | Must match the crate exactly | `build.mjs` downloads the GitHub release asset and checks its sha256. cargo-binstall fails through the cloud proxy | wasm-bindgen moves |
+| `wasm-bindgen-cli` | `0.2.129` (read from `Cargo.lock`), sha256 per platform in `build.mjs` | adopted (S3) | Must match the crate exactly | `build.mjs` downloads the GitHub release asset and checks its sha256. cargo-binstall fails through the cloud proxy | wasm-bindgen moves |
 
 ## Vendored assets
 
