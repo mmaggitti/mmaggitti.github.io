@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- House icon style: saturated dark field, chunky light forms, one element lit. -->
+  <rect width="64" height="64" rx="14" fill="#16404F"/>
+  <path d="M6 50 L20 30 L26 37 L32 16 L40 32 L46 26 L58 50 Z" fill="#fff" fill-opacity=".45"/>
+  <path d="M32 16 L40 32 L35 29 L32 34 L29 28 Z" fill="#fff"/>
+</svg>
