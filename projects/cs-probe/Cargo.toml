@@ -17,7 +17,7 @@ publish = false
 
 [workspace.dependencies]
 cs-probe-core = { path = "crates/cs-probe-core" }
-wasm-bindgen = "=0.2.129"
+wasm-bindgen = "=0.2.128"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
