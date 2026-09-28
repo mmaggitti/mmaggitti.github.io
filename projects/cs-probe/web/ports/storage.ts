@@ -7,6 +7,8 @@ import type { Bytes } from '../worker/protocol';
 
 export interface Storage {
   readonly backend: 'opfs' | 'indexeddb';
+  /** Why OPFS wasn't used, when it wasn't: a diagnostic worth showing on a real device. */
+  readonly fallback?: string | undefined;
   read(name: string): Promise<Bytes | null>;
   write(name: string, bytes: Bytes): Promise<void>;
   /** Add bytes to the end of a file, creating it if needed: the operation an append-only log needs. */
@@ -30,8 +32,9 @@ async function persist(): Promise<boolean> {
   }
 }
 
-async function opfs(app: string): Promise<Storage | null> {
-  if (typeof navigator.storage?.getDirectory !== 'function') return null;
+/** OPFS through the storage worker, or the reason it can't be used here. */
+async function opfs(app: string): Promise<Storage | string> {
+  if (typeof navigator.storage?.getDirectory !== 'function') return 'navigator.storage.getDirectory is missing';
   const worker = new Worker(new URL('./storage.worker.ts', import.meta.url), { type: 'module' });
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -42,6 +45,10 @@ async function opfs(app: string): Promise<Storage | null> {
     if (e.data.ok) p.resolve(e.data.value);
     else p.reject(Object.assign(new Error(e.data.error?.message ?? 'storage failed'), { name: e.data.error?.kind ?? 'storage' }));
   };
+  worker.onerror = (e) => {
+    for (const p of pending.values()) p.reject(new Error(e.message || 'the storage worker failed to load'));
+    pending.clear();
+  };
   const call = <T>(msg: Record<string, unknown>, transfer: Transferable[] = []) =>
     new Promise<T>((resolve, reject) => {
       const id = nextId++;
@@ -50,10 +57,10 @@ async function opfs(app: string): Promise<Storage | null> {
     });
   try {
     // A worker that never answers (no OPFS in this context) must not hang the app.
-    await Promise.race([call({ op: 'open', app }), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))]);
-  } catch {
+    await Promise.race([call({ op: 'open', app }), new Promise((_, reject) => setTimeout(() => reject(new Error('no answer in 3 s')), 3000))]);
+  } catch (e) {
     worker.terminate();
-    return null;
+    return e instanceof Error ? `${e.name === 'Error' ? '' : `${e.name}: `}${e.message}` : String(e);
   }
   // Transfer a copy: the caller's bytes stay usable.
   const send = (op: 'write' | 'append', name: string, bytes: Bytes) => {
@@ -72,7 +79,7 @@ async function opfs(app: string): Promise<Storage | null> {
   };
 }
 
-function indexedDb(app: string): Storage {
+function indexedDb(app: string, fallback?: string): Storage {
   const db = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(`${app}:storage`, 1);
     req.onupgradeneeded = () => req.result.createObjectStore('files');
@@ -87,6 +94,7 @@ function indexedDb(app: string): Storage {
   const store = async (mode: IDBTransactionMode) => (await db).transaction('files', mode).objectStore('files');
   return {
     backend: 'indexeddb',
+    fallback,
     async read(name) {
       checkName(name);
       return ((await done((await store('readonly')).get(key(name)))) as Bytes | undefined) ?? null;
@@ -119,5 +127,6 @@ function indexedDb(app: string): Storage {
 
 /** The app's storage: OPFS when this browser can write to it from a worker, IndexedDB otherwise. */
 export async function openStorage(app: string): Promise<Storage> {
-  return (await opfs(app)) ?? indexedDb(app);
+  const o = await opfs(app);
+  return typeof o === 'string' ? indexedDb(app, o) : o;
 }

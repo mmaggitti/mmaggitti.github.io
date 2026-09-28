@@ -114,7 +114,7 @@ export const commands = {
     try {
       storage = await openStorage(APP);
       const persisted = await storage.persist();
-      store.set({ storage: `${storage.backend}${persisted ? ', persistent' : ''}` });
+      store.set({ storage: `${storage.backend}${persisted ? ', persistent' : ''}${storage.fallback ? ` (OPFS unavailable: ${storage.fallback})` : ''}` });
       const cards = parseJsonl(await readText('cards.jsonl'));
       const reviews = parseJsonl(await readText('reviews.jsonl'));
       const metaText = await readText('meta.json');
