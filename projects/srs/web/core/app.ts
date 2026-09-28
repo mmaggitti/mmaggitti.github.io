@@ -132,7 +132,9 @@ export const commands = {
 
   /** Import a deck or a backup from Files. */
   async importFile() {
-    const [file] = await pick('.jsonl,.json,.txt,application/json,text/plain');
+    // No type filter: iOS has no file type for .jsonl, so a filter greys the deck out in Files.
+    // Every line is validated on import instead.
+    const [file] = await pick();
     if (!file || !storage) return;
     store.set({ busy: true });
     try {

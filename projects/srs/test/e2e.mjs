@@ -32,9 +32,12 @@ const until = async (page, check, predicate, what, timeout = 15_000) => {
 };
 const shown = (page, selector) => page.evaluate((s) => !!document.querySelector(s), selector);
 
+/** Import through the real file picker; returns its `accept` filter. */
 async function importFile(page, path) {
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-action="import"]')]);
+  const accept = await chooser.element().getAttribute('accept');
   await chooser.setFiles(path);
+  return accept;
 }
 
 /** Where the review screen draws: the card inside the viewport, the bar pinned to its bottom. */
@@ -72,7 +75,9 @@ export default async function run({ browser, origin, engine }) {
 
     // Empty, then the sample deck imported through the file picker.
     expect(await until(page, 'empty', (t) => t.includes('No cards yet'), at('empty state')), '');
-    await importFile(page, FIXTURE);
+    // No type filter: iOS greys out .jsonl in Files under any accept list (it has no type for it).
+    const accept = await importFile(page, FIXTURE);
+    expect(!accept, at(`the import picker filters by type (${accept}); iOS would grey out .jsonl decks`));
     expect(await until(page, 'cards', (t) => t === String(DECK.length), at('cards after import')), '');
     expect(await read(page, 'new') === String(DECK.length), at(`new after import: ${await read(page, 'new')}`));
     expect(await read(page, 'due') === '0', at(`due after import: ${await read(page, 'due')}`));

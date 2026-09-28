@@ -9,7 +9,13 @@ export interface PickedFile {
   bytes: Bytes;
 }
 
-/** Ask the user for files. Resolves to [] if they cancel. */
+/**
+ * Ask the user for files. Resolves to [] if they cancel.
+ *
+ * `accept` filters what the picker offers. On iOS it only matches file types the system knows: a
+ * format with no registered type (`.jsonl`, most custom extensions) is greyed out in Files even
+ * when its extension is listed. For such formats leave `accept` empty and validate the contents.
+ */
 export function pick(accept = '', multiple = false): Promise<PickedFile[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
