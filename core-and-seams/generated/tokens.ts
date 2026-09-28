@@ -248,6 +248,41 @@ export const tokens = {
       },
       "dataDropped": "orange"
     },
+    "purple": {
+      "light": {
+        "accent": "#A100FF",
+        "accent-deep": "#7500C0",
+        "accent-deepest": "#460073",
+        "accent-soft": "#C2A3FF",
+        "accent-softest": "#E6DCFF",
+        "on-accent": "#FFFFFF"
+      },
+      "dark": {
+        "accent": "#BE83FF",
+        "accent-deep": "#AF5DFF",
+        "accent-deepest": "#E2CCFF",
+        "accent-soft": "#402E55",
+        "accent-softest": "#231A2F",
+        "on-accent": "#000000"
+      },
+      "data": {
+        "red": "#F2B0B0",
+        "orange": "#F8C6A0",
+        "amber": "#F2CE9E",
+        "yellow": "#ECE0A0",
+        "lime": "#D3E6A2",
+        "green": "#A9DCB9",
+        "mint": "#A6E8C9",
+        "teal": "#A8EFE3",
+        "cyan": "#A9DDED",
+        "blue": "#AEC2FF",
+        "indigo": "#C1B8F4",
+        "purple": "#E7B2E3",
+        "pink": "#FFB3D1",
+        "rose": "#F3B0D3"
+      },
+      "dataDropped": "violet"
+    },
     "slate": {
       "light": {
         "accent": "#5E7791",
