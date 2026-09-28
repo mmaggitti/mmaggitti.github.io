@@ -54,7 +54,11 @@ async function loadAndDraw(browser, origin, gl) {
           fill: Math.abs(c.width - s.width) <= 2 && Math.abs(c.height - s.height) <= 2 && c.height > 300,
           grand: !!grand && on(grand),
           peaks: [...document.querySelectorAll('.pk .chip')].filter(on).length,
-          pins: [...document.querySelectorAll('.vp .num')].filter(on).length,
+          // A pin counts as on the stage by its center: the stage may clip the edge of one near its side.
+          pins: [...document.querySelectorAll('.vp .num')].filter((el) => {
+            const b = el.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
+            return getComputedStyle(el).visibility === 'visible' && x > s.left && x < s.right && y > s.top && y < s.bottom;
+          }).length,
           shown: [...document.querySelectorAll('.vp .num')].filter((el) => getComputedStyle(el).visibility === 'visible').length,
         };
       });
@@ -63,9 +67,11 @@ async function loadAndDraw(browser, origin, gl) {
       must(r.peaks >= 3, `only ${r.peaks} peak labels on the stage`);
       // The opening view leaves the southernmost photo spot just below the stage edge.
       must(r.pins === r.shown && r.pins >= 4, `${r.pins} photo pins on the stage, ${r.shown} shown`);
-      // A blank or single-color canvas compresses to a few KB; the drawn terrain doesn't.
-      const png = await page.locator('#stage').screenshot();
-      must(png.length > 60000, `the stage screenshot is ${png.length} bytes — is the terrain drawn?`);
+      // A blank stage screenshots to ~27 KB; the drawn terrain to 200 KB+. Polled: software GL in CI
+      // may show its first frame a moment after the loading screen goes.
+      let png = 0;
+      await waitFor(async () => (png = (await page.locator('#stage').screenshot()).length) > 60000,
+        () => `the stage screenshot is ${png} bytes — is the terrain drawn?`, 20000);
 
       // Probes that would land on or past the stage's edge are skipped: the stage clips there.
       const hits = await page.evaluate(() => {

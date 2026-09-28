@@ -10,6 +10,9 @@
 <meta name="theme-color" content="#0E1412" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<!-- No /ds/ds.css on purpose: this page keeps its own look, sized in rem against the default 16px
+     root. The site sheet's 75% root would shrink every size here, and its --bg/--line/--accent
+     would collide with the page's own. -->
 <style>
 @font-face{font-family:"Barlow";src:url(fonts/barlow-latin-400.woff2) format("woff2");font-weight:400;font-display:swap}
 @font-face{font-family:"Barlow";src:url(fonts/barlow-latin-500.woff2) format("woff2");font-weight:500;font-display:swap}
@@ -40,7 +43,7 @@
 html,body{height:100%}
 :root{box-sizing:border-box} /* the safe-area padding stays inside the 100% height */
 body{background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:0.875rem;-webkit-font-smoothing:antialiased}
-.app{box-sizing:border-box;height:100%;max-width:87.5rem;margin:0 auto;padding-inline:1rem;padding-block:0.625rem 0.75rem;display:flex;flex-direction:column;gap:0.625rem}
+.app{box-sizing:border-box;height:100%;max-width:87.5rem;margin:0 auto;padding-inline:max(1rem,env(safe-area-inset-left)) max(1rem,env(safe-area-inset-right));padding-block:0.625rem 0.75rem;display:flex;flex-direction:column;gap:0.625rem}
 .top{display:flex;align-items:flex-end;justify-content:space-between;gap:0.75rem}
 .top h1{margin:0;font-family:var(--display);font-weight:600;font-size:1.375rem;letter-spacing:.08em;text-transform:uppercase;line-height:1;text-wrap:balance}
 .top p{margin:0.25rem 0 0;color:var(--muted);font-size:0.78125rem;letter-spacing:.01em}
@@ -766,8 +769,11 @@ body{background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:0.875
     box.appendChild(status);
     fetch(location.href.split('#')[0], { cache: 'force-cache' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(function (text) { box.removeChild(status); render(text); })
-      .catch(function () { status.textContent = 'Couldn’t load the source.'; built = false; });
+      .then(function (text) { render(text); box.removeChild(status); })
+      .catch(function () {
+        box.textContent = ''; box.appendChild(status);
+        status.textContent = 'Couldn’t load the source.'; built = false;
+      });
   }
 
   function render(text) {
