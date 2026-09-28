@@ -251,6 +251,9 @@ source).
 - **The app's CSP blocks eval**, so an e2e must not rebuild functions from strings inside the page
   (`new Function`, string predicates). Poll from Node instead, as `cs-probe`'s `until` does.
 - **Unlisted until it's an app:** `<meta name="launcher" content="unlisted">`.
+- **Storage in tests:** Chromium runs the OPFS path. CI's WebKit (Playwright, Linux) has no OPFS at
+  all (`navigator.storage.getDirectory` is missing), so it runs the IndexedDB fallback. Between them
+  both paths are tested. What an iPhone gets, the app says: Flashcards shows it in its storage hint.
 
 ## Phone-first rules (every project)
 
