@@ -1458,6 +1458,79 @@ const BREAKS = [
     file: 'projects/draw/DEVICE-CHECKS.md', from: 'and [one that loops](https://mmaggitti.github.io/draw/#import=TVDL', to: 'and [one that loops](https://mmaggitti.github.io/draw/#import=NY5N',
     run: drawTests('device-checks.test.ts'), expect: /✖ DEVICE-CHECKS\.md's links decode and open as their rows say/,
   },
+  // P1-M0: the engine refuses what a browser's XML parser refuses, each at its place.
+  {
+    id: 'B278', what: 'an attribute written twice is accepted',
+    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>` };\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B279', what: 'a bare & is accepted',
+    file: 'engine/xml/entities.ts', from: "if (ref === undefined) return { at: i, message: raw[i + 1] === '#' ? 'a malformed character reference' : \"a bare & (write &amp; for the character itself)\" };", to: 'if (ref === undefined) continue;',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B280', what: '&nbsp; is accepted with no DTD (an undeclared entity stays as written)',
+    file: 'engine/xml/entities.ts', from: '    } else return { at: i, message: `the entity &${ref}; is not declared` };', to: '    }',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B281', what: '&#0; is accepted (read as U+FFFD, as before P1)',
+    file: 'engine/xml/entities.ts', from: "      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${ref}; names a character XML doesn't allow` };\n", to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B282', what: "'--' in a comment is accepted",
+    file: 'engine/xml/lex.ts', from: "      if (dashes !== close) return fail(dashes, \"'--' inside a comment\");\n", to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B283', what: 'an element prefix nobody declared is accepted',
+    file: 'engine/model/doc.ts', from: '    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${prefix} of <${tag}> is not declared`);\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B284', what: 'a lowercase <!doctype is accepted',
+    file: 'engine/xml/lex.ts', from: "    if (src.startsWith('<!DOCTYPE', i)) {", to: "    if (src.startsWith('<!DOCTYPE', i) || src.startsWith('<!doctype', i)) {",
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    // A form feed is refused wherever it stands (it is no XML character at all); what the old /\S/
+    // lets through outside the root is JavaScript's other whitespace: a no-break space, a late BOM.
+    id: 'B285', what: 'text outside the root is judged by the old /\\S/ again (a no-break space before the root passes)',
+    file: 'engine/xml/cst.ts', from: 'const STRAY = /[^ \\t\\r\\n]/;', to: 'const STRAY = /\\S/;',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+  },
+  {
+    id: 'B286', what: "the DOCTYPE's subset scan loses its processing-instruction skip (a ] or a quote in one breaks the DOCTYPE)",
+    file: 'engine/xml/lex.ts', from: "    } else if (src.startsWith('<?', k)) {\n      const e = src.indexOf('?>', k + 2);\n      if (e === -1) return -1;\n      k = e + 1;\n", to: '',
+    run: XML_TESTS, expect: /✖ a processing instruction in the DOCTYPE may hold \] and quotes/,
+  },
+  {
+    id: 'B287', what: 'an entity a parameter entity may declare is reported as not well-formed (it loses kind: limit)',
+    file: 'engine/xml/entities.ts', from: "which Draw doesn't expand`, kind: 'limit' };", to: "which Draw doesn't expand` };",
+    run: XML_TESTS, expect: /✖ an entity a parameter entity may declare is over Draw's limits, not malformed/,
+  },
+  {
+    id: 'B288', what: 'the parser tree check compares no corpus file', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, file] of corpus.entries()) {', to: '    for (const [i, file] of corpus.slice(0, 0).entries()) {',
+    run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: compared 0 of \d+ corpus files/,
+  },
+  {
+    id: 'B289', what: "the engine's canonical tree takes an attribute's raw text for its value (lab/transform.svg's transform spans lines)", slow: true,
+    file: 'projects/draw/test/probe-helpers/xml-canon.mjs', from: 'const attrs = n.attrs.map((a) => [a.ns, a.local, a.prefix, decodeAttr(a.raw, doc.entities)]).sort(byNsLocal);', to: 'const attrs = n.attrs.map((a) => [a.ns, a.local, a.prefix, a.raw]).sort(byNsLocal);',
+    run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: \d+ of \d+ corpus files parse to different trees in the engine and the browser \([^)]*lab\/transform\.svg/,
+  },
+  {
+    id: 'B291', what: 'the parser probe loop is skipped', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, probe] of PROBES.entries()) {', to: '    for (const [i, probe] of PROBES.slice(0, 0).entries()) {',
+    run: SITE_E2E, expect: /theEngineRefusesWhatTheBrowserRefuses: checked 0 of \d+ probes/,
+  },
+  {
+    id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
+    run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
+  },
 ];
 
 const args = process.argv.slice(2);

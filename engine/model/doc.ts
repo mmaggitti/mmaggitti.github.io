@@ -99,8 +99,8 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
   if (!parsed.ok) return parsed;
   const { cst } = parsed;
   const nodes = new Map<NodeId, Node>();
-  const doctype = cst.prolog.find((l) => l.tok.kind === 'doctype');
-  const entities = readEntityTable(doctype && doctype.tok.kind === 'doctype' ? doctype.tok.subset : null);
+  const doctype = cst.prolog.find((l) => l.tok.kind === 'doctype')?.tok;
+  const entities = doctype?.kind === 'doctype' ? readEntityTable(doctype.subset, publicId(source.slice(doctype.start, doctype.end))) : readEntityTable(null);
   const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget, version: 0 };
 
   // Check every reference, then expand it once, now, against the document's budget (see the header).
@@ -202,6 +202,12 @@ class ParseFail extends Error {
     this.at = at;
     this.kind = kind;
   }
+}
+
+/** The public identifier a DOCTYPE names (<!DOCTYPE svg PUBLIC "…" "…">), or null. */
+function publicId(doctype: string): string | null {
+  const m = /^<!DOCTYPE[ \t\r\n]+[^ \t\r\n[>]+[ \t\r\n]+PUBLIC[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/.exec(doctype);
+  return m ? m[1] ?? m[2] : null;
 }
 
 /** Where an attribute's value starts in the source: after its name, '=' (with any spaces) and the quote. */

@@ -15,7 +15,9 @@
 //   character reference to a character XML doesn't allow, an undeclared entity, an external entity
 //   in an attribute value, an entity whose text isn't well-formed where it is used), each at its
 //   place. An undeclared entity in a document whose DOCTYPE references a parameter entity is over
-//   Draw's limits instead: the parameter entity may declare it, and Draw never expands one.
+//   Draw's limits instead: the parameter entity may declare it, and Draw never expands one. So is
+//   one under a DOCTYPE that names an XHTML DTD, where browsers supply HTML's named references
+//   (&nbsp;, &copy;…) themselves and Draw doesn't.
 
 export const ENTITY_BUDGET = 1_000_000; // characters produced by expansion, per document
 export const ENTITY_DEPTH = 8;
@@ -28,9 +30,30 @@ export interface EntityTable {
   parameter: Set<string>; // %name; declarations: never expanded
   /** The subset references a parameter entity (a %name; outside literals and comments). */
   hasPERefs: boolean;
+  /** The DOCTYPE names an XHTML DTD (XHTML_DTDS): browsers then supply HTML's named references. */
+  xhtmlDtd: boolean;
 }
 
-export const NO_ENTITIES: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false };
+export const NO_ENTITIES: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: false };
+
+/**
+ * The public identifiers under which a browser's XML parser supplies HTML's named character
+ * references (&nbsp;, &copy;…) for entities the document doesn't declare, without reading the DTD:
+ * the list Blink's and WebKit's XML document parsers share (their external-subset handler).
+ */
+export const XHTML_DTDS: ReadonlySet<string> = new Set([
+  '-//W3C//DTD XHTML 1.0 Transitional//EN',
+  '-//W3C//DTD XHTML 1.1//EN',
+  '-//W3C//DTD XHTML 1.0 Strict//EN',
+  '-//W3C//DTD XHTML 1.0 Frameset//EN',
+  '-//W3C//DTD XHTML Basic 1.0//EN',
+  '-//W3C//DTD XHTML 1.1 plus MathML 2.0//EN',
+  '-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN',
+  '-//W3C//DTD MathML 2.0//EN',
+  '-//WAPFORUM//DTD XHTML Mobile 1.0//EN',
+  '-//WAPFORUM//DTD XHTML Mobile 1.1//EN',
+  '-//WAPFORUM//DTD XHTML Mobile 1.2//EN',
+]);
 
 /** XML 1.0 §2.11: every CRLF and lone CR in the source reads as LF. */
 export const normalizeEol = (s: string): string => s.replace(/\r\n?/g, '\n');
@@ -53,10 +76,11 @@ const PE_REF = /%[A-Za-z_:][\w.:-]*;/y;
  * instructions). As in XML, an internal entity's replacement text has its line ends normalized and
  * its character references expanded at the declaration; entity references in it expand later,
  * where the entity is used. A character reference to a character XML doesn't allow stays as
- * written, so a use of the entity is refused (wellFormedRefs).
+ * written, so a use of the entity is refused (wellFormedRefs). `publicId` is the one the DOCTYPE
+ * names, if any.
  */
-export function readEntityTable(subset: string | null): EntityTable {
-  const table: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false };
+export function readEntityTable(subset: string | null, publicId: string | null = null): EntityTable {
+  const table: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: publicId !== null && XHTML_DTDS.has(publicId) };
   if (!subset) return table;
   const { declarations, hasPERefs } = readSubset(subset);
   table.hasPERefs = hasPERefs;
@@ -147,6 +171,8 @@ function refError(raw: string, table: EntityTable, inAttr: boolean, open: string
       if (inAttr) return { at: i, message: `the external entity &${ref}; can't be used in an attribute value` };
     } else if (table.hasPERefs) {
       return { at: i, message: `the entity &${ref}; is not declared; it may be declared by a parameter entity, which Draw doesn't expand`, kind: 'limit' };
+    } else if (table.xhtmlDtd) {
+      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };
     } else return { at: i, message: `the entity &${ref}; is not declared` };
   }
   return null;

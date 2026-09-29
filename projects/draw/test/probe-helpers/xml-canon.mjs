@@ -12,6 +12,7 @@
 //     kids: elements, { t } (adjacent text and CDATA merged, line ends normalized), { c } and { pi }
 //   item: { c: comment data } or { pi: [target, data] }
 // The DOCTYPE's internal subset is never compared. A refused document is { refused: true, ... }.
+// The engine's form also carries `known`: what canonDiffs needs to apply KNOWN (never compared).
 //
 // KNOWN lists where the two differ on purpose, each with its reason; canonDiffs applies it.
 
@@ -71,10 +72,12 @@ export function engineCanon(text) {
     epilog: items(doc.epilog),
     // For KNOWN, never compared: the entities Draw keeps as written, the attributes a DTD defaults,
     // and the comments and processing instructions inside the subset, with where the DOCTYPE stands.
-    external: [...doc.entities.external],
-    defaults: [...subset.matchAll(ATTLIST)].flatMap(([, el, defs]) => [...defs.matchAll(ATTDEF)].map(([, attr]) => [el, attr])),
-    subsetItems: subsetItems(subset, pi),
-    beforeDoctype: at === -1 ? 0 : items(doc.prolog.slice(0, at)).length,
+    known: {
+      external: [...doc.entities.external],
+      defaults: [...subset.matchAll(ATTLIST)].flatMap(([, el, defs]) => [...defs.matchAll(ATTDEF)].map(([, attr]) => [el, attr])),
+      subsetItems: subsetItems(subset, pi),
+      beforeDoctype: at === -1 ? 0 : items(doc.prolog.slice(0, at)).length,
+    },
   };
 }
 
@@ -167,19 +170,21 @@ export const KNOWN = [
 
 /**
  * Every difference between an engine canon and a browser canon, as "path: engine …, browser …",
- * after KNOWN. Paths read like XPath: /svg/g[2]/@fill, /svg/text[1]/text()[1].
+ * after KNOWN. Paths read like XPath: /svg/g[2]/@fill, /svg/text[1]/text()[1]. Two trees are
+ * compared only when both parse: a refusal on either side is itself a difference.
  */
 export function canonDiffs(engine, browser) {
   if (engine.refused || browser.refused) {
-    return engine.refused && browser.refused ? [] : [`/: ${engine.refused ? `the engine refuses it (${engine.message})` : 'the engine parses it'}, the browser ${browser.refused ? `refuses it (${browser.message})` : 'parses it'}`];
+    return [`/: ${engine.refused ? `the engine refuses it (${engine.message})` : 'the engine parses it'}, the browser ${browser.refused ? `refuses it (${browser.message})` : 'parses it'}`];
   }
   const diffs = [];
   const say = (path, a, b) => diffs.push(`${path}: engine ${JSON.stringify(a)}, browser ${JSON.stringify(b)}`);
-  const external = new RegExp(engine.external.length ? `&(?:${engine.external.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')});` : '(?!)', 'g');
-  const defaulted = new Set(engine.defaults.map(([el, attr]) => `${el} ${attr}`));
+  const { known } = engine;
+  const external = new RegExp(known.external.length ? `&(?:${known.external.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')});` : '(?!)', 'g');
+  const defaulted = new Set(known.defaults.map(([el, attr]) => `${el} ${attr}`));
   const qname = (x) => (x.prefix ? `${x.prefix}:${x.local}` : x.local);
   if (JSON.stringify(engine.doctype) !== JSON.stringify(browser.doctype)) say('/doctype', engine.doctype, browser.doctype);
-  const withSubset = [...engine.prolog.slice(0, engine.beforeDoctype), ...engine.subsetItems, ...engine.prolog.slice(engine.beforeDoctype)];
+  const withSubset = [...engine.prolog.slice(0, known.beforeDoctype), ...known.subsetItems, ...engine.prolog.slice(known.beforeDoctype)];
   if (![engine.prolog, withSubset].some((p) => JSON.stringify(p) === JSON.stringify(browser.prolog))) say('/prolog', engine.prolog, browser.prolog);
   if (JSON.stringify(engine.epilog) !== JSON.stringify(browser.epilog)) say('/epilog', engine.epilog, browser.epilog);
   const element = (a, b, path) => {
@@ -223,10 +228,13 @@ export function canonDiffs(engine, browser) {
 /**
  * The strict well-formedness probes: one refusal for each rule the engine enforces, and what must
  * stay accepted. `draw` is the engine's verdict ('limit': refused as over Draw's limits); `browser`
- * the parser's, per engine. Chromium's are checked in the cloud container, WebKit's in CI (both
- * parse XML with libxml2).
+ * the parser's, per engine. Chromium's were read in the cloud container; WebKit's are the same by
+ * prediction (both engines parse XML with libxml2, refuse on any error it reports, and share the
+ * handlers that matter here: entities, the XHTML DTDs, namespaces), and CI's WebKit run holds them
+ * to it.
  */
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg">';
+const XHTML_DOCTYPE = '<!DOCTYPE svg PUBLIC "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN" "http://www.w3.org/2002/04/xhtml-math-svg/xhtml-math-svg.dtd">';
 const both = (verdict) => ({ chromium: verdict, webkit: verdict });
 const refused = (label, body, draw = 'refuse') => ({ label, text: body.includes('<svg') ? body : `${SVG}${body}</svg>`, draw, browser: both('refuse') });
 const accepted = (label, body) => ({ label, text: body.includes('<svg') ? body : `${SVG}${body}</svg>`, draw: 'accept', browser: both('accept') });
@@ -242,6 +250,7 @@ export const PROBES = [
   refused('an external entity in a value', `<!DOCTYPE svg [<!ENTITY ext SYSTEM "ext.xml">]>${SVG}<g id="&ext;"/></svg>`),
   refused('an entity that expands to a bare &', `<!DOCTYPE svg [<!ENTITY a "x &#38; y">]>${SVG}<text>&a;</text></svg>`),
   refused('-- in a comment', '<!-- a -- b -->'),
+  refused('a comment that ends in ---', '<!-- a --->'),
   refused('a lowercase <!doctype', `<!doctype svg>${SVG}</svg>`),
   refused('a no-break space before the root', `\u{A0}${SVG}</svg>`),
   refused('an unbound element prefix', '<p:g/>'),
@@ -250,6 +259,7 @@ export const PROBES = [
   refused('the xml prefix bound elsewhere', '<g xmlns:xml="urn:x"/>'),
   refused('the xmlns prefix declared', '<g xmlns:xmlns="urn:x"/>'),
   refused('a name with two colons', '<g xmlns:a="urn:a"><a:b:c/></g>'),
+  refused('a name that starts with a colon', '<:g/>'),
   refused('U+0001 in text', '<text>a\u{1}b</text>'),
   refused(']]> in text', '<text>a ]]> b</text>'),
   accepted('a processing instruction with ] and \' in the DOCTYPE', `<!DOCTYPE svg [<?draw a ] b ' c?><!ENTITY e "x">]>${SVG}<text>&e;</text></svg>`),
@@ -260,4 +270,6 @@ export const PROBES = [
   accepted('a parameter entity declared and never referenced', `<!DOCTYPE svg [<!ENTITY % p "x">]>${SVG}<text>hi</text></svg>`),
   accepted('a leading BOM (the engine is given it)', `\u{FEFF}${SVG}</svg>`),
   accepted(']]> in a value', '<g id="a]]>b"/>'),
+  // Browsers supply HTML's named references under an XHTML DOCTYPE; Draw doesn't read DTDs.
+  { label: 'an HTML entity under an XHTML DOCTYPE', text: `${XHTML_DOCTYPE}${SVG}<text>a&nbsp;b</text></svg>`, draw: 'limit', browser: both('accept') },
 ];

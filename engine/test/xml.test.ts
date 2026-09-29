@@ -137,6 +137,35 @@ test("an entity a parameter entity may declare is over Draw's limits, not malfor
   }
 });
 
+// Under a DOCTYPE that names an XHTML DTD (XHTML_DTDS), browsers supply HTML's named references
+// themselves, so &nbsp; is well-formed to them there; Draw neither reads DTDs nor knows HTML's
+// references, so such a file is over its limits. Under any other DOCTYPE, &nbsp; is not declared,
+// and browsers refuse it (e2e theEngineRefusesWhatTheBrowserRefuses has both).
+test("an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const doctype of [
+    '<!DOCTYPE svg PUBLIC "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN" "http://www.w3.org/2002/04/xhtml-math-svg/xhtml-math-svg.dtd">',
+    "<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'xhtml1-strict.dtd' [<!ENTITY brand 'Draw'>]>",
+  ]) {
+    for (const body of ['<text>a&nbsp;b</text>', '<g id="&copy;"/>']) {
+      const src = `${doctype}${svg}${body}</svg>`;
+      const r = parseDoc(src);
+      assert.ok(!r.ok, `${doctype} ${body}`);
+      assert.equal(r.error.kind, 'limit', body);
+      assert.equal(r.error.at, src.indexOf('&', doctype.length), body);
+      assert.match(r.error.message, /is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read/);
+    }
+    const ok = parseDoc(`${doctype}${svg}<text>&lt;&#160;${doctype.includes('brand') ? '&brand;' : ''}</text></svg>`);
+    assert.ok(ok.ok, 'what the document declares, the predefined entities and character references read as ever');
+  }
+  // Any other DOCTYPE supplies nothing, the SVG DTD's included: &nbsp; there is not declared.
+  const src = `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">${svg}<text>&nbsp;</text></svg>`;
+  const r = parseDoc(src);
+  assert.ok(!r.ok);
+  assert.equal(r.error.kind, undefined);
+  assert.equal(r.error.at, src.indexOf('&nbsp;'));
+});
+
 test('a billion-laughs document fails within the entity budget', () => {
   let subset = '<!ENTITY lol "lollollollollollollollollollol">';
   for (let i = 1; i <= 9; i++) subset += `<!ENTITY lol${i} "${`&lol${i === 1 ? '' : i - 1};`.repeat(10)}">`;

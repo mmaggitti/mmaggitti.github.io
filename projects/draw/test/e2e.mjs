@@ -2937,6 +2937,8 @@ async function corpusTreesMatchTheBrowsersParser(browser, origin) {
 async function theEngineRefusesWhatTheBrowserRefuses(browser, origin) {
   const engine = browser.browserType().name();
   await withPage(browser, origin, 956, async (page, errors) => {
+    const ns = await page.evaluate(() => new DOMParser().parseFromString('<', 'text/xml').getElementsByTagName('parsererror')[0]?.namespaceURI ?? null);
+    must(ns !== null, `DOMParser puts no parsererror in what it makes of '<', so a refusal can't be told from a tree`);
     const theirs = await page.evaluate(browserCanon, { texts: PROBES.map((p) => p.text) });
     const problems = [];
     let checked = 0;
