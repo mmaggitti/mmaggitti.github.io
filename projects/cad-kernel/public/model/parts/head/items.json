@@ -1,0 +1,692 @@
+{
+  "scope": "@head",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Head outline",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [190, -95],
+          "start": [-190, -95]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [190, 95],
+          "start": [190, -95]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-190, 95],
+          "start": [190, 95]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-190, -95],
+          "start": [-190, 95]
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Head",
+      "extent": {
+        "type": "distance",
+        "distance": 100
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Chamber",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [-135, 0],
+          "radius": 40
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Combustion chamber",
+      "extent": {
+        "type": "distance",
+        "distance": 10
+      },
+      "operation": "cut",
+      "profile": "@sk2"
+    },
+    {
+      "id": "pa1",
+      "type": "feature.pattern.linear",
+      "name": "Combustion chambers",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex2"],
+      "spacing": 90
+    },
+    {
+      "id": "in_axis",
+      "type": "datum.plane",
+      "name": "Intake valve axis",
+      "normal": [0, 0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, 16.660254037844386, 5],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Valve guide",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 4
+        }
+      ],
+      "plane": "@in_axis"
+    },
+    {
+      "id": "ex3",
+      "type": "feature.extrude",
+      "name": "Valve guide bore",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk3"
+    },
+    {
+      "id": "in_pocket",
+      "type": "datum.plane",
+      "name": "Valve pocket",
+      "normal": [0, 0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, 17.74118095489748, 9.034074173710932],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk5",
+      "type": "sketch",
+      "name": "Valve pocket",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 17
+        }
+      ],
+      "plane": "@in_pocket"
+    },
+    {
+      "id": "ex5",
+      "type": "feature.extrude",
+      "name": "Valve pocket",
+      "extent": {
+        "type": "distance",
+        "distance": 20.64213562373095
+      },
+      "operation": "cut",
+      "profile": "@sk5"
+    },
+    {
+      "id": "pa2",
+      "type": "feature.pattern.linear",
+      "name": "Valve guide bores and pockets",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex3", "@ex5"],
+      "spacing": 90
+    },
+    {
+      "id": "ex_axis",
+      "type": "datum.plane",
+      "name": "Exhaust valve axis",
+      "normal": [0, -0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, -16.660254037844386, 5],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk4",
+      "type": "sketch",
+      "name": "Valve guide",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 4
+        }
+      ],
+      "plane": "@ex_axis"
+    },
+    {
+      "id": "ex4",
+      "type": "feature.extrude",
+      "name": "Valve guide bore",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk4"
+    },
+    {
+      "id": "ex_pocket",
+      "type": "datum.plane",
+      "name": "Valve pocket",
+      "normal": [0, -0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, -17.74118095489748, 9.034074173710932],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk6",
+      "type": "sketch",
+      "name": "Valve pocket",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 15
+        }
+      ],
+      "plane": "@ex_pocket"
+    },
+    {
+      "id": "ex6",
+      "type": "feature.extrude",
+      "name": "Valve pocket",
+      "extent": {
+        "type": "distance",
+        "distance": 18.64213562373095
+      },
+      "operation": "cut",
+      "profile": "@sk6"
+    },
+    {
+      "id": "pa3",
+      "type": "feature.pattern.linear",
+      "name": "Valve guide bores and pockets",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex4", "@ex6"],
+      "spacing": 90
+    },
+    {
+      "id": "h1",
+      "type": "feature.hole",
+      "name": "Spark-plug holes",
+      "diameter": 12.5,
+      "extent": {
+        "type": "through_all"
+      },
+      "face": {
+        "hints": [
+          [0, 93, 100]
+        ],
+        "names": ["ex1.cap[end]"]
+      },
+      "form": {
+        "type": "counterbore",
+        "depth": 18,
+        "diameter": 20.8
+      },
+      "positions": [
+        [-135, 0, 100],
+        [-45, 0, 100],
+        [45, 0, 100],
+        [135, 0, 100]
+      ],
+      "thread": {
+        "designation": "M14x1.25"
+      }
+    },
+    {
+      "id": "h2",
+      "type": "feature.hole",
+      "name": "Head-bolt holes",
+      "diameter": 13,
+      "extent": {
+        "type": "through_all"
+      },
+      "face": {
+        "hints": [
+          [0, 93, 100]
+        ],
+        "names": ["ex1.cap[end]"]
+      },
+      "form": {
+        "type": "counterbore",
+        "depth": 12,
+        "diameter": 22
+      },
+      "positions": [
+        [-180, -58, 100],
+        [-90, -58, 100],
+        [0, -58, 100],
+        [90, -58, 100],
+        [180, -58, 100],
+        [-180, 58, 100],
+        [-90, 58, 100],
+        [0, 58, 100],
+        [90, 58, 100],
+        [180, 58, 100]
+      ]
+    },
+    {
+      "id": "in_spring",
+      "type": "datum.plane",
+      "name": "Intake spring seat",
+      "normal": [0, 0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, 35.267323678899146, 74.44252928038877],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk7",
+      "type": "sketch",
+      "name": "Spring pocket",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 15
+        }
+      ],
+      "plane": "@in_spring"
+    },
+    {
+      "id": "ex7",
+      "type": "feature.extrude",
+      "name": "Spring pocket",
+      "extent": {
+        "type": "distance",
+        "distance": 35.47827855400848
+      },
+      "operation": "cut",
+      "profile": "@sk7"
+    },
+    {
+      "id": "ex_spring",
+      "type": "datum.plane",
+      "name": "Exhaust spring seat",
+      "normal": [0, -0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, -35.267323678899146, 74.44252928038877],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk8",
+      "type": "sketch",
+      "name": "Spring pocket",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 15
+        }
+      ],
+      "plane": "@ex_spring"
+    },
+    {
+      "id": "ex8",
+      "type": "feature.extrude",
+      "name": "Spring pocket",
+      "extent": {
+        "type": "distance",
+        "distance": 35.47827855400848
+      },
+      "operation": "cut",
+      "profile": "@sk8"
+    },
+    {
+      "id": "pa4",
+      "type": "feature.pattern.linear",
+      "name": "Spring pockets",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex7", "@ex8"],
+      "spacing": 90
+    },
+    {
+      "id": "in_route",
+      "type": "datum.plane",
+      "name": "Intake port route",
+      "normal": [1, 0, 0],
+      "origin": [-135, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk9",
+      "type": "sketch",
+      "name": "Intake port route",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [23.176380902, 29.318516526],
+          "start": [21.105828541, 21.591109915]
+        },
+        {
+          "id": "a1",
+          "type": "arc",
+          "center": [47.324526559, 22.848040398],
+          "end": [23.176380902, 29.318516526],
+          "start": [47.324526559, 47.848040398]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [105, 47.848040398],
+          "start": [47.324526559, 47.848040398]
+        }
+      ],
+      "plane": "@in_route"
+    },
+    {
+      "id": "in_port",
+      "type": "datum.plane",
+      "name": "Intake port",
+      "normal": [0, 0.25881904510252074, 0.9659258262890683],
+      "origin": [-135, 21.10582854123025, 21.59110991546882],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk10",
+      "type": "sketch",
+      "name": "Intake port",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 13
+        }
+      ],
+      "plane": "@in_port"
+    },
+    {
+      "id": "sw1",
+      "type": "feature.sweep",
+      "name": "Intake port",
+      "operation": "cut",
+      "path": "@sk9",
+      "profile": "@sk10"
+    },
+    {
+      "id": "pa5",
+      "type": "feature.pattern.linear",
+      "name": "Intake ports",
+      "count": 4,
+      "direction": "x",
+      "items": ["@sw1"],
+      "spacing": 90
+    },
+    {
+      "id": "ex_port",
+      "type": "datum.plane",
+      "name": "Exhaust port throat",
+      "normal": [0, -85.44708572938487, 29.20444504226559],
+      "origin": [-135, -19.552914270615126, 15.79555495773441],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk11",
+      "type": "sketch",
+      "name": "Exhaust port throat",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 12
+        }
+      ],
+      "plane": "@ex_port"
+    },
+    {
+      "id": "ex_exit",
+      "type": "datum.plane",
+      "name": "Exhaust port exit",
+      "normal": [0, -85.44708572938487, 29.20444504226559],
+      "origin": [-135, -105, 45],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk12",
+      "type": "sketch",
+      "name": "Exhaust port exit",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 14
+        }
+      ],
+      "plane": "@ex_exit"
+    },
+    {
+      "id": "lo1",
+      "type": "feature.loft",
+      "name": "Exhaust port",
+      "operation": "cut",
+      "profiles": ["@sk11", "@sk12"]
+    },
+    {
+      "id": "pa6",
+      "type": "feature.pattern.linear",
+      "name": "Exhaust ports",
+      "count": 4,
+      "direction": "x",
+      "items": ["@lo1"],
+      "spacing": 90
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Casting corners",
+      "edges": {
+        "hints": [
+          [190, -95, 50],
+          [190, 95, 50],
+          [-190, 95, 50],
+          [-190, -95, 50]
+        ],
+        "names": [
+          "ex1.side[l1]/ex1.side[l2]",
+          "ex1.side[l2]/ex1.side[l3]",
+          "ex1.side[l3]/ex1.side[l4]",
+          "ex1.side[l1]/ex1.side[l4]"
+        ]
+      },
+      "radius": 8
+    },
+    {
+      "id": "c_deck",
+      "type": "connector",
+      "name": "Head gasket face",
+      "origin": [0, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_cam",
+      "type": "connector",
+      "name": "Camshaft axis",
+      "origin": [0, 0, 130],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_in1",
+      "type": "connector",
+      "name": "Intake valve seat 1",
+      "origin": [-135, 18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_ex1",
+      "type": "connector",
+      "name": "Exhaust valve seat 1",
+      "origin": [-135, -18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_in2",
+      "type": "connector",
+      "name": "Intake valve seat 2",
+      "origin": [-45, 18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_ex2",
+      "type": "connector",
+      "name": "Exhaust valve seat 2",
+      "origin": [-45, -18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_in3",
+      "type": "connector",
+      "name": "Intake valve seat 3",
+      "origin": [45, 18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_ex3",
+      "type": "connector",
+      "name": "Exhaust valve seat 3",
+      "origin": [45, -18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_in4",
+      "type": "connector",
+      "name": "Intake valve seat 4",
+      "origin": [135, 18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_ex4",
+      "type": "connector",
+      "name": "Exhaust valve seat 4",
+      "origin": [135, -18, 10],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, -0.9659258262890683]
+    },
+    {
+      "id": "c_top",
+      "type": "connector",
+      "name": "Cover face",
+      "origin": [0, 0, 100],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_intake",
+      "type": "connector",
+      "name": "Intake face",
+      "origin": [0, 95, 47.848040398218345],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 1, 0]
+    },
+    {
+      "id": "c_sin1",
+      "type": "connector",
+      "name": "Intake spring seat 1",
+      "origin": [-135, 35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sex1",
+      "type": "connector",
+      "name": "Exhaust spring seat 1",
+      "origin": [-135, -35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sin2",
+      "type": "connector",
+      "name": "Intake spring seat 2",
+      "origin": [-45, 35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sex2",
+      "type": "connector",
+      "name": "Exhaust spring seat 2",
+      "origin": [-45, -35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sin3",
+      "type": "connector",
+      "name": "Intake spring seat 3",
+      "origin": [45, 35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sex3",
+      "type": "connector",
+      "name": "Exhaust spring seat 3",
+      "origin": [45, -35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sin4",
+      "type": "connector",
+      "name": "Intake spring seat 4",
+      "origin": [135, 35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0.25881904510252074, 0.9659258262890683]
+    },
+    {
+      "id": "c_sex4",
+      "type": "connector",
+      "name": "Exhaust spring seat 4",
+      "origin": [135, -35.267323678899146, 74.44252928038877],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, -0.25881904510252074, 0.9659258262890683]
+    }
+  ]
+}

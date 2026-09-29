@@ -1,0 +1,26 @@
+{
+  "scope": "@piston_pin",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Pin section",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 10
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 6
+        }
+      ],
+      "plane": "@yz"
+    }
+  ]
+}

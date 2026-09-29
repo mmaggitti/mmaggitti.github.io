@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- House icon style: saturated dark field, chunky light forms, one element lit (the crank pin). -->
+  <rect width="64" height="64" rx="14" fill="#2B3A2E"/>
+  <rect x="20" y="8" width="24" height="18" rx="4" fill="#fff"/>
+  <path d="M29 26 L25 46" stroke="#fff" stroke-opacity=".45" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="32" cy="48" r="9" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="5"/>
+  <circle cx="25" cy="46" r="5" fill="#F2B544"/>
+</svg>

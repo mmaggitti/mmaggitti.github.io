@@ -1,0 +1,597 @@
+{
+  "objects": [
+    {
+      "id": "engine",
+      "type": "assembly",
+      "name": "Engine",
+      "instances": [
+        {
+          "id": "block_1",
+          "type": "instance",
+          "grounded": true,
+          "of": "@block",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, 0]
+          }
+        },
+        {
+          "id": "head_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@head",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, "=deck"]
+          }
+        },
+        {
+          "id": "crank_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@crank",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, 0]
+          }
+        },
+        {
+          "id": "camshaft_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@camshaft",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, "=deck + 130 mm"]
+          }
+        },
+        {
+          "id": "piston_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [-135, 0, "=stroke / 2 + rod_len - pin_height"]
+          }
+        },
+        {
+          "id": "pin_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston_pin",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [-135, 0, "=stroke / 2 + rod_len"]
+          }
+        },
+        {
+          "id": "rod_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@rod",
+          "placement": {
+            "rotation": [0.5, 0.5, 0.5, 0.5],
+            "translation": [-135, 0, "=stroke / 2"]
+          }
+        },
+        {
+          "id": "intake_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@intake_valve",
+          "placement": {
+            "rotation": [0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [-135, 45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "exhaust_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@exhaust_valve",
+          "placement": {
+            "rotation": [-0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [-135, -45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "piston_2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [-45, 0, "=-stroke / 2 + rod_len - pin_height"]
+          }
+        },
+        {
+          "id": "pin_2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston_pin",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [-45, 0, "=-stroke / 2 + rod_len"]
+          }
+        },
+        {
+          "id": "rod_2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@rod",
+          "placement": {
+            "rotation": [0.5, 0.5, 0.5, 0.5],
+            "translation": [-45, 0, "=-stroke / 2"]
+          }
+        },
+        {
+          "id": "intake_2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@intake_valve",
+          "placement": {
+            "rotation": [0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [-45, 45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "exhaust_2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@exhaust_valve",
+          "placement": {
+            "rotation": [-0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [-45, -45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "piston_3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [45, 0, "=-stroke / 2 + rod_len - pin_height"]
+          }
+        },
+        {
+          "id": "pin_3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston_pin",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [45, 0, "=-stroke / 2 + rod_len"]
+          }
+        },
+        {
+          "id": "rod_3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@rod",
+          "placement": {
+            "rotation": [0.5, 0.5, 0.5, 0.5],
+            "translation": [45, 0, "=-stroke / 2"]
+          }
+        },
+        {
+          "id": "intake_3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@intake_valve",
+          "placement": {
+            "rotation": [0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [45, 45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "exhaust_3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@exhaust_valve",
+          "placement": {
+            "rotation": [-0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [45, -45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "piston_4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [135, 0, "=stroke / 2 + rod_len - pin_height"]
+          }
+        },
+        {
+          "id": "pin_4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@piston_pin",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [135, 0, "=stroke / 2 + rod_len"]
+          }
+        },
+        {
+          "id": "rod_4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@rod",
+          "placement": {
+            "rotation": [0.5, 0.5, 0.5, 0.5],
+            "translation": [135, 0, "=stroke / 2"]
+          }
+        },
+        {
+          "id": "intake_4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@intake_valve",
+          "placement": {
+            "rotation": [0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [135, 45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "exhaust_4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@exhaust_valve",
+          "placement": {
+            "rotation": [-0.9914448613738104, 0, 0, 0.1305261922200517],
+            "translation": [135, -45.17599973576468, "=deck + 111.42221176035217 mm"]
+          }
+        },
+        {
+          "id": "oil_pan_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@oil_pan",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, -70]
+          }
+        },
+        {
+          "id": "valve_cover_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_cover",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, "=deck + 100 mm"]
+          }
+        },
+        {
+          "id": "intake_manifold_1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@intake_manifold",
+          "placement": {
+            "rotation": [0, 0, 0, 1],
+            "translation": [0, 0, "=deck"]
+          }
+        },
+        {
+          "id": "spring_in1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [-0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [-135, 35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_ex1",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [-135, -35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_in2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [-0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [-45, 35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_ex2",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [-45, -35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_in3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [-0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [45, 35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_ex3",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [45, -35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_in4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [-0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [135, 35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        },
+        {
+          "id": "spring_ex4",
+          "type": "instance",
+          "grounded": false,
+          "of": "@valve_spring",
+          "placement": {
+            "rotation": [0.13052619222005157, 0, 0, 0.9914448613738104],
+            "translation": [135, -35.267323678899146, "=deck + 74.44252928038877 mm"]
+          }
+        }
+      ],
+      "joints": [
+        {
+          "id": "j_head",
+          "type": "joint.fixed",
+          "a": "@block_1/c_deck",
+          "b": "@head_1/c_deck"
+        },
+        {
+          "id": "j_crank",
+          "type": "joint.revolute",
+          "a": "@block_1/c_main",
+          "b": "@crank_1/c_axis",
+          "state": {
+            "angle": "=crank_angle"
+          }
+        },
+        {
+          "id": "j_cam",
+          "type": "joint.revolute",
+          "a": "@head_1/c_cam",
+          "b": "@camshaft_1/c_axis",
+          "state": {
+            "angle": "=crank_angle / 2"
+          }
+        },
+        {
+          "id": "j_big1",
+          "type": "joint.revolute",
+          "a": "@crank_1/c_pin1",
+          "b": "@rod_1/c_big"
+        },
+        {
+          "id": "j_small1",
+          "type": "joint.revolute",
+          "a": "@rod_1/c_small",
+          "b": "@pin_1/c_axis"
+        },
+        {
+          "id": "j_pin1",
+          "type": "joint.fixed",
+          "a": "@piston_1/c_pin",
+          "b": "@pin_1/c_axis"
+        },
+        {
+          "id": "j_bore1",
+          "type": "joint.slider",
+          "a": "@block_1/c_bore1",
+          "b": "@piston_1/c_axis"
+        },
+        {
+          "id": "j_in1",
+          "type": "joint.fixed",
+          "a": "@head_1/c_in1",
+          "b": "@intake_1/c_face"
+        },
+        {
+          "id": "j_ex1",
+          "type": "joint.fixed",
+          "a": "@head_1/c_ex1",
+          "b": "@exhaust_1/c_face"
+        },
+        {
+          "id": "j_big2",
+          "type": "joint.revolute",
+          "a": "@crank_1/c_pin2",
+          "b": "@rod_2/c_big"
+        },
+        {
+          "id": "j_small2",
+          "type": "joint.revolute",
+          "a": "@rod_2/c_small",
+          "b": "@pin_2/c_axis"
+        },
+        {
+          "id": "j_pin2",
+          "type": "joint.fixed",
+          "a": "@piston_2/c_pin",
+          "b": "@pin_2/c_axis"
+        },
+        {
+          "id": "j_bore2",
+          "type": "joint.slider",
+          "a": "@block_1/c_bore2",
+          "b": "@piston_2/c_axis"
+        },
+        {
+          "id": "j_in2",
+          "type": "joint.fixed",
+          "a": "@head_1/c_in2",
+          "b": "@intake_2/c_face"
+        },
+        {
+          "id": "j_ex2",
+          "type": "joint.fixed",
+          "a": "@head_1/c_ex2",
+          "b": "@exhaust_2/c_face"
+        },
+        {
+          "id": "j_big3",
+          "type": "joint.revolute",
+          "a": "@crank_1/c_pin3",
+          "b": "@rod_3/c_big"
+        },
+        {
+          "id": "j_small3",
+          "type": "joint.revolute",
+          "a": "@rod_3/c_small",
+          "b": "@pin_3/c_axis"
+        },
+        {
+          "id": "j_pin3",
+          "type": "joint.fixed",
+          "a": "@piston_3/c_pin",
+          "b": "@pin_3/c_axis"
+        },
+        {
+          "id": "j_bore3",
+          "type": "joint.slider",
+          "a": "@block_1/c_bore3",
+          "b": "@piston_3/c_axis"
+        },
+        {
+          "id": "j_in3",
+          "type": "joint.fixed",
+          "a": "@head_1/c_in3",
+          "b": "@intake_3/c_face"
+        },
+        {
+          "id": "j_ex3",
+          "type": "joint.fixed",
+          "a": "@head_1/c_ex3",
+          "b": "@exhaust_3/c_face"
+        },
+        {
+          "id": "j_big4",
+          "type": "joint.revolute",
+          "a": "@crank_1/c_pin4",
+          "b": "@rod_4/c_big"
+        },
+        {
+          "id": "j_small4",
+          "type": "joint.revolute",
+          "a": "@rod_4/c_small",
+          "b": "@pin_4/c_axis"
+        },
+        {
+          "id": "j_pin4",
+          "type": "joint.fixed",
+          "a": "@piston_4/c_pin",
+          "b": "@pin_4/c_axis"
+        },
+        {
+          "id": "j_bore4",
+          "type": "joint.slider",
+          "a": "@block_1/c_bore4",
+          "b": "@piston_4/c_axis"
+        },
+        {
+          "id": "j_in4",
+          "type": "joint.fixed",
+          "a": "@head_1/c_in4",
+          "b": "@intake_4/c_face"
+        },
+        {
+          "id": "j_ex4",
+          "type": "joint.fixed",
+          "a": "@head_1/c_ex4",
+          "b": "@exhaust_4/c_face"
+        },
+        {
+          "id": "j_pan",
+          "type": "joint.fixed",
+          "a": "@block_1/c_pan",
+          "b": "@oil_pan_1/c_rail"
+        },
+        {
+          "id": "j_cover",
+          "type": "joint.fixed",
+          "a": "@head_1/c_top",
+          "b": "@valve_cover_1/c_base"
+        },
+        {
+          "id": "j_manifold",
+          "type": "joint.fixed",
+          "a": "@head_1/c_intake",
+          "b": "@intake_manifold_1/c_flange"
+        },
+        {
+          "id": "j_sin1",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sin1",
+          "b": "@spring_in1/c_seat"
+        },
+        {
+          "id": "j_sex1",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sex1",
+          "b": "@spring_ex1/c_seat"
+        },
+        {
+          "id": "j_sin2",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sin2",
+          "b": "@spring_in2/c_seat"
+        },
+        {
+          "id": "j_sex2",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sex2",
+          "b": "@spring_ex2/c_seat"
+        },
+        {
+          "id": "j_sin3",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sin3",
+          "b": "@spring_in3/c_seat"
+        },
+        {
+          "id": "j_sex3",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sex3",
+          "b": "@spring_ex3/c_seat"
+        },
+        {
+          "id": "j_sin4",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sin4",
+          "b": "@spring_in4/c_seat"
+        },
+        {
+          "id": "j_sex4",
+          "type": "joint.fixed",
+          "a": "@head_1/c_sex4",
+          "b": "@spring_ex4/c_seat"
+        }
+      ]
+    }
+  ]
+}

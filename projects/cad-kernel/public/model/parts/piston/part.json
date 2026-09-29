@@ -1,0 +1,20 @@
+{
+  "objects": [
+    {
+      "id": "piston",
+      "type": "part",
+      "name": "Piston",
+      "appearance": "@cast_al",
+      "history": [
+        "@sk1",
+        "@rv1",
+        "@pin_plane",
+        "@sk2",
+        "@ex1",
+        "@c_axis",
+        "@c_pin"
+      ],
+      "material": "@al_piston"
+    }
+  ]
+}

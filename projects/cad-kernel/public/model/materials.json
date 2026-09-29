@@ -1,0 +1,28 @@
+{
+  "objects": [
+    {
+      "id": "al_piston",
+      "type": "material",
+      "name": "Aluminum 4032-T6",
+      "density": "=2680 kg/m^3"
+    },
+    {
+      "id": "steel",
+      "type": "material",
+      "name": "Alloy steel",
+      "density": "=7850 kg/m^3"
+    },
+    {
+      "id": "cast_iron",
+      "type": "material",
+      "name": "Grey cast iron",
+      "density": "=7200 kg/m^3"
+    },
+    {
+      "id": "al_head",
+      "type": "material",
+      "name": "Aluminum A356-T6",
+      "density": "=2680 kg/m^3"
+    }
+  ]
+}

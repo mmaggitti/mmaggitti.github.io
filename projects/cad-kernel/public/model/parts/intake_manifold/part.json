@@ -1,0 +1,30 @@
+{
+  "objects": [
+    {
+      "id": "intake_manifold",
+      "type": "part",
+      "name": "Intake manifold",
+      "appearance": "@cast_al",
+      "history": [
+        "@plenum_end",
+        "@sk1",
+        "@ex1",
+        "@f1",
+        "@sh1",
+        "@runner",
+        "@sk2",
+        "@flange",
+        "@sk3",
+        "@sw1",
+        "@pa1",
+        "@sk4",
+        "@bore_start",
+        "@sk5",
+        "@sw2",
+        "@pa2",
+        "@c_flange"
+      ],
+      "material": "@al_head"
+    }
+  ]
+}

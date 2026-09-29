@@ -1,0 +1,63 @@
+{
+  "scope": "@piston",
+  "objects": [
+    {
+      "id": "rv1",
+      "type": "feature.revolve",
+      "name": "Piston body",
+      "angle": 360,
+      "axis": "@sk1.l18",
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "pin_plane",
+      "type": "datum.plane",
+      "name": "Pin bore plane",
+      "normal": [1, 0, 0],
+      "origin": [-80, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Pin bore",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 25],
+          "radius": 10
+        }
+      ],
+      "plane": "@pin_plane"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Pin bore",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk2"
+    },
+    {
+      "id": "c_axis",
+      "type": "connector",
+      "name": "Piston axis",
+      "origin": [0, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_pin",
+      "type": "connector",
+      "name": "Pin bore",
+      "origin": [0, 0, 25],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    }
+  ]
+}

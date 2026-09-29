@@ -1,0 +1,76 @@
+{
+  "objects": [
+    {
+      "id": "bore",
+      "type": "parameter",
+      "notes": "Cylinder bore",
+      "quantity": "length",
+      "value": 80
+    },
+    {
+      "id": "stroke",
+      "type": "parameter",
+      "notes": "Crank stroke",
+      "quantity": "length",
+      "value": 80
+    },
+    {
+      "id": "pin_len",
+      "type": "parameter",
+      "notes": "Piston pin length",
+      "quantity": "length",
+      "value": 72
+    },
+    {
+      "id": "rod_len",
+      "type": "parameter",
+      "notes": "Connecting rod, centre to centre",
+      "quantity": "length",
+      "value": 140
+    },
+    {
+      "id": "piston_h",
+      "type": "parameter",
+      "notes": "Piston height",
+      "quantity": "length",
+      "value": 60
+    },
+    {
+      "id": "pin_height",
+      "type": "parameter",
+      "notes": "Pin centre above the piston's bottom",
+      "quantity": "length",
+      "value": 25
+    },
+    {
+      "id": "deck",
+      "type": "parameter",
+      "notes": "Deck height above the crank axis",
+      "quantity": "length",
+      "value": "=stroke / 2 + rod_len + piston_h - pin_height"
+    },
+    {
+      "id": "long_stroke",
+      "type": "configuration",
+      "name": "Long stroke",
+      "values": {
+        "stroke": 86
+      }
+    },
+    {
+      "id": "crank_angle",
+      "type": "parameter",
+      "notes": "Crank angle from cylinder 1 at top dead centre",
+      "quantity": "angle",
+      "value": 0
+    },
+    {
+      "id": "quarter_turn",
+      "type": "configuration",
+      "name": "Crank at 90°",
+      "values": {
+        "crank_angle": 90
+      }
+    }
+  ]
+}

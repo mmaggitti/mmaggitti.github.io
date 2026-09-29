@@ -1,0 +1,898 @@
+{
+  "scope": "@crank",
+  "objects": [
+    {
+      "id": "j1_plane",
+      "type": "datum.plane",
+      "name": "j1_plane",
+      "normal": [1, 0, 0],
+      "origin": [-195, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Main journal",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 30
+        }
+      ],
+      "plane": "@j1_plane"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Front main journal",
+      "extent": {
+        "type": "distance",
+        "distance": 30
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "web1a",
+      "type": "datum.plane",
+      "name": "web1a",
+      "normal": [1, 0, 0],
+      "origin": [-165, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "pin1",
+      "type": "datum.plane",
+      "name": "pin1",
+      "normal": [1, 0, 0],
+      "origin": [-151, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "web1b",
+      "type": "datum.plane",
+      "name": "web1b",
+      "normal": [1, 0, 0],
+      "origin": [-119, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Web",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@c1"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c2"],
+          "value": 36
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": "=stroke / 2"
+        },
+        {
+          "id": "k5",
+          "type": "coincident",
+          "refs": ["@l3.end", "@l4.start"]
+        },
+        {
+          "id": "k6",
+          "type": "coincident",
+          "refs": ["@l4.end", "@l5.start"]
+        },
+        {
+          "id": "k7",
+          "type": "coincident",
+          "refs": ["@l5.end", "@l6.start"]
+        },
+        {
+          "id": "k8",
+          "type": "coincident",
+          "refs": ["@l6.end", "@l3.start"]
+        },
+        {
+          "id": "k9",
+          "type": "fix",
+          "refs": ["@l3"]
+        },
+        {
+          "id": "k10",
+          "type": "horizontal",
+          "refs": ["@l5"]
+        },
+        {
+          "id": "k11",
+          "type": "vertical",
+          "refs": ["@l4"]
+        },
+        {
+          "id": "k12",
+          "type": "vertical",
+          "refs": ["@l6"]
+        },
+        {
+          "id": "k13",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@l5.start"],
+          "value": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 45
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, 40],
+          "radius": 36
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [34, 0],
+          "start": [-34, 0]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [34, 40],
+          "start": [34, 0]
+        },
+        {
+          "id": "l5",
+          "type": "line",
+          "end": [-34, 40],
+          "start": [34, 40]
+        },
+        {
+          "id": "l6",
+          "type": "line",
+          "end": [-34, 0],
+          "start": [-34, 40]
+        }
+      ],
+      "plane": "@web1a"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Web",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk2"
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Crank pin",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@o"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c1"],
+          "value": 24
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@o", "@c1.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@o", "@c1.center"],
+          "value": "=stroke / 2"
+        }
+      ],
+      "entities": [
+        {
+          "id": "o",
+          "type": "point",
+          "at": [0, 0],
+          "construction": true
+        },
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 40],
+          "radius": 24
+        }
+      ],
+      "plane": "@pin1"
+    },
+    {
+      "id": "ex3",
+      "type": "feature.extrude",
+      "name": "Crank pin",
+      "extent": {
+        "type": "distance",
+        "distance": 32
+      },
+      "operation": "add",
+      "profile": "@sk3"
+    },
+    {
+      "id": "sk4",
+      "type": "sketch",
+      "name": "Web",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@c1"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c2"],
+          "value": 36
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": "=stroke / 2"
+        },
+        {
+          "id": "k5",
+          "type": "coincident",
+          "refs": ["@l3.end", "@l4.start"]
+        },
+        {
+          "id": "k6",
+          "type": "coincident",
+          "refs": ["@l4.end", "@l5.start"]
+        },
+        {
+          "id": "k7",
+          "type": "coincident",
+          "refs": ["@l5.end", "@l6.start"]
+        },
+        {
+          "id": "k8",
+          "type": "coincident",
+          "refs": ["@l6.end", "@l3.start"]
+        },
+        {
+          "id": "k9",
+          "type": "fix",
+          "refs": ["@l3"]
+        },
+        {
+          "id": "k10",
+          "type": "horizontal",
+          "refs": ["@l5"]
+        },
+        {
+          "id": "k11",
+          "type": "vertical",
+          "refs": ["@l4"]
+        },
+        {
+          "id": "k12",
+          "type": "vertical",
+          "refs": ["@l6"]
+        },
+        {
+          "id": "k13",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@l5.start"],
+          "value": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 45
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, 40],
+          "radius": 36
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [34, 0],
+          "start": [-34, 0]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [34, 40],
+          "start": [34, 0]
+        },
+        {
+          "id": "l5",
+          "type": "line",
+          "end": [-34, 40],
+          "start": [34, 40]
+        },
+        {
+          "id": "l6",
+          "type": "line",
+          "end": [-34, 0],
+          "start": [-34, 40]
+        }
+      ],
+      "plane": "@web1b"
+    },
+    {
+      "id": "ex4",
+      "type": "feature.extrude",
+      "name": "Web",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk4"
+    },
+    {
+      "id": "web2a",
+      "type": "datum.plane",
+      "name": "web2a",
+      "normal": [1, 0, 0],
+      "origin": [-75, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "pin2",
+      "type": "datum.plane",
+      "name": "pin2",
+      "normal": [1, 0, 0],
+      "origin": [-61, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "web2b",
+      "type": "datum.plane",
+      "name": "web2b",
+      "normal": [1, 0, 0],
+      "origin": [-29, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk5",
+      "type": "sketch",
+      "name": "Web",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@c1"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c2"],
+          "value": 36
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@c1.center"],
+          "value": "=stroke / 2"
+        },
+        {
+          "id": "k5",
+          "type": "coincident",
+          "refs": ["@l3.end", "@l4.start"]
+        },
+        {
+          "id": "k6",
+          "type": "coincident",
+          "refs": ["@l4.end", "@l5.start"]
+        },
+        {
+          "id": "k7",
+          "type": "coincident",
+          "refs": ["@l5.end", "@l6.start"]
+        },
+        {
+          "id": "k8",
+          "type": "coincident",
+          "refs": ["@l6.end", "@l3.start"]
+        },
+        {
+          "id": "k9",
+          "type": "fix",
+          "refs": ["@l5"]
+        },
+        {
+          "id": "k10",
+          "type": "horizontal",
+          "refs": ["@l3"]
+        },
+        {
+          "id": "k11",
+          "type": "vertical",
+          "refs": ["@l4"]
+        },
+        {
+          "id": "k12",
+          "type": "vertical",
+          "refs": ["@l6"]
+        },
+        {
+          "id": "k13",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@l3.start"],
+          "value": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 45
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, -40],
+          "radius": 36
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [34, -40],
+          "start": [-34, -40]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [34, 0],
+          "start": [34, -40]
+        },
+        {
+          "id": "l5",
+          "type": "line",
+          "end": [-34, 0],
+          "start": [34, 0]
+        },
+        {
+          "id": "l6",
+          "type": "line",
+          "end": [-34, -40],
+          "start": [-34, 0]
+        }
+      ],
+      "plane": "@web2a"
+    },
+    {
+      "id": "ex5",
+      "type": "feature.extrude",
+      "name": "Web",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk5"
+    },
+    {
+      "id": "sk6",
+      "type": "sketch",
+      "name": "Crank pin",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@o"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c1"],
+          "value": 24
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@o", "@c1.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@c1.center", "@o"],
+          "value": "=stroke / 2"
+        }
+      ],
+      "entities": [
+        {
+          "id": "o",
+          "type": "point",
+          "at": [0, 0],
+          "construction": true
+        },
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, -40],
+          "radius": 24
+        }
+      ],
+      "plane": "@pin2"
+    },
+    {
+      "id": "ex6",
+      "type": "feature.extrude",
+      "name": "Crank pin",
+      "extent": {
+        "type": "distance",
+        "distance": 32
+      },
+      "operation": "add",
+      "profile": "@sk6"
+    },
+    {
+      "id": "sk7",
+      "type": "sketch",
+      "name": "Web",
+      "constraints": [
+        {
+          "id": "k1",
+          "type": "fix",
+          "refs": ["@c1"]
+        },
+        {
+          "id": "k2",
+          "type": "radius",
+          "refs": ["@c2"],
+          "value": 36
+        },
+        {
+          "id": "k3",
+          "type": "distance_x",
+          "refs": ["@c1.center", "@c2.center"],
+          "value": 0
+        },
+        {
+          "id": "k4",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@c1.center"],
+          "value": "=stroke / 2"
+        },
+        {
+          "id": "k5",
+          "type": "coincident",
+          "refs": ["@l3.end", "@l4.start"]
+        },
+        {
+          "id": "k6",
+          "type": "coincident",
+          "refs": ["@l4.end", "@l5.start"]
+        },
+        {
+          "id": "k7",
+          "type": "coincident",
+          "refs": ["@l5.end", "@l6.start"]
+        },
+        {
+          "id": "k8",
+          "type": "coincident",
+          "refs": ["@l6.end", "@l3.start"]
+        },
+        {
+          "id": "k9",
+          "type": "fix",
+          "refs": ["@l5"]
+        },
+        {
+          "id": "k10",
+          "type": "horizontal",
+          "refs": ["@l3"]
+        },
+        {
+          "id": "k11",
+          "type": "vertical",
+          "refs": ["@l4"]
+        },
+        {
+          "id": "k12",
+          "type": "vertical",
+          "refs": ["@l6"]
+        },
+        {
+          "id": "k13",
+          "type": "distance_y",
+          "refs": ["@c2.center", "@l3.start"],
+          "value": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 45
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, -40],
+          "radius": 36
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [34, -40],
+          "start": [-34, -40]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [34, 0],
+          "start": [34, -40]
+        },
+        {
+          "id": "l5",
+          "type": "line",
+          "end": [-34, 0],
+          "start": [34, 0]
+        },
+        {
+          "id": "l6",
+          "type": "line",
+          "end": [-34, -40],
+          "start": [-34, 0]
+        }
+      ],
+      "plane": "@web2b"
+    },
+    {
+      "id": "ex7",
+      "type": "feature.extrude",
+      "name": "Web",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk7"
+    },
+    {
+      "id": "j2_plane",
+      "type": "datum.plane",
+      "name": "j2_plane",
+      "normal": [1, 0, 0],
+      "origin": [-105, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk8",
+      "type": "sketch",
+      "name": "Main journal",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 30
+        }
+      ],
+      "plane": "@j2_plane"
+    },
+    {
+      "id": "ex8",
+      "type": "feature.extrude",
+      "name": "Main journal",
+      "extent": {
+        "type": "distance",
+        "distance": 30
+      },
+      "operation": "add",
+      "profile": "@sk8"
+    },
+    {
+      "id": "pa1",
+      "type": "feature.pattern.linear",
+      "name": "Main journals",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex8"],
+      "spacing": 90
+    },
+    {
+      "id": "pa2",
+      "type": "feature.pattern.linear",
+      "name": "Outer throws",
+      "count": 2,
+      "direction": "x",
+      "items": ["@ex2", "@ex3", "@ex4"],
+      "spacing": 270
+    },
+    {
+      "id": "pa3",
+      "type": "feature.pattern.linear",
+      "name": "Inner throws",
+      "count": 2,
+      "direction": "x",
+      "items": ["@ex5", "@ex6", "@ex7"],
+      "spacing": 90
+    },
+    {
+      "id": "drill_plane",
+      "type": "datum.plane",
+      "name": "Oil drilling",
+      "normal": [-0.7474093186836598, 0, -0.6643638388299198],
+      "origin": [0, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk9",
+      "type": "sketch",
+      "name": "Oil drilling",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 3
+        }
+      ],
+      "plane": "@drill_plane"
+    },
+    {
+      "id": "ex9",
+      "type": "feature.extrude",
+      "name": "Oil drilling",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk9"
+    },
+    {
+      "id": "h1",
+      "type": "feature.hole",
+      "name": "Journal cross-drilling",
+      "diameter": 6,
+      "extent": {
+        "type": "through_all"
+      },
+      "face": {
+        "hints": [
+          [0, 0, 30]
+        ]
+      },
+      "positions": [
+        [0, 0, 30]
+      ]
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Journal and pin fillets",
+      "edges": {
+        "hints": [
+          [-165, -30, 0],
+          [-151, -24, 40],
+          [-119, -24, 40],
+          [-105, -30, 0],
+          [-75, -30, 0],
+          [-61, -24, -40],
+          [-29, -24, -40],
+          [-15, -30, 0],
+          [15, -30, 0],
+          [29, -24, -40],
+          [61, -24, -40],
+          [75, -30, 0],
+          [105, -30, 0],
+          [119, -24, 40],
+          [151, -24, 40],
+          [165, -30, 0]
+        ],
+        "names": [
+          "ex1.side[c1]/ex2.cap[start]",
+          "ex2.cap[end]/ex3.side[c1]",
+          "ex3.side[c1]/ex4.cap[start]",
+          "ex4.cap[end]/ex8.side[c1]",
+          "ex5.cap[start]/ex8.side[c1]",
+          "ex5.cap[end]/ex6.side[c1]",
+          "ex6.side[c1]/ex7.cap[start]",
+          "ex7.cap[end]/pa1[2].ex8.side[c1]",
+          "pa1[2].ex8.side[c1]/pa3[2].ex5.cap[start]",
+          "pa3[2].ex5.cap[end]/pa3[2].ex6.side[c1]",
+          "pa3[2].ex6.side[c1]/pa3[2].ex7.cap[start]",
+          "pa1[3].ex8.side[c1]/pa3[2].ex7.cap[end]",
+          "pa1[3].ex8.side[c1]/pa2[2].ex2.cap[start]",
+          "pa2[2].ex2.cap[end]/pa2[2].ex3.side[c1]",
+          "pa2[2].ex3.side[c1]/pa2[2].ex4.cap[start]",
+          "pa1[4].ex8.side[c1]/pa2[2].ex4.cap[end]"
+        ]
+      },
+      "radius": 3
+    },
+    {
+      "id": "c_axis",
+      "type": "connector",
+      "name": "Crank axis",
+      "origin": [0, 0, 0],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_pin1",
+      "type": "connector",
+      "name": "Crank pin 1",
+      "origin": [-135, 0, "=stroke / 2"],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_pin2",
+      "type": "connector",
+      "name": "Crank pin 2",
+      "origin": [-45, 0, "=-stroke / 2"],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_pin3",
+      "type": "connector",
+      "name": "Crank pin 3",
+      "origin": [45, 0, "=-stroke / 2"],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_pin4",
+      "type": "connector",
+      "name": "Crank pin 4",
+      "origin": [135, 0, "=stroke / 2"],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "cad-kernel",
+  "private": true,
+  "type": "module",
+  "description": "The car engine that cad-kernel, a CAD kernel written from scratch in Rust, builds: shown with Three.js, rebuilt on the phone by the kernel's WebAssembly build.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.1"
+  }
+}

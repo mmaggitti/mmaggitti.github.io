@@ -1,0 +1,12 @@
+{
+  "objects": [
+    {
+      "id": "oil_pan",
+      "type": "part",
+      "name": "Oil pan",
+      "appearance": "@ground_steel",
+      "history": ["@sk1", "@ex1", "@f1", "@sh1", "@c_rail"],
+      "material": "@steel"
+    }
+  ]
+}

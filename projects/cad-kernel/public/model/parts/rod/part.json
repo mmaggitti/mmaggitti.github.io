@@ -1,0 +1,26 @@
+{
+  "objects": [
+    {
+      "id": "rod",
+      "type": "part",
+      "name": "Connecting rod and cap",
+      "appearance": "@ground_steel",
+      "history": [
+        "@sk1",
+        "@ex1",
+        "@sk2",
+        "@ex2",
+        "@bolt_plane",
+        "@sk3",
+        "@ex3",
+        "@sk4",
+        "@ex4",
+        "@b1",
+        "@b2",
+        "@c_big",
+        "@c_small"
+      ],
+      "material": "@steel"
+    }
+  ]
+}

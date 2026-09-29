@@ -1,0 +1,99 @@
+{
+  "scope": "@oil_pan",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Pan outline",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [190, -95],
+          "start": [-190, -95]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [190, 95],
+          "start": [190, -95]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-190, 95],
+          "start": [190, 95]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-190, -95],
+          "start": [-190, 95]
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Pan",
+      "draft": 3,
+      "extent": {
+        "type": "distance",
+        "distance": 110,
+        "reverse": true
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Pan corners",
+      "edges": {
+        "hints": [
+          [187.11757213943272, -92.11757213943274, -55],
+          [187.11757213943272, 92.11757213943274, -55],
+          [-187.11757213943272, 92.11757213943274, -55],
+          [-187.11757213943272, -92.11757213943274, -55],
+          [0, -89.23514427886546, -110],
+          [184.23514427886548, 0, -110],
+          [0, 89.23514427886546, -110],
+          [-184.23514427886548, 0, -110]
+        ],
+        "names": [
+          "ex1.side[l1]/ex1.side[l2]",
+          "ex1.side[l2]/ex1.side[l3]",
+          "ex1.side[l3]/ex1.side[l4]",
+          "ex1.side[l1]/ex1.side[l4]",
+          "ex1.cap[end]/ex1.side[l1]",
+          "ex1.cap[end]/ex1.side[l2]",
+          "ex1.cap[end]/ex1.side[l3]",
+          "ex1.cap[end]/ex1.side[l4]"
+        ]
+      },
+      "radius": 15
+    },
+    {
+      "id": "sh1",
+      "type": "feature.shell",
+      "name": "Pan walls",
+      "faces": {
+        "hints": [
+          [0, 0, 0]
+        ],
+        "names": ["ex1.cap[start]"]
+      },
+      "thickness": 4
+    },
+    {
+      "id": "c_rail",
+      "type": "connector",
+      "name": "Rail face",
+      "origin": [0, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

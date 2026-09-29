@@ -1,0 +1,25 @@
+{
+  "objects": [
+    {
+      "id": "camshaft",
+      "type": "part",
+      "name": "Camshaft",
+      "appearance": "@ground_steel",
+      "history": [
+        "@front",
+        "@sk1",
+        "@ex1",
+        "@lobe_in",
+        "@sk2",
+        "@ex2",
+        "@pa1",
+        "@lobe_ex",
+        "@sk3",
+        "@ex3",
+        "@pa2",
+        "@c_axis"
+      ],
+      "material": "@steel"
+    }
+  ]
+}

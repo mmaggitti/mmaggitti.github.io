@@ -1,0 +1,38 @@
+{
+  "objects": [
+    {
+      "id": "block",
+      "type": "part",
+      "name": "Engine block",
+      "appearance": "@cast_al",
+      "history": [
+        "@pan",
+        "@deck",
+        "@front",
+        "@sk1",
+        "@ex1",
+        "@sk2",
+        "@ex2",
+        "@pa1",
+        "@sk3",
+        "@ex3",
+        "@pa2",
+        "@sk4",
+        "@ex4",
+        "@sk5",
+        "@ex5",
+        "@h1",
+        "@f1",
+        "@c1",
+        "@c_main",
+        "@c_deck",
+        "@c_bore1",
+        "@c_bore2",
+        "@c_bore3",
+        "@c_bore4",
+        "@c_pan"
+      ],
+      "material": "@cast_iron"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "objects": [
+    {
+      "id": "cast_al",
+      "type": "appearance",
+      "name": "Cast aluminum",
+      "color": "#b8bcc0",
+      "metallic": 0.4,
+      "roughness": 0.6
+    },
+    {
+      "id": "ground_steel",
+      "type": "appearance",
+      "name": "Ground steel",
+      "color": "#8e9296",
+      "metallic": 0.8,
+      "roughness": 0.3
+    }
+  ]
+}

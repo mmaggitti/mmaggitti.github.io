@@ -1,0 +1,50 @@
+{
+  "objects": [
+    {
+      "id": "crank",
+      "type": "part",
+      "name": "Crankshaft",
+      "appearance": "@ground_steel",
+      "history": [
+        "@j1_plane",
+        "@sk1",
+        "@ex1",
+        "@web1a",
+        "@pin1",
+        "@web1b",
+        "@sk2",
+        "@ex2",
+        "@sk3",
+        "@ex3",
+        "@sk4",
+        "@ex4",
+        "@web2a",
+        "@pin2",
+        "@web2b",
+        "@sk5",
+        "@ex5",
+        "@sk6",
+        "@ex6",
+        "@sk7",
+        "@ex7",
+        "@j2_plane",
+        "@sk8",
+        "@ex8",
+        "@pa1",
+        "@pa2",
+        "@pa3",
+        "@drill_plane",
+        "@sk9",
+        "@ex9",
+        "@h1",
+        "@f1",
+        "@c_axis",
+        "@c_pin1",
+        "@c_pin2",
+        "@c_pin3",
+        "@c_pin4"
+      ],
+      "material": "@steel"
+    }
+  ]
+}

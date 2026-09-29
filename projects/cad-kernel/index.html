@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve to real values. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="A four-cylinder engine built by cad-kernel, a CAD kernel written from scratch. Turn it, tap a part for its name, turn the crank.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>Car engine · cad-kernel</title>
+</head>
+<body>
+  <div id="view"></div>
+  <header class="top">
+    <div class="card">
+      <h1 class="title">Car engine</h1>
+      <p class="sub" id="status" data-check="status">Loading the engine…</p>
+      <p class="pick ds-mono" id="pick" data-check="pick" aria-live="polite">Tap a part to see its name.</p>
+    </div>
+  </header>
+  <div class="bar">
+    <label class="crank">
+      <span>Crank <output id="angle" data-check="angle">0°</output></span>
+      <input id="crank" type="range" min="0" max="720" step="1" value="0" aria-label="Crank angle in degrees" disabled>
+    </label>
+    <div class="actions">
+      <button class="ds-btn" id="inside" type="button" aria-pressed="false" disabled>Show inside</button>
+      <button class="ds-btn ds-btn--primary" id="play" type="button" aria-pressed="false" disabled>Play</button>
+      <button class="ds-btn" id="rebuild" type="button" disabled>Rebuild here</button>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

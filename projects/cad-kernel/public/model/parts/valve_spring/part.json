@@ -1,0 +1,12 @@
+{
+  "objects": [
+    {
+      "id": "valve_spring",
+      "type": "part",
+      "name": "Valve spring",
+      "appearance": "@ground_steel",
+      "history": ["@start", "@sk1", "@sw1", "@c_seat"],
+      "material": "@steel"
+    }
+  ]
+}

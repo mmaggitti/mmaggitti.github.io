@@ -1,0 +1,191 @@
+{
+  "scope": "@camshaft",
+  "objects": [
+    {
+      "id": "front",
+      "type": "datum.plane",
+      "name": "front",
+      "normal": [1, 0, 0],
+      "origin": [-190, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Camshaft",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 12
+        }
+      ],
+      "plane": "@front"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Shaft",
+      "extent": {
+        "type": "distance",
+        "distance": 380
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "lobe_in",
+      "type": "datum.plane",
+      "name": "lobe_in",
+      "normal": [1, 0, 0],
+      "origin": [-160, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Cam lobe",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "s1",
+          "type": "spline",
+          "controlPoints": [
+            [0, -18],
+            [11.88, -18],
+            [18, -8.1],
+            [16.2, 8.1],
+            [8.1, 20.8],
+            [0, 26],
+            [-8.1, 20.8],
+            [-16.2, 8.1],
+            [-18, -8.1],
+            [-11.88, -18],
+            [0, -18]
+          ],
+          "degree": 3,
+          "knots": [
+            0,
+            0,
+            0,
+            0,
+            0.125,
+            0.25,
+            0.375,
+            0.5,
+            0.625,
+            0.75,
+            0.875,
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "plane": "@lobe_in"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Cam lobe",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk2"
+    },
+    {
+      "id": "pa1",
+      "type": "feature.pattern.linear",
+      "name": "Cam lobes",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex2"],
+      "spacing": 90
+    },
+    {
+      "id": "lobe_ex",
+      "type": "datum.plane",
+      "name": "lobe_ex",
+      "normal": [1, 0, 0],
+      "origin": [-124, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Cam lobe",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "s1",
+          "type": "spline",
+          "controlPoints": [
+            [16.914467174, 6.15636258],
+            [12.851267871, 17.319910915],
+            [1.455147649, 19.684830335],
+            [-13.15223655, 12.452657296],
+            [-22.315969673, 0.497491247],
+            [-24.43200814, -8.892523726],
+            [-16.775243351, -14.72552921],
+            [-2.070783906, -17.993383618],
+            [13.767872808, -14.144104013],
+            [20.977666477, -5.007185755],
+            [16.914467174, 6.15636258]
+          ],
+          "degree": 3,
+          "knots": [
+            0,
+            0,
+            0,
+            0,
+            0.125,
+            0.25,
+            0.375,
+            0.5,
+            0.625,
+            0.75,
+            0.875,
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "plane": "@lobe_ex"
+    },
+    {
+      "id": "ex3",
+      "type": "feature.extrude",
+      "name": "Cam lobe",
+      "extent": {
+        "type": "distance",
+        "distance": 14
+      },
+      "operation": "add",
+      "profile": "@sk3"
+    },
+    {
+      "id": "pa2",
+      "type": "feature.pattern.linear",
+      "name": "Cam lobes",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex3"],
+      "spacing": 90
+    },
+    {
+      "id": "c_axis",
+      "type": "connector",
+      "name": "Camshaft axis",
+      "origin": [0, 0, 0],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    }
+  ]
+}

@@ -1,0 +1,214 @@
+{
+  "scope": "@rod",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Rod outline",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 36
+        },
+        {
+          "id": "c2",
+          "type": "circle",
+          "center": [0, 140],
+          "radius": 15
+        },
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [9, 21.599999999999998],
+          "start": [-9, 21.599999999999998]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [9, 131],
+          "start": [9, 21.599999999999998]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-9, 131],
+          "start": [9, 131]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-9, 21.599999999999998],
+          "start": [-9, 131]
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Rod blank",
+      "extent": {
+        "type": "distance",
+        "distance": 22,
+        "symmetric": true
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Rod bores",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c3",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 24
+        },
+        {
+          "id": "c4",
+          "type": "circle",
+          "center": [0, 140],
+          "radius": 10
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Big and small end bores",
+      "extent": {
+        "type": "distance",
+        "distance": 44,
+        "symmetric": true
+      },
+      "operation": "cut",
+      "profile": "@sk2"
+    },
+    {
+      "id": "bolt_plane",
+      "type": "datum.plane",
+      "name": "Rod bolt plane",
+      "normal": [0, 1, 0],
+      "origin": [0, -46, 0],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Rod bolts",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c5",
+          "type": "circle",
+          "center": [-30, 0],
+          "radius": 4.5
+        },
+        {
+          "id": "c6",
+          "type": "circle",
+          "center": [30, 0],
+          "radius": 4.5
+        }
+      ],
+      "plane": "@bolt_plane"
+    },
+    {
+      "id": "ex3",
+      "type": "feature.extrude",
+      "name": "Rod bolt holes",
+      "extent": {
+        "type": "distance",
+        "distance": 92
+      },
+      "operation": "cut",
+      "profile": "@sk3"
+    },
+    {
+      "id": "sk4",
+      "type": "sketch",
+      "name": "Rod side",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l10",
+          "type": "line",
+          "end": [56, 0],
+          "start": [-56, 0]
+        },
+        {
+          "id": "l11",
+          "type": "line",
+          "end": [56, 175],
+          "start": [56, 0]
+        },
+        {
+          "id": "l12",
+          "type": "line",
+          "end": [-56, 175],
+          "start": [56, 175]
+        },
+        {
+          "id": "l13",
+          "type": "line",
+          "end": [-56, 0],
+          "start": [-56, 175]
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex4",
+      "type": "feature.extrude",
+      "name": "Rod",
+      "extent": {
+        "type": "distance",
+        "distance": 44,
+        "symmetric": true
+      },
+      "operation": "new",
+      "profile": "@sk4"
+    },
+    {
+      "id": "b1",
+      "type": "feature.boolean",
+      "name": "Rod from blank",
+      "keepTools": true,
+      "operation": "intersect",
+      "target": "@ex4",
+      "tools": ["@ex1"]
+    },
+    {
+      "id": "b2",
+      "type": "feature.boolean",
+      "name": "Cap from blank",
+      "keepTools": true,
+      "operation": "cut",
+      "target": "@ex1",
+      "tools": ["@ex4"]
+    },
+    {
+      "id": "c_big",
+      "type": "connector",
+      "name": "Big end",
+      "origin": [0, 0, 0],
+      "xAxis": [0, 1, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_small",
+      "type": "connector",
+      "name": "Small end",
+      "origin": [0, 140, 0],
+      "xAxis": [0, 1, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+{
+  "scope": "@valve_cover",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Cover outline",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [190, -95],
+          "start": [-190, -95]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [190, 95],
+          "start": [190, -95]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-190, 95],
+          "start": [190, 95]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-190, -95],
+          "start": [-190, 95]
+        }
+      ],
+      "plane": "@xy"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Cover",
+      "extent": {
+        "type": "distance",
+        "distance": 80
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Cover corners",
+      "edges": {
+        "hints": [
+          [190, -95, 40],
+          [190, 95, 40],
+          [-190, 95, 40],
+          [-190, -95, 40]
+        ],
+        "names": [
+          "ex1.side[l1]/ex1.side[l2]",
+          "ex1.side[l2]/ex1.side[l3]",
+          "ex1.side[l3]/ex1.side[l4]",
+          "ex1.side[l1]/ex1.side[l4]"
+        ],
+        "query": {
+          "edgesOf": "@ex1",
+          "where": {
+            "curve": "line",
+            "parallelTo": "z"
+          }
+        }
+      },
+      "radius": 20
+    },
+    {
+      "id": "f2",
+      "type": "feature.fillet",
+      "name": "Cover top",
+      "edges": {
+        "hints": [
+          [0, -95, 80],
+          [190, 0, 80],
+          [0, 95, 80],
+          [-190, 0, 80],
+          [184.14213562373095, -89.14213562373095, 80],
+          [184.14213562373095, 89.14213562373095, 80],
+          [-184.14213562373095, 89.14213562373095, 80],
+          [-184.14213562373095, -89.14213562373095, 80]
+        ],
+        "names": [
+          "ex1.cap[end]/ex1.side[l1]",
+          "ex1.cap[end]/ex1.side[l2]",
+          "ex1.cap[end]/ex1.side[l3]",
+          "ex1.cap[end]/ex1.side[l4]",
+          "ex1.cap[end]/f1.face[ex1.side[l1]/ex1.side[l2]]",
+          "ex1.cap[end]/f1.face[ex1.side[l2]/ex1.side[l3]]",
+          "ex1.cap[end]/f1.face[ex1.side[l3]/ex1.side[l4]]",
+          "ex1.cap[end]/f1.face[ex1.side[l1]/ex1.side[l4]]"
+        ]
+      },
+      "radius": 10
+    },
+    {
+      "id": "sh1",
+      "type": "feature.shell",
+      "name": "Cover walls",
+      "faces": {
+        "hints": [
+          [0, 0, 0]
+        ],
+        "names": ["ex1.cap[start]"]
+      },
+      "thickness": 3
+    },
+    {
+      "id": "cam_end",
+      "type": "datum.plane",
+      "name": "Camshaft seals",
+      "normal": [1, 0, 0],
+      "origin": [-200, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Camshaft seals",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 30],
+          "radius": 14
+        }
+      ],
+      "plane": "@cam_end"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Camshaft seal bores",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk2"
+    },
+    {
+      "id": "c_base",
+      "type": "connector",
+      "name": "Gasket face",
+      "origin": [0, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

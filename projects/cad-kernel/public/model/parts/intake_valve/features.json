@@ -1,0 +1,22 @@
+{
+  "scope": "@intake_valve",
+  "objects": [
+    {
+      "id": "rv1",
+      "type": "feature.revolve",
+      "name": "Valve body",
+      "angle": 360,
+      "axis": "@sk1.l6",
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "c_face",
+      "type": "connector",
+      "name": "Valve face",
+      "origin": [0, 0, 105],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

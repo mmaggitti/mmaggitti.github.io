@@ -1,0 +1,64 @@
+/* The engine fills the screen; the title card sits at the top and the controls in the bottom
+   thumb zone, both clear of the notch and the home indicator. Sizes in rem (ds.css). */
+
+html, body { height: 100%; overflow: hidden; }
+body { overscroll-behavior: none; }
+
+#view { position: fixed; inset: 0; touch-action: none; }
+#view canvas { display: block; width: 100%; height: 100%; }
+
+.top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: calc(env(safe-area-inset-top) + var(--space-3)) calc(env(safe-area-inset-right) + var(--space-3)) 0 calc(env(safe-area-inset-left) + var(--space-3));
+  pointer-events: none;
+}
+.card {
+  pointer-events: auto;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  -webkit-backdrop-filter: blur(0.75rem);
+  backdrop-filter: blur(0.75rem);
+}
+.title { font-size: var(--text-lg); line-height: var(--leading-tight); margin: 0 0 var(--space-1); }
+.sub { color: var(--text-muted); font-size: var(--text-sm); margin: 0; }
+.pick {
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+  min-height: calc(var(--text-sm) * var(--leading) * 2);
+  overflow-wrap: anywhere;
+}
+
+.bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) calc(env(safe-area-inset-right) + var(--space-4)) calc(var(--space-3) + env(safe-area-inset-bottom)) calc(env(safe-area-inset-left) + var(--space-4));
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(0.75rem);
+  backdrop-filter: blur(0.75rem);
+}
+.bar > * { width: 100%; max-width: var(--measure); margin: 0 auto; }
+.crank {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  font-size: var(--text-sm);
+}
+.crank > span { flex: none; min-width: 6.5rem; font-variant-numeric: tabular-nums; }
+.crank input { flex: 1; min-width: 0; min-height: var(--tap-min); margin: 0; accent-color: var(--accent); }
+.actions { display: flex; gap: var(--space-3); }
+.actions .ds-btn { padding: 0 var(--space-2); }
+.ds-btn:disabled { opacity: 0.5; }
+.ds-btn[aria-pressed="true"]:not(.ds-btn--primary) { background: var(--line); border: 2px solid var(--accent); }

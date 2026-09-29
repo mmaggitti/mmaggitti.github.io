@@ -1,0 +1,12 @@
+{
+  "objects": [
+    {
+      "id": "piston_pin",
+      "type": "part",
+      "name": "Piston pin",
+      "appearance": "@ground_steel",
+      "history": ["@sk1", "@ex1", "@c_axis"],
+      "material": "@steel"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "objects": [
+    {
+      "id": "valve_cover",
+      "type": "part",
+      "name": "Valve cover",
+      "appearance": "@cast_al",
+      "history": [
+        "@sk1",
+        "@ex1",
+        "@f1",
+        "@f2",
+        "@sh1",
+        "@cam_end",
+        "@sk2",
+        "@ex2",
+        "@c_base"
+      ],
+      "material": "@al_head"
+    }
+  ]
+}

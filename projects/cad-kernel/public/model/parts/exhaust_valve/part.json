@@ -1,0 +1,12 @@
+{
+  "objects": [
+    {
+      "id": "exhaust_valve",
+      "type": "part",
+      "name": "Exhaust valve",
+      "appearance": "@ground_steel",
+      "history": ["@sk1", "@rv1", "@c_face"],
+      "material": "@steel"
+    }
+  ]
+}

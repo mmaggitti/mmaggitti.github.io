@@ -1,0 +1,347 @@
+{
+  "scope": "@block",
+  "objects": [
+    {
+      "id": "pan",
+      "type": "datum.plane",
+      "name": "Pan rail",
+      "normal": [0, 0, 1],
+      "origin": [0, 0, -70],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "deck",
+      "type": "datum.plane",
+      "name": "Deck",
+      "normal": [0, 0, 1],
+      "origin": [0, 0, "=deck"],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "front",
+      "type": "datum.plane",
+      "name": "Front face",
+      "normal": [1, 0, 0],
+      "origin": [-200, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Block outline",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [190, -95],
+          "start": [-190, -95]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [190, 95],
+          "start": [190, -95]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-190, 95],
+          "start": [190, 95]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-190, -95],
+          "start": [-190, 95]
+        }
+      ],
+      "plane": "@pan"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Block",
+      "extent": {
+        "type": "distance",
+        "distance": "=deck + 70 mm"
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Crankcase bay",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [-93, -85],
+          "start": [-177, -85]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [-93, 85],
+          "start": [-93, -85]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [-177, 85],
+          "start": [-93, 85]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [-177, -85],
+          "start": [-177, 85]
+        }
+      ],
+      "plane": "@pan"
+    },
+    {
+      "id": "ex2",
+      "type": "feature.extrude",
+      "name": "Crankcase bay",
+      "extent": {
+        "type": "distance",
+        "distance": 160
+      },
+      "operation": "cut",
+      "profile": "@sk2"
+    },
+    {
+      "id": "pa1",
+      "type": "feature.pattern.linear",
+      "name": "Crankcase bays",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex2"],
+      "spacing": 90
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Bore",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [-135, 0],
+          "radius": 40
+        }
+      ],
+      "plane": "@deck"
+    },
+    {
+      "id": "ex3",
+      "type": "feature.extrude",
+      "name": "Cylinder bore",
+      "extent": {
+        "type": "distance",
+        "distance": "=deck - 90 mm",
+        "reverse": true
+      },
+      "operation": "cut",
+      "profile": "@sk3"
+    },
+    {
+      "id": "pa2",
+      "type": "feature.pattern.linear",
+      "name": "Cylinder bores",
+      "count": 4,
+      "direction": "x",
+      "items": ["@ex3"],
+      "spacing": 90
+    },
+    {
+      "id": "sk4",
+      "type": "sketch",
+      "name": "Main bearing bore",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 32
+        }
+      ],
+      "plane": "@front"
+    },
+    {
+      "id": "ex4",
+      "type": "feature.extrude",
+      "name": "Main bearing bore",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk4"
+    },
+    {
+      "id": "sk5",
+      "type": "sketch",
+      "name": "Oil gallery",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [-70, 105],
+          "radius": 6
+        }
+      ],
+      "plane": "@front"
+    },
+    {
+      "id": "ex5",
+      "type": "feature.extrude",
+      "name": "Main oil gallery",
+      "extent": {
+        "type": "through_all"
+      },
+      "operation": "cut",
+      "profile": "@sk5"
+    },
+    {
+      "id": "h1",
+      "type": "feature.hole",
+      "name": "Head-bolt holes",
+      "diameter": 10.2,
+      "extent": {
+        "type": "distance",
+        "distance": 45
+      },
+      "face": {
+        "hints": [
+          [0, 93, 215]
+        ],
+        "names": ["ex1.cap[end]"]
+      },
+      "positions": [
+        [-180, -58, "=deck"],
+        [-90, -58, "=deck"],
+        [0, -58, "=deck"],
+        [90, -58, "=deck"],
+        [180, -58, "=deck"],
+        [-180, 58, "=deck"],
+        [-90, 58, "=deck"],
+        [0, 58, "=deck"],
+        [90, 58, "=deck"],
+        [180, 58, "=deck"]
+      ],
+      "thread": {
+        "depth": 40,
+        "designation": "M12x1.75"
+      }
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Casting corners",
+      "edges": {
+        "hints": [
+          [190, -95, 0],
+          [190, 95, 0],
+          [-190, 95, 0],
+          [-190, -95, 0]
+        ],
+        "names": [
+          "ex1.side[l1]/ex1.side[l2]",
+          "ex1.side[l2]/ex1.side[l3]",
+          "ex1.side[l3]/ex1.side[l4]",
+          "ex1.side[l1]/ex1.side[l4]"
+        ],
+        "query": {
+          "edgesOf": "@ex1",
+          "where": {
+            "curve": "line",
+            "parallelTo": "z"
+          }
+        }
+      },
+      "radius": 8
+    },
+    {
+      "id": "c1",
+      "type": "feature.chamfer",
+      "name": "Bore lead-in chamfers",
+      "distance": 1.5,
+      "edges": {
+        "hints": [
+          [-135, 40, 215],
+          [-45, 40, 215],
+          [45, 40, 215],
+          [135, 40, 215]
+        ],
+        "names": [
+          "ex1.cap[end]/ex3.side[c1]",
+          "ex1.cap[end]/pa2[2].ex3.side[c1]",
+          "ex1.cap[end]/pa2[3].ex3.side[c1]",
+          "ex1.cap[end]/pa2[4].ex3.side[c1]"
+        ]
+      }
+    },
+    {
+      "id": "c_main",
+      "type": "connector",
+      "name": "Main bearing axis",
+      "origin": [0, 0, 0],
+      "xAxis": [0, 0, 1],
+      "zAxis": [1, 0, 0]
+    },
+    {
+      "id": "c_deck",
+      "type": "connector",
+      "name": "Deck",
+      "origin": [0, 0, "=deck"],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_bore1",
+      "type": "connector",
+      "name": "Bore 1 axis",
+      "origin": [-135, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_bore2",
+      "type": "connector",
+      "name": "Bore 2 axis",
+      "origin": [-45, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_bore3",
+      "type": "connector",
+      "name": "Bore 3 axis",
+      "origin": [45, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_bore4",
+      "type": "connector",
+      "name": "Bore 4 axis",
+      "origin": [135, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    },
+    {
+      "id": "c_pan",
+      "type": "connector",
+      "name": "Pan rail",
+      "origin": [0, 0, -70],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

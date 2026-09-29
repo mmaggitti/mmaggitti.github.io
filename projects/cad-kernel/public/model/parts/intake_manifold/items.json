@@ -1,0 +1,215 @@
+{
+  "scope": "@intake_manifold",
+  "objects": [
+    {
+      "id": "plenum_end",
+      "type": "datum.plane",
+      "name": "Throttle end",
+      "normal": [1, 0, 0],
+      "origin": [-170, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Plenum",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [165, 137.848040398],
+          "radius": 35
+        }
+      ],
+      "plane": "@plenum_end"
+    },
+    {
+      "id": "ex1",
+      "type": "feature.extrude",
+      "name": "Plenum",
+      "extent": {
+        "type": "distance",
+        "distance": 340
+      },
+      "operation": "new",
+      "profile": "@sk1"
+    },
+    {
+      "id": "f1",
+      "type": "feature.fillet",
+      "name": "Plenum end",
+      "edges": {
+        "hints": [
+          [170, 200, 137.84804039821836]
+        ],
+        "names": ["ex1.cap[end]/ex1.side[c1]"]
+      },
+      "radius": 8
+    },
+    {
+      "id": "sh1",
+      "type": "feature.shell",
+      "name": "Plenum walls",
+      "faces": {
+        "hints": [
+          [-170, 165, 137.84804039821836]
+        ],
+        "names": ["ex1.cap[start]"]
+      },
+      "thickness": 3
+    },
+    {
+      "id": "runner",
+      "type": "datum.plane",
+      "name": "Runner route",
+      "normal": [1, 0, 0],
+      "origin": [-135, 0, 0],
+      "xDir": [0, 1, 0]
+    },
+    {
+      "id": "sk2",
+      "type": "sketch",
+      "name": "Runner route",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [120, 47.848040398],
+          "start": [95, 47.848040398]
+        },
+        {
+          "id": "a1",
+          "type": "arc",
+          "center": [120, 92.848040398],
+          "end": [165, 92.848040398],
+          "start": [120, 47.848040398]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [165, 117.848040398],
+          "start": [165, 92.848040398]
+        }
+      ],
+      "plane": "@runner"
+    },
+    {
+      "id": "flange",
+      "type": "datum.plane",
+      "name": "Runner flange",
+      "normal": [0, 1, 0],
+      "origin": [-135, 95, 47.848040398218345],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk3",
+      "type": "sketch",
+      "name": "Runner",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 17
+        }
+      ],
+      "plane": "@flange"
+    },
+    {
+      "id": "sw1",
+      "type": "feature.sweep",
+      "name": "Runner",
+      "operation": "add",
+      "path": "@sk2",
+      "profile": "@sk3"
+    },
+    {
+      "id": "pa1",
+      "type": "feature.pattern.linear",
+      "name": "Runners",
+      "count": 4,
+      "direction": "x",
+      "items": ["@sw1"],
+      "spacing": 90
+    },
+    {
+      "id": "sk4",
+      "type": "sketch",
+      "name": "Runner route",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [120, 47.848040398],
+          "start": [90, 47.848040398]
+        },
+        {
+          "id": "a1",
+          "type": "arc",
+          "center": [120, 92.848040398],
+          "end": [165, 92.848040398],
+          "start": [120, 47.848040398]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [165, 122.848040398],
+          "start": [165, 92.848040398]
+        }
+      ],
+      "plane": "@runner"
+    },
+    {
+      "id": "bore_start",
+      "type": "datum.plane",
+      "name": "Runner bore start",
+      "normal": [0, 1, 0],
+      "origin": [-135, 90, 47.848040398218345],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk5",
+      "type": "sketch",
+      "name": "Runner bore",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 13
+        }
+      ],
+      "plane": "@bore_start"
+    },
+    {
+      "id": "sw2",
+      "type": "feature.sweep",
+      "name": "Runner bore",
+      "operation": "cut",
+      "path": "@sk4",
+      "profile": "@sk5"
+    },
+    {
+      "id": "pa2",
+      "type": "feature.pattern.linear",
+      "name": "Runner bores",
+      "count": 4,
+      "direction": "x",
+      "items": ["@sw2"],
+      "spacing": 90
+    },
+    {
+      "id": "c_flange",
+      "type": "connector",
+      "name": "Runner flanges",
+      "origin": [0, 95, 47.848040398218345],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 1, 0]
+    }
+  ]
+}

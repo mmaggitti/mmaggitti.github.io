@@ -1,0 +1,56 @@
+{
+  "scope": "@valve_spring",
+  "objects": [
+    {
+      "id": "coil",
+      "type": "CADK_curves.helix",
+      "name": "Spring coil",
+      "axis": [0, 0, 1],
+      "handedness": "right",
+      "origin": [0, 0, 1.9920922153170921],
+      "pitch": 6.5,
+      "radius": 11,
+      "turns": 5,
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "start",
+      "type": "datum.plane",
+      "name": "Wire section",
+      "normal": [0, 69.11503837897544, 6.5],
+      "origin": [11, 0, 1.9920922153170921],
+      "xDir": [1, 0, 0]
+    },
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Wire",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "c1",
+          "type": "circle",
+          "center": [0, 0],
+          "radius": 1.8
+        }
+      ],
+      "plane": "@start"
+    },
+    {
+      "id": "sw1",
+      "type": "feature.sweep",
+      "name": "Coil",
+      "operation": "new",
+      "path": "@coil",
+      "profile": "@sk1"
+    },
+    {
+      "id": "c_seat",
+      "type": "connector",
+      "name": "Seat",
+      "origin": [0, 0, 0],
+      "xAxis": [1, 0, 0],
+      "zAxis": [0, 0, 1]
+    }
+  ]
+}

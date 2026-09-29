@@ -1,0 +1,57 @@
+{
+  "scope": "@exhaust_valve",
+  "objects": [
+    {
+      "id": "sk1",
+      "type": "sketch",
+      "name": "Exhaust valve section",
+      "constraints": [],
+      "entities": [
+        {
+          "id": "l1",
+          "type": "line",
+          "end": [3, 0],
+          "start": [0, 0]
+        },
+        {
+          "id": "l2",
+          "type": "line",
+          "end": [3, 88.35786437626905],
+          "start": [3, 0]
+        },
+        {
+          "id": "a1",
+          "type": "arc",
+          "center": [13, 88.35786437626905],
+          "end": [3, 88.35786437626905],
+          "start": [5.9289321881345245, 95.42893218813452]
+        },
+        {
+          "id": "l3",
+          "type": "line",
+          "end": [14, 103.5],
+          "start": [5.9289321881345245, 95.42893218813452]
+        },
+        {
+          "id": "l4",
+          "type": "line",
+          "end": [14, 105],
+          "start": [14, 103.5]
+        },
+        {
+          "id": "l5",
+          "type": "line",
+          "end": [0, 105],
+          "start": [14, 105]
+        },
+        {
+          "id": "l6",
+          "type": "line",
+          "end": [0, 0],
+          "start": [0, 105]
+        }
+      ],
+      "plane": "@yz"
+    }
+  ]
+}
