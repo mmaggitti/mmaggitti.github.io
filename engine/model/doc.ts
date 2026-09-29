@@ -11,10 +11,14 @@
 //   a file that expands too far, or into markup, fails to open instead of failing later. Markup
 //   parsed into the document later (fragment.ts) spends from the same budget. Reads after that
 //   each get their own budget: editing never drains it.
+// - What a browser refuses here, parsing refuses too, at its place: a reference that isn't
+//   well-formed (entities.ts), a prefix nobody declared, a namespace declaration XML forbids
+//   (xmlns:p="", or the xml and xmlns prefixes and namespaces bound otherwise), and one attribute
+//   written twice under two prefixes of one namespace.
 
-import type { LexError, Quote } from '../xml/lex.ts';
+import type { AttrTok, LexError, Quote } from '../xml/lex.ts';
 import { parseCst, DEFAULT_LIMITS, type CstElement, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
-import { decodeAttr, decodeText, escape, readEntityTable, newBudget, normalizeEol, EntityBudgetError, EntityMarkupError, type Budget, type EntityTable } from '../xml/entities.ts';
+import { decodeAttr, decodeText, escape, readEntityTable, newBudget, normalizeEol, wellFormedRefs, EntityBudgetError, EntityMarkupError, EntityWellFormednessError, type Budget, type EntityTable } from '../xml/entities.ts';
 
 export type NodeId = number;
 
@@ -99,14 +103,17 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
   const entities = readEntityTable(doctype && doctype.tok.kind === 'doctype' ? doctype.tok.subset : null);
   const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget, version: 0 };
 
-  // Expand every reference once, now, against the document's budget (see the header).
+  // Check every reference, then expand it once, now, against the document's budget (see the header).
+  // `at` is where the raw text starts in the source.
   const check = (raw: string, at: number, attr: boolean): void => {
     if (!raw.includes('&')) return;
+    const bad = wellFormedRefs(raw, entities, attr);
+    if (bad) throw new ParseFail(at + bad.at, bad.message, bad.kind);
     try {
       if (attr) decodeAttr(raw, entities, doc.budget);
       else decodeText(raw, entities, doc.budget);
     } catch (e) {
-      if (e instanceof EntityBudgetError || e instanceof EntityMarkupError) throw new ParseFail(at, e.message, e.kind);
+      if (e instanceof EntityBudgetError || e instanceof EntityMarkupError || e instanceof EntityWellFormednessError) throw new ParseFail(at, e.message, e.kind);
       throw e;
     }
   };
@@ -120,19 +127,36 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
 
   const element = (el: CstElement, parent: NodeId | null, scope: Map<string, string | null>): NodeId => {
     const id = newId();
+    const tag = el.start.name;
     // namespace declarations on this element apply to its own name and attributes
     let map = scope;
     for (const a of el.start.attrs) {
+      check(a.raw, valueAt(a), true);
       if (a.name === 'xmlns' || a.name.startsWith('xmlns:')) {
+        const declared = a.name === 'xmlns' ? '' : a.name.slice(6);
+        const uri = decodeAttr(a.raw, entities);
+        const bad = declarationError(declared, uri);
+        if (bad) throw new ParseFail(a.at, bad);
         if (map === scope) map = new Map(scope);
-        check(a.raw, el.start.start, true);
-        map.set(a.name === 'xmlns' ? '' : a.name.slice(6), decodeAttr(a.raw, entities) || null);
-      } else check(a.raw, el.start.start, true);
+        map.set(declared, uri || null);
+      }
     }
-    const [prefix, local] = splitName(el.start.name);
+    const bound = (p: string): boolean => p === 'xml' || !!map.get(p);
+    const [prefix, local] = splitName(tag);
+    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${prefix} of <${tag}> is not declared`);
+    const seen = new Map<string, string>(); // namespace and local name → the name as first written
     const attrs: Attr[] = el.start.attrs.map((a) => {
       const [ap, al] = splitName(a.name);
-      const ns = a.name === 'xmlns' || ap === 'xmlns' ? NS.xmlns : ap === 'xml' ? NS.xml : ap ? map.get(ap) ?? null : null;
+      const declaration = a.name === 'xmlns' || ap === 'xmlns';
+      if (!declaration && ap !== null && !bound(ap)) throw new ParseFail(a.at, `the prefix ${ap} of attribute ${a.name} is not declared`);
+      const ns = declaration ? NS.xmlns : ap === 'xml' ? NS.xml : ap ? map.get(ap) ?? null : null;
+      if (!declaration) {
+        const key = `${ns ?? ''} ${al}`;
+        const first = seen.get(key);
+        // The same name twice is the lexer's to refuse; here, two names for one attribute.
+        if (first !== undefined && first !== a.name) throw new ParseFail(a.at, `attributes ${first} and ${a.name} of <${tag}> are one attribute: their prefixes name the same namespace`);
+        seen.set(key, a.name);
+      }
       return { qname: a.name, prefix: ap, local: al, ns, lead: a.lead, eq: a.eq, quote: a.quote, raw: a.raw };
     });
     const whole = { start: el.start.start, end: (el.end ?? el.start).end };
@@ -163,20 +187,38 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
     doc.root = element(cst.root, null, new Map([['', null]]));
     doc.epilog = cst.epilog.map((l) => leaf(l.tok, null));
   } catch (e) {
-    if (e instanceof ParseFail) return { ok: false, error: { at: e.at, message: e.message, kind: e.kind } };
+    if (e instanceof ParseFail) return { ok: false, error: e.kind ? { at: e.at, message: e.message, kind: e.kind } : { at: e.at, message: e.message } };
     throw e;
   }
   return { ok: true, doc };
 }
 
+/** A failure while building: not well-formed, or (kind 'limit') over Draw's limits. */
 class ParseFail extends Error {
   at: number;
-  kind: 'limit';
-  constructor(at: number, message: string, kind: 'limit') {
+  kind?: 'limit';
+  constructor(at: number, message: string, kind?: 'limit') {
     super(message);
     this.at = at;
     this.kind = kind;
   }
+}
+
+/** Where an attribute's value starts in the source: after its name, '=' (with any spaces) and the quote. */
+const valueAt = (a: AttrTok): number => a.at + a.name.length + a.eq.length + 1;
+
+/**
+ * Why Namespaces in XML forbids this declaration (`prefix` '' is xmlns="…"), or null: a prefix
+ * can't be undeclared (xmlns:p=""), xml is bound only to its own namespace and that namespace to no
+ * other prefix, and neither the xmlns prefix nor its namespace can be declared at all.
+ */
+function declarationError(prefix: string, uri: string): string | null {
+  if (prefix === 'xmlns') return 'the prefix xmlns is reserved: it can’t be declared';
+  if (prefix === 'xml') return uri === NS.xml ? null : `the prefix xml is bound to ${NS.xml} only`;
+  if (uri === NS.xml) return `only the prefix xml may name ${NS.xml}`;
+  if (uri === NS.xmlns) return `no prefix may name ${NS.xmlns}`;
+  if (prefix && !uri) return `xmlns:${prefix} is empty: a prefix can’t be undeclared`;
+  return null;
 }
 
 export function splitName(name: string): [string | null, string] {

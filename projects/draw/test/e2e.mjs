@@ -30,8 +30,11 @@
 // the canvas on wide screens, and a render error caught and drawn again. The P0-M5 review adds: a
 // tag's close never alone on a line in Tidy, Play from the top and Pause holding the frame, no
 // theme flash on load, the legend verb first with chip samples, Enter closing the Number sheet,
-// and Export and the legend over a file shown as source. Every check that passes in every call,
-// having asserted something, is a line of the support ledger's e2e evidence (EVIDENCE, below).
+// and Export and the legend over a file shown as source. P1-M0 holds the engine's parser to the
+// browser's own: every corpus file parses in both to the same canonical tree (xml-canon.mjs, after
+// its KNOWN differences), and probe by probe, what the browser refuses the engine refuses, and what
+// the engine refuses as not well-formed the browser refuses too. Every check that passes in every
+// call, having asserted something, is a line of the support ledger's e2e evidence (EVIDENCE, below).
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
@@ -46,6 +49,7 @@ import { encodeImport } from '../src/platform/files.ts';
 import { parseDoc } from '../../../engine/model/doc.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { decodePng } from './probe-helpers/png.mjs';
+import { browserCanon, canonDiffs, engineCanon, PROBES } from './probe-helpers/xml-canon.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const TAP_MIN = 44;
@@ -164,6 +168,9 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theCodeDocksBesideTheCanvasOnWideScreens);
   await check(aRenderErrorIsCaughtAndRedrawn);
   for (const height of [956, 796]) await check(phoneRulesOnTheCodeTools, height);
+  // P1-M0: the engine's parser against the browser's.
+  await check(corpusTreesMatchTheBrowsersParser);
+  await check(theEngineRefusesWhatTheBrowserRefuses);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), { complete: true, engine, calls }];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -377,10 +384,10 @@ async function policyEdges(browser, origin) {
 const svgDoc = (body, attrs = '') => `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"${attrs}>${body}</svg>`;
 const ANIMATE_WIDTH = '<animate href="#t" attributeName="width" values="1;2" dur="1s"/>';
 const MORE_EDGES = [
-  // An attribute written twice (browsers refuse such a file; the engine doesn't yet): never drawn,
-  // whether the canvas refuses the element or, later, the parser refuses the file.
-  { label: 'fill written twice', text: svgDoc('<rect width="10" height="10" fill="red" fill="blue"/>'), absent: 'rect', skipped: 1, orUnparsed: true },
-  { label: 'attributeName written twice', text: svgDoc('<rect width="10" height="10"><animate attributeName="opacity" attributeName="width" values="1;2" dur="1s"/></rect>'), absent: 'animate', skipped: 1, orUnparsed: true },
+  // An attribute written twice: browsers refuse such a file, and so does Draw's parser, so it never
+  // reaches the canvas (which would refuse the element too: hasDuplicateAttrs).
+  { label: 'fill written twice', text: svgDoc('<rect width="10" height="10" fill="red" fill="blue"/>'), unparsed: 'attribute fill is written twice in <rect>' },
+  { label: 'attributeName written twice', text: svgDoc('<rect width="10" height="10"><animate attributeName="opacity" attributeName="width" values="1;2" dur="1s"/></rect>'), unparsed: 'attribute attributeName is written twice in <animate>' },
   // SMIL is judged against what the browser animates: through the href the canvas keeps, every
   // element the fragment can name (drawn or not), never xml:id, and never "some element".
   { label: 'a dropped href leaves xlink:href to decide', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" xlink:href="#t" attributeName="width" values="1;2" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animate', skipped: 1 },
@@ -421,7 +428,8 @@ async function moreEdges(browser, origin) {
         if (stats.ok || !stats.error?.includes(c.refused)) out.push(`the canvas reports ${JSON.stringify(stats)}, not a refused root (${c.refused})`);
         return out.map((m) => `${c.label}: ${m}`);
       }
-      if (!stats.ok) return c.orUnparsed && stats.rendered === 0 && stats.skippedElements === 0 ? [] : [`${c.label}: did not render (${stats.error})`];
+      if (c.unparsed) return !stats.ok && stats.error === c.unparsed && stats.rendered === 0 ? [] : [`${c.label}: the canvas reports ${JSON.stringify(stats)}, not the parser's refusal (${c.unparsed})`];
+      if (!stats.ok) return [`${c.label}: did not render (${stats.error})`];
       if (c.skipped !== undefined && stats.skippedElements !== c.skipped) out.push(`skipped ${stats.skippedElements} element(s), not ${c.skipped}`);
       if (c.absent && q(c.absent)) out.push(`<${c.absent}> is on the canvas`);
       if (c.present && !q(c.present)) out.push(`<${c.present}> is not on the canvas`);
@@ -2470,9 +2478,11 @@ async function readOnlyCodeIsPlainText(browser, origin) {
 // A file that isn't well-formed opens as read-only source, through the one importer: nothing is
 // drawn and nothing loads, the code holds its text exactly with the failing line and character
 // marked (in view), no token edits it, and it becomes no draft. The canvas and the ContextBar say
-// where it fails; Files is the way on, and the drawing before it reopens from there.
+// where it fails; Files is the way on, and the drawing before it reopens from there. A file only
+// strict well-formedness refuses (a bare &) opens as source the same way.
 async function aMalformedFileOpensAsReadOnlySource(browser, origin) {
   const BAD = `<svg xmlns="${SVG_NS}" viewBox="0 0 10 10">\n  <rect width="1" height="1">\n</svg>\n`;
+  const STRICT = `<svg xmlns="${SVG_NS}" viewBox="0 0 10 10">\n  <text>Fish & chips</text>\n</svg>\n`;
   await withPage(browser, origin, 956, async (page, errors, context) => {
     const quiet = watch(page, context, origin);
     await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
@@ -2520,6 +2530,22 @@ async function aMalformedFileOpensAsReadOnlySource(browser, origin) {
     await closeModal(page);
     const rules = await page.evaluate(rulesNow, TAP_MIN);
     must(rules.small.length === 0 && rules.sw <= rules.cw && rules.sh <= rules.ch, `the source view breaks the phone rules: ${JSON.stringify({ small: rules.small, sw: rules.sw, sh: rules.sh })}`);
+    // A file only strict well-formedness refuses (a bare &, which browsers refuse too) is source in
+    // the same way, marked where the browser's parser stops.
+    await openFilesMenu(page);
+    await page.locator('.draw-modal input[type="file"]').setInputFiles({ name: 'fish.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(STRICT) });
+    await until('the strict file shows as source', async () => (await page.locator('.draw-code').textContent()) === STRICT);
+    await twoFrames(page);
+    const strict = await page.evaluate(() => ({
+      drawn: document.querySelector('.draw-host').shadowRoot.childElementCount,
+      mark: document.querySelector('.draw-code .cv-error')?.textContent ?? null,
+      line: document.querySelector('.draw-code .cv-error-line')?.textContent ?? null,
+      over: document.querySelector('.draw-unparsed')?.textContent ?? '',
+      name: document.querySelector('.draw-name').textContent,
+    }));
+    must(strict.drawn === 0 && strict.name === 'fish', `the strict file was drawn (${strict.drawn}), or is named ${strict.name}`);
+    must(strict.line === '  <text>Fish & chips</text>' && strict.mark === '&', `the mark is on ${JSON.stringify(strict.mark)} of the line ${JSON.stringify(strict.line)}, not the bare & on line 2`);
+    must(strict.over.includes('Line 2, column 14: a bare & (write &amp; for the character itself).'), `the canvas says ${JSON.stringify(strict.over)}`);
     await page.locator('.draw-source-files').tap();
     await page.locator('.draw-draft').first().waitFor();
     const names = await page.locator('.draw-draft-name').allTextContents();
@@ -2878,6 +2904,57 @@ async function phoneRulesOnTheCodeTools(browser, origin, height) {
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   }, { reducedMotion: 'reduce' });
   must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+}
+
+// P1-M0: Draw's parser against the browser's. Every corpus file parses in both to the same
+// canonical tree: elements, attributes and their values as read, text, comments and processing
+// instructions (probe-helpers/xml-canon.mjs; KNOWN there lists where the two differ on purpose, and
+// why). At least 250 files must be compared, and up to 10 differences are shown, by file and path.
+async function corpusTreesMatchTheBrowsersParser(browser, origin) {
+  const corpus = corpusFiles();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const theirs = await page.evaluate(browserCanon, { texts: corpus.map((f) => f.text) });
+    const differ = [];
+    const shown = [];
+    let compared = 0;
+    for (const [i, file] of corpus.entries()) {
+      const diffs = canonDiffs(engineCanon(file.text), theirs[i]);
+      compared++;
+      if (!diffs.length) continue;
+      differ.push(file.name);
+      for (const d of diffs) if (shown.length < 10) shown.push(`${file.name} ${d}`);
+    }
+    must(compared >= 250, `compared ${compared} of ${corpus.length} corpus files`);
+    must(differ.length === 0, `${differ.length} of ${compared} corpus files parse to different trees in the engine and the browser (${differ.join(', ')}); the first ${shown.length} difference(s):\n${shown.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// P1-M0: what the browser's parser refuses (a parsererror in what DOMParser returns, in the
+// namespace that '<' shows), Draw's parser refuses, and what Draw's parser refuses as not
+// well-formed, the browser refuses too (a refusal over Draw's limits may be well-formed). Each
+// probe also says what both give, the browser's verdict per engine, so a verdict that moves is named.
+async function theEngineRefusesWhatTheBrowserRefuses(browser, origin) {
+  const engine = browser.browserType().name();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const theirs = await page.evaluate(browserCanon, { texts: PROBES.map((p) => p.text) });
+    const problems = [];
+    let checked = 0;
+    for (const [i, probe] of PROBES.entries()) {
+      checked++;
+      const mine = engineCanon(probe.text);
+      const draw = mine.refused ? (mine.kind === 'limit' ? 'limit' : 'refuse') : 'accept';
+      const verdict = theirs[i].refused ? 'refuse' : 'accept';
+      const why = (r) => (r.refused ? ` (${r.message})` : '');
+      if (verdict === 'refuse' && draw === 'accept') problems.push(`${probe.label}: ${engine} refuses it, but Draw's parser accepts it`);
+      if (draw === 'refuse' && verdict === 'accept') problems.push(`${probe.label}: Draw's parser refuses it as not well-formed${why(mine)}, but ${engine} accepts it`);
+      if (draw !== probe.draw) problems.push(`${probe.label}: Draw's parser gives ${draw}, not ${probe.draw} as the probe table says${why(mine)}`);
+      if (verdict !== probe.browser[engine]) problems.push(`${probe.label}: ${engine} gives ${verdict}, not ${probe.browser[engine]} as the probe table says${why(theirs[i])}`);
+    }
+    must(checked > 0 && checked === PROBES.length, `checked ${checked} of ${PROBES.length} probes`);
+    must(problems.length === 0, `Draw's parser and ${engine}'s disagree:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
 }
 
 // Runs in the page: open each file through drawTest, then read what reached the shadow root.

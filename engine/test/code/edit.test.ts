@@ -246,11 +246,16 @@ test('blocks: start tag, leaves and end tag in order, tokens at block offsets', 
 });
 
 test('blocks follow serialize through structural edits and duplicate attributes', () => {
-  const r = parseDoc(`<svg ${SVG}><g/><rect x="1" x="2"/><circle r="3"></circle></svg>`);
+  const r = parseDoc(`<svg ${SVG}><g/><rect x="1" y="2"/><circle r="3"></circle></svg>`);
   assert.ok(r.ok);
   const doc = r.doc;
   const [g, rect, circle] = (doc.nodes.get(doc.root) as ElementNode).children;
-  // a duplicate attribute: only the first is ever the target of an edit, so only it has tokens
+  // The parser refuses an attribute written twice, as a browser does, so this one is made by hand:
+  // <rect x="1" x="2"/>. Only the first is ever the target of an edit, so only it has tokens.
+  const tag = doc.nodes.get(rect) as ElementNode;
+  tag.attrs[1] = { ...tag.attrs[1], qname: 'x', local: 'x' };
+  tag.tagDirty = true;
+  assert.ok(serialize(doc).includes('<rect x="1" x="2"/>'));
   assert.deepEqual(
     blockFor(doc, rect).tokens.map((t) => t.start),
     [9],

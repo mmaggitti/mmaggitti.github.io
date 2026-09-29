@@ -66,6 +66,25 @@ test("a file that isn't well-formed never reaches the editor: it says what and w
   assert.equal(html.source, null, 'a root that is not <svg> is not shown as source: it is well-formed');
 });
 
+test('a file a browser refuses (a bare &, an undefined entity, a duplicate attribute) opens as read-only source at the error', async () => {
+  const ed = fakeEditor();
+  ed.open(SAMPLE);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const [text, message, line, column, at] of [
+    [`${svg}\n  <text>Fish & chips</text>\n</svg>\n`, 'a bare & (write &amp; for the character itself)', 2, 14, '&'],
+    [`${svg}\n  <text>a&nbsp;b</text>\n</svg>\n`, 'the entity &nbsp; is not declared', 2, 10, '&nbsp;'],
+    [`${svg}\n  <rect fill="red" fill="blue"/>\n</svg>\n`, 'attribute fill is written twice in <rect>', 2, 20, 'fill="blue"'],
+  ] as const) {
+    const r = await importSvg(ed, { via: 'file', name: 'x.svg', text });
+    assert.ok(!r.ok, message);
+    assert.equal(r.message, message);
+    assert.deepEqual(r.source, { text, at: text.indexOf(at) }, `${message}: its text, for the read-only source view, and where it fails`);
+    assert.deepEqual([r.line, r.column], [line, column], message);
+    assert.equal(r.excerpt!.text.slice(r.excerpt!.at), text.slice(text.indexOf(at)).split('\n')[0], `${message}: the excerpt points at the failure`);
+    assert.equal(ed.source(), SAMPLE, 'the drawing that was open stays');
+  }
+});
+
 test("a well-formed file over Draw's limits opens nowhere, not even as source: it says so and where, and the open drawing stays", async () => {
   const ed = fakeEditor();
   ed.open(SAMPLE);

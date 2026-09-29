@@ -74,8 +74,8 @@ export function parseCst(source: string, limits: Limits = DEFAULT_LIMITS): Parse
     }
     const leaf: CstLeaf = { type: 'leaf', tok };
     if (stack.length) stack[stack.length - 1].children.push(leaf);
-    else if (tok.kind === 'text' && /\S/.test(source.slice(tok.start, tok.end))) {
-      return { ok: false, error: { at: tok.start, message: 'text outside the root element' } };
+    else if (tok.kind === 'text' && stray(source, tok.start, tok.end) !== -1) {
+      return { ok: false, error: { at: stray(source, tok.start, tok.end), message: 'text outside the root element' } };
     } else if (tok.kind === 'cdata') {
       return { ok: false, error: { at: tok.start, message: 'CDATA outside the root element' } };
     } else if (root) epilog.push(leaf);
@@ -84,6 +84,15 @@ export function parseCst(source: string, limits: Limits = DEFAULT_LIMITS): Parse
   if (stack.length) return { ok: false, error: { at: source.length, message: `<${stack[stack.length - 1].start.name}> is never closed` } };
   if (!root) return { ok: false, error: { at: 0, message: 'no root element' } };
   return { ok: true, cst: { source, prolog, root, epilog } };
+}
+
+// Outside the root only XML's own whitespace may stand (a browser refuses a form feed or a no-break
+// space there), and a byte order mark only as the very first character.
+const STRAY = /[^ \t\r\n]/;
+function stray(source: string, start: number, end: number): number {
+  const from = start === 0 && source.charCodeAt(0) === 0xfeff ? 1 : start;
+  const k = source.slice(from, end).search(STRAY);
+  return k === -1 ? -1 : from + k;
 }
 
 /** Text of an untouched CST: the source itself (asserted equal by the round-trip tests). */
