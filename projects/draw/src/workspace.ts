@@ -21,7 +21,7 @@ import type { ImportReport } from '../../../engine/report/import-report.ts';
 import type { Editor } from './editor.ts';
 import { importSvg, why, type ImportFailure, type ImportInput, type Via } from './import.ts';
 import { Autosave, type Lock, type Timers } from './autosave.ts';
-import type { DraftStore } from './platform/drafts.ts';
+import { localJournal, type DraftStore, type Journal } from './platform/drafts.ts';
 import { decodeImport } from './platform/files.ts';
 import type { Outcome } from './platform/share.ts';
 import { exportFile, type ExportFile, type ExportKind } from './export/svg.ts';
@@ -54,6 +54,8 @@ export interface WorkspaceDeps {
   timers?: Timers;
   delay?: number;
   now?: () => number;
+  /** The unload journal (tests pass memoryJournal()). */
+  journal?: Journal;
 }
 
 export class Workspace {
@@ -69,6 +71,7 @@ export class Workspace {
   #editor: Editor;
   #store: DraftStore;
   #lock: Lock;
+  #journal: Journal;
   #sample: string;
   #now: () => number;
   #doc: Doc | null = null; // the document bound to the autosave
@@ -79,7 +82,8 @@ export class Workspace {
     this.#lock = deps.lock;
     this.#sample = deps.sample;
     this.#now = deps.now ?? Date.now;
-    this.autosave = new Autosave(deps.store, deps.lock, { timers: deps.timers, delay: deps.delay, now: deps.now });
+    this.#journal = deps.journal ?? localJournal;
+    this.autosave = new Autosave(deps.store, deps.lock, { timers: deps.timers, delay: deps.delay, now: deps.now, journal: this.#journal });
     // The last subscriber of the plan's data flow: after the canvas, the code, the overlay and the
     // stores. Only the bound document is saved (drawTest.render opens others, unbound).
     editor.onChange(() => {
@@ -99,6 +103,7 @@ export class Workspace {
    * draft reopens, unless something else opened meanwhile.
    */
   async boot(fragment: string, clearFragment: () => void): Promise<void> {
+    await this.#replayJournal();
     const before = this.#editor.doc;
     if (await this.openLink(fragment, clearFragment)) return;
     let latest: string | undefined;
@@ -118,6 +123,33 @@ export class Workspace {
     if (failure) {
       this.failure.set(failure);
       this.panel.set('report');
+    }
+  }
+
+  /**
+   * A change the page wrote to the unload journal as it went away, whose IndexedDB save may not have
+   * landed: written into its draft if it is newer (as a new version), or as a new draft for a drawing
+   * that wasn't one yet, under the draft's lock. Kept for the next load if that can't happen now.
+   */
+  async #replayJournal(): Promise<void> {
+    const j = this.#journal.read();
+    if (!j) return;
+    const release = j.id ? await this.#lock(j.id) : null;
+    if (j.id && !release) return; // another tab has that draft open: leave it for later
+    try {
+      let d;
+      try {
+        d = j.id ? await this.#store.load(j.id) : undefined;
+      } catch {
+        d = undefined; // an unreadable record under its id: the journal's text replaces it
+      }
+      if (!d) await this.#store.create(j.name, j.text, j.id || undefined);
+      else if (d.updated < j.at && d.text !== j.text) await this.#store.saveOver(d, j.text);
+      this.#journal.clear();
+    } catch {
+      // storage refused it (full, or gone): keep the journal for the next load
+    } finally {
+      release?.();
     }
   }
 

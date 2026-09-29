@@ -227,3 +227,80 @@ export async function lockDraft(id: string): Promise<(() => void) | null> {
     });
   });
 }
+
+// ── the unload journal ─────────────────────────────────────────────────────────────────────────
+//
+// Safari can drop an IndexedDB write that starts while the page unloads (CI's WebKit loses one
+// started in pagehide even with commit()). A localStorage write is synchronous, so it can't be
+// dropped: when the page is hidden or goes away, the pending change is also written here, and the
+// next load replays it into its draft if it is newer. One entry, cleared once its text is saved.
+// Other projects share this origin, so an entry is checked like a draft record and its text is
+// opened through the importer like any file.
+
+/** A pending change: its draft id ('' for a drawing that is not a draft yet), name, text and time. */
+export interface JournalEntry {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+}
+
+export interface Journal {
+  write(e: JournalEntry): boolean;
+  read(): JournalEntry | null;
+  clear(): void;
+}
+
+const JOURNAL_KEY = 'draw:journal';
+
+export function isJournalEntry(v: unknown): v is JournalEntry {
+  if (typeof v !== 'object' || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return typeof e.id === 'string' && typeof e.name === 'string' && typeof e.text === 'string' && finite(e.at);
+}
+
+/** The journal in localStorage. Every failure (no storage, full, a bad entry) is a quiet no-op. */
+export const localJournal: Journal = {
+  write(e) {
+    try {
+      localStorage.setItem(JOURNAL_KEY, JSON.stringify(e));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  read() {
+    try {
+      const raw = localStorage.getItem(JOURNAL_KEY);
+      const v: unknown = raw === null ? null : JSON.parse(raw);
+      return isJournalEntry(v) ? v : null;
+    } catch {
+      return null;
+    }
+  },
+  clear() {
+    try {
+      localStorage.removeItem(JOURNAL_KEY);
+    } catch {
+      // nothing to clear
+    }
+  },
+};
+
+/** The journal in memory (tests). */
+export function memoryJournal(): Journal & { raw: unknown } {
+  const j = {
+    raw: null as unknown,
+    write(e: JournalEntry) {
+      j.raw = structuredClone(e);
+      return true;
+    },
+    read() {
+      return isJournalEntry(j.raw) ? structuredClone(j.raw) : null;
+    },
+    clear() {
+      j.raw = null;
+    },
+  };
+  return j;
+}

@@ -985,6 +985,16 @@ const BREAKS = [
     file: 'engine/export/clean.ts', from: '      removedElements++;', to: '      removedElements += 2;',
     run: engineTests('export/clean.test.ts'), expect: /✖ Inkscape and Illustrator files lose exactly their editor markup/,
   },
+  {
+    id: 'B188', what: 'a flush no longer writes the unload journal (Safari drops an IndexedDB write started in pagehide)',
+    file: 'projects/draw/src/autosave.ts', from: "if (this.#timer !== null && b && !b.readOnly) this.#journal.write(", to: "if (false && this.#timer !== null && b && !b.readOnly) this.#journal.write(",
+    run: drawTests('autosave.test.ts'), expect: /✖ a flush writes the pending change to the unload journal at once/,
+  },
+  {
+    id: 'B189', what: 'the next load no longer replays the unload journal',
+    file: 'projects/draw/src/workspace.ts', from: '    await this.#replayJournal();\n', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ an unload journal whose save never landed is replayed/,
+  },
 ];
 
 const args = process.argv.slice(2);

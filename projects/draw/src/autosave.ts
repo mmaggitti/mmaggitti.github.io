@@ -13,11 +13,14 @@
 //   failed keeps its text, its lock and its record here: every later open and flush saves it
 //   again, and reopening its draft reopens those changes, not the older stored text. Nothing is
 //   lost silently.
+// - The unload journal (platform/drafts.ts): a flush also writes the pending change to it
+//   synchronously, because Safari can drop an IndexedDB write started while the page unloads. A save
+//   that lands clears it; the next load replays one that didn't (Workspace.boot).
 //
 // Framework-free, with injected timers and locks, so the unit tests drive it over memory storage.
 
 import { createStore, type Store } from './panels/store.ts';
-import { QuotaError, type Draft, type DraftStore } from './platform/drafts.ts';
+import { localJournal, QuotaError, type Draft, type DraftStore, type Journal } from './platform/drafts.ts';
 import { why } from './import.ts';
 
 export const SAVE_DELAY_MS = 1000;
@@ -75,13 +78,15 @@ export class Autosave {
   #chain: Promise<void> = Promise.resolve();
   /** Documents whose last save failed, oldest first: saved again at every open and flush until one succeeds. */
   #unsaved = new Set<Binding>();
+  #journal: Journal;
 
-  constructor(store: DraftStore, lock: Lock, options: { timers?: Timers; delay?: number; now?: () => number } = {}) {
+  constructor(store: DraftStore, lock: Lock, options: { timers?: Timers; delay?: number; now?: () => number; journal?: Journal } = {}) {
     this.#store = store;
     this.#lock = lock;
     this.#timers = options.timers ?? realTimers;
     this.#delay = options.delay ?? SAVE_DELAY_MS;
     this.#now = options.now ?? Date.now;
+    this.#journal = options.journal ?? localJournal;
   }
 
   /** The open document's draft id (null until it is a draft). */
@@ -162,6 +167,9 @@ export class Autosave {
    */
   flush(): Promise<void> {
     const retry = new Set(this.#unsaved);
+    const b = this.#b;
+    // Written before anything else, synchronously: the one write an unloading page can't lose.
+    if (this.#timer !== null && b && !b.readOnly) this.#journal.write({ id: b.id ?? '', name: b.name, text: b.text(), at: this.#now() });
     if (this.#timer !== null) {
       this.#timers.clear(this.#timer);
       this.#timer = null;
@@ -207,6 +215,8 @@ export class Autosave {
       return;
     }
     b.error = null;
+    const j = this.#journal.read();
+    if (j && (j.id === b.id || j.id === '') && j.text === text) this.#journal.clear(); // stored now: nothing to replay
     const was = this.#unsaved.delete(b);
     this.#show(b, this.#timer !== null && b === this.#b ? { kind: 'pending' } : { kind: 'saved', at: this.#now() });
     if (was) {

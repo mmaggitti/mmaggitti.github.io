@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
-import { DraftStore, memoryKV, type KV } from '../../src/platform/drafts.ts';
+import { DraftStore, memoryJournal, memoryKV, type Journal, type KV } from '../../src/platform/drafts.ts';
 import { encodeImport } from '../../src/platform/files.ts';
 import { SAVE_DELAY_MS } from '../../src/autosave.ts';
 import { READ_ONLY } from '../../src/editor.ts';
@@ -18,16 +18,16 @@ import { corpus, corpusBytes, edit, fakeEditor, FakeTimers, lockTable, SAMPLE } 
 const DAY = 86_400_000;
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
-function rig(kv: KV = memoryKV(), locks = lockTable()) {
+function rig(kv: KV = memoryKV(), locks = lockTable(), journal: Journal = memoryJournal()) {
   const timers = new FakeTimers();
   const editor = fakeEditor();
   const store = new DraftStore(kv, () => timers.now);
-  const ws = new Workspace(editor, { store, lock: locks.lock, sample: SAMPLE, timers, now: () => timers.now });
+  const ws = new Workspace(editor, { store, lock: locks.lock, sample: SAMPLE, timers, now: () => timers.now, journal });
   const settle = async () => {
     timers.tick(SAVE_DELAY_MS);
     await ws.autosave.flush();
   };
-  return { timers, editor, store, ws, locks, kv, settle };
+  return { timers, editor, store, ws, locks, kv, journal, settle };
 }
 
 test('on load the sample opens at once, then the most recent draft reopens quietly', async () => {
@@ -364,4 +364,67 @@ test('a failed save stays loud while another draft is open, and reopening its dr
   await settle();
   assert.equal((await store.load(a))!.text, edited);
   assert.equal(ws.autosave.state.get().kind, 'saved');
+});
+
+test('an unload journal whose save never landed is replayed into its draft on the next load, then cleared', async () => {
+  const kv = memoryKV();
+  await new DraftStore(kv, () => 100).create('Logo', '<svg xmlns="http://www.w3.org/2000/svg" id="old"/>', 'logo');
+  const journal = memoryJournal();
+  journal.write({ id: 'logo', name: 'Logo', text: '<svg xmlns="http://www.w3.org/2000/svg" id="new"/>', at: 200 });
+  const { ws, editor, store } = rig(kv, lockTable(), journal);
+  void ws.openSample();
+  await ws.boot('', () => {});
+  assert.equal(editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" id="new"/>', 'the reopened draft has the change');
+  const d = (await store.load('logo'))!;
+  assert.equal(d.versions.length, 2, 'as a new version: the one before is kept');
+  assert.equal(journal.read(), null);
+});
+
+test('a journal older than its draft, or for a drawing that was not a draft, or held by another tab', async () => {
+  // Older than the stored draft: ignored, and cleared.
+  const kv = memoryKV();
+  await new DraftStore(kv, () => 300).create('Logo', '<svg xmlns="http://www.w3.org/2000/svg" id="stored"/>', 'logo');
+  const older = memoryJournal();
+  older.write({ id: 'logo', name: 'Logo', text: '<svg xmlns="http://www.w3.org/2000/svg" id="stale"/>', at: 200 });
+  const a = rig(kv, lockTable(), older);
+  void a.ws.openSample();
+  await a.ws.boot('', () => {});
+  assert.equal(a.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" id="stored"/>');
+  assert.equal((await a.store.load('logo'))!.versions.length, 1);
+  assert.equal(older.read(), null);
+
+  // Not a draft yet (the sample edited, then the page went away): it becomes one.
+  const fresh = memoryJournal();
+  fresh.write({ id: '', name: 'Sample', text: '<svg xmlns="http://www.w3.org/2000/svg" id="edited"/>', at: 5 });
+  const b = rig(memoryKV(), lockTable(), fresh);
+  void b.ws.openSample();
+  await b.ws.boot('', () => {});
+  assert.equal(b.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" id="edited"/>');
+  assert.equal((await b.store.list()).length, 1);
+  assert.equal(fresh.read(), null);
+
+  // Another tab holds that draft: the journal waits for a later load.
+  const kv2 = memoryKV();
+  await new DraftStore(kv2, () => 1).create('Logo', '<svg xmlns="http://www.w3.org/2000/svg"/>', 'logo');
+  const locks = lockTable();
+  locks.held.add('logo');
+  const waiting = memoryJournal();
+  waiting.write({ id: 'logo', name: 'Logo', text: '<svg xmlns="http://www.w3.org/2000/svg" id="later"/>', at: 9 });
+  const c = rig(kv2, locks, waiting);
+  void c.ws.openSample();
+  await c.ws.boot('', () => {});
+  assert.notEqual(waiting.read(), null, 'kept for the next load');
+  assert.equal((await c.store.load('logo'))!.versions.length, 1);
+});
+
+test("a journal entry that isn't one (another script on the origin) is ignored", async () => {
+  for (const raw of [{ id: 7, name: 'x', text: '<svg/>', at: 1 }, { id: 'a', name: 'x', text: 42, at: 1 }, { id: 'a', name: 'x', text: '<svg/>', at: Infinity }, 'junk', null]) {
+    const journal = memoryJournal();
+    journal.raw = raw;
+    const { ws, editor, store } = rig(memoryKV(), lockTable(), journal);
+    void ws.openSample();
+    await ws.boot('', () => {});
+    assert.equal(editor.source(), SAMPLE, `nothing replayed for ${JSON.stringify(raw)}`);
+    assert.deepEqual(await store.list(), []);
+  }
 });
