@@ -10,6 +10,9 @@
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
+//
+// A break edits with String.prototype.replace, so `from` may be a RegExp (an anchor that survives
+// the row or line around it changing) and `to` a replacer function.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -141,14 +144,16 @@ const BREAKS = [
     run: LEDGER_CHECK, expect: /svg-profile-tables\.mjs is out of date/,
   },
   {
+    // The whole row's line, whatever it holds by then (its status, tests and notes change as it is built).
     id: 'B21', what: 'an SVG element loses its ledger row',
-    file: 'engine/ledger/ledger.json', from: '{"id":"element:rect","kind":"element","name":"rect","ns":"svg","group":"shape","class":"edit","render":true,"serve":true,"phase":1,"status":"planned","lesson":["grid","shapes"]},\n', to: '',
+    file: 'engine/ledger/ledger.json', from: /^\{"id":"element:rect",[^\n]*\n/m, to: '',
     run: LEDGER_CHECK, expect: /no row for the SVG element <rect>/,
   },
   {
+    // One phase past wherever the ledger stands, whose rows are never all done while it is built.
     id: 'B22', what: 'the phase is raised before its rows are done',
-    file: 'engine/ledger/ledger.json', from: '"currentPhase": 1', to: '"currentPhase": 2',
-    run: LEDGER_CHECK, expect: /behind the current phase 2/,
+    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 1}`,
+    run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is (?:planned|partial)/,
   },
   {
     id: 'B23', what: 'the served profile stops refusing the ledger\'s active attributes',
@@ -1525,6 +1530,17 @@ const BREAKS = [
     id: 'B291', what: 'the parser probe loop is skipped', slow: true,
     file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, probe] of PROBES.entries()) {', to: '    for (const [i, probe] of PROBES.slice(0, 0).entries()) {',
     run: SITE_E2E, expect: /theEngineRefusesWhatTheBrowserRefuses: checked 0 of \d+ probes/,
+  },
+  // P1-M0: the ledger's citations and the canvas's pattern rows.
+  {
+    id: 'B290', what: "a ledger row's note names an e2e check the row doesn't cite",
+    file: 'engine/ledger/ledger.json', from: ',"projects/draw/test/e2e.mjs#theLedgerLoadsOnlyForSupport"]', to: ']',
+    run: LEDGER_CHECK, expect: /feature:support-tab: its note names the e2e check theLedgerLoadsOnlyForSupport but the row does not cite it/,
+  },
+  {
+    id: 'B292', what: 'data-* stops rendering (the canvas ignores the pattern rows again)',
+    file: 'engine/policy/render-policy.ts', from: '  if (!scope) return attrNs === null && (elNs === NS.svg ? RENDER_SVG_ATTRIBUTE_PATTERNS : elNs === NS.xhtml ? RENDER_XHTML_ATTRIBUTE_PATTERNS : []).some((re) => re.test(attrLocal));\n', to: '  if (!scope) return false;\n',
+    run: POLICY_TESTS, expect: /✖ data-\* \(a pattern row\): rendered on every element, kept byte for byte, served/,
   },
   {
     id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',

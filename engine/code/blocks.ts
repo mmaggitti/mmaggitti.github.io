@@ -79,7 +79,8 @@ function startBlock(doc: Doc, n: ElementNode): Block {
   let pos = 1 + n.qname.length;
   for (const a of n.attrs) {
     pos += a.lead.length + a.qname.length + a.eq.length + 1;
-    // A duplicate attribute (accepted, as browsers refuse) is never the one an edit reaches.
+    // An attribute written twice is never the one an edit reaches (the parser refuses such a file, as
+    // browsers do, but a document built in code may still hold one).
     const key = `${a.ns ?? ''}\n${a.local}`;
     if (!seen.has(key) && text.startsWith(a.raw, pos)) {
       const target: TokenTarget = { attr: { ns: a.ns, local: a.local } };

@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1331 rows: 1081 planned, 3 partial, 246 done, 1 superseded.
+Current phase: **P1**. 1331 rows: 1076 planned, 3 partial, 251 done, 1 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -14,9 +14,9 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 | attribute | 386 | 266 | 0 | 120 | 0 |
 | property | 48 | 34 | 0 | 14 | 0 |
 | value | 85 | 74 | 0 | 11 | 0 |
-| syntax | 23 | 1 | 0 | 22 | 0 |
+| syntax | 23 | 0 | 0 | 23 | 0 |
 | namespace | 20 | 11 | 2 | 7 | 0 |
-| capability | 480 | 454 | 0 | 25 | 1 |
+| capability | 480 | 450 | 0 | 29 | 1 |
 | feature | 101 | 80 | 0 | 21 | 0 |
 
 ## By phase
@@ -24,11 +24,11 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 323 | 323 | 0 | 0 | 0 |
+| P1 | 318 | 313 | 0 | 5 | 0 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
-| P3 | 161 | 161 | 0 | 0 | 0 |
-| P4 | 273 | 273 | 0 | 0 | 0 |
-| P5 | 124 | 124 | 0 | 0 | 0 |
+| P3 | 162 | 162 | 0 | 0 | 0 |
+| P4 | 275 | 275 | 0 | 0 | 0 |
+| P5 | 126 | 126 | 0 | 0 | 0 |
 | P6 | 107 | 106 | 0 | 0 | 1 |
 | P7 | 8 | 8 | 0 | 0 | 0 |
 | P8 | 14 | 14 | 0 | 0 | 0 |
@@ -49,15 +49,15 @@ Each lesson's capabilities and the phases that deliver them.
 
 | Set | Lesson | Title | Phases | Capabilities | Done |
 |---|---|---|---|---|---|
-| 1 | Vector | Pixels vs vector | P1 | 11 | 0 |
+| 1 | Vector | Pixels vs vector | P1 | 11 | 2 |
 | 1 | Grid | The grid | P1 | 10 | 0 |
 | 1 | Shapes | Shapes | P1 | 13 | 0 |
-| 1 | Style | Fill and stroke | P1 | 12 | 0 |
+| 1 | Style | Fill and stroke | P1 | 12 | 1 |
 | 1 | Paths | Paths | P1 | 18 | 0 |
 | 1 | Transform | Groups and transforms | P1 | 11 | 0 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P5 | 50 | 0 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 0 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 0 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |
@@ -74,7 +74,7 @@ Each lesson's capabilities and the phases that deliver them.
 | 4 | Texture | Texture and distortion | P4 | 13 | 0 |
 | 4 | Light | Lighting | P4 | 15 | 0 |
 | 5 | Size | Sizing and views | P2 | 10 | 0 |
-| 5 | Access | Accessibility | P1 | 11 | 0 |
+| 5 | Access | Accessibility | P1 | 11 | 1 |
 | 5 | Images | Images and HTML | P4 | 13 | 0 |
 | 5 | Media | Video, audio and more | P6 | 11 | 0 |
 | 5 | Switch | Switch and unknown tags | P6 | 10 | 0 |
@@ -93,4 +93,8 @@ Each lesson's capabilities and the phases that deliver them.
 
 Rows whose phase changed after they were first recorded in `ids.lock`.
 
-None.
+- `value:url/data-image`: P1 → P4
+- `capability:create/template-scene`: P1 → P5
+- `capability:create/arrows`: P1 → P3
+- `capability:create/effect`: P1 → P4
+- `capability:create/paste-roundtrip`: P1 → P5

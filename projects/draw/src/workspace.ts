@@ -1,9 +1,10 @@
 // The workspace: what is open, and the files around it. It runs every open through the one
 // importer (src/import.ts), binds the open document to its draft (src/autosave.ts), keeps the
 // import report of what opened (and why the last open failed, if it did), and writes exports.
-// React reads its stores (panels/FileSheets.tsx, panels/TopBar.tsx); the page wires in IndexedDB,
-// Web Locks, the paste and drop events and the URL fragment (panels/App.tsx). Framework-free, so
-// the unit tests drive it with a real Editor over fake views and drafts in memory.
+// React reads its stores (panels/FileSheets.tsx, and the top bar in panels/App.tsx); the page
+// wires in IndexedDB, Web Locks, the paste and drop events and the URL fragment (panels/App.tsx).
+// Framework-free, so the unit tests drive it with a real Editor over fake views and drafts in
+// memory.
 //
 // - On load: the sample opens at once; then an #import link opens (and the fragment is cleared,
 //   so a reload doesn't import it again), or else the most recent draft reopens.

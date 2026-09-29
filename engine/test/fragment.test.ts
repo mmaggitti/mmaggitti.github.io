@@ -141,6 +141,31 @@ test('Edit source spends what the document has left of its limits, so the file a
   assert.ok(parseDoc(serialize(big.doc)).ok, 'and the saved file reopens');
 });
 
+// Edit source parses with the same engine, so it refuses what a browser refuses (xml.test.ts has
+// every rule), each at its place in the edited text, and what the document declares still counts.
+test('Edit source refuses what a browser refuses, at its place in the text, with the document in scope', () => {
+  const r = parseDoc(`<!DOCTYPE svg [<!ENTITY brand "Draw">]>${SRC}`);
+  assert.ok(r.ok);
+  const doc = r.doc;
+  const before = serialize(doc);
+  for (const [text, at, message] of [
+    ['<text>Fish & chips</text>', 11, /a bare &/],
+    ['<text>a&nbsp;b</text>', 7, /the entity &nbsp; is not declared/],
+    ['<rect x="1" x="2"/>', 12, /attribute x is written twice in <rect>/],
+    ['<p:g/>', 1, /the prefix p of <p:g> is not declared/],
+    ['<g><!-- a -- b --></g>', 10, /'--' inside a comment/],
+    ['<g xmlns:p=""/>', 3, /xmlns:p is empty/],
+  ] as const) {
+    const f = parseFragment(doc, doc.root, text);
+    assert.ok(!f.ok, text);
+    assert.equal(f.error.at, at, `${text}: ${f.error.message}`);
+    assert.match(f.error.message, message, text);
+  }
+  // The root's xmlns:q and the DOCTYPE's &brand; are in scope, as they are where the text lands.
+  assert.ok(parseFragment(doc, doc.root, '<use q:href="#a"><title>by &brand;</title></use>').ok);
+  assert.equal(serialize(doc), before, 'a refused edit changes nothing');
+});
+
 test('Edit source cannot bring in a DOCTYPE or an XML declaration (a browser refuses either there)', () => {
   const r = parseDoc(SRC);
   assert.ok(r.ok);

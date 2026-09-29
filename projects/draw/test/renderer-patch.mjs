@@ -80,7 +80,7 @@ function cases() {
     return { r, root, doc: parsed.doc };
   };
   const byId = (doc, id) => [...doc.nodes.values()].find((n) => n.kind === 'element' && n.attrs.some((a) => a.local === 'id' && a.raw === id));
-  // Model moves, as M3's commands will make them.
+  // Model moves, made by hand as engine/commands' opRemove and opInsert make them.
   const detach = (doc, node) => {
     const p = el(doc, node.parent);
     p.children = p.children.filter((c) => c !== node.id);

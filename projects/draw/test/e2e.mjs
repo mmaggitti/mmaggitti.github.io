@@ -33,15 +33,17 @@
 // and Export and the legend over a file shown as source. P1-M0 holds the engine's parser to the
 // browser's own: every corpus file parses in both to the same canonical tree (xml-canon.mjs, after
 // its KNOWN differences), and probe by probe, what the browser refuses the engine refuses, and what
-// the engine refuses as not well-formed the browser refuses too. Every check that passes in every
-// call, having asserted something, is a line of the support ledger's e2e evidence (EVIDENCE, below).
+// the engine refuses as not well-formed the browser refuses too. The canvas draws the ledger's
+// pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do.
+// Every check that passes in every call, having asserted something, is a line of the support
+// ledger's e2e evidence (EVIDENCE, below).
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROFILE_VERSION } from '../../../scripts/lib/svg-profile.mjs';
-import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
+import { RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTE_PATTERNS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
 import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
 import { detentHeights } from '../src/detents.ts';
@@ -58,12 +60,14 @@ const CORPUS = join(HERE, '../../../engine/test/fixtures/corpus');
 const SAMPLE = readFileSync(join(HERE, '../src/canvas/sample.svg'), 'utf8');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XHTML_NS = 'http://www.w3.org/1999/xhtml';
-// The generated tables, as the page checks them (Maps travel as entry lists).
+// The generated tables, as the page checks them (Maps travel as entry lists, patterns as sources).
 const TABLES = {
   svgElements: [...RENDER_SVG_ELEMENTS],
   xhtmlElements: [...RENDER_XHTML_ELEMENTS],
   svgAttributes: [...RENDER_SVG_ATTRIBUTES],
   xhtmlAttributes: [...RENDER_XHTML_ATTRIBUTES],
+  svgPatterns: RENDER_SVG_ATTRIBUTE_PATTERNS.map((re) => re.source),
+  xhtmlPatterns: RENDER_XHTML_ATTRIBUTE_PATTERNS.map((re) => re.source),
 };
 
 // The ledger's e2e evidence: one line per check that passed, in this run and this engine. A ledger
@@ -2965,13 +2969,16 @@ async function renderEach({ files, tables }) {
   const XLINK = 'http://www.w3.org/1999/xlink', XML = 'http://www.w3.org/XML/1998/namespace';
   const elements = { [SVG]: new Set(tables.svgElements), [XHTML]: new Set(tables.xhtmlElements) };
   const attributes = { [SVG]: new Map(tables.svgAttributes), [XHTML]: new Map(tables.xhtmlAttributes) };
+  const patterns = { [SVG]: tables.svgPatterns.map((s) => new RegExp(s)), [XHTML]: tables.xhtmlPatterns.map((s) => new RegExp(s)) };
   const ACTIVE = new Set(['script', 'iframe', 'object', 'embed', 'audio', 'video', 'canvas']);
   const ANIMATIONS = new Set(['animate', 'set', 'animateTransform', 'animateColor']);
   const LOCAL_URL = /^(#|data:image\/(png|jpeg|gif|webp)[;,])/i;
   const keyOf = (a) => (a.namespaceURI === null ? a.localName : a.namespaceURI === XLINK ? `xlink:${a.localName}` : a.namespaceURI === XML ? `xml:${a.localName}` : null);
+  // A key with no row may match a pattern row (data-*, aria-*), which has no namespace (so no prefix).
   const renders = (el, key) => {
     const scope = attributes[el.namespaceURI]?.get(key);
-    return !!scope && !scope.except?.includes(el.localName) && (scope.on === '*' || scope.on.includes(el.localName));
+    if (!scope) return !key.includes(':') && !!patterns[el.namespaceURI]?.some((re) => re.test(key));
+    return !scope.except?.includes(el.localName) && (scope.on === '*' || scope.on.includes(el.localName));
   };
   const inForeignObject = (el) => {
     for (let p = el.parentElement; p; p = p.parentElement) if (p.namespaceURI === SVG && p.localName === 'foreignObject') return true;

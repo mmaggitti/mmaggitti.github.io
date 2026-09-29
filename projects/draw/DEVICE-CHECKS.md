@@ -10,8 +10,8 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 | # | Check | How | Pass |
 |---|---|---|---|
-| 1 | Pinch keeps the point | Pinch on the canvas around a small detail; the detail stays under your fingers | ☐ |
-| 2 | The page never zooms | Pinch on the top bar, the code sheet, the Scrub strip and the tool rail; nothing but the drawing ever zooms | ☐ |
+| 1 | Pinch keeps the point | Pinch on the canvas around a small detail; the detail stays under your fingers | ☑ Mark, iPhone, 2026-09-29 |
+| 2 | The page never zooms | Pinch on the top bar, the code sheet, the Scrub strip and the tool rail; nothing but the drawing ever zooms | ☑ Mark, iPhone, 2026-09-29 |
 | 3 | Two-finger tap undoes | Change a number, then tap the canvas with two fingers | ☐ |
 | 4 | Scrub feels right | Drag a number in the code sideways; it changes smoothly, a vertical drag still scrolls, and one Undo puts it back | ☐ |
 | 5 | Taps land | Tap small tokens in the code; the one under your finger is taken, never its neighbour | ☐ |
