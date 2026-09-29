@@ -1522,6 +1522,12 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
   },
   {
+    // Edit source parses its text with the document's DOCTYPE and namespaces in scope.
+    id: 'B295', what: "Edit source parses without the document's DOCTYPE (the entities it declares are out of scope)",
+    file: 'engine/model/fragment.ts', from: "const head = `${doctype && doctype.kind === 'doctype' ? doctype.raw : ''}<${WRAPPER}", to: 'const head = `<${WRAPPER}',
+    run: engineTests('fragment.test.ts'), expect: /✖ Edit source refuses what a browser refuses, at its place in the text, with the document in scope/,
+  },
+  {
     id: 'B288', what: 'the parser tree check compares no corpus file', slow: true,
     file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, file] of corpus.entries()) {', to: '    for (const [i, file] of corpus.slice(0, 0).entries()) {',
     run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: compared 0 of \d+ corpus files/,
@@ -1552,6 +1558,27 @@ const BREAKS = [
     id: 'B294', what: "DOMPurify's second opinion refuses data-* (a pattern row the policy draws never reaches the canvas)", slow: true,
     file: 'projects/draw/src/canvas/safe-sink.ts', from: '  SANITIZE_DOM: false,\n', to: '  SANITIZE_DOM: false,\n  ALLOW_DATA_ATTR: false,\n',
     run: SITE_E2E, expect: /without data-state or aria-label: the pattern rows \(data-\*, aria-\*\) must pass both judges/,
+  },
+  // P1-M0: SVG Lab goals closed early, each reached with Draw's own tools on the lab's file.
+  {
+    id: 'B296', what: 'zoom stops at 4× the fitted drawing',
+    file: 'projects/draw/src/canvas/viewport.ts', from: 'Math.min(Math.max(MAX_SCALE, fitScale * MAX_SCALE_FACTOR), ', to: 'Math.min(fitScale * 4, ',
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Zoom to 8×" \(vector\)/,
+  },
+  {
+    id: 'B297', what: "a tap on a colour token opens no Color sheet",
+    file: 'projects/draw/src/editor.ts', from: "      case 'color':\n        return this.#openSheet({ kind: 'color', ref, token: t });\n", to: "      case 'color':\n        return;\n",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Change a color" \(vector\)/,
+  },
+  {
+    id: 'B298', what: "stroke-linejoin's keywords lose bevel",
+    file: 'engine/code/tokens.ts', from: "'stroke-linejoin': ['miter', 'round', 'bevel', 'miter-clip', 'arcs'],", to: "'stroke-linejoin': ['miter', 'round', 'miter-clip', 'arcs'],",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Bevel corners" \(style\)/,
+  },
+  {
+    id: 'B299', what: 'a tap on a text run opens no Text sheet',
+    file: 'projects/draw/src/editor.ts', from: "      case 'text':\n        return this.#openSheet({ kind: 'text', ref, token: t });\n", to: "      case 'text':\n        return;\n",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Write your own title" \(access\)/,
   },
 ];
 
