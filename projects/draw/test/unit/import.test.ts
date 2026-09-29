@@ -43,13 +43,14 @@ test('text opens the same way, before the first await (the sample opens synchron
   return pending.then((r) => assert.ok(r.ok && r.name === 'Sample'));
 });
 
-test('a file that fails to parse opens nowhere: it says what and where, and the open drawing stays', async () => {
+test("a file that isn't well-formed never reaches the editor: it says what and where, carries its text for the source view, and the open drawing stays", async () => {
   const ed = fakeEditor();
   ed.open(SAMPLE);
   const bad = '<svg xmlns="http://www.w3.org/2000/svg">\n  <g>\n    <rect/>\n  </svg>\n';
   const r = await importSvg(ed, { via: 'paste', name: '', text: bad });
   assert.ok(!r.ok);
   assert.equal(r.message, '</svg> closes <g>');
+  assert.deepEqual(r.source, { text: bad, at: bad.indexOf('</svg>') }, 'its text, for the read-only source view');
   assert.deepEqual([r.line, r.column], [4, 3]);
   assert.equal(r.excerpt!.text, '  </svg>');
   assert.equal(r.excerpt!.text.slice(r.excerpt!.at), '</svg>', 'the excerpt points at the failure');
@@ -62,6 +63,28 @@ test('a file that fails to parse opens nowhere: it says what and where, and the 
   const junk = await importSvg(ed, { via: 'file', name: 'broken.svgz', bytes: new Uint8Array([0x1f, 0x8b, 1, 2, 3, 4]) });
   assert.ok(!junk.ok && /could not be read/.test(junk.message) && junk.line === null, 'a gzip that does not inflate says so');
   assert.equal(ed.source(), SAMPLE);
+  assert.equal(html.source, null, 'a root that is not <svg> is not shown as source: it is well-formed');
+});
+
+test("a well-formed file over Draw's limits opens nowhere, not even as source: it says so and where, and the open drawing stays", async () => {
+  const ed = fakeEditor();
+  ed.open(SAMPLE);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  const deep = `${svg}\n${'<g>'.repeat(300)}${'</g>'.repeat(300)}</svg>`;
+  const laughs = `<!DOCTYPE svg [<!ENTITY a "${'x'.repeat(1000)}"><!ENTITY b "${'&a;'.repeat(2000)}">]>\n${svg}<text>&b;</text></svg>`;
+  const markup = `<!DOCTYPE svg [<!ENTITY r "<rect/>">]>\n${svg}&r;</svg>`;
+  for (const [text, message, line] of [
+    [deep, 'nesting deeper than 256 (over Draw’s limits)', 2],
+    [laughs, 'entity expansion over 1000000 characters (over Draw’s limits)', 2],
+    [markup, 'entity &r; expands to markup (over Draw’s limits)', 2],
+  ] as const) {
+    const r = await importSvg(ed, { via: 'file', name: 'big.svg', text });
+    assert.ok(!r.ok, message);
+    assert.equal(r.message, message);
+    assert.equal(r.line, line, message);
+    assert.equal(r.source, null, `${message}: never shown as source (it isn't "not well-formed")`);
+    assert.equal(ed.source(), SAMPLE, 'the drawing that was open stays');
+  }
 });
 
 test('a document the canvas refuses to draw is open, and says why', async () => {

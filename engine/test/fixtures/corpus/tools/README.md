@@ -14,3 +14,10 @@ well-formed XML.
 `edge-legacy-fonts-tiny-rdfa.svg` is generated from the support ledger: it holds every element and
 attribute the ledger keeps byte for byte but never renders (SVG fonts, SVG Tiny 1.2, RDFa), so the
 round trip exercises them.
+
+What the ledger keeps and renders (its `preserve` rows) is here in the shapes real files use it:
+SVG 1.1 text by reference and deprecated presentation attributes (`edge-svg11-*`), SVG 2 flowed
+text from Inkscape 1.x, current CSS (`edge-css-*`: layers, container and feature queries, Color 4
+and 5, CSS transforms, a scroll-driven animation), ids two pasted icons share, and path data with
+an error part way (`edge-path-comma-joined-commands.svg`, the one file whose paths do not all
+parse). `engine/test/corpus/kept.ts` finds each row in them.

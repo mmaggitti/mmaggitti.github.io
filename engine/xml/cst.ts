@@ -36,7 +36,7 @@ export const DEFAULT_LIMITS: Limits = { maxBytes: 20e6, maxNodes: 200_000, maxDe
 export type ParseResult = { ok: true; cst: Cst } | { ok: false; error: LexError };
 
 export function parseCst(source: string, limits: Limits = DEFAULT_LIMITS): ParseResult {
-  if (source.length > limits.maxBytes) return { ok: false, error: { at: 0, message: `file is larger than ${limits.maxBytes / 1e6} MB` } };
+  if (source.length > limits.maxBytes) return { ok: false, error: { at: 0, message: `file is larger than ${limits.maxBytes / 1e6} MB`, kind: 'limit' } };
   const lexed = lex(source);
   if (!lexed.ok) return lexed;
   const prolog: CstLeaf[] = [];
@@ -45,14 +45,14 @@ export function parseCst(source: string, limits: Limits = DEFAULT_LIMITS): Parse
   const stack: CstElement[] = [];
   let count = 0;
   for (const tok of lexed.tokens) {
-    if (++count > limits.maxNodes) return { ok: false, error: { at: tok.start, message: `more than ${limits.maxNodes} nodes` } };
+    if (++count > limits.maxNodes) return { ok: false, error: { at: tok.start, message: `more than ${limits.maxNodes} nodes`, kind: 'limit' } };
     if (tok.kind === 'start') {
       const el: CstElement = { type: 'element', start: tok, end: null, children: [] };
       if (stack.length) stack[stack.length - 1].children.push(el);
       else if (root) return { ok: false, error: { at: tok.start, message: 'a second root element' } };
       else root = el;
       if (!tok.selfClosing) {
-        if (stack.length + 1 > limits.maxDepth) return { ok: false, error: { at: tok.start, message: `nesting deeper than ${limits.maxDepth}` } };
+        if (stack.length + 1 > limits.maxDepth) return { ok: false, error: { at: tok.start, message: `nesting deeper than ${limits.maxDepth}`, kind: 'limit' } };
         stack.push(el);
       }
       continue;

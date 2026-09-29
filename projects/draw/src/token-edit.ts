@@ -68,6 +68,21 @@ export function steppedFrom(t: NumberToken, text: string, steps: number): string
   return scrubNumber({ ...t, value, decimals }, steps * stepOf(t));
 }
 
+/**
+ * The Number sheet's slider: the token's own range where it has one (opacity 0 to 1), else SVG
+ * Lab's -100 to 200 scaled to the drawing: from minus the artboard's larger side to twice it (a
+ * percentage keeps -100 to 200). It always reaches the value, and moves one step at a time.
+ */
+export function sliderRange(t: NumberToken, extent: number): { min: number; max: number; step: number } {
+  const e = t.unit === '%' || !(extent > 0) ? 100 : extent;
+  return { min: Math.min(t.min ?? -e, t.value), max: Math.max(t.max ?? 2 * e, t.value), step: stepOf(t) };
+}
+
+/** A slider position as the token's text: at its precision (or its step's), within its range. */
+export function sliderText(t: NumberToken, value: number): string {
+  return scrubNumber({ ...t, value }, 0);
+}
+
 /** The ± key: the same number with the other sign (iOS's decimal keypad has no minus). */
 export function negated(text: string): string {
   const t = text.trim();

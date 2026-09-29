@@ -1327,3 +1327,7 @@ feature:lab-routes	8
 feature:security-review	8
 feature:offline	8
 feature:home-screen-install	8
+capability:shared/handle-snap	1
+feature:working-copy-metadata	1
+feature:served-profile-before-save	2
+syntax:strict-well-formedness	1

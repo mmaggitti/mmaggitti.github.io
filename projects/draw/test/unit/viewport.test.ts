@@ -90,6 +90,16 @@ test('one finger: a tap, or a drag once it moves past the slop', () => {
     ['tool-down', 'tool-drag-start', 'tool-drag', 'tool-drag-end']);
 });
 
+test('a move under 5 pt is a tap; 5 pt or more, in any direction, is a drag (SVG Lab\'s number, pinned)', () => {
+  const tap = ['tool-down', 'tool-tap'];
+  for (const [dx, dy] of [[4.9, 0], [0, -4.9], [3, 3.9]]) {
+    assert.deepEqual(run([ev('down', 1, 10, 10, 0), ev('move', 1, 10 + dx, 10 + dy, 5), ev('up', 1, 10 + dx, 10 + dy, 9)]), tap, `${dx},${dy}`);
+  }
+  for (const [dx, dy] of [[5.1, 0], [0, 5], [-3, 4.1]]) {
+    assert.deepEqual(run([ev('down', 1, 10, 10, 0), ev('move', 1, 10 + dx, 10 + dy, 5), ev('up', 1, 10 + dx, 10 + dy, 9)]), ['tool-down', 'tool-drag-start', 'tool-drag-end'], `${dx},${dy}`);
+  }
+});
+
 test('a second finger cancels the tool gesture and pinches; leftover fingers do nothing', () => {
   assert.deepEqual(run([
     ev('down', 1, 10, 10, 0), ev('move', 1, 30, 10, 5), ev('down', 2, 100, 100, 50), ev('move', 2, 120, 120, 60),

@@ -29,7 +29,7 @@ function load(rel: string): Doc {
 const joined = (doc: Doc): string => codeBlocks(doc).map((b) => b.text).join('');
 
 test('the corpus is there', () => {
-  assert.equal(FILES.length, 253);
+  assert.equal(FILES.length, 260);
 });
 
 test('blocks tile serialize(doc), and every token is the slice it claims', () => {

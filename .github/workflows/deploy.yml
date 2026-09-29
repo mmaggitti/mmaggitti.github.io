@@ -89,6 +89,11 @@ jobs:
         env:
           ENGINE: webkit
 
+      # Draw's support ledger cites e2e checks for the rows only a browser proves. Each cited check
+      # must have passed in the run above (test/e2e.mjs records them), so WebKit is the evidence.
+      - name: Ledger — every cited e2e check passed (WebKit)
+        run: node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/draw-e2e-evidence.jsonl
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

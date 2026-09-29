@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 40" width="240" height="40">
+  <!-- A reading-progress bar for a page that inlines this file: a scroll-driven animation. -->
+  <style>
+    @keyframes fill-bar { from { transform: scale3d(0, 1, 1) } to { transform: scale3d(1, 1, 1) } }
+    .progress {
+      transform-box: fill-box;
+      transform-origin: left center;
+      will-change: transform;
+      animation: fill-bar linear both;
+      animation-timeline: scroll(root block);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .progress { animation: none; will-change: auto }
+    }
+  </style>
+  <rect width="240" height="40" fill="#f1faee"/>
+  <rect class="progress" x="8" y="16" width="224" height="8" rx="4" fill="#2a9d8f"/>
+</svg>

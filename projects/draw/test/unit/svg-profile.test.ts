@@ -32,6 +32,7 @@ const INERT: [string, string][] = [
   ['filter chain', svg('<filter id="f"><feGaussianBlur stdDeviation="2"/><feOffset dx="1"/></filter><rect filter="url(#f)"/>')],
   ['style attribute ok', svg('<rect style="fill:#e76f51;stroke:url(#g)"/>')],
   ['data font in css', svg('<style>@font-face{font-family:X;src:url(data:font/woff2;base64,AAAA)}</style>')],
+  ['css comments', svg('<style>/* brand */ rect { fill: url(#g) /* the gradient */ } /* end */</style><rect style="fill: /* teal */ #2a9d8f"/>')],
 ];
 
 const ACTIVE: [string, string, string][] = [
@@ -94,6 +95,96 @@ for (const [name, text, rule] of ACTIVE) {
     assert.ok(rules.includes(rule), `${name}: expected rule ${rule}, got [${rules.join(', ')}]`);
   });
 }
+
+// The ledger's active rows, where the served profile must refuse them. Ordinary values only: a
+// script URL that does nothing, a style sheet by name, an image on another site.
+const SCRIPT_URLS: [string, string][] = [
+  ['javascript:', 'javascript:void(0)'],
+  ['vbscript:', 'vbscript:void(0)'],
+  ['data:text/html', 'data:text/html,hello'],
+];
+
+/** Where a served file can hold a URL, and the rule that refuses a bad one there. */
+const URL_PLACES: [string, (u: string) => string, string][] = [
+  ['a link', (u) => svg(`<a href="${u}"><rect width="1" height="1"/></a>`), 'url'],
+  ['an XLink link', (u) => svg(`<a xlink:href="${u}"><rect width="1" height="1"/></a>`, XL), 'url'],
+  ['an image', (u) => svg(`<image href="${u}" width="1" height="1"/>`), 'url'],
+  ['an XLink image', (u) => svg(`<image xlink:href="${u}" width="1" height="1"/>`, XL), 'url'],
+  ['a filter image', (u) => svg(`<filter id="f"><feImage href="${u}"/></filter>`), 'url'],
+  ['a use', (u) => svg(`<use href="${u}"/>`), 'use-href-not-fragment'],
+  ['an HTML image', (u) => svg(`<foreignObject width="1" height="1"><img ${XH} src="${u}"/></foreignObject>`), 'url'],
+  ['a <style>', (u) => svg(`<style>rect { fill: url(${u}) }</style>`), 'css'],
+  ['a style attribute', (u) => svg(`<rect style="fill: url(${u})"/>`), 'css'],
+  ['a fill', (u) => svg(`<rect fill="url(${u})"/>`), 'css'],
+  ['a mask', (u) => svg(`<g mask="url(${u})"/>`), 'css'],
+  ['a cursor', (u) => svg(`<rect cursor="url(${u}), auto"/>`), 'css'],
+  ['an animated fill', (u) => svg(`<rect><animate attributeName="fill" values="red;url(${u})" dur="1s"/></rect>`), 'css'],
+  // A url() with no closing ")" or quote still loads: a browser reads it to the end.
+  ['a fill never closed', (u) => svg(`<rect fill="url(${u}"/>`), 'css'],
+  ['a quoted fill never closed', (u) => svg(`<rect fill="url('${u})"/>`), 'css'],
+  ['a mask never closed', (u) => svg(`<g mask="url(${u}"/>`), 'css'],
+  ['a style attribute with an unmatched quote', (u) => svg(`<rect style="mask:url('${u})"/>`), 'css'],
+  ['a <style> with an unmatched quote', (u) => svg(`<style>rect{mask:url('${u})}</style>`), 'css'],
+  ['an HTML srcset', (u) => svg(`<foreignObject width="1" height="1"><img ${XH} srcset="${u} 1x"/></foreignObject>`), 'url'],
+  ['an HTML table background', (u) => svg(`<foreignObject width="1" height="1"><table ${XH} background="${u}"/></foreignObject>`), 'url'],
+];
+const rulesOf = (text: string): string[] => checkSvg(text).map((f: { rule: string }) => f.rule);
+
+for (const [label, url] of SCRIPT_URLS) {
+  test(`never served: ${label} URLs, wherever a URL, url() or animated value can hold one`, () => {
+    for (const [place, make, rule] of URL_PLACES) {
+      for (const u of [url, url.toUpperCase(), ` ${url}`]) {
+        const rules = rulesOf(make(u));
+        assert.ok(rules.includes(rule), `${JSON.stringify(u)} in ${place}: expected ${rule}, got [${rules.join(', ')}]`);
+      }
+    }
+  });
+}
+
+test('never served: a resource on another site, wherever a URL or url() can load one', () => {
+  const resources = URL_PLACES.filter(([place]) => !place.includes('link'));
+  for (const url of ['https://example.com/logo.png', 'http://example.com/logo.png', '//example.com/logo.png']) {
+    for (const [place, make, rule] of resources) {
+      const rules = rulesOf(make(url));
+      assert.ok(rules.includes(rule), `${url} in ${place}: expected ${rule}, got [${rules.join(', ')}]`);
+    }
+    for (const css of [`@font-face { font-family: X; src: url(${url}) }`, `rect { cursor: url(${url}), auto }`, `rect { fill: image-set("${url}" 1x) }`]) {
+      assert.ok(rulesOf(svg(`<style>${css}</style>`)).includes('css'), css);
+    }
+  }
+  // A link is not a resource: it loads nothing until it is followed, so https is served on <a>.
+  assert.deepEqual(checkSvg(svg('<a href="https://example.com/"><rect width="1" height="1"/></a>')), []);
+  // Files on this site are not another site's.
+  assert.deepEqual(checkSvg(svg('<image href="logo.png" width="1" height="1"/><rect fill="url(#g)"/>')), []);
+});
+
+test('never served: @import, whatever its form', () => {
+  const imports = ['@import "theme.css";', '@import url(theme.css) screen;', '@import url("#local");', '@IMPORT "theme.css";', '@layer base; @import "theme.css" layer(base);', '/* theme */ @import "theme.css";', '@\\69mport "theme.css";', '@charset "/*"; @import "theme.css"; rect { stroke: teal } /* end */'];
+  for (const css of imports) {
+    for (const text of [svg(`<style>${css}</style>`), svg(`<style><![CDATA[${css}]]></style>`), svg(`<rect style='${css}'/>`)]) {
+      assert.ok(rulesOf(text).includes('css'), text);
+    }
+  }
+});
+
+test('@namespace: a file with the string form is served; one with the url() form is refused (css), though a namespace name is never fetched', () => {
+  assert.deepEqual(rulesOf(svg('<style>@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: teal }</style><rect/>')), []);
+  for (const css of ['@namespace url(http://www.w3.org/2000/svg);', '@namespace svg url("http://www.w3.org/2000/svg");']) {
+    assert.deepEqual(rulesOf(svg(`<style>${css}</style><rect/>`)), ['css'], css);
+  }
+});
+
+test('never served: xml:base, on any element and whatever it points at', () => {
+  for (const value of ['https://example.com/', 'assets/', '#', '']) {
+    const texts = [
+      `<svg ${NS} xml:base="${value}"/>`,
+      svg(`<g xml:base="${value}"><use href="#a"/></g>`),
+      svg(`<a xml:base="${value}" href="#a"><rect width="1" height="1"/></a>`),
+      svg(`<foreignObject width="1" height="1"><div ${XH} xml:base="${value}"/></foreignObject>`),
+    ];
+    for (const text of texts) assert.ok(rulesOf(text).includes('xml-base'), text);
+  }
+});
 
 test('findings carry a line number, never the matched text', () => {
   const f = checkSvg(`<svg ${NS}>\n<rect/>\n<script>secret-token-shape</script>\n</svg>`);

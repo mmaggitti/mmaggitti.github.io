@@ -12,7 +12,7 @@
 //   parsed into the document later (fragment.ts) spends from the same budget. Reads after that
 //   each get their own budget: editing never drains it.
 
-import type { Quote } from '../xml/lex.ts';
+import type { LexError, Quote } from '../xml/lex.ts';
 import { parseCst, DEFAULT_LIMITS, type CstElement, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
 import { decodeAttr, decodeText, escape, readEntityTable, newBudget, normalizeEol, EntityBudgetError, EntityMarkupError, type Budget, type EntityTable } from '../xml/entities.ts';
 
@@ -86,7 +86,8 @@ export interface Doc {
 let nextId = 1;
 const newId = (): NodeId => nextId++;
 
-export type BuildResult = { ok: true; doc: Doc } | { ok: false; error: { at: number; message: string } };
+/** A failure is not well-formed XML, or (kind 'limit') over Draw's limits: see LexError. */
+export type BuildResult = { ok: true; doc: Doc } | { ok: false; error: LexError };
 
 /** Parse a document; `budget` is the entity expansion it may spend (a fragment passes what its document has left). */
 export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget: Budget = newBudget()): BuildResult {
@@ -105,7 +106,7 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
       if (attr) decodeAttr(raw, entities, doc.budget);
       else decodeText(raw, entities, doc.budget);
     } catch (e) {
-      if (e instanceof EntityBudgetError || e instanceof EntityMarkupError) throw new ParseFail(at, e.message);
+      if (e instanceof EntityBudgetError || e instanceof EntityMarkupError) throw new ParseFail(at, e.message, e.kind);
       throw e;
     }
   };
@@ -162,7 +163,7 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
     doc.root = element(cst.root, null, new Map([['', null]]));
     doc.epilog = cst.epilog.map((l) => leaf(l.tok, null));
   } catch (e) {
-    if (e instanceof ParseFail) return { ok: false, error: { at: e.at, message: e.message } };
+    if (e instanceof ParseFail) return { ok: false, error: { at: e.at, message: e.message, kind: e.kind } };
     throw e;
   }
   return { ok: true, doc };
@@ -170,9 +171,11 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
 
 class ParseFail extends Error {
   at: number;
-  constructor(at: number, message: string) {
+  kind: 'limit';
+  constructor(at: number, message: string, kind: 'limit') {
     super(message);
     this.at = at;
+    this.kind = kind;
   }
 }
 

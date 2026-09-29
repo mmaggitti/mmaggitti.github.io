@@ -15,7 +15,7 @@
 // Serving over HTTP, not file://, because ES modules refuse to load from file:// — the same reason
 // as the crossword suite's _serve.cjs, which this server is adapted from.
 
-import { existsSync, mkdirSync, readdirSync, readFile } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFile, rmSync } from 'node:fs';
 import http from 'node:http';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -123,6 +123,7 @@ for (const pg of pages) {
 // E2E=draw,studio runs only those projects' e2e (the page checks above still run on every page): a
 // local shortcut for tools such as Draw's prove-breaks. CI never sets it.
 const only = process.env.E2E ? new Set(process.env.E2E.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+rmSync(join(ROOT, '.smoke', 'draw-e2e-evidence.jsonl'), { force: true }); // Draw's ledger evidence comes only from this run's e2e
 for (const name of readdirSync(join(ROOT, 'projects')).filter((n) => !/^[_.]/.test(n) && (!only || only.has(n))).sort()) {
   const file = join(ROOT, 'projects', name, 'test', 'e2e.mjs');
   if (!existsSync(file)) continue;

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" width="240" height="160">
+  <!-- Hand-written CSS of the current generation: cascade layers, feature and container queries,
+       Color 4 and 5 functions, system colours and CSS transform functions with units. -->
+  <style title="Default">
+    @namespace "http://www.w3.org/2000/svg";
+    @namespace svg "http://www.w3.org/2000/svg";
+    @layer base, theme;
+    @layer base {
+      .card { fill: #f1faee; stroke: GrayText; stroke-width: 1 }
+    }
+    @layer theme {
+      .accent { fill: color-mix(in srgb, #e76f51 60%, white) }
+      .wide-gamut { fill: color(display-p3 0.16 0.62 0.56) }
+    }
+    @supports (fill: light-dark(#000, #fff)) {
+      .label { fill: light-dark(#1d3557, #a8dadc) }
+    }
+    svg|svg { container-type: inline-size }
+    @container (min-width: 120px) {
+      .label { font-size: 14px }
+    }
+    .panel { contain: layout paint }
+    .tilt { transform-box: fill-box; transform-origin: center; transform: rotate(-8deg) translateX(4px) }
+    .wrap { shape-inside: circle(40%); shape-image-threshold: 0.5; shape-padding: 4px }
+  </style>
+  <rect class="card panel" x="8" y="8" width="224" height="144" rx="10"/>
+  <rect class="accent tilt" x="24" y="24" width="56" height="40"/>
+  <circle class="wide-gamut" cx="140" cy="44" r="20"/>
+  <rect x="176" y="24" width="40" height="40" fill="rgb(from #2a9d8f r g b / 50%)" stroke="CanvasText"/>
+  <rect x="24" y="88" width="56" height="40" fill="Canvas" stroke="#264653" style="transform-box: fill-box; transform-origin: 50% 50%; transform: skewX(-10deg) translate(2px, 0)"/>
+  <circle cx="200" cy="108" r="16" fill="light-dark(#e9c46a, #f4a261)" style="stroke: color(srgb 0.15 0.27 0.33); stroke-width: 2"/>
+  <text class="label wrap" x="96" y="112" font-family="sans-serif" font-size="12">Kept as written</text>
+</svg>

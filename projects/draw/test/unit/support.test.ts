@@ -26,9 +26,11 @@ test('the search finds rows by every word, in any field, and says how many it di
   assert.equal(all.matched, LEDGER.rows.length);
   assert.equal(all.rows.length, SHOWN, 'a long list is cut, and the count says so');
   assert.deepEqual(search(LEDGER.rows, 'feature:support-tab').rows.map((r) => r.id), ['feature:support-tab']);
-  const partial = search(LEDGER.rows, 'P0 PARTIAL', 10_000).rows;
-  const want = LEDGER.rows.filter((r) => r.phase === 0 && r.status === 'partial');
-  assert.ok(want.length > 0 && want.every((r) => partial.includes(r)), 'the phase and the status are words to find, whatever their case');
+  // A phase and a status some rows have (P0 has no partial rows left once it is closed).
+  const some = LEDGER.rows.find((r) => r.status === 'partial') ?? LEDGER.rows[0];
+  const found = search(LEDGER.rows, `P${some.phase} ${some.status.toUpperCase()}`, 10_000).rows;
+  const want = LEDGER.rows.filter((r) => r.phase === some.phase && r.status === some.status);
+  assert.ok(want.length > 0 && want.every((r) => found.includes(r)), 'the phase and the status are words to find, whatever their case');
   const hidden = search(LEDGER.rows, 'preserve-hidden element', 10_000).rows;
   assert.ok(hidden.length > 0 && hidden.every((r) => r.class === 'preserve-hidden' || /preserve-hidden/.test(r.note ?? '')));
   const reasoned = LEDGER.rows.find((r) => r.reason && !`${r.id} ${r.name} ${r.note ?? ''}`.toLowerCase().includes(r.reason.slice(0, 24).toLowerCase()))!;

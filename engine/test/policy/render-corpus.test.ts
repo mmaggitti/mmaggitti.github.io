@@ -12,6 +12,7 @@ import { ELEMENT_CLASS } from '../../policy/tables.ts';
 import {
   attrKey, attributeRenders, cssAllowed, cssUrlsLocal, elementRenders, hasDuplicateAttrs, renderValue, smilTargetAllowed, URL_ATTRIBUTES,
 } from '../../policy/render-policy.ts';
+import { KEPT, loadCorpus, sitesOf } from '../corpus/kept.ts';
 
 const CORPUS = fileURLToPath(new URL('../fixtures/corpus/', import.meta.url));
 const FILES = readdirSync(CORPUS, { recursive: true, encoding: 'utf8' })
@@ -117,4 +118,30 @@ test("the canvas's stricter rules cost real files nothing: no attribute twice, n
     });
   }
   assert.ok(css >= 50, `only ${css} CSS texts: the corpus lost its styles`);
+});
+
+// A kept row that renders (class preserve, render: true) is drawn as the file has it: wherever the
+// renderer reaches one, the element renders, and the attribute or CSS that holds it passes the
+// policy unchanged (a <style> is judged whole, as the sink judges it). Found by corpus/kept.ts.
+test('every kept (preserve) row of this phase that renders is drawn as written wherever the canvas reaches it', () => {
+  const corpus = loadCorpus();
+  const rows = KEPT.filter((r) => r.render);
+  assert.ok(rows.length >= 25, `only ${rows.length} rendered kept rows`);
+  for (const row of rows) {
+    let reached = 0;
+    for (const f of corpus) {
+      const sites = sitesOf(row, f);
+      if (!sites.length) continue;
+      const rendered = new Set<ElementNode>();
+      walk(f.doc, (el, ok) => ok && rendered.add(el));
+      for (const s of sites) {
+        if (!rendered.has(s.el)) continue;
+        reached++;
+        const where = `${row.id} in ${f.file} on <${s.el.qname}>`;
+        if (s.attr) assert.equal(renderValue(s.el, s.attr, s.value), s.value, `${where}: ${s.attr.qname} is not drawn as written`);
+        else if (s.el.local === 'style') assert.ok(cssAllowed(s.value) && cssUrlsLocal(s.value), `${where}: the <style> is refused`);
+      }
+    }
+    assert.ok(reached > 0, `${row.id}: the canvas reaches it nowhere in the corpus`);
+  }
 });

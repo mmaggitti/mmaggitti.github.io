@@ -5,6 +5,7 @@
 //   shadow root's own hit test and mapped back to its NodeId by the renderer.
 // - Two fingers pinch and pan the view; a quick two-finger tap is undo.
 // - The wheel pans; with ctrl (a trackpad pinch, or ctrl and the wheel) it zooms about the pointer.
+// - A press on the app's own controls over the drawing (.draw-chrome: Play, Files) is theirs.
 // - The page itself never zooms: app.css gives the canvas touch-action: none (and the rest of the
 //   app pan-x pan-y), and Safari's own pinch events (gesturestart and friends) are cancelled here,
 //   for the whole document.
@@ -64,6 +65,8 @@ export class Stage {
   #pointer(e: PointerEvent): void {
     const type = e.type === 'pointerdown' ? 'down' : e.type === 'pointermove' ? 'move' : e.type === 'pointerup' ? 'up' : 'cancel';
     if (type === 'down' && e.pointerType === 'mouse' && e.button !== 0) return;
+    // The app's own controls over the drawing (Play, Files) take their taps as buttons do.
+    if (type === 'down' && e.target instanceof Element && e.target.closest('.draw-chrome')) return;
     if (type === 'down') {
       try {
         this.#area.setPointerCapture(e.pointerId);

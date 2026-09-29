@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseDoc, descendants, NS, type Attr, type Doc, type ElementNode } from '../../model/doc.ts';
+import { parseDoc, descendants, serialize, NS, type Attr, type Doc, type ElementNode } from '../../model/doc.ts';
 import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS, type AttrScope } from '../../policy/tables.ts';
 import { cssAllowed as profileCssAllowed } from '../../../scripts/lib/svg-profile.mjs';
 import {
@@ -165,6 +165,93 @@ test('URLs: a fragment on every URL attribute, data: images only where images sh
   // Editors wrap long base64 (XML reads the line ends as spaces); still a data: image.
   assert.ok(urlAllowed('image', 'href', 'data:image/png;base64,iVBORw0K GgoAAAA\n  NSUhEUgAA'));
   assert.ok(urlAllowed('image', 'href', 'DATA:IMAGE/PNG;base64,AAAA'));
+});
+
+// The ledger's active rows: what the canvas must never render, wherever it can appear. Ordinary
+// values only: a script URL that does nothing, a style sheet by name, an image on another site.
+/** Every [element, attribute key] where a URL attribute renders at all. */
+function urlPlaces(): [string, string, string][] {
+  const out: [string, string, string][] = [];
+  for (const [elNs, , elements] of TABLES) {
+    for (const key of URL_ATTRIBUTES) {
+      const [ns, local] = keyParts(key);
+      for (const e of elements) if (attributeRenders(elNs, e, ns, local)) out.push([elNs, e, key]);
+    }
+  }
+  return out;
+}
+/** Every way a url() reaches the canvas: CSS text, a style attribute, a presentation attribute, an animated value. */
+function urlInCss(u: string): string[] {
+  const css = [`rect { fill: url(${u}) }`, `rect { fill: url("${u}") }`, `@font-face { font-family: X; src: url(${u}) }`, `rect { cursor: url(${u}), auto }`];
+  for (const c of css) assert.ok(!cssUrlsLocal(c), c);
+  return [
+    svg(`<rect style="fill: url(${u})"/>`),
+    svg(`<rect fill="url(${u})"/>`),
+    svg(`<g mask="url('${u}')"/>`),
+    svg(`<g filter="url(${u})"/>`),
+    svg(`<rect cursor="url(${u}), auto"/>`),
+  ];
+}
+
+for (const [label, url] of [['javascript:', 'javascript:void(0)'], ['vbscript:', 'vbscript:void(0)'], ['data:text/html', 'data:text/html,hello']]) {
+  test(`never rendered: ${label} URLs, on any URL attribute, in any url() or in an animated value`, () => {
+    const places = urlPlaces();
+    assert.ok(places.length > 10, 'too few URL attributes render');
+    for (const u of [url, url.toUpperCase(), ` ${url}`, `\t${url}`]) {
+      for (const [, e, key] of places) assert.ok(!urlAllowed(e, keyParts(key)[1], u), `${JSON.stringify(u)} on <${e} ${key}>`);
+      for (const src of urlInCss(u)) {
+        const local = /<(\w+)/.exec(src.slice(src.indexOf('>') + 1))![1];
+        assert.equal(valueOf(src, local), null, src);
+      }
+    }
+    // A link never renders its href at all; an animation of href is refused whatever it sets.
+    assert.ok(!attributeRenders(NS.svg, 'a', null, 'href') && !attributeRenders(NS.svg, 'a', NS.xlink, 'href'));
+    const doc = parse(svg(`<a><set attributeName="href" to="${url}"/></a><rect><animate attributeName="fill" values="red;url(${url})"/></rect>`));
+    assert.ok(!smilTargetAllowed(find(doc, 'set'), 'href', { ns: NS.svg, local: 'a' }));
+    const animate = find(doc, 'animate');
+    const values = animate.attrs.find((a) => a.local === 'values')!;
+    assert.equal(renderValue(animate, values, `red;url(${url})`), null, 'the animated value is dropped');
+  });
+}
+
+test('never rendered: a resource on another site, on any URL attribute or in any url()', () => {
+  const places = urlPlaces();
+  for (const u of ['https://example.com/logo.png', 'http://example.com/logo.png', '//example.com/logo.png', 'https://example.com/sprite.svg#icon']) {
+    for (const [, e, key] of places) assert.ok(!urlAllowed(e, keyParts(key)[1], u), `${u} on <${e} ${key}>`);
+    for (const src of urlInCss(u)) {
+      const local = /<(\w+)/.exec(src.slice(src.indexOf('>') + 1))![1];
+      assert.equal(valueOf(src, local), null, src);
+    }
+    assert.ok(!cssUrlsLocal(`rect { fill: image-set("${u}" 1x) }`), 'image-set');
+  }
+  // Nor a file beside this one: the canvas loads nothing but the document itself.
+  assert.ok(!urlAllowed('image', 'href', 'logo.png') && !cssUrlsLocal('rect { fill: url(paint.svg#g) }'));
+});
+
+test('never rendered: @import, whatever its form', () => {
+  const imports = ['@import "theme.css";', '@import url(theme.css) screen;', '@import url("#local");', '@IMPORT "theme.css";', '@layer base; @import "theme.css" layer(base);', '/* theme */ @import "theme.css";', '@\\69mport "theme.css";'];
+  for (const css of imports) {
+    // A <style> is judged whole, as the sink judges it: both rules must pass, and neither does.
+    assert.ok(!cssAllowed(css) && !cssUrlsLocal(css), css);
+    assert.equal(valueOf(svg(`<rect style='${css}'/>`), 'rect'), null, css);
+  }
+});
+
+// A namespace name is never fetched, but written as url() it is a url() that leaves the document,
+// and both CSS guards refuse those whole (fail closed). So the string form, the one the corpus
+// carries, renders; the url() form is kept byte for byte, and the canvas drops its <style>.
+test('@namespace: the string form renders; the url() form is kept byte for byte and its <style> is not drawn', () => {
+  for (const css of ['@namespace "http://www.w3.org/2000/svg";', '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: teal }']) {
+    assert.ok(cssAllowed(css) && cssUrlsLocal(css), css);
+  }
+  for (const css of ['@namespace url(http://www.w3.org/2000/svg);', '@namespace svg url("http://www.w3.org/2000/svg"); svg|rect { fill: teal }']) {
+    // The sink draws a <style> only when both hold (safe-sink.ts cssOk); neither does.
+    assert.ok(!cssAllowed(css) && !cssUrlsLocal(css), css);
+    const text = svg(`<style>${css}</style><rect width="10" height="10"/>`);
+    const r = parseDoc(text);
+    assert.ok(r.ok, css);
+    assert.equal(serialize(r.doc), text, `${css}: not kept byte for byte`);
+  }
 });
 
 // The allowlist against a real URL parser (Node's WHATWG one), for every character up to U+00A0

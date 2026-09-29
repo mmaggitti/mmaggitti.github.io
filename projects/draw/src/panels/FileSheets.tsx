@@ -1,11 +1,13 @@
 // The file sheets over the canvas: the Files menu (Open…, New, a paste field, the import report
-// again, and the drafts to reopen or delete), the Import report (after every import, or why an
-// open failed), Export (as-is, clean, Save to Files), and Open link (an #import link that arrived
-// while Draw was open opens only on a tap). They read the workspace's stores; every file, paste
-// and share goes through src/platform/ and every open through the importer.
+// again, the drafts to reopen or delete, and the theme), the Import report (after every import, or
+// why an open failed), Export (as-is, clean, Save to Files), Open link (an #import link that
+// arrived while Draw was open opens only on a tap), and Copy's fallback (the text to select, where
+// the clipboard is blocked). They read the workspace's stores; every file, paste and share goes
+// through src/platform/ and every open through the importer.
 
 import { useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import type { Workspace } from '../workspace.ts';
+import type { ImportFailure } from '../import.ts';
 import type { ExportKind } from '../export/svg.ts';
 import { failureText, reportView } from '../files-view.ts';
 import { pasted } from '../platform/files.ts';
@@ -13,7 +15,15 @@ import { shareOrDownload } from '../platform/share.ts';
 import { Modal } from './Sheets.tsx';
 import { useStore } from './store.ts';
 
-export function FileSheets({ workspace }: { workspace: Workspace }) {
+export type Theme = 'system' | 'light' | 'dark';
+
+interface Props {
+  workspace: Workspace;
+  theme: Theme;
+  setTheme: (t: Theme) => void;
+}
+
+export function FileSheets({ workspace, theme, setTheme }: Props) {
   const panel = useStore(workspace.panel);
   const close = () => workspace.close();
   switch (panel) {
@@ -21,8 +31,11 @@ export function FileSheets({ workspace }: { workspace: Workspace }) {
       return (
         <Modal key="files" title="Files" onClose={close} done mono={false}>
           <FilesMenu workspace={workspace} />
+          <ThemeChoice theme={theme} setTheme={setTheme} />
         </Modal>
       );
+    case 'copy':
+      return <CopySheet workspace={workspace} close={close} />;
     case 'report':
       return <ReportSheet workspace={workspace} close={close} />;
     case 'export':
@@ -138,20 +151,22 @@ function FilesMenu({ workspace }: { workspace: Workspace }) {
 function ReportSheet({ workspace, close }: { workspace: Workspace; close: () => void }) {
   const failure = useStore(workspace.failure);
   const current = useStore(workspace.current);
-  if (failure) {
+  const unparsed = useStore(workspace.unparsed);
+  const shown: ImportFailure | null = failure ?? unparsed;
+  if (shown) {
     return (
-      <Modal key="failure" title={`Can’t open ${failure.name}`} onClose={close} done mono={false}>
+      <Modal key="failure" title={`Can’t open ${shown.name}`} onClose={close} done mono={false}>
         <p className="draw-problem draw-failure" role="alert">
-          {failureText(failure)}
+          {failureText(shown)}
         </p>
-        {failure.excerpt && (
+        {shown.excerpt && (
           <pre className="draw-excerpt ds-mono" aria-label="Where it failed">
-            {failure.excerpt.text}
+            {shown.excerpt.text}
             {'\n'}
-            {' '.repeat(failure.excerpt.at)}^
+            {' '.repeat(shown.excerpt.at)}^
           </pre>
         )}
-        <p className="ds-muted">Nothing opened: the drawing you had open is unchanged.</p>
+        <p className="ds-muted">{shown === failure ? 'Nothing opened: the drawing you had open is unchanged.' : 'It is open as read-only source, with the error marked in the code. Nothing is drawn, and it is not a draft.'}</p>
       </Modal>
     );
   }
@@ -217,9 +232,10 @@ function ExportBody({ workspace }: { workspace: Workspace }) {
   const link = useRef<HTMLAnchorElement>(null);
   const [busy, setBusy] = useState(false);
   const current = useStore(workspace.current);
+  const unparsed = useStore(workspace.unparsed);
   const clean = workspace.exportFile('clean');
   const asIs = workspace.exportFile('as-is');
-  if (!clean || !asIs) return <p className="ds-muted">Nothing is open.</p>;
+  if (!clean || !asIs) return <p className="ds-muted">{unparsed ? 'A file that isn’t well-formed can’t be exported; Copy (over the code) has its text.' : 'Nothing is open.'}</p>;
   const n = clean.removed!.elements + clean.removed!.attributes;
   const removed = n ? `removes ${clean.removed!.elements} element${clean.removed!.elements === 1 ? '' : 's'} and ${clean.removed!.attributes} attribute${clean.removed!.attributes === 1 ? '' : 's'}` : 'there is none here, so it is the as-is file';
   const go = async (kind: ExportKind) => {
@@ -259,6 +275,55 @@ function ExportBody({ workspace }: { workspace: Workspace }) {
       )}
       {/* The download link shareOrDownload clicks when the share sheet can't take a file. */}
       <a ref={link} hidden />
+    </>
+  );
+}
+
+/**
+ * Copy where the clipboard is blocked: the text in a read-only field, with Select all (then the
+ * system's own Copy).
+ */
+function CopySheet({ workspace, close }: { workspace: Workspace; close: () => void }) {
+  const text = useStore(workspace.copying);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const selectAll = () => {
+    const a = area.current;
+    if (!a) return;
+    a.focus();
+    a.select();
+    a.setSelectionRange(0, a.value.length);
+  };
+  return (
+    <Modal key="copy" title="Copy the file" onClose={close} done mono={false}>
+      <p className="ds-small ds-muted draw-hint-text">The clipboard isn’t available here: select the text, then copy it.</p>
+      <textarea ref={area} className="draw-source draw-copy-text ds-mono" aria-label="The file to copy" readOnly rows={8} value={text ?? ''} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+      <div className="draw-actions">
+        <button type="button" className="ds-btn ds-btn--primary draw-select-all" onClick={selectAll}>
+          Select all
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+const THEMES: { theme: Theme; label: string }[] = [
+  { theme: 'system', label: 'System' },
+  { theme: 'light', label: 'Light' },
+  { theme: 'dark', label: 'Dark' },
+];
+
+/** Light or dark: the system's, or a choice kept on this device. The drawing stays on white paper either way. */
+function ThemeChoice({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
+  return (
+    <>
+      <h3 className="draw-subhead">Theme</h3>
+      <div className="ds-seg draw-theme" role="group" aria-label="Theme">
+        {THEMES.map((t) => (
+          <button key={t.theme} type="button" aria-pressed={theme === t.theme} onClick={() => setTheme(t.theme)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
     </>
   );
 }

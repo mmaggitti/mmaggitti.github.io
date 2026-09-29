@@ -1,15 +1,17 @@
 // The ContextBar (48pt, above the ToolRail): the Scrub strip while a code number is focused (−, the
-// value, +, ± for negatives, Done), else the selection and its actions, else a hint. Refused edits
-// and other notices show just above it for a few seconds.
+// value, +, ± for negatives, Done), else the selection and its actions, else a hint; for a file
+// open as read-only source, where it fails and Files. Refused edits and other notices ("Copied")
+// show just above it for a few seconds.
 
 import { useEffect } from 'react';
 import type { Editor } from '../editor.ts';
+import type { Unparsed } from '../workspace.ts';
 import { elementLabel } from './label.ts';
 import { useStore } from './store.ts';
 
 const NOTICE_MS = 4000;
 
-export function ContextBar({ editor }: { editor: Editor }) {
+export function ContextBar({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed | null; files: () => void }) {
   const focus = useStore(editor.focus);
   const selection = useStore(editor.selection);
   const notice = useStore(editor.notice);
@@ -23,7 +25,18 @@ export function ContextBar({ editor }: { editor: Editor }) {
 
   const ids = [...selection];
   let body;
-  if (focus) {
+  if (unparsed) {
+    body = (
+      <>
+        <span className="draw-label">
+          Read-only source{unparsed.line !== null ? ` · line ${unparsed.line}, column ${unparsed.column}` : ''}
+        </span>
+        <button type="button" className="draw-key draw-action draw-source-files" onClick={files}>
+          Files
+        </button>
+      </>
+    );
+  } else if (focus) {
     const t = focus.token;
     body = (
       <div className="draw-strip" role="group" aria-label={`Scrub ${t.prop}`}>

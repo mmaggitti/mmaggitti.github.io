@@ -14,7 +14,10 @@
 //   large, and one that is only looked at is not kept (it is still in the link). A draft reopens
 //   quietly.
 // - An open that fails opens nowhere: the drawing that was open stays, and the report sheet says
-//   why and where.
+//   why and where. A file that isn't well-formed opens as read-only source instead: its text in the
+//   code with the error marked, nothing drawn, nothing to edit, and no draft; Files is the way on.
+// - Copy puts the file (or that source) on the clipboard, through src/platform/ (it never reads the
+//   clipboard); where the clipboard is blocked, a read-only sheet holds the text to select.
 
 import { serialize, type Doc } from '../../../engine/model/doc.ts';
 import type { ImportReport } from '../../../engine/report/import-report.ts';
@@ -28,7 +31,10 @@ import { exportFile, type ExportFile, type ExportKind } from './export/svg.ts';
 import { draftRows, type DraftRow } from './files-view.ts';
 import { createStore, type Store } from './panels/store.ts';
 
-export type Panel = 'files' | 'report' | 'export' | 'link' | null;
+export type Panel = 'files' | 'report' | 'export' | 'link' | 'copy' | null;
+
+/** A file that isn't well-formed, open as read-only source. */
+export type Unparsed = ImportFailure & { source: { text: string; at: number } };
 
 export interface Current {
   name: string;
@@ -67,6 +73,10 @@ export class Workspace {
   readonly drafts: Store<DraftRow[] | null> = createStore<DraftRow[] | null>(null);
   /** An #import link that arrived while Draw was open, waiting for Open (panel 'link'). */
   readonly offer: Store<string | null> = createStore<string | null>(null);
+  /** The file open as read-only source (it isn't well-formed), or null. */
+  readonly unparsed: Store<Unparsed | null> = createStore<Unparsed | null>(null);
+  /** What Copy couldn't put on the clipboard, shown to select (panel 'copy'). */
+  readonly copying: Store<string | null> = createStore<string | null>(null);
   readonly autosave: Autosave;
   #editor: Editor;
   #store: DraftStore;
@@ -237,6 +247,7 @@ export class Workspace {
   async #open(input: ImportInput, how: { draft?: string; show?: boolean; create?: boolean }): Promise<boolean> {
     const r = await importSvg(this.#editor, input);
     if (!r.ok) {
+      if (r.source) return this.#showSource(r as Unparsed);
       this.failure.set(r);
       this.panel.set('report');
       return false;
@@ -244,6 +255,7 @@ export class Workspace {
     const doc = r.doc;
     if (this.#editor.doc !== doc) return false; // another open took the editor meanwhile
     this.#doc = doc;
+    this.unparsed.set(null);
     this.failure.set(null);
     this.current.set({ name: r.name, via: r.via, report: r.report, problem: r.problem, encoding: r.encoding, gzip: r.gzip, lossy: r.lossy });
     this.#editor.readOnly.set(false);
@@ -253,8 +265,25 @@ export class Workspace {
     return true;
   }
 
+  /**
+   * A file that isn't well-formed opens as read-only source: never drawn, nothing to edit, and no
+   * draft. The drawing that was open closes as it does when another opens (a change still waiting is
+   * saved to its own draft first), so Files reopens it.
+   */
+  async #showSource(r: Unparsed): Promise<boolean> {
+    this.#doc = null;
+    this.#editor.showSource(r.source.text, r.source.at);
+    this.current.set(null);
+    this.failure.set(null);
+    this.unparsed.set(r);
+    this.#editor.readOnly.set(false);
+    this.panel.set(null);
+    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: false });
+    return true;
+  }
+
   #linkFailed(message: string): void {
-    this.failure.set({ ok: false, via: 'link', name: 'Linked drawing', message, line: null, column: null, excerpt: null });
+    this.failure.set({ ok: false, via: 'link', name: 'Linked drawing', message, source: null, line: null, column: null, excerpt: null });
     this.panel.set('report');
   }
 
@@ -307,6 +336,27 @@ export class Workspace {
     this.panel.set(null);
     this.failure.set(null);
     this.offer.set(null);
+    this.copying.set(null);
+  }
+
+  // ── copy ───────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Copy: the file as it is now (every byte, as the as-is export has it; the tidy view never changes
+   * it), or the source open read-only. `write` puts text on the clipboard (platform/clipboard.ts),
+   * called before anything is awaited, so it keeps the tap's user activation. "Copied", or, where
+   * the clipboard is blocked, a read-only sheet with the text to select.
+   */
+  async copy(write: (text: string) => Promise<boolean>): Promise<boolean> {
+    const text = this.unparsed.get()?.source.text ?? (this.#editor.doc ? this.#editor.source() : null);
+    if (text === null) return false;
+    if (await write(text)) {
+      this.#editor.notice.set('Copied');
+      return true;
+    }
+    this.show('copy');
+    this.copying.set(text);
+    return false;
   }
 
   // ── export ─────────────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,29 @@
    split code sheet sharing what is left (the canvas is 557 / 359 / 98 with the sheet at peek,
    half and full; the sheet's head is 95), the ContextBar (48) and the ToolRail (52, plus the home
    indicator's inset).
-   iPad keeps this layout in P0. */
+   On a wide screen, or a phone on its side, the code docks beside the canvas (see the end).
+
+   Colours: the ds.css tokens, light or dark with the system, or as chosen in Files (data-theme on
+   <html>, below); Draw's own colours are the --draw-* and --cv-* variables on .draw. */
+
+/* A theme chosen in Files overrides the system's: the ds.css tokens (the same values as ds.css). */
+:root[data-theme="light"] {
+  --bg: #F6F4EE; --surface: #FFFFFF; --text: #1B1B1B; --text-muted: #5E5A52; --line: #E3DED3; --accent: #233044; --on-accent: #FFFFFF;
+}
+:root[data-theme="dark"] {
+  --bg: #111111; --surface: #1C1C1E; --text: #F2F2F2; --text-muted: #A5A5AA; --line: #2C2C2E; --accent: #9DB4D6; --on-accent: #111111;
+}
+.draw {
+  --draw-danger: #b3261e;
+  --draw-warn: #8a5a00;
+  --cv-number: #b0125b; /* dragged */
+  --cv-word: #1d5fbf; /* tapped: keywords, colours, references */
+  --cv-text: #7a5b00; /* tapped: text */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .draw { --draw-danger: #f2b8b5; --draw-warn: #f2c94c; --cv-number: #ff7fb3; --cv-word: #8ab4ff; --cv-text: #f2c94c; }
+}
+:root[data-theme="dark"] .draw { --draw-danger: #f2b8b5; --draw-warn: #f2c94c; --cv-number: #ff7fb3; --cv-word: #8ab4ff; --cv-text: #f2c94c; }
 
 /* A fixed-height column (ds-app is only a minimum), so the canvas takes exactly what the rest leave.
    The page never zooms: no pinch or double-tap zoom anywhere in the app, while panels still scroll
@@ -26,8 +48,7 @@
 .draw-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); overflow: hidden; }
 .draw-name { min-width: 0; font-weight: 700; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .draw-save { flex: 0 0 auto; color: var(--text-muted); }
-.draw-save[data-save="failed"] { color: #b3261e; font-weight: 600; }
-@media (prefers-color-scheme: dark) { .draw-save[data-save="failed"] { color: #f2b8b5; } }
+.draw-save[data-save="failed"] { color: var(--draw-danger); font-weight: 600; }
 .draw-bar-btn {
   flex: 0 0 auto;
   min-width: max(var(--tap-min), 4.5rem);
@@ -91,7 +112,8 @@
   --space-5: initial; --space-6: initial; --space-7: initial; --space-8: initial; --radius-sm: initial;
   --radius: initial; --control-h: initial; --control-h-sm: initial; --measure: initial;
   --tap-min: initial; --bg: initial; --surface: initial; --text: initial; --text-muted: initial;
-  --line: initial; --accent: initial; --on-accent: initial;
+  --line: initial; --accent: initial; --on-accent: initial; --draw-danger: initial; --draw-warn: initial;
+  --cv-number: initial; --cv-word: initial; --cv-text: initial;
 }
 /* The app's marks over the drawing (overlay.ts): never hit, so a tap reaches the drawing. The
    document's own CSS can lift the host (:host, or a style on its root) with a z-index, so the marks
@@ -105,6 +127,45 @@
   margin: 0;
   color: var(--text-muted);
 }
+/* The app's word over the drawing: a file shown only as source, or one the canvas couldn't draw.
+   Above the marks (it comes after them), and scrolling inside the canvas when that is short. */
+.draw-over {
+  position: absolute;
+  inset: var(--space-4);
+  z-index: 2147483647;
+  height: fit-content;
+  max-height: calc(100% - var(--space-4) * 2);
+  max-width: 30rem;
+  margin: auto;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 0.25rem 1.5rem rgb(0 0 0 / 0.12);
+  touch-action: manipulation;
+}
+.draw-over-title { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.draw-over-text { margin: var(--space-1) 0 var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.draw-broken .draw-over-title { color: var(--draw-danger); }
+/* Play, for a drawing reduced motion opened paused. */
+.draw-play-btn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2147483647;
+  min-width: max(var(--tap-min), 4.5rem);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 600 var(--text-sm) / 1 var(--font-ui);
+  touch-action: manipulation;
+}
+.draw-play-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 /* ── The split code sheet ──────────────────────────────────────────────────── */
 
@@ -148,11 +209,56 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  scroll-padding-block: var(--tap-min); /* a block scrolled into view stays a finger's width off the edges */
+  scroll-padding-block: calc(var(--tap-min) * 2) var(--tap-min); /* a block scrolled into view stays a finger's width off the edges (and clear of the code bar) */
   border-top: 1px solid var(--line);
 }
 .draw-empty { margin: 0; padding: var(--space-4); }
 .draw-attrs { margin: var(--space-3); }
+
+/* Over the code: the legend, Tidy and Copy, kept in view while the code scrolls. */
+.draw-code-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.draw-legend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  margin: 0;
+  color: var(--text-muted);
+  font: var(--text-sm) / 1.5 var(--font-ui);
+}
+.draw-legend-item { display: inline-flex; align-items: baseline; gap: var(--space-1); white-space: nowrap; }
+/* A sample is a token chip (SVG Lab's .tk): code type on a light tint of its own colour. */
+.cv-key {
+  padding: 0 0.1875rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-family: var(--font-mono);
+}
+.draw-bar-key {
+  flex: 0 0 auto;
+  min-width: max(var(--tap-min), 3.75rem);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: 600 var(--text-sm) / 1 var(--font-ui);
+  touch-action: manipulation;
+}
+.draw-bar-key[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-copy { margin-left: auto; }
 
 /* The code view (codeview/code-view.ts): the source as text, wrapped, never scrolling sideways.
    A sideways drag on a number scrubs it; a vertical drag scrolls. */
@@ -168,17 +274,44 @@
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-  --cv-number: #b0125b;
-  --cv-word: #1d5fbf;
-  --cv-text: #7a5b00;
 }
-@media (prefers-color-scheme: dark) {
-  .cv { --cv-number: #ff7fb3; --cv-word: #8ab4ff; --cv-text: #f2c94c; }
-}
+/* The legend's samples (cv-key) take exactly the colours of the tokens they explain. */
 .cv-tok { border-radius: 0.1875rem; }
-.cv-number { color: var(--cv-number); }
-.cv-color, .cv-enum, .cv-ref { color: var(--cv-word); }
-.cv-text { color: var(--cv-text); }
+.cv-number, .cv-key--number { color: var(--cv-number); }
+.cv-color, .cv-enum, .cv-ref, .cv-key--word { color: var(--cv-word); }
+.cv-text, .cv-key--text { color: var(--cv-text); }
+.cv-key { font-weight: 500; }
+/* A colour's swatch, from the colour the engine read; none is struck through, and a colour that
+   comes from elsewhere (currentColor, context-fill) is an empty frame. The token never breaks
+   between its swatch and its text. */
+.cv-color { white-space: nowrap; }
+.cv-swatch {
+  display: inline-block;
+  width: 0.6875rem;
+  height: 0.6875rem;
+  margin-right: 0.25rem;
+  border-radius: 2px;
+  background: var(--cv-swatch, transparent);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25);
+  vertical-align: -0.0625rem;
+}
+.cv-swatch--none {
+  background: linear-gradient(to top right, transparent calc(50% - 0.0625rem), #e6007e calc(50% - 0.0625rem), #e6007e calc(50% + 0.0625rem), transparent calc(50% + 0.0625rem)), #fff;
+}
+.cv-swatch--current, .cv-swatch--context { background: none; box-shadow: inset 0 0 0 1px currentColor; }
+/* Read-only (another tab has the drawing, or a file shown as source): plain, selectable text. */
+.cv--ro { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.cv--ro .cv-tok { color: inherit; font-weight: inherit; }
+.cv--ro .cv-swatch { display: none; }
+/* A file that isn't well-formed: the line that fails, and the character where it does. */
+.cv-error-line { background: color-mix(in srgb, var(--draw-danger) 12%, transparent); }
+.cv-error { border-radius: 2px; background: color-mix(in srgb, var(--draw-danger) 30%, transparent); outline: 2px solid var(--draw-danger); }
+.cv-error--gap::after { content: "\23CE"; color: var(--draw-danger); }
+/* The tidy view (codeview/layout.ts): whitespace between elements gives way to its own; an
+   attribute that wraps keeps to its column. */
+.cv-gone { display: none; }
+.cv-at { display: inline-block; max-width: calc(100% - var(--cv-at) * 1ch); vertical-align: top; }
+.cv-probe { position: absolute; visibility: hidden; white-space: pre; }
 .cv-selected { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .cv-active, .cv-focus { outline: 2px solid var(--cv-number); }
 .cv-scrubbing { cursor: ew-resize; }
@@ -343,8 +476,9 @@
   white-space: pre-wrap;
   resize: vertical;
 }
-.draw-problem { margin: var(--space-2) 0 0; color: #b3261e; font-size: var(--text-sm); }
-@media (prefers-color-scheme: dark) { .draw-problem { color: #f2b8b5; } }
+.draw-problem { margin: var(--space-2) 0 0; color: var(--draw-danger); font-size: var(--text-sm); }
+/* The Number sheet's slider. */
+.draw-range { display: block; width: 100%; min-height: var(--tap-min); margin: var(--space-3) 0 0; accent-color: var(--accent); }
 .draw-actions { display: flex; gap: var(--space-3); margin-top: var(--space-3); }
 
 /* ── Alerts under the top bar: storage failed (loud), or read-only here ───── */
@@ -378,6 +512,7 @@
 .draw-subhead { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-md); }
 .draw-hint-text { margin: 0 0 var(--space-2); }
 .draw-drafts, .draw-exports, .draw-notes, .draw-ledger { margin: 0; padding: 0; list-style: none; }
+.draw-theme { margin-top: var(--space-1); }
 .draw-draft { display: flex; align-items: stretch; gap: var(--space-2); border-top: 1px solid var(--line); }
 .draw-draft[data-open] .draw-draft-name::after { content: " ●"; color: var(--accent); }
 .draw-draft-open {
@@ -399,8 +534,7 @@
 }
 .draw-draft-name { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .draw-draft-meta { color: var(--text-muted); }
-.draw-draft-remind { color: #8a5a00; font-weight: 600; }
-@media (prefers-color-scheme: dark) { .draw-draft-remind { color: #f2c94c; } }
+.draw-draft-remind { color: var(--draw-warn); font-weight: 600; }
 .draw-draft-delete { align-self: center; font-size: var(--text-sm); }
 
 .draw-buckets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
@@ -460,3 +594,17 @@
 .draw-ledger-name { overflow-wrap: anywhere; }
 .draw-ledger-meta { color: var(--text-muted); }
 .draw-ledger-note { overflow-wrap: anywhere; }
+
+/* ── Wide screens and phones on their side: the code docks beside the canvas ── */
+
+/* The same query as media.ts DOCK (which hides the handle and keeps the code shown). */
+@media (min-width: 46em) and (min-aspect-ratio: 5/4) {
+  .draw-split { flex-direction: row; }
+}
+.draw-sheet--dock {
+  width: clamp(20rem, 42%, 40rem);
+  border-top: 0;
+  border-left: 1px solid var(--line);
+  box-shadow: none;
+}
+.draw-sheet--dock .draw-sheet-head { padding-top: var(--space-2); }

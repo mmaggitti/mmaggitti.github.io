@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="80mm"
+   height="60mm"
+   viewBox="0 0 80 60"
+   version="1.1"
+   id="svg5"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs2">
+    <rect
+       x="22.7"
+       y="18.9"
+       width="257"
+       height="98.3"
+       id="rect1" />
+    <circle
+       cx="238"
+       cy="68"
+       r="30"
+       id="circle1"
+       style="shape-margin:6" />
+  </defs>
+  <g
+     id="layer1">
+    <rect
+       style="fill:#f1faee;stroke:none"
+       id="rect2"
+       width="80"
+       height="60"
+       x="0"
+       y="0" />
+    <text
+       xml:space="preserve"
+       transform="scale(0.26458333)"
+       id="text1"
+       style="font-size:16px;line-height:1.25;font-family:sans-serif;white-space:pre;shape-inside:url(#rect1);shape-subtract:url(#circle1);shape-padding:8;fill:#1d3557"><tspan
+         x="30.699219"
+         y="41.9"
+         id="tspan1">Text flowed into a frame,</tspan><tspan
+         x="30.699219"
+         y="61.9"
+         id="tspan2">with its SVG 1.1 lines.</tspan></text>
+    <text
+       xml:space="preserve"
+       transform="scale(0.26458333)"
+       id="text2"
+       style="font-size:12px;line-height:1.25;font-family:sans-serif;white-space:pre;inline-size:180.5;fill:#457b9d"
+       x="30.2"
+       y="170.4"><tspan
+         x="30.2"
+         y="170.4"
+         id="tspan3">Text in a fixed-width column</tspan></text>
+  </g>
+</svg>

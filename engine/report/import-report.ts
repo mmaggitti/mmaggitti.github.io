@@ -11,6 +11,7 @@
 import { descendants, NS, type Doc, type ElementNode } from '../model/doc.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
 import { classifyAttribute, classifyElement, type Classified } from '../policy/classify.ts';
+import { elementRenders } from '../policy/render-policy.ts';
 import type { LedgerClass } from '../policy/tables.ts';
 
 export type Bucket = 'editable' | 'kept' | 'preview' | 'unclassified';
@@ -75,7 +76,12 @@ export function importReport(doc: Doc): ImportReport {
   if (dup.length) notes.push(`${dup.length} id${dup.length > 1 ? 's are' : ' is'} used more than once (${dup.slice(0, 5).join(', ')}${dup.length > 5 ? ', …' : ''}); browsers use the first.`);
   const dangling = [...new Set(refs.dangling.map((r) => r.id))];
   if (dangling.length) notes.push(`${dangling.length} reference${dangling.length > 1 ? 's point' : ' points'} at an id that is not in the file (${dangling.slice(0, 5).join(', ')}${dangling.length > 5 ? ', …' : ''}).`);
-  if (webkitOnly.size) notes.push(`Safari draws ${[...webkitOnly].sort().map((x) => `<${x}>`).join(', ')}; Chrome, Firefox and Draw's canvas do not.`);
+  // The canvas renders some of them (tref, altGlyph), so in Safari Draw draws those too.
+  const names = (xs: string[]) => xs.sort().map((x) => `<${x}>`).join(', ');
+  const drawn = [...webkitOnly].filter((x) => elementRenders(NS.svg, x, false));
+  const hidden = [...webkitOnly].filter((x) => !elementRenders(NS.svg, x, false));
+  if (drawn.length) notes.push(`Safari draws ${names(drawn)}, and so does Draw's canvas there; Chrome and Firefox do not.`);
+  if (hidden.length) notes.push(`Safari draws ${names(hidden)}; Chrome, Firefox and Draw's canvas do not.`);
   if (totals.preview) notes.push('Scripts, handlers and media are kept in the file but never run in the editor.');
   if (totals.unclassified) notes.push('Unclassified content is kept byte for byte and never drawn.');
   return { totals, items, notes };

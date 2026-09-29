@@ -31,7 +31,7 @@ interface Rig {
   focused: (FocusMark | null)[];
 }
 
-function rig(size = HOST): Rig {
+function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
@@ -46,6 +46,10 @@ function rig(size = HOST): Rig {
     setCamera: (r) => cameras.push(r),
     nodeFor: () => ({}),
     stats: () => ({ rendered: 1, skippedElements: 0, droppedAttributes: 0 }),
+    clear: () => log.push('canvas clear'),
+    motion: () => 'still',
+    play: () => {},
+    ...over,
   };
   const r: Rig = {
     log, listing, cameras, outlines, selected, focused,
@@ -67,6 +71,12 @@ function rig(size = HOST): Rig {
         },
         select: (nodes) => selected.push(new Set(nodes)),
         focus: (mark) => focused.push(mark),
+        readOnly: (on) => log.push(`code read-only ${on}`),
+        source: (t, at) => {
+          log.push(`code source ${at}`);
+          listing.clear();
+          order = [];
+        },
       },
       overlay: { outline: (ids) => (log.push('overlay'), outlines.push([...ids])) },
       hostSize: () => size,
@@ -197,7 +207,10 @@ test('a read-only document refuses every edit and says why; selection and the vi
   r.editor.tapToken(col.block, col.token);
   assert.equal(r.editor.sheet.get(), null, 'no sheet opens');
   r.editor.tapToken(num.block, num.token);
+  assert.equal(r.editor.focus.get(), null, 'a number is plain text here: no Scrub strip');
   r.editor.stepFocus(1);
+  r.editor.keyToken(num.block, num.token, 'up');
+  r.editor.keyToken(kw.block, kw.token, 'open');
   r.editor.scrubStart(num.block, num.token);
   r.editor.scrub(4);
   r.editor.scrubEnd(true);
@@ -209,7 +222,10 @@ test('a read-only document refuses every edit and says why; selection and the vi
   assert.deepEqual([...r.editor.selection.get()], [c.id], 'selection still works');
   r.editor.zoomAt({ x: 10, y: 10 }, 2);
   assert.equal(r.editor.view.scale, r.editor.fitScale * 2, 'and so does the view');
+  assert.ok(r.log.includes('code read-only true'), 'the code shows it as plain text');
   r.editor.readOnly.set(false);
+  assert.equal(r.log.at(-1), 'code read-only false');
+  r.editor.tapToken(num.block, num.token);
   r.editor.stepFocus(1);
   assert.notEqual(r.editor.source(), SAMPLE, 'editable again');
 });
@@ -578,4 +594,118 @@ test('a document with no artboard draws as the browser draws it until the view m
   assert.equal(r.cameras.at(-1), null);
   r.editor.zoomAt({ x: 0, y: 0 }, 2);
   assert.deepEqual(r.cameras.at(-1), { x: 0, y: 0, width: HOST.width / 2, height: HOST.height / 2 });
+});
+
+// ── P0-M5: the keyboard, the source view, render errors ────────────────────────────────────────
+
+test('the keyboard: Enter or Space on a number opens its Number sheet and the arrows step it, one entry each; on any other token Enter does what a tap does', () => {
+  const r = rig();
+  r.editor.open(SAMPLE);
+  const c = circleOf(r);
+  const cx = tokenIn(r, c.id, 'number');
+  r.editor.keyToken(cx.block, cx.token, 'up');
+  assert.ok(r.editor.source().includes('cx="213"'), 'an arrow up steps the number');
+  r.editor.keyToken(cx.block, cx.token, 'down');
+  r.editor.keyToken(cx.block, cx.token, 'down');
+  assert.equal(r.editor.source(), SAMPLE.replace('cx="212"', 'cx="211"'), 'and down steps it back, changing only its bytes');
+  assert.equal(r.editor.focus.get()?.token.text, '211', 'the Scrub strip follows the number the keys step');
+  assert.deepEqual([...r.editor.selection.get()], [c.id], 'and its element is selected');
+  let entries = 0;
+  while (r.editor.history.get().canUndo) {
+    entries++;
+    r.editor.undo();
+  }
+  assert.equal(entries, 3, 'one history entry a key');
+  assert.equal(r.editor.source(), SAMPLE);
+  r.editor.keyToken(cx.block, cx.token, 'open');
+  assert.equal(r.editor.sheet.get()?.kind, 'number', 'Enter or Space on a number opens its Number sheet');
+  r.editor.closeSheet();
+  const poly = element(doc(r), (n) => n.local === 'polyline');
+  const cap = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.editor.keyToken(cap.block, cap.token, 'open');
+  const cycled = SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="square"');
+  assert.equal(r.editor.source(), cycled, 'Enter on a keyword moves it to its next option, as a tap does');
+  const square = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.editor.keyToken(square.block, square.token, 'up');
+  assert.equal(r.editor.source(), cycled, 'an arrow on a keyword changes nothing');
+  r.editor.keyToken(square.block, square.token, 'open');
+  assert.equal(r.editor.source(), SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="butt"'), 'and wraps round');
+  const fill = tokenIn(r, c.id, 'color');
+  r.editor.keyToken(fill.block, fill.token, 'open');
+  assert.equal(r.editor.sheet.get()?.kind, 'color', 'Enter on a colour opens its sheet');
+  r.editor.closeSheet();
+});
+
+test('a file shown as source: its text in the code with the error marked, nothing drawn, and nothing to edit until another opens', () => {
+  const r = rig();
+  r.editor.open(SAMPLE);
+  const c = circleOf(r);
+  const cx = tokenIn(r, c.id, 'number');
+  r.editor.tapToken(cx.block, cx.token);
+  r.editor.keyToken(cx.block, cx.token, 'up');
+  assert.ok(r.editor.focus.get() && r.editor.history.get().canUndo, 'test setup: a number is focused and there is history');
+  const bad = '<svg xmlns="http://www.w3.org/2000/svg">\n<g>\n</svg>\n';
+  r.log.length = 0;
+  r.editor.showSource(bad, 46);
+  assert.deepEqual(r.log.slice(0, 2), ['canvas clear', 'code source 46'], 'the canvas draws nothing, and the code shows the text');
+  assert.equal(r.editor.doc, null);
+  assert.equal(r.editor.source(), '');
+  assert.equal(r.editor.selection.get().size, 0);
+  assert.equal(r.editor.focus.get(), null);
+  assert.deepEqual(r.editor.history.get(), { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null });
+  // Nothing edits it: taps, keys, scrubs, undo, Edit source.
+  r.editor.tapToken(cx.block, cx.token);
+  r.editor.keyToken(cx.block, cx.token, 'open');
+  r.editor.scrubStart(cx.block, cx.token);
+  r.editor.scrub(3);
+  r.editor.scrubEnd(true);
+  r.editor.undo();
+  r.editor.openSource();
+  r.editor.tapCanvas(c.id);
+  assert.equal(r.editor.sheet.get(), null);
+  assert.equal(r.editor.focus.get(), null);
+  assert.equal(r.editor.selection.get().size, 0);
+  assert.equal(r.editor.source(), '');
+  assert.equal(r.editor.motion.get(), 'still');
+  r.editor.open(SAMPLE);
+  assert.equal(text(r), SAMPLE, 'the next drawing that opens lists its code again');
+});
+
+test('a render error: the whole drawing is drawn again from the model; if that fails too, the canvas is cleared and says why, and the file, the code and undo carry on', () => {
+  let failPatch = 0;
+  let failRender = 0;
+  const r: Rig = rig(HOST, {
+    patchAttributes: (id) => {
+      r.log.push(`canvas attrs ${id}`);
+      if (failPatch-- > 0) throw new Error('patch broke');
+    },
+    render: () => {
+      r.log.push('canvas render');
+      if (failRender-- > 0) throw new Error('render broke');
+    },
+  });
+  r.editor.open(SAMPLE);
+  const c = circleOf(r);
+  const cx = tokenIn(r, c.id, 'number');
+  failPatch = 1;
+  r.log.length = 0;
+  r.editor.keyToken(cx.block, cx.token, 'up');
+  assert.ok(r.log.includes('canvas render'), 'a patch that threw: the whole drawing is drawn again');
+  assert.equal(r.editor.canvasError.get(), null, 'and nothing needs saying');
+  assert.ok(r.editor.source().includes('cx="213"'), 'the edit is in the file');
+  assert.equal(text(r), r.editor.source(), 'and in the code');
+  failPatch = 1;
+  failRender = 1;
+  r.log.length = 0;
+  r.editor.keyToken(cx.block, cx.token, 'up');
+  assert.equal(r.editor.canvasError.get(), 'render broke', 'drawing it again failed too: the canvas says why');
+  assert.ok(r.log.includes('canvas clear'), 'and draws nothing rather than half a drawing');
+  assert.ok(r.editor.source().includes('cx="214"'), 'the file has the edit');
+  assert.equal(text(r), r.editor.source(), 'and so does the code');
+  assert.equal(r.editor.motion.get(), 'still');
+  r.log.length = 0;
+  r.editor.undo();
+  assert.ok(r.log.includes('canvas render'), 'the next change draws the whole drawing again');
+  assert.equal(r.editor.canvasError.get(), null, 'which works now, so the message goes');
+  assert.ok(r.editor.source().includes('cx="213"'), 'undo carried on through it');
 });

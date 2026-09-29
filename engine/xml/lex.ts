@@ -29,6 +29,11 @@ export type Tok =
 export interface LexError {
   at: number;
   message: string;
+  /**
+   * 'limit': over what Draw's parser takes (size, node count, depth, the entity budget and depth,
+   * an entity that expands to markup); the file itself may be well-formed. Absent: not well-formed.
+   */
+  kind?: 'limit';
 }
 
 export type LexResult = { ok: true; tokens: Tok[] } | { ok: false; error: LexError };

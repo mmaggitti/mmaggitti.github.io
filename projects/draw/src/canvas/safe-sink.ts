@@ -174,9 +174,11 @@ export function sinkText(doc: Doc, node: LeafNode, parent: ElementNode): Text | 
 // rules they outrank the document's normal CSS (its own !important inline styles can still win):
 // - the rendered root fills the host whatever the document sizes it to;
 // - reduced motion stops CSS animations and transitions, as ds.css does for the app (its rule
-//   can't cross the shadow boundary; the renderer pauses SMIL).
+//   can't cross the shadow boundary; the renderer pauses SMIL), until Play (draw-play); Pause
+//   (draw-held) holds them on their frame.
 const CANVAS_CSS = `:host > svg { width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important } }`;
+@media (prefers-reduced-motion: reduce) { :host(:not(.draw-play):not(.draw-held)) *, :host(:not(.draw-play):not(.draw-held)) *::before, :host(:not(.draw-play):not(.draw-held)) *::after { animation: none !important; transition: none !important }
+:host(.draw-held) *, :host(.draw-held) *::before, :host(.draw-held) *::after { animation-play-state: paused !important; transition: none !important } }`;
 let canvas: CSSStyleSheet | null = null;
 
 /** The canvas's own stylesheet (made once, on first use). */

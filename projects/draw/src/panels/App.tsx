@@ -3,7 +3,8 @@
 // ContextBar (the Scrub strip, or the selection's actions) and the ToolRail, over the
 // framework-free editor (src/editor.ts) and workspace (src/workspace.ts: opening, drafts, export).
 // Every open goes through the one importer (src/import.ts); files, the clipboard, storage and the
-// share sheet only through src/platform/.
+// share sheet only through src/platform/. The theme follows the system unless a choice in Files
+// says otherwise (data-theme on <html>, kept on this device).
 
 import { useEffect, useState } from 'react';
 import { Editor, type OpenResult } from '../editor.ts';
@@ -11,11 +12,13 @@ import { Workspace } from '../workspace.ts';
 import type { View } from '../canvas/viewport.ts';
 import { DraftStore, idbKV, lockDraft } from '../platform/drafts.ts';
 import { acceptDrag, clearFragment, dropped, fragment, pasted } from '../platform/files.ts';
+import { writeClipboard } from '../platform/clipboard.ts';
+import { readPref, writePref } from '../platform/prefs.ts';
 import { Views } from './views.ts';
 import { Canvas } from './Canvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { ContextBar } from './ContextBar.tsx';
-import { FileSheets } from './FileSheets.tsx';
+import { FileSheets, type Theme } from './FileSheets.tsx';
 import { Guard } from './Guard.tsx';
 import { Sheets } from './Sheets.tsx';
 import { ToolRail } from './ToolRail.tsx';
@@ -46,6 +49,22 @@ export function App() {
   const [editor] = useState(() => new Editor(views.ports));
   const [workspace] = useState(() => new Workspace(editor, { store: new DraftStore(idbKV()), lock: lockDraft, sample }));
   const current = useStore(workspace.current);
+  const unparsed = useStore(workspace.unparsed);
+  const [theme, setTheme] = useState<Theme>(() => {
+    const t = readPref('theme');
+    return t === 'light' || t === 'dark' ? t : 'system';
+  });
+
+  // The theme on <html>: none follows the system (ds.css); light or dark overrides it (app.css).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'system') delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }, [theme]);
+  const chooseTheme = (t: Theme) => {
+    writePref('theme', t === 'system' ? null : t);
+    setTheme(t);
+  };
 
   // Runs after Canvas and CodePanel have attached their views (child effects run first).
   useEffect(() => {
@@ -103,6 +122,7 @@ export function App() {
   // A panel that throws shows a message and Files, never a blank page (Guard). The canvas and the
   // code view are outside every guard: they hold the drawing, and React only owns their containers.
   const files = () => workspace.show('files');
+  const copy = () => void workspace.copy(writeClipboard);
   return (
     <div className="draw ds-app">
       <Guard files={files}>
@@ -111,8 +131,8 @@ export function App() {
             Files
           </button>
           <span className="draw-title">
-            <span className="draw-name">{current?.name ?? 'Draw'}</span>
-            <SaveLabel workspace={workspace} />
+            <span className="draw-name">{current?.name ?? unparsed?.name ?? 'Draw'}</span>
+            <SaveLabel workspace={workspace} source={!!unparsed} />
           </span>
           <span className="draw-badge ds-small">preview</span>
           <button type="button" className="draw-fit" onClick={() => editor.fitToScreen()}>
@@ -125,24 +145,25 @@ export function App() {
         <Alert workspace={workspace} />
       </Guard>
       <div className="draw-split">
-        <Canvas editor={editor} views={views} error={current?.problem ?? null} onDrag={acceptDrag} onDrop={drop} />
-        <CodePanel editor={editor} views={views} files={files} />
+        <Canvas editor={editor} views={views} error={current?.problem ?? null} unparsed={unparsed} files={files} onDrag={acceptDrag} onDrop={drop} />
+        <CodePanel editor={editor} views={views} files={files} copy={copy} source={!!unparsed} />
       </div>
       <Guard files={files}>
-        <ContextBar editor={editor} />
+        <ContextBar editor={editor} unparsed={unparsed} files={files} />
         <ToolRail editor={editor} />
         <Sheets editor={editor} />
-        <FileSheets workspace={workspace} />
+        <FileSheets workspace={workspace} theme={theme} setTheme={chooseTheme} />
       </Guard>
     </div>
   );
 }
 
-function SaveLabel({ workspace }: { workspace: Workspace }) {
-  const s = useStore(workspace.autosave.state);
-  const label = SAVE_LABEL[s.kind];
+function SaveLabel({ workspace, source }: { workspace: Workspace; source: boolean }) {
+  const state = useStore(workspace.autosave.state);
+  const kind = source && state.kind !== 'failed' ? 'read-only' : state.kind;
+  const label = SAVE_LABEL[kind];
   return label ? (
-    <span className="draw-save ds-small" data-save={s.kind} aria-live="polite">
+    <span className="draw-save ds-small" data-save={kind} aria-live="polite">
       {label}
     </span>
   ) : null;

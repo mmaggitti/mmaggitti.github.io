@@ -31,6 +31,10 @@ const CHECK_SINKS = ['node', ['tools/check-sinks.mjs'], DRAW];
 // Keyed patching in Chromium, with the Renderer bundled from source: no site build needed.
 const PATCH_TESTS = ['node', ['test/renderer-patch.mjs'], DRAW];
 const drawTests = (file) => ['node', ['--test', '--test-reporter=spec', `test/unit/${file}`], DRAW];
+// The e2e evidence gate after the site e2e, as `npm run verify` and CI run it. The smoke test is
+// expected to fail for some of these breaks; the break is caught only if ledger-check then fails.
+const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/draw-e2e-evidence.jsonl';
+const SITE_E2E_EVIDENCE = ['sh', ['-c', `node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && { E2E=draw node scripts/smoke-test.mjs; ${E2E_EVIDENCE}; }`], REPO];
 
 const BREAKS = [
   {
@@ -61,7 +65,7 @@ const BREAKS = [
   },
   {
     id: 'B6', what: 'the ledger and the served profile disagree on the version',
-    file: 'engine/ledger/ledger.json', from: '"profileVersion": 2', to: '"profileVersion": 3',
+    file: 'engine/ledger/ledger.json', from: '"profileVersion": 4', to: '"profileVersion": 5',
     run: ['node', ['tools/ledger-check.mjs'], DRAW], expect: /profileVersion/,
   },
   {
@@ -143,8 +147,8 @@ const BREAKS = [
   },
   {
     id: 'B22', what: 'the phase is raised before its rows are done',
-    file: 'engine/ledger/ledger.json', from: '"currentPhase": 0', to: '"currentPhase": 1',
-    run: LEDGER_CHECK, expect: /behind the current phase 1/,
+    file: 'engine/ledger/ledger.json', from: '"currentPhase": 1', to: '"currentPhase": 2',
+    run: LEDGER_CHECK, expect: /behind the current phase 2/,
   },
   {
     id: 'B23', what: 'the served profile stops refusing the ledger\'s active attributes',
@@ -338,7 +342,7 @@ const BREAKS = [
   },
   {
     id: 'B60', what: 'reduced motion no longer stops CSS animations', slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: '{ *, *::before, *::after { animation: none !important; transition: none !important } }', to: '{ }',
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '{ :host(:not(.draw-play):not(.draw-held)) *, :host(:not(.draw-play):not(.draw-held)) *::before, :host(:not(.draw-play):not(.draw-held)) *::after { animation: none !important; transition: none !important }\n', to: '{ ',
     run: SITE_E2E, expect: /reduced motion "reduce": the canvas runs \d+ CSS animation/,
   },
   {
@@ -490,9 +494,9 @@ const BREAKS = [
     run: SITE_E2E, expect: /the Number sheet took "4o" without a word/,
   },
   {
-    id: 'B90', what: 'a changed code block no longer flashes', slow: true,
-    file: 'projects/draw/src/codeview/code-view.ts', from: "    el.classList.add('cv-flash');\n", to: '',
-    run: SITE_E2E, expect: /the scrubbed block doesn't flash/,
+    id: 'B90', what: 'a changed token no longer flashes', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: "const flash = (target: Element | null) => target?.classList.add('cv-flash');", to: 'const flash = (_target: Element | null) => undefined;',
+    run: SITE_E2E, expect: /the scrubbed token doesn't flash/,
   },
   {
     id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true,
@@ -557,7 +561,7 @@ const BREAKS = [
   },
   {
     id: 'B103', what: 'a selected block scrolls flush against the ContextBar (no scroll padding)', slow: true,
-    file: 'projects/draw/src/app.css', from: '  scroll-padding-block: var(--tap-min);', to: '',
+    file: 'projects/draw/src/app.css', from: '  scroll-padding-block: calc(var(--tap-min) * 2) var(--tap-min);', to: '',
     run: SITE_E2E, expect: /from the panel's bottom edge, under a finger's width/,
   },
   {
@@ -654,13 +658,13 @@ const BREAKS = [
   },
   {
     id: 'B122', what: 'a file that fails to parse no longer says where',
-    file: 'projects/draw/src/import.ts', from: 'return failed(input, parsed.error.message, text, parsed.error.at);', to: 'return failed(input, parsed.error.message);',
-    run: drawTests('import.test.ts'), expect: /✖ a file that fails to parse opens nowhere/,
+    file: 'projects/draw/src/import.ts', from: 'failed(input, message, text, at), source', to: 'failed(input, message), source',
+    run: drawTests('import.test.ts'), expect: /✖ a file that isn't well-formed never reaches the editor/,
   },
   {
     id: 'B123', what: 'the importer hands the editor a root that is not <svg>',
     file: 'projects/draw/src/import.ts', from: "if (root.ns !== NS.svg || root.local !== 'svg') {", to: 'if (false) {',
-    run: drawTests('import.test.ts'), expect: /✖ a file that fails to parse opens nowhere/,
+    run: drawTests('import.test.ts'), expect: /✖ a file that isn't well-formed never reaches the editor/,
   },
   {
     id: 'B124', what: 'export writes UTF-8 whatever encoding the file came in',
@@ -994,6 +998,465 @@ const BREAKS = [
     id: 'B189', what: 'the next load no longer replays the unload journal',
     file: 'projects/draw/src/workspace.ts', from: '    await this.#replayJournal();\n', to: '',
     run: drawTests('workspace.test.ts'), expect: /✖ an unload journal whose save never landed is replayed/,
+  },
+  // ── P0-M5: the code panel's tools ────────────────────────────────────────────────────────────
+  {
+    id: 'B190', what: 'the tidy view keeps a tag too wide for the panel on one line',
+    file: 'projects/draw/src/codeview/layout.ts', from: 'if (!spansLines && (indent.length + oneLine <= cols || attrs.length === 1)) {', to: 'if (true) {',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view lays a minified file out one element a line/,
+  },
+  {
+    id: 'B191', what: "the tidy view doesn't measure the panel again when it changes size", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: 'if (this.tidyOn && !this.raw && this.measure()) this.rebuild();', to: 'if (false) this.rebuild();',
+    run: SITE_E2E, expect: /the width was not measured again/,
+  },
+  {
+    id: 'B192', what: 'the tidy view shows a character that is not whitespace in place of whitespace',
+    file: 'projects/draw/src/codeview/layout.ts', from: 'swaps.push({ at: a.lead[0], end: a.lead[1], text: `\\n${inner}` });', to: 'swaps.push({ at: a.lead[0], end: a.lead[1], text: `\\n${inner}·` });',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view swaps only whitespace, never inside a token/,
+  },
+  {
+    id: 'B193', what: 'the code view loses where a block sits in the tree (every block at the root)',
+    file: 'projects/draw/src/codeview/blocks.ts', from: '  for (let p = n.parent; p !== null; p = doc.nodes.get(p)?.parent ?? null) d++;\n', to: '',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the code is always the whole file inside its root <svg>/,
+  },
+  {
+    id: 'B194', what: "the legend's number is not the colour of the numbers it explains", slow: true,
+    file: 'projects/draw/src/app.css', from: '.cv-number, .cv-key--number { color: var(--cv-number); }', to: '.cv-number { color: var(--cv-number); }\n.cv-key--number { color: var(--cv-word); }',
+    run: SITE_E2E, expect: /the legend shows a number as/,
+  },
+  {
+    id: 'B195', what: "a colour token's swatch is its text, not the colour the engine read",
+    file: 'projects/draw/src/codeview/blocks.ts', from: "  return toHex(t.color) ?? 'context';", to: '  return t.text;',
+    run: drawTests('code-panel.test.ts'), expect: /✖ a colour token carries the swatch the engine read/,
+  },
+  {
+    id: 'B196', what: "a colour's swatch is not painted", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: "if (t.swatch.startsWith('#')) sw.style.setProperty('--cv-swatch', t.swatch);", to: "if (t.swatch.startsWith('#')) void 0;",
+    run: SITE_E2E, expect: /the #ffd166 swatch is/,
+  },
+  {
+    id: 'B197', what: 'both arrow keys step a number up',
+    file: 'projects/draw/src/editor.ts', from: "this.stepFocus(key === 'up' ? 1 : -1);", to: 'this.stepFocus(1);',
+    run: drawTests('editor.test.ts'), expect: /✖ the keyboard: Enter or Space on a number opens its Number sheet/,
+  },
+  {
+    id: 'B198', what: 'code tokens cannot be focused (no keyboard)', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: '    if (!this.ro) span.tabIndex = 0;\n', to: '',
+    run: SITE_E2E, expect: /a token cannot be focused/,
+  },
+  {
+    id: 'B199', what: 'read-only code keeps its token colours', slow: true,
+    file: 'projects/draw/src/app.css', from: '.cv--ro .cv-tok { color: inherit; font-weight: inherit; }', to: '',
+    run: SITE_E2E, expect: /read-only tokens are still coloured/,
+  },
+  {
+    id: 'B200', what: 'a tap on a read-only number opens the Scrub strip',
+    file: 'projects/draw/src/editor.ts', from: "    if (t.kind !== 'ref' && !this.#writable()) return; // read-only: plain text, and a tap says why\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a read-only document refuses every edit and says why/,
+  },
+  {
+    id: 'B201', what: 'Copy puts the file as it was opened on the clipboard, not as it is now',
+    file: 'projects/draw/src/workspace.ts', from: '(this.#editor.doc ? this.#editor.source() : null)', to: '(this.#editor.doc ? this.#editor.doc.source : null)',
+    run: drawTests('workspace.test.ts'), expect: /✖ Copy puts the file on the clipboard exactly as it is/,
+  },
+  {
+    id: 'B202', what: 'a refused clipboard write counts as copied',
+    file: 'projects/draw/src/platform/clipboard.ts', from: '    return false; // blocked', to: '    return true; // blocked',
+    run: drawTests('code-panel.test.ts'), expect: /✖ Copy writes the clipboard \(never reads it\)/,
+  },
+  {
+    id: 'B203', what: 'Copy is not wired to its button', slow: true,
+    file: 'projects/draw/src/panels/CodePanel.tsx', from: 'className="draw-bar-key draw-copy" onClick={copy}>', to: 'className="draw-bar-key draw-copy">',
+    run: SITE_E2E, expect: /Copy said nothing/,
+  },
+  {
+    id: 'B204', what: "a file that isn't well-formed opens nowhere (no source view)",
+    file: 'projects/draw/src/workspace.ts', from: '      if (r.source) return this.#showSource(r as Unparsed);\n', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ a file that isn't well-formed opens as read-only source through the one importer/,
+  },
+  {
+    id: 'B205', what: "the source view doesn't mark where the file fails", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: "    mark.className = 'cv-error';", to: "    mark.className = 'cv-mark';",
+    run: SITE_E2E, expect: /the mark is on null/,
+  },
+  {
+    id: 'B206', what: 'the source view leaves the drawing before it on the canvas',
+    file: 'projects/draw/src/editor.ts', from: '    this.#ports.canvas.clear();\n    this.#ports.code.source(text, at);', to: '    this.#ports.code.source(text, at);',
+    run: drawTests('editor.test.ts'), expect: /✖ a file shown as source: its text in the code/,
+  },
+  {
+    id: 'B207', what: 'wide screens stack the code under the canvas (no dock)', slow: true,
+    file: 'projects/draw/src/app.css', from: '  .draw-split { flex-direction: row; }', to: '',
+    run: SITE_E2E, expect: /the code is not docked beside the canvas/,
+  },
+  {
+    id: 'B208', what: 'a render error during an edit is not caught',
+    file: 'projects/draw/src/editor.ts', from: '      } catch {\n        this.#redraw();\n      }', to: '      } finally {\n        void 0;\n      }',
+    run: drawTests('editor.test.ts'), expect: /✖ a render error: the whole drawing is drawn again from the model/,
+  },
+  {
+    id: 'B209', what: 'a canvas that could not draw says nothing', slow: true,
+    file: 'projects/draw/src/panels/Canvas.tsx', from: '  if (broken) {', to: '  if (false) {',
+    run: SITE_E2E, expect: /a canvas that could not draw says nothing/,
+  },
+  {
+    id: 'B210', what: 'every edit flashes the whole block, not only the token that changed', slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: '    if (changed === null) flash(el);\n    else for (const i of changed)', to: '    flash(el);\n    if (changed === null) for (const i of [] as number[])',
+    run: SITE_E2E, expect: /the flash is on the whole block, not only the token that changed/,
+  },
+  {
+    id: 'B211', what: 'an edit counts every token of the block as changed',
+    file: 'projects/draw/src/codeview/blocks.ts', from: '    if (a.text.slice(s.start, s.end) !== b.text.slice(t.start, t.end)) out.push(i);', to: '    out.push(i);',
+    run: drawTests('code-panel.test.ts'), expect: /✖ an edit flashes only the tokens it changed/,
+  },
+  {
+    id: 'B212', what: 'holding − or + steps once, then never repeats',
+    file: 'projects/draw/src/repeat.ts', from: '      fn();\n      this.#handle = this.#timers.set(tick, HOLD_EVERY);\n', to: '      fn();\n',
+    run: drawTests('code-panel.test.ts'), expect: /✖ hold to repeat/,
+  },
+  {
+    id: 'B213', what: "the Number sheet's slider ignores the artboard (always -100 to 200)",
+    file: 'projects/draw/src/token-edit.ts', from: "  const e = t.unit === '%' || !(extent > 0) ? 100 : extent;", to: '  const e = 100;',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the Number sheet's slider/,
+  },
+  {
+    id: 'B214', what: 'the Number sheet steps once however long + is held', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: '      repeat.start(() => put(steppedFrom(t, latest.current, d)));', to: '      put(steppedFrom(t, latest.current, d));',
+    run: SITE_E2E, expect: /holding \+ for a second wrote r=43/,
+  },
+  {
+    id: 'B215', what: 'Escape no longer closes a sheet', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();", to: 'const key = (_e: KeyboardEvent) => false;',
+    run: SITE_E2E, expect: /Escape did not close the sheet/,
+  },
+  {
+    id: 'B216', what: 'the click of the tap that opened a sheet reaches a control in it', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: '          if (pressed.current || e.detail === 0 || performance.now() - opened.current > GHOST_CLICK_MS) return;', to: '          return;',
+    run: SITE_E2E, expect: /the tap that opened the Color sheet picked a colour in it/,
+  },
+  {
+    id: 'B217', what: 'Dark chosen in Files does not override a light system', slow: true,
+    file: 'projects/draw/src/app.css', from: ':root[data-theme="dark"] {\n  --bg: #111111;', to: ':root[data-theme="none"] {\n  --bg: #111111;',
+    run: SITE_E2E, expect: /Dark chosen in Files over a light system shows/,
+  },
+  {
+    id: 'B218', what: 'the code keeps its light colours when the system goes dark', slow: true,
+    file: 'projects/draw/src/app.css', from: '  :root:not([data-theme="light"]) .draw { --draw-danger', to: '  :root:not(:root) .draw { --draw-danger',
+    run: SITE_E2E, expect: /the code did not recolour when the system went dark/,
+  },
+  {
+    id: 'B219', what: 'reduced motion pauses a drawing with no Play to start it', slow: true,
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "  if (motion === 'paused' || motion === 'playing') {", to: '  if (false) {',
+    run: SITE_E2E, expect: /an animated drawing under reduced motion offers no Play/,
+  },
+  {
+    id: 'B220', what: 'reduced motion pauses a drawing at its start (a fade-in shows nothing)', slow: true,
+    file: 'projects/draw/src/canvas/renderer.ts', from: '        (dom as SVGSVGElement).setCurrentTime(stillTime(dom as SVGSVGElement));\n', to: '',
+    run: SITE_E2E, expect: /not the frame where the fade has arrived/,
+  },
+  {
+    id: 'B221', what: "Play doesn't let a drawing's CSS animations run", slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: ':host(:not(.draw-play):not(.draw-held)) *, :host(:not(.draw-play):not(.draw-held)) *::before, :host(:not(.draw-play):not(.draw-held)) *::after {', to: '*, *::before, *::after {',
+    run: SITE_E2E, expect: /Play did not start the CSS animation/,
+  },
+  {
+    // (A wider SLOP itself is caught first, by viewport.test.ts in the build: B275.)
+    id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true,
+    file: 'projects/draw/src/canvas/stage.ts', from: 'x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp', to: 'x: (e.clientX - box.left) / 2, y: (e.clientY - box.top) / 2, t: e.timeStamp',
+    run: SITE_E2E, expect: /a touch that moved 8pt selected the circle/,
+  },
+  {
+    id: 'B223', what: "the code bar's buttons fall under the tap floor", slow: true,
+    file: 'projects/draw/src/app.css', from: '  min-width: max(var(--tap-min), 3.75rem);\n  min-height: var(--tap-min);\n  padding: 0 var(--space-3);\n  border: 1px solid var(--line);\n  border-radius: var(--radius-sm);\n  background: var(--surface);\n  color: var(--text);\n  font: 600 var(--text-sm) / 1 var(--font-ui);', to: '  min-width: max(var(--tap-min), 3.75rem);\n  min-height: 2rem;\n  padding: 0 var(--space-3);\n  border: 1px solid var(--line);\n  border-radius: var(--radius-sm);\n  background: var(--surface);\n  color: var(--text);\n  font: 600 var(--text-sm) / 1 var(--font-ui);',
+    run: SITE_E2E, expect: /the code bar: tap targets under 44pt/,
+  },
+  // P0-M5: the engine rows (the keep-as-is corpus, script and external URLs, the served profile).
+  {
+    id: 'B224', what: 'the canvas stops rendering a kept attribute (kerning)',
+    file: 'engine/policy/render-policy.ts', from: "  if (attrNs === NS.xml && attrLocal === 'base') return false;\n", to: "  if (attrNs === NS.xml && attrLocal === 'base') return false;\n  if (attrLocal === 'kerning') return false;\n",
+    run: engineTests('policy/render-corpus.test.ts'), expect: /✖ every kept \(preserve\) row of this phase that renders is drawn as written/,
+  },
+  {
+    id: 'B225', what: 'the canvas stops rendering a kept element (tref)',
+    file: 'engine/policy/render-policy.ts', from: '  if (ns === NS.svg) return RENDER_SVG_ELEMENTS.has(local);', to: "  if (ns === NS.svg) return local !== 'tref' && RENDER_SVG_ELEMENTS.has(local);",
+    run: engineTests('policy/render-corpus.test.ts'), expect: /✖ every kept \(preserve\) row of this phase that renders is drawn as written/,
+  },
+  {
+    id: 'B226', what: 'the served profile stops checking url() in presentation attributes and animated values',
+    file: 'scripts/lib/svg-profile.mjs', from: "  else if (/url\\s*\\(|image-set\\s*\\(|\\\\/i.test(value) && !cssAllowed(value)) add('css', at);\n", to: '',
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: javascript: URLs, wherever a URL, url\(\) or animated value can hold one/,
+  },
+  {
+    id: 'B227', what: "the canvas's URL allowlist lets a javascript: URL through",
+    file: 'engine/policy/render-policy.ts', from: "  const ok = (u: string) => u.startsWith('#') || (DATA_IMAGE", to: "  const ok = (u: string) => u.startsWith('#') || /^javascript:/i.test(u) || (DATA_IMAGE",
+    run: POLICY_TESTS, expect: /✖ never rendered: javascript: URLs/,
+  },
+  {
+    id: 'B228', what: "the canvas's CSS reading forgets @import (B41's edit, seen by the @import test)",
+    file: 'engine/policy/render-policy.ts', from: 'if (/image-set\\s*\\(|@import/.test(t)) return false;', to: 'if (/image-set\\s*\\(/.test(t)) return false;',
+    run: POLICY_TESTS, expect: /✖ never rendered: @import, whatever its form/,
+  },
+  {
+    id: 'B229', what: "the canvas's url() rule lets https resources load",
+    file: 'engine/policy/render-policy.ts', from: "  const ok = (u: string) => u.startsWith('#') || CSS_DATA.test(u);", to: "  const ok = (u: string) => u.startsWith('#') || CSS_DATA.test(u) || /^https:/.test(u);",
+    run: POLICY_TESTS, expect: /✖ never rendered: a resource on another site/,
+  },
+  {
+    id: 'B230', what: 'the served profile lets an <image> load from another site',
+    file: 'scripts/lib/svg-profile.mjs', from: "  if ((s === 'http' || s === 'https' || s === 'mailto') && el === 'a') return true;", to: "  if ((s === 'http' || s === 'https' || s === 'mailto') && (el === 'a' || el === 'image')) return true;",
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: a resource on another site/,
+  },
+  {
+    id: 'B231', what: 'the served profile forgets xml:base',
+    file: 'scripts/lib/svg-profile.mjs', from: "  if (attr.ns === XML_NS && local === 'base') { add('xml-base', at); return; }\n", to: '',
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: xml:base/,
+  },
+  {
+    id: 'B232', what: 'the shared CSS guard forgets @import',
+    file: 'scripts/lib/svg-profile.mjs', from: '  if (/@import|expression', to: '  if (/expression',
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: @import, whatever its form/,
+  },
+  {
+    id: 'B233', what: "the import report says Draw's canvas never draws tref and altGlyph",
+    file: 'engine/report/import-report.ts',
+    from: "  if (drawn.length) notes.push(`Safari draws ${names(drawn)}, and so does Draw's canvas there; Chrome and Firefox do not.`);\n  if (hidden.length) notes.push(",
+    to: "  if (webkitOnly.size) notes.push(`Safari draws ${names([...webkitOnly])}; Chrome, Firefox and Draw's canvas do not.`);\n  if (false) notes.push(",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ what only WebKit draws is flagged/,
+  },
+  {
+    id: 'B234', what: 'duplicate ids stop being reported',
+    file: 'engine/model/refs.ts', from: '  return [...index.ids].filter(([, list]) => list.length > 1).map(([id]) => id);', to: '  return [...index.ids].filter(([, list]) => list.length > 2).map(([id]) => id);',
+    run: engineTests('report/import-report.test.ts'), expect: /✖ duplicate ids are kept as written/,
+  },
+  {
+    id: 'B235', what: 'an internal parameter entity is read as a general one (and expanded)',
+    file: 'engine/xml/entities.ts', from: '    if (m[1]) table.parameter.add(name);\n    else if (m[3])', to: '    if (m[1] && m[3]) table.parameter.add(name);\n    else if (m[3])',
+    run: XML_TESTS, expect: /✖ parameter entities are recorded and never expanded/,
+  },
+  {
+    id: 'B236', what: "an edit rewrites a path's unparsed tail",
+    file: 'engine/path/serialize.ts', from: "  return p.segs.map((s) => s.raw).join('') + p.tail;", to: "  return p.segs.map((s) => s.raw).join('') + p.tail.replace(/^,/, ' ');",
+    run: engineTests('corpus/corpus.test.ts'), expect: /✖ a path is drawn up to its first error, and an edit before it keeps the unparsed rest byte for byte/,
+  },
+  {
+    id: 'B237', what: 'the corpus loses its only inline-size',
+    file: 'engine/test/fixtures/corpus/tools/inkscape-1x-plain-svg2-flowed-text.svg', from: 'white-space:pre;inline-size:180.5;fill', to: 'white-space:pre;fill',
+    run: engineTests('corpus/corpus.test.ts'), expect: /✖ every kept \(preserve\) row of this phase occurs in the corpus/,
+  },
+  {
+    id: 'B238', what: 'the shared CSS guard starts refusing a kept colour function (light-dark)',
+    file: 'scripts/lib/svg-profile.mjs', from: '  if (/@import|expression\\s*\\(', to: '  if (/@import|light-dark\\s*\\(|expression\\s*\\(',
+    run: engineTests('policy/render-corpus.test.ts'), expect: /✖ every kept \(preserve\) row of this phase that renders is drawn as written/,
+  },
+  {
+    id: 'B239', what: 'the corpus loses its only <tref>',
+    file: 'engine/test/fixtures/corpus/tools/edge-svg11-tref-altglyph.svg', from: 'Made by <tref xlink:href="#product-name"/></text>', to: 'Made by Northwind</text>',
+    run: engineTests('corpus/corpus.test.ts'), expect: /✖ every kept \(preserve\) row of this phase occurs in the corpus/,
+  },
+  // P0-M5: the tests behind the P0 features, and @namespace's two forms.
+  {
+    id: 'B240', what: 'check-sinks forgets insertAdjacentHTML',
+    file: 'projects/draw/tools/check-sinks.mjs', from: '|insertAdjacentHTML|', to: '|',
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks fails the build on planted HTML sinks/,
+  },
+  {
+    id: 'B241', what: 'check-library --site stops checking the .svg files it serves',
+    file: 'scripts/check-library.mjs', from: '    if (/\\.svg$/i.test(file)) for (const f of svgFindings(file)) out.push(`${rel}:${f}`);\n', to: '',
+    run: drawTests('check-library.test.ts'), expect: /✖ check-library --site: every \.svg anywhere on the built site must be inert/,
+  },
+  {
+    id: 'B242', what: "the canvas's CSS guard lets @namespace's url() through",
+    file: 'engine/policy/render-policy.ts', from: "  const ok = (u: string) => u.startsWith('#') || CSS_DATA.test(u);", to: "  const ok = (u: string) => u.startsWith('#') || CSS_DATA.test(u) || u.startsWith('http://www.w3.org/2000/svg');",
+    run: POLICY_TESTS, expect: /✖ @namespace: the string form renders; the url\(\) form is kept byte for byte/,
+  },
+  {
+    id: 'B243', what: "the served profile's CSS guard lets @namespace's url() through",
+    file: 'scripts/lib/svg-profile.mjs', from: "    if (u.startsWith('#')) continue;", to: "    if (u.startsWith('#') || u.startsWith('http://www.w3.org/2000/svg')) continue;",
+    run: drawTests('svg-profile.test.ts'), expect: /✖ @namespace: a file with the string form is served; one with the url\(\) form is refused/,
+  },
+  // P0-M5: e2e checks as ledger evidence, and the phase gate after the P0 exit.
+  {
+    id: 'B244', what: 'a ledger row cites an e2e check that does not exist',
+    file: 'engine/ledger/ledger.json', from: '"projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"', to: '"projects/draw/test/e2e.mjs#cspIsFirstAndEnforce"',
+    run: LEDGER_CHECK, expect: /feature:meta-csp: cspIsFirstAndEnforce is not a function in projects\/draw\/test\/e2e\.mjs/,
+  },
+  {
+    id: 'B245', what: 'a cited e2e check is no longer run through check()',
+    file: 'projects/draw/test/e2e.mjs', from: '  await check(cspIsFirstAndEnforced);\n', to: '',
+    run: LEDGER_CHECK, expect: /feature:meta-csp: projects\/draw\/test\/e2e\.mjs#cspIsFirstAndEnforced is not run through check\(\)/,
+  },
+  {
+    id: 'B246', what: 'a cited e2e check fails', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: "must(first === 'meta Content-Security-Policy',", to: "must(first === 'no such element',",
+    run: SITE_E2E_EVIDENCE, expect: /feature:meta-csp: cited e2e check did not pass in every call \(or did not run, or asserted nothing\): projects\/draw\/test\/e2e\.mjs#cspIsFirstAndEnforced/,
+  },
+  {
+    id: 'B247', what: 'a cited e2e check is skipped (still called through check(), so the static check passes)', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: '  await check(cspIsFirstAndEnforced);', to: "  if (origin === 'never') await check(cspIsFirstAndEnforced);",
+    run: SITE_E2E_EVIDENCE, expect: /feature:meta-csp: cited e2e check did not pass in every call \(or did not run, or asserted nothing\): projects\/draw\/test\/e2e\.mjs#cspIsFirstAndEnforced/,
+  },
+  {
+    id: 'B248', what: 'e2e evidence older than the e2e is taken as evidence',
+    create: '.smoke/stale-e2e-evidence.jsonl', content: '',
+    run: ['sh', ['-c', 'touch -d 2000-01-01 .smoke/stale-e2e-evidence.jsonl && node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/stale-e2e-evidence.jsonl'], REPO],
+    expect: /stale-e2e-evidence\.jsonl: older than projects\/draw\/test\/e2e\.mjs/,
+  },
+  {
+    id: 'B249', what: 'a phase-0 row is reopened after the P0 exit',
+    file: 'engine/ledger/ledger.json', from: '"group":"P0","phase":0,"status":"done","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]', to: '"group":"P0","phase":0,"status":"planned","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]',
+    run: LEDGER_CHECK, expect: /feature:meta-csp: phase 0 is behind the current phase 1 but the row is planned/,
+  },
+  // P0-M5 review fixes: the served profile (version 4).
+  {
+    id: 'B250', what: "the served profile reads a url() only when it is closed",
+    file: 'scripts/lib/svg-profile.mjs', from: "  for (const m of t.matchAll(/url\\s*\\(\\s*['\"]?/g)) {\n    const u = squash(t.slice(m.index + m[0].length));", to: "  for (const m of t.matchAll(/url\\s*\\(\\s*(['\"]?)(.*?)\\1\\s*\\)/g)) {\n    const u = squash(m[2]);",
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: a resource on another site[^\n]*\n[\s\S]*a fill never closed/,
+  },
+  {
+    id: 'B251', what: 'the served profile reads CSS only with its comments removed',
+    file: 'scripts/lib/svg-profile.mjs', from: "return [t, t.replace(/\\/\\*[\\s\\S]*?\\*\\//g, '')].every(cssReadingAllowed);", to: "return cssReadingAllowed(t.replace(/\\/\\*[\\s\\S]*?\\*\\//g, ''));",
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: @import, whatever its form/,
+  },
+  {
+    id: 'B252', what: 'the served profile lets an XHTML srcset or background through',
+    file: 'scripts/lib/svg-profile.mjs', from: "  if (el.ns === XHTML_NS && (local === 'srcset' || local === 'background')) { add('url', at); return; }\n", to: '',
+    run: drawTests('svg-profile.test.ts'), expect: /✖ never served: a resource on another site[^\n]*\n[\s\S]*an HTML srcset/,
+  },
+  // P0-M5 review fixes: a file over Draw's limits is refused, not shown as "not well-formed" source.
+  {
+    id: 'B253', what: "the importer shows a file over Draw's limits as source",
+    file: 'projects/draw/src/import.ts', from: "    if (kind === 'limit') return failed(input, `${message} (over Draw’s limits)`, text, at);\n", to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a well-formed file over Draw's limits opens nowhere, not even as source/,
+  },
+  {
+    id: 'B254', what: 'the depth limit is reported as a well-formedness error',
+    file: 'engine/xml/cst.ts', from: "message: `nesting deeper than ${limits.maxDepth}`, kind: 'limit' }", to: 'message: `nesting deeper than ${limits.maxDepth}` }',
+    run: XML_TESTS, expect: /✖ a limit failure says so \(kind 'limit'\)/,
+  },
+  {
+    id: 'B255', what: 'an entity that expands too far is reported as a well-formedness error',
+    file: 'engine/xml/entities.ts', from: "export class EntityBudgetError extends Error {\n  readonly kind = 'limit';", to: "export class EntityBudgetError extends Error {\n  readonly kind = undefined;",
+    run: XML_TESTS, expect: /✖ a limit failure says so \(kind 'limit'\)/,
+  },
+  // P0-M5 review fixes: the e2e evidence (a check that asserts nothing, fails for one of its
+  // arguments, or ran before its helpers or the build changed is no evidence).
+  {
+    id: 'B256', what: 'a cited e2e check returns before asserting anything (an engine-guarded early return)', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: "  await withPage(browser, origin, 956, async (page, errors) => {\n    const first = await page.evaluate(() => {", to: "  await withPage(browser, origin, 956, async (page, errors) => {\n    if (origin) return;\n    const first = await page.evaluate(() => {",
+    run: SITE_E2E_EVIDENCE, expect: /feature:meta-csp: cited e2e check did not pass in every call \(or did not run, or asserted nothing\): projects\/draw\/test\/e2e\.mjs#cspIsFirstAndEnforced/,
+  },
+  {
+    id: 'B257', what: 'a cited e2e check fails for one of its arguments (dark) and passes for the other (light)', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: 'must(files.length >= 200, `the fidelity check found', to: "must(files.length >= 200 && colorScheme !== 'dark', `the fidelity check found",
+    run: SITE_E2E_EVIDENCE, expect: /: cited e2e check did not pass in every call \(or did not run, or asserted nothing\): projects\/draw\/test\/e2e\.mjs#corpusLooksAsItDoesAlone/,
+  },
+  {
+    id: 'B258', what: 'e2e evidence older than a helper the e2e runs is taken as evidence',
+    file: 'projects/draw/test/probe-helpers/png.mjs', append: '\n// changed after the e2e ran\n',
+    create: '.smoke/helper-e2e-evidence.jsonl', content: '{"complete":true,"engine":"chromium","calls":0}\n',
+    run: ['sh', ['-c', 'touch -r projects/draw/test/e2e.mjs .smoke/helper-e2e-evidence.jsonl && node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/helper-e2e-evidence.jsonl'], REPO],
+    expect: /helper-e2e-evidence\.jsonl: older than projects\/draw\/test\/probe-helpers\/png\.mjs/,
+  },
+  {
+    id: 'B259', what: 'e2e evidence is taken with no built page to be evidence of',
+    create: '.smoke/nosite-e2e-evidence.jsonl', content: '{"complete":true,"engine":"chromium","calls":0}\n',
+    run: ['sh', ['-c', 'mv _site/draw/index.html _site/draw/index.html.away 2>/dev/null; node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/nosite-e2e-evidence.jsonl; s=$?; mv _site/draw/index.html.away _site/draw/index.html 2>/dev/null; exit $s'], REPO],
+    expect: /nosite-e2e-evidence\.jsonl: there is no _site\/draw\/index\.html/,
+  },
+  {
+    id: 'B260', what: 'e2e evidence from a run that never finished (no complete line) is taken as evidence',
+    create: '.smoke/partial-e2e-evidence.jsonl', content: '{"file":"projects/draw/test/e2e.mjs","name":"cspIsFirstAndEnforced","engine":"chromium"}\n',
+    run: ['node', ['projects/draw/tools/ledger-check.mjs', '--e2e-evidence', '.smoke/partial-e2e-evidence.jsonl'], REPO],
+    expect: /partial-e2e-evidence\.jsonl: not a complete run/,
+  },
+  {
+    id: 'B261', what: "the smoke test leaves an earlier run's Draw e2e evidence in place", slow: true,
+    file: 'scripts/smoke-test.mjs', from: "rmSync(join(ROOT, '.smoke', 'draw-e2e-evidence.jsonl'), { force: true });", to: '',
+    run: ['sh', ['-c', 'node scripts/build-site.mjs >/dev/null && mkdir -p .smoke && echo earlier > .smoke/draw-e2e-evidence.jsonl && E2E=none node scripts/smoke-test.mjs >/dev/null; if [ -e .smoke/draw-e2e-evidence.jsonl ]; then echo "an earlier run\'s Draw e2e evidence survived the smoke test"; rm .smoke/draw-e2e-evidence.jsonl; exit 1; fi'], REPO],
+    expect: /an earlier run's Draw e2e evidence survived the smoke test/,
+  },
+  {
+    id: 'B262', what: "the probe's @font-face gap is listed for WebKit only, so Chromium must pass it too (gaps are gated per engine)", slow: true,
+    file: 'projects/draw/test/probe-shadow.mjs', from: "gap: ['chromium']", to: "gap: ['webkit']",
+    run: SITE_E2E, expect: /shadow root breaks 1 feature\(s\) that work in the light DOM in chromium[^:]*: @font-face in the document's <style>/,
+  },
+  // P0-M5 review fixes: the code panel and the canvas.
+  {
+    id: 'B263', what: "Tidy ends an attribute's wrap at its closing quote, so a tag's close drops to a line of its own",
+    file: 'projects/draw/src/codeview/layout.ts', from: 'end: a === attrs[attrs.length - 1] ? b.text.length : a.end', to: 'end: a.end',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view keeps a tag's close with its last attribute/,
+  },
+  {
+    id: 'B264', what: "the code view draws a tag's close after its last wrap (the start of a line of its own)", slow: true,
+    file: 'projects/draw/src/codeview/code-view.ts', from: '      this.fill(wrap, b, t, w.at, w.end);\n      el.append(wrap);\n      at = w.end;',
+    to: "      const stop = w.end === b.text.length ? b.text.lastIndexOf(b.text.endsWith('/>') ? '/>' : '>') : w.end;\n      this.fill(wrap, b, t, w.at, stop);\n      el.append(wrap);\n      at = stop;",
+    run: SITE_E2E, expect: /tidyKeepsEachCloseWithItsTag: \d+ tag close\(s\) start a line of their own in the tidy view/,
+  },
+  {
+    id: 'B265', what: 'Tidy keeps a line break around an attribute\'s "="',
+    file: 'projects/draw/src/codeview/layout.ts', from: '    swaps.push(...unbreak(b.text, a.at + a.name.length, a.valueAt - 1));', to: '',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view takes line breaks out of a tag's own syntax/,
+  },
+  {
+    id: 'B266', what: 'Tidy keeps a line break before an end tag\'s ">"',
+    file: 'projects/draw/src/codeview/layout.ts', from: 'swaps: end ? unbreak(b.text, end[0].length, b.text.length - 1) : []', to: 'swaps: []',
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view takes line breaks out of a tag's own syntax/,
+  },
+  {
+    id: 'B267', what: 'the first Play under reduced motion resumes from the opening still (a fade that animates once shows no motion)', slow: true,
+    file: 'projects/draw/src/canvas/renderer.ts', from: '      if (this.#fromStill) svg.setCurrentTime(0);\n', to: '',
+    run: SITE_E2E, expect: /Play shows no motion/,
+  },
+  {
+    id: 'B268', what: "Pause under reduced motion drops a CSS animation back to its base style instead of holding its frame", slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '\n:host(.draw-held) *, :host(.draw-held) *::before, :host(.draw-held) *::after { animation-play-state: paused !important; transition: none !important }', to: '',
+    run: SITE_E2E, expect: /Pause did not hold the CSS animation on its frame/,
+  },
+  {
+    id: 'B269', what: 'the theme chosen in Files goes on <html> only after React has drawn (a load flashes the system theme)', slow: true,
+    file: 'projects/draw/src/main.tsx', from: "if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;\n", to: '',
+    run: SITE_E2E, expect: /a load with Dark chosen drew the app in the system's theme first/,
+  },
+  {
+    id: 'B270', what: "the legend's samples lose their token chips (plain coloured words among the verbs)", slow: true,
+    file: 'projects/draw/src/app.css', from: '  background: color-mix(in srgb, currentColor 12%, transparent);\n  font-family: var(--font-mono);\n', to: '',
+    run: SITE_E2E, expect: /the samples are not chips in code type apart from the words/,
+  },
+  {
+    id: 'B271', what: 'Export over a file shown as source says "Nothing is open."', slow: true,
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: "{unparsed ? 'A file that isn’t well-formed can’t be exported; Copy (over the code) has its text.' : 'Nothing is open.'}", to: 'Nothing is open.',
+    run: SITE_E2E, expect: /Export over the source says/,
+  },
+  {
+    id: 'B272', what: 'the legend shows over a file shown as source', slow: true,
+    file: 'projects/draw/src/panels/CodePanel.tsx', from: '{!source && !readOnly && <Legend />}', to: '{!readOnly && <Legend />}',
+    run: SITE_E2E, expect: /the legend shows over source that nothing can edit/,
+  },
+  {
+    id: 'B273', what: 'Enter no longer closes the Number sheet', slow: true,
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "          onKeyDown={(e) => e.key === 'Enter' && close()}\n        />\n        {unit &&", to: '        />\n        {unit &&',
+    run: SITE_E2E, expect: /Enter did not close the Number sheet/,
+  },
+  {
+    id: 'B274', what: 'any CSS that mentions "animation" counts as motion (a still drawing gets a Play that does nothing)',
+    file: 'projects/draw/src/canvas/renderer.ts', from: "const CSS_MOTION = /@keyframes|(?:^|[{;\\s])animation(?:-name)?\\s*:(?!\\s*none\\s*(?:[;}!]|$))/i;", to: 'const CSS_MOTION = /animation|@keyframes/i;',
+    run: drawTests('motion.test.ts'), expect: /✖ CSS moves with @keyframes/,
+  },
+  {
+    id: 'B275', what: 'the tap slop on the canvas grows from 5 pt to 8',
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'export const SLOP = 5;', to: 'export const SLOP = 8;',
+    run: drawTests('viewport.test.ts'), expect: /✖ a move under 5 pt is a tap; 5 pt or more/,
+  },
+  {
+    id: 'B276', what: 'Tidy hides a value, in files only the whole corpus has (heroicons\' aria-hidden)',
+    file: 'projects/draw/src/codeview/layout.ts', from: '    swaps.push(...unbreak(b.text, a.at + a.name.length, a.valueAt - 1));', to: "    swaps.push(...unbreak(b.text, a.at + a.name.length, a.valueAt - 1));\n    if (a.name === 'aria-hidden') swaps.push({ at: a.valueAt, end: a.valueEnd, text: '' });",
+    run: drawTests('code-panel.test.ts'), expect: /✖ the tidy view swaps only whitespace, never inside a token, over the whole corpus/,
+  },
+  {
+    id: 'B277', what: 'a DEVICE-CHECKS.md link is damaged (it no longer opens the looping drawing its row names)',
+    file: 'projects/draw/DEVICE-CHECKS.md', from: 'and [one that loops](https://mmaggitti.github.io/draw/#import=TVDL', to: 'and [one that loops](https://mmaggitti.github.io/draw/#import=NY5N',
+    run: drawTests('device-checks.test.ts'), expect: /✖ DEVICE-CHECKS\.md's links decode and open as their rows say/,
   },
 ];
 

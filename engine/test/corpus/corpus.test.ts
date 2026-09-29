@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 import { lex } from '../../xml/lex.ts';
 import { parseDoc, serialize, descendants, attrValue, textContent, NS, type Doc, type ElementNode } from '../../model/doc.ts';
 import { parsePath } from '../../path/parse.ts';
+import { editArg, serializePath } from '../../path/serialize.ts';
+import { renderValue } from '../../policy/render-policy.ts';
+import { KEPT, loadCorpus, sitesOf } from './kept.ts';
 
 const CORPUS = fileURLToPath(new URL('../fixtures/corpus/', import.meta.url));
 
@@ -41,7 +44,7 @@ test('every folder holds the files it should', () => {
   // (tools/capture-lab-corpus.mjs). tools: hand-written (tools/README.md). A re-capture that adds
   // or loses a lab mode changes this count on purpose.
   const sets = ['bootstrap', 'feather', 'heroicons', 'lucide', 'simple-icons', 'tabler'];
-  assert.deepEqual(counts, { ...Object.fromEntries(sets.map((s) => [`icons/${s}`, 25])), lab: 66, tools: 37 });
+  assert.deepEqual(counts, { ...Object.fromEntries(sets.map((s) => [`icons/${s}`, 25])), lab: 66, tools: 44 });
   for (const s of sets) assert.ok(readFileSync(`${CORPUS}icons/${s}/LICENSE.txt`, 'utf8').length > 0, `icons/${s} has its license`);
 });
 
@@ -80,19 +83,72 @@ test('every corpus file survives a full rebuild: all nodes dirty, bytes unchange
   }
 });
 
+// One file holds path data with an error on purpose (value:path/error-tail, tested below).
+const ERROR_TAILS = 'tools/edge-path-comma-joined-commands.svg';
+
 test('every path in the corpus parses without error', () => {
   let n = 0;
+  let tails = 0;
   for (const rel of FILES) {
     const { doc } = load(rel);
     for (const e of elements(doc)) {
       const d = e.ns === NS.svg && e.local === 'path' ? attrValue(doc, e, null, 'd') : null;
       if (d === null) continue;
       const p = parsePath(d);
-      assert.equal(p.error, null, `${rel}: ${p.error?.message} in ${JSON.stringify(d.slice(0, 60))}`);
+      if (rel === ERROR_TAILS && p.error) tails++;
+      else assert.equal(p.error, null, `${rel}: ${p.error?.message} in ${JSON.stringify(d.slice(0, 60))}`);
       n++;
     }
   }
   assert.ok(n >= 400, `only ${n} paths: the corpus lost files`);
+  assert.equal(tails, 2, `${ERROR_TAILS} lost its error tails`);
+});
+
+// SVG draws a path up to its first error. Draw keeps the rest as written: the canvas passes the
+// value to the browser unchanged, and an edit before the error rewrites one number, never the tail.
+test('a path is drawn up to its first error, and an edit before it keeps the unparsed rest byte for byte', () => {
+  const { src, doc } = load(ERROR_TAILS);
+  const paths = elements(doc).filter((e) => e.local === 'path');
+  const tails: string[] = [];
+  for (const e of paths) {
+    const d = attrValue(doc, e, null, 'd')!;
+    const p = parsePath(d);
+    if (!p.error) continue;
+    assert.equal(p.segs.map((s) => s.raw).join('') + p.tail, d, 'the parse is lossless');
+    assert.ok(p.tail.length > 0 && p.error.at >= d.length - p.tail.length, `${d}: the error lies in the tail`);
+    tails.push(p.tail);
+    assert.equal(renderValue(e, e.attrs.find((a) => a.local === 'd')!, d), d, 'the canvas passes the whole value to the browser');
+    const edited = serializePath(editArg(p, 0, 0, 12));
+    assert.ok(edited.endsWith(p.tail), `${d}: the edit kept the tail`);
+    assert.equal(edited.slice(0, -p.tail.length), p.segs.map((s) => s.raw).join('').replace(/^M10/, 'M12'), `${d}: only the number changed`);
+    assert.deepEqual(parsePath(edited).error?.message, p.error.message, `${d}: the error is still there`);
+  }
+  // A comma before a command, and a trailing one: Blink and WebKit draw past both, Gecko does not.
+  assert.deepEqual(tails, [',L50,40,L90,70,L130,20', ',']);
+  assert.equal(serialize(doc), src);
+});
+
+// A row the ledger keeps and renders (class preserve) is proven by the corpus holding it the way
+// real files use it: here, that each occurs somewhere (found by kept.ts) and its files survive a
+// full rebuild unchanged. The render and served halves: render-corpus.test.ts and ledger.test.ts.
+test('every kept (preserve) row of this phase occurs in the corpus, and its files round-trip byte for byte', () => {
+  const corpus = loadCorpus();
+  assert.ok(KEPT.length >= 25, `only ${KEPT.length} kept rows: the ledger lost them`);
+  const files = new Set<string>();
+  for (const row of KEPT) {
+    const sites = corpus.flatMap((f) => sitesOf(row, f));
+    assert.ok(sites.length > 0, `${row.id}: not in the corpus`);
+    for (const s of sites) files.add(s.file);
+  }
+  for (const f of corpus.filter((x) => files.has(x.file))) {
+    const { doc } = load(f.file);
+    for (const n of doc.nodes.values()) {
+      if (n.kind === 'element') n.tagDirty = n.childrenDirty = true;
+      else n.dirty = true;
+    }
+    assert.equal(serialize(doc), f.src, `${f.file}: rebuilt round trip`);
+    assert.equal(serialize(f.doc), f.src, `${f.file}: round trip`);
+  }
 });
 
 // XML 1.0 §2.11 and §3.3.3: a processor turns CRLF and lone CR into LF, then every TAB, CR and LF

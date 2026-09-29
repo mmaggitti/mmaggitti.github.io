@@ -82,6 +82,35 @@ test('entities: predefined and numeric decode; internal expand; external never',
   assert.ok(t.parameter.has('p'));
 });
 
+// A browser's XML parser expands a parameter entity at declaration level in the internal subset,
+// which can declare more entities. Draw records them and never expands one, so nothing a
+// parameter entity declares ever reaches a value; its references stay as written.
+test('parameter entities are recorded and never expanded: in the DOCTYPE, in text or in values', () => {
+  const src = `<!DOCTYPE svg [
+  <!ENTITY % decl "<!ENTITY name 'Draw'>">
+  %decl;
+  <!ENTITY % fill "red">
+  <!ENTITY % extra SYSTEM "extra.dtd">
+  %extra;
+  <!ENTITY brand "Draw">
+]>
+<svg xmlns="http://www.w3.org/2000/svg"><text>&name; by &brand;</text><rect fill="&fill;"/><rect fill="%fill;"/></svg>`;
+  const r = parseDoc(src);
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const { entities } = r.doc;
+  assert.deepEqual([...entities.parameter].sort(), ['decl', 'extra', 'fill'], 'recorded');
+  assert.deepEqual([...entities.internal.keys()], ['brand'], 'what %decl; would declare is never declared');
+  assert.deepEqual([...entities.external], [], 'an external parameter entity is not a general one either');
+  const [text, rect, rect2] = [...descendants(r.doc, r.doc.root)].filter((n) => n.kind === 'element').slice(1).map((n) => el(r.doc, n.id));
+  assert.equal(textContent(r.doc, text.id), '&name; by Draw', 'a general reference to what %decl; declares stays as written');
+  assert.equal(attrValue(r.doc, rect, null, 'fill'), '&fill;', 'a parameter entity is not a general entity of the same name');
+  assert.equal(attrValue(r.doc, rect2, null, 'fill'), '%fill;', 'outside the DTD, % is only text');
+  const unresolved = new Set<string>();
+  assert.equal(decode('&decl;&extra;', entities, newBudget(), 0, unresolved), '&decl;&extra;');
+  assert.deepEqual([...unresolved].sort(), ['decl', 'extra']);
+  assert.equal(serialize(r.doc), src, 'the DOCTYPE and every reference are kept byte for byte');
+});
+
 test('a billion-laughs document fails within the entity budget', () => {
   let subset = '<!ENTITY lol "lollollollollollollollollollol">';
   for (let i = 1; i <= 9; i++) subset += `<!ENTITY lol${i} "${`&lol${i === 1 ? '' : i - 1};`.repeat(10)}">`;
@@ -152,6 +181,25 @@ test('limits: size, node count and depth fail cleanly', () => {
   assert.equal(parseCst('<svg/>', { maxBytes: 3, maxNodes: 10, maxDepth: 10 }).ok, false);
   assert.equal(parseCst('<svg>' + '<g/>'.repeat(20) + '</svg>', { maxBytes: 1e6, maxNodes: 10, maxDepth: 10 }).ok, false);
   assert.equal(parseCst('<g>'.repeat(20) + '</g>'.repeat(20), { maxBytes: 1e6, maxNodes: 1e5, maxDepth: 10 }).ok, false);
+});
+
+test("a limit failure says so (kind 'limit'), in the CST and through parseDoc's entity checks; a well-formedness error does not", () => {
+  for (const [src, limits, message] of [
+    ['<svg/>'.padEnd(2e6), { maxBytes: 1e6, maxNodes: 10, maxDepth: 10 }, 'file is larger than 1 MB'],
+    ['<svg>' + '<g/>'.repeat(20) + '</svg>', { maxBytes: 1e6, maxNodes: 10, maxDepth: 10 }, 'more than 10 nodes'],
+    ['<g>'.repeat(20) + '</g>'.repeat(20), { maxBytes: 1e6, maxNodes: 1e5, maxDepth: 10 }, 'nesting deeper than 10'],
+  ] as const) {
+    const r = parseCst(src, limits);
+    assert.ok(!r.ok && r.error.kind === 'limit' && r.error.message === message, !r.ok ? r.error.message : 'parsed');
+  }
+  const entity = (decl: string, body: string) => parseDoc(`<!DOCTYPE svg [${decl}]><svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`);
+  for (const r of [entity(`<!ENTITY a "${'x'.repeat(1000)}"><!ENTITY b "${'&a;'.repeat(2000)}">`, '<text>&b;</text>'), entity('<!ENTITY r "<rect/>">', '&r;')]) {
+    assert.ok(!r.ok && r.error.kind === 'limit', !r.ok ? r.error.message : 'parsed');
+  }
+  for (const src of ['<svg><g></svg>', '<svg a="1" a="2"', '<svg/><svg/>', '<svg>&#x3c;</g></svg>']) {
+    const r = parseDoc(src);
+    assert.ok(!r.ok && r.error.kind === undefined, src);
+  }
 });
 
 test('a DOCTYPE outside the prolog, or an XML declaration after the start, is refused as a browser refuses it', () => {

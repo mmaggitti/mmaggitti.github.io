@@ -155,8 +155,13 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   - The GitHub token comes from Mark at run time (Keychain-filled, memory only), never from a file.
 - **Device checks:** `projects/draw/DEVICE-CHECKS.md` lists what CI can't prove (gesture feel, iOS
   pickers and share sheets, the keyboard, storage); Mark signs it on his phone for each phase.
-- **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit) → vite build →
-  library-index`. It runs inside `npm run build`, so CI gates all of it.
+- **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit, recorded as
+  evidence) → ledger-check --evidence → vite build → library-index`. It runs inside `npm run build`,
+  so CI gates all of it. After the smoke test, `ledger-check --e2e-evidence` requires every e2e check
+  a ledger row cites to have passed in that run (WebKit in CI), in every call and asserting
+  something, in a complete run newer than the e2e, its helpers and the built page.
+- **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
+  earlier phase must be done or superseded. P0 closed on 2026-09-29 (`currentPhase` 1).
 
 ## Cloud-container limits
 

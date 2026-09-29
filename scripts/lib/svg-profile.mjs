@@ -15,7 +15,11 @@
 import { ACTIVE_ATTRIBUTES, ELEMENTS, METADATA_NS, XHTML_ELEMENTS, SMIL_ELEMENTS } from './svg-profile-tables.mjs';
 
 // 2: the tables are generated from Draw's support ledger, and its active attributes are refused.
-export const PROFILE_VERSION = 2;
+// 3: a url(), image-set() or escape in any other attribute value (a presentation attribute, a SMIL
+//    value) must pass the CSS rule too.
+// 4: a url() is read from its start (one never closed is still a url()), CSS is read with its
+//    comments both kept and removed, and XHTML srcset and background are refused.
+export const PROFILE_VERSION = 4;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -61,11 +65,17 @@ export function cssAllowed(css) {
   const t = css
     .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, h) => String.fromCodePoint(Math.min(parseInt(h, 16), 0x10ffff)))
     .replace(/\\(.)/g, '$1')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
     .toLowerCase();
+  // A comment can split a keyword ("u/**/rl("), and "/*" inside a string starts no comment, so the
+  // text must pass with its comments kept and with them removed (as the canvas's guard reads it).
+  return [t, t.replace(/\/\*[\s\S]*?\*\//g, '')].every(cssReadingAllowed);
+}
+
+function cssReadingAllowed(t) {
   if (/@import|expression\s*\(|behavior\s*:|-moz-binding|javascript:|image-set\s*\(/.test(t)) return false;
-  for (const m of t.matchAll(/url\s*\(\s*(['"]?)(.*?)\1\s*\)/g)) {
-    const u = squash(m[2]);
+  // Each url() is read from its start: a browser reads one with no closing ")" or quote to the end.
+  for (const m of t.matchAll(/url\s*\(\s*['"]?/g)) {
+    const u = squash(t.slice(m.index + m[0].length));
     if (u.startsWith('#')) continue;
     if (/^data:(image\/(png|jpeg|gif|webp)|font\/)/.test(u)) continue;
     if (!/^[a-z][a-z0-9+.-]*:/.test(u) && !u.startsWith('//')) continue; // relative
@@ -251,6 +261,8 @@ function checkAttribute(el, attr, rawValue, add, at) {
     add('foreign-attribute', at); // inkscape:*, sodipodi:*, i:*, x:* are editor data, not served
     return;
   }
+  // HTML attributes that load an image by URL (the full XHTML attribute allowlist is P2's).
+  if (el.ns === XHTML_NS && (local === 'srcset' || local === 'background')) { add('url', at); return; }
   if (local === 'href' || local === 'src') {
     if (el.local === 'use' && el.ns === SVG_NS && !squash(value).startsWith('#')) add('use-href-not-fragment', at);
     else if (!urlAllowed(value, el.local)) add('url', at);
@@ -263,6 +275,10 @@ function checkAttribute(el, attr, rawValue, add, at) {
     return;
   }
   // SMIL values/from/to/by on a URL-bearing target are covered by smil-retarget above; any other
-  // attribute value holding a script URL is still refused.
+  // attribute value holding a script URL is still refused. Presentation attributes are CSS
+  // (fill="url(…)", mask, filter, cursor) and SMIL values feed them, so a value that can load
+  // something through CSS (a url(), an image-set(), or escapes that could spell one) must pass the
+  // CSS rule too.
   if (/^javascript:|^vbscript:|^data:text\/html/i.test(squash(value))) add('url', at);
+  else if (/url\s*\(|image-set\s*\(|\\/i.test(value) && !cssAllowed(value)) add('css', at);
 }

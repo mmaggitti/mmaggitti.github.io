@@ -30,12 +30,17 @@ export class Views {
         setCamera: (rect) => r().setCamera(rect),
         nodeFor: (id) => r().nodeFor(id),
         stats: () => r().stats(),
+        clear: () => r().clear(),
+        motion: () => r().motion(),
+        play: (on) => r().play(on),
       },
       code: {
         set: (blocks) => this.code?.set(blocks),
         patch: (block) => this.code?.patch(block),
         select: (nodes) => this.code?.select(nodes),
         focus: (mark) => this.code?.focus(mark),
+        readOnly: (on) => this.code?.readOnly(on),
+        source: (text, at) => this.code?.source(text, at),
       },
       overlay: { outline: (ids) => this.#outline(ids) },
       hostSize: () => {

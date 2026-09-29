@@ -2,7 +2,9 @@
 // drop, an #import link, a draft, New and the sample), so nothing skips the engine's parser or
 // the render sink (the plan's "one importer"). A file → readFile → bytes → decodeSvg (gzip,
 // encodings) → parseDoc → editor.open(doc) → the import report. A file that fails anywhere before the editor opens it
-// opens nowhere: the result says why and where, and the drawing that was open stays.
+// opens nowhere: the result says why and where, and the drawing that was open stays (a file over
+// Draw's limits among them). One that isn't well-formed carries its text too, which the workspace
+// shows as read-only source (never drawn).
 //
 // It holds no state and touches no DOM, so node's test runner drives it with a real Editor over
 // fake views (test/unit/import.test.ts).
@@ -46,6 +48,8 @@ export interface ImportFailure {
   via: Via;
   name: string;
   message: string;
+  /** The text of a file that isn't well-formed, and where it fails in it: it opens as read-only source. */
+  source: { text: string; at: number } | null;
   /** Where in the text it failed (1-based), when the text was read at all. */
   line: number | null;
   column: number | null;
@@ -104,7 +108,7 @@ function excerptAt(text: string, at: number): { text: string; at: number } {
 }
 
 function failed(input: ImportInput, message: string, text?: string, at?: number): ImportFailure {
-  const fail: ImportFailure = { ok: false, via: input.via, name: drawingName(input.name, null, input.via), message, line: null, column: null, excerpt: null };
+  const fail: ImportFailure = { ok: false, via: input.via, name: drawingName(input.name, null, input.via), message, source: null, line: null, column: null, excerpt: null };
   if (text !== undefined && at !== undefined) {
     // A BOM is not a column: positions count from the first character after it.
     if (text.charCodeAt(0) === 0xfeff && at > 0) [text, at] = [text.slice(1), at - 1];
@@ -135,7 +139,12 @@ export async function importSvg(target: OpenTarget, input: ImportInput): Promise
   // Markup starts with "<" (after a BOM and blank space): anything else (a PNG, a text file) isn't one.
   if (!/^\uFEFF?\s*</.test(text)) return failed(input, 'this isn’t an SVG file');
   const parsed = parseDoc(text);
-  if (!parsed.ok) return failed(input, parsed.error.message, text, parsed.error.at);
+  if (!parsed.ok) {
+    const { at, message, kind } = parsed.error;
+    // Over Draw's limits (the file may well be well-formed): refused, and the drawing that was open stays.
+    if (kind === 'limit') return failed(input, `${message} (over Draw’s limits)`, text, at);
+    return { ...failed(input, message, text, at), source: { text, at } };
+  }
   const doc = parsed.doc;
   const root = el(doc, doc.root);
   if (root.ns !== NS.svg || root.local !== 'svg') {

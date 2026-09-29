@@ -9,6 +9,7 @@ import { parseDoc, descendants, NS, type ElementNode } from '../model/doc.ts';
 import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../policy/tables.ts';
 import { ACTIVE_ATTRIBUTES, ELEMENTS, XHTML_ELEMENTS } from '../../scripts/lib/svg-profile-tables.mjs';
 import { checkSvg } from '../../scripts/lib/svg-profile.mjs';
+import { KEPT, loadCorpus, sitesOf } from './corpus/kept.ts';
 
 interface Row {
   id: string;
@@ -138,4 +139,17 @@ test('the served profile accepts every attribute the ledger serves, on every ser
     }
   }
   assert.ok(checked > 1000, `only ${checked} element/attribute pairs checked`);
+});
+
+// A kept row the ledger serves must survive in a real file, not only alone: some corpus file that
+// holds it passes the served profile whole. (What the ledger does not serve is refused above.)
+test('every kept (preserve) row of this phase that is served occurs in a corpus file the served profile accepts whole', () => {
+  const corpus = loadCorpus();
+  const clean = new Map(corpus.map((f) => [f.file, checkSvg(f.src).length === 0]));
+  const rows = KEPT.filter((r) => r.serve);
+  assert.ok(rows.length >= 25, `only ${rows.length} served kept rows`);
+  for (const row of rows) {
+    const files = [...new Set(corpus.flatMap((f) => sitesOf(row, f).map((s) => s.file)))];
+    assert.ok(files.some((f) => clean.get(f)), `${row.id}: no corpus file that holds it is served (${files.join(', ') || 'none holds it'})`);
+  }
 });

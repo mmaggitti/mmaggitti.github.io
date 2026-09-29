@@ -125,9 +125,10 @@ test('a broken #import link says so, is cleared, and the most recent draft opens
 test('every way in goes through the importer; one that fails keeps the open drawing, and the next success clears the failure', async () => {
   const { ws, editor, store } = rig();
   void ws.openSample();
-  assert.equal(await ws.openText('<svg xmlns="http://www.w3.org/2000/svg"><g></svg>', '', 'paste'), false);
+  assert.equal(await ws.openText('<html xmlns="http://www.w3.org/1999/xhtml"><body/></html>', '', 'paste'), false);
   const f = ws.failure.get()!;
   assert.equal(f.line, 1);
+  assert.equal(f.source, null, 'well-formed, so not opened as source');
   assert.equal(ws.panel.get(), 'report');
   assert.equal(editor.source(), SAMPLE, 'the drawing that was open stays');
   assert.deepEqual(await store.list(), [], 'and nothing became a draft');
@@ -427,4 +428,85 @@ test("a journal entry that isn't one (another script on the origin) is ignored",
     assert.equal(editor.source(), SAMPLE, `nothing replayed for ${JSON.stringify(raw)}`);
     assert.deepEqual(await store.list(), []);
   }
+});
+
+// ── P0-M5: a file that isn't well-formed, and Copy ─────────────────────────────────────────────
+
+test("a file that isn't well-formed opens as read-only source through the one importer: its text and where it fails, nothing drawn or editable, and no draft; Files reopens the drawing before it", async () => {
+  const { ws, editor, store, settle } = rig();
+  void ws.openSample();
+  assert.ok(await ws.openText(SAMPLE, 'sunset.svg', 'paste'));
+  edit(editor, 'circle', '<circle cx="1" cy="1" r="1"/>'); // a change still waiting to be saved
+  const bad = '<svg xmlns="http://www.w3.org/2000/svg">\n<rect width="1" height="1">\n</svg>\n';
+  assert.equal(await ws.openBytes(utf8(bad), 'broken.svg', 'file'), true, 'it opens, as source');
+  const u = ws.unparsed.get()!;
+  assert.equal(u.name, 'broken');
+  assert.deepEqual([u.line, u.column, u.message], [3, 1, '</svg> closes <rect>'], 'the error, its line and its column');
+  assert.deepEqual(u.source, { text: bad, at: bad.indexOf('</svg>') }, 'its text exactly, and where in it');
+  assert.equal(editor.doc, null, 'the editor never took it: nothing is drawn, and nothing can be edited');
+  assert.equal(editor.source(), '');
+  assert.equal(ws.current.get(), null);
+  assert.equal(ws.failure.get(), null);
+  assert.equal(ws.panel.get(), null, 'no sheet over it: the canvas and the code say what and where');
+  await settle();
+  const drafts = await store.list();
+  assert.deepEqual(drafts.map((d) => d.name), ['sunset'], 'it is not a draft');
+  const before = (await store.load(drafts[0].id))!;
+  assert.ok(before.text.includes('<circle cx="1" cy="1" r="1"/>'), 'the drawing before was saved as its own draft, change and all');
+  // Files: the Import report says why, and reopening the draft leaves the source.
+  ws.show('report');
+  assert.equal(ws.panel.get(), 'report');
+  assert.equal(ws.unparsed.get(), u, 'the report sheet reads it');
+  ws.close();
+  assert.ok(await ws.openDraft(drafts[0].id));
+  assert.equal(ws.unparsed.get(), null);
+  assert.equal(editor.source(), before.text);
+  // A link or a draft that isn't well-formed opens the same way; a draft stays as it is.
+  await store.create('Damaged', bad, 'damaged');
+  assert.ok(await ws.openDraft('damaged'));
+  assert.equal(ws.unparsed.get()?.source.text, bad);
+  await settle();
+  assert.equal((await store.load('damaged'))!.text, bad, 'nothing was written to it');
+  assert.ok(await ws.openLink(await encodeImport(bad), () => {}));
+  assert.equal(ws.unparsed.get()?.via, 'link');
+  // A file that is well-formed but not SVG is still refused, and the source stays.
+  assert.equal(await ws.openText('<html xmlns="http://www.w3.org/1999/xhtml"/>', '', 'paste'), false);
+  assert.equal(ws.panel.get(), 'report');
+  assert.equal(ws.unparsed.get()?.via, 'link');
+});
+
+test("a well-formed file over Draw's limits is refused as before: the report says why and where, it never opens as source, and the drawing that was open stays", async () => {
+  const { ws, editor } = rig();
+  void ws.openSample();
+  assert.ok(await ws.openText(SAMPLE, 'sunset.svg', 'paste'));
+  const deep = `<svg xmlns="http://www.w3.org/2000/svg">\n${'<g>'.repeat(300)}${'</g>'.repeat(300)}</svg>`;
+  assert.equal(await ws.openBytes(utf8(deep), 'deep.svg', 'file'), false, 'it opens nowhere');
+  const f = ws.failure.get()!;
+  assert.deepEqual([f.name, f.line, f.message, f.source], ['deep', 2, 'nesting deeper than 256 (over Draw’s limits)', null]);
+  assert.equal(ws.panel.get(), 'report', 'the report says why');
+  assert.equal(ws.unparsed.get(), null, 'never shown as source: it is well-formed');
+  assert.equal(editor.source(), SAMPLE, 'the drawing that was open stays');
+  assert.equal(ws.current.get()?.name, 'sunset');
+});
+
+test('Copy puts the file on the clipboard exactly as it is (xmlns, viewBox and all) and says Copied; where the clipboard is blocked, the text waits in a sheet to select', async () => {
+  const { ws, editor } = rig();
+  void ws.openSample();
+  const got: string[] = [];
+  assert.equal(await ws.copy(async (t) => (got.push(t), true)), true);
+  assert.deepEqual(got, [SAMPLE], 'the file, byte for byte');
+  assert.match(got[0], /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 320 240">/);
+  assert.equal(editor.notice.get(), 'Copied');
+  editor.notice.set(null);
+  edit(editor, 'circle', '<circle r="3"/>');
+  assert.equal(await ws.copy(async () => false), false);
+  assert.equal(ws.panel.get(), 'copy', 'blocked: the sheet with the text');
+  assert.equal(ws.copying.get(), editor.source(), 'the file as it is now, the edit and all');
+  assert.equal(editor.notice.get(), null, 'and no "Copied"');
+  ws.close();
+  assert.equal(ws.copying.get(), null);
+  const bad = '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>';
+  await ws.openText(bad, '', 'paste');
+  await ws.copy(async (t) => (got.push(t), true));
+  assert.equal(got.at(-1), bad, 'a file open as source copies its text');
 });

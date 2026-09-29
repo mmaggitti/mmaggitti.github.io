@@ -21,9 +21,19 @@
 // is not stored; UTF-16, .svgz and invalid bytes on export; the reminder an export clears; no
 // metadata under Editable; a failed save that stays loud across other drawings; a damaged draft
 // record and a panel that throws never blank the app; notices over the Files menu; the Files sheet
-// above the keyboard; and the Support search first, with each row's name.
+// above the keyboard; and the Support search first, with each row's name. P0-M5 adds the code
+// panel's tools: the legend, Tidy (the file never changes), Copy, the keyboard on tokens, colour
+// swatches, read-only code as plain text, a file that isn't well-formed as read-only source, the
+// Number sheet's hold-to-repeat and slider, the sheets' Done, dim and Escape (and the opening tap's
+// click kept out of them), only the changed token flashing, Play under reduced motion, the theme
+// (the system's, or one chosen in Files), a tap on the canvas under 5pt, the code docked beside
+// the canvas on wide screens, and a render error caught and drawn again. The P0-M5 review adds: a
+// tag's close never alone on a line in Tidy, Play from the top and Pause holding the frame, no
+// theme flash on load, the legend verb first with chip samples, Enter closing the Number sheet,
+// and Export and the legend over a file shown as source. Every check that passes in every call,
+// having asserted something, is a line of the support ledger's e2e evidence (EVIDENCE, below).
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,14 +62,38 @@ const TABLES = {
   xhtmlAttributes: [...RENDER_XHTML_ATTRIBUTES],
 };
 
+// The ledger's e2e evidence: one line per check that passed, in this run and this engine. A ledger
+// row may cite a check as projects/draw/test/e2e.mjs#<function name>, and
+// `ledger-check --e2e-evidence` (after `npm test` in `npm run verify` and in CI, so WebKit there)
+// requires every cited check to be here. A check has a line only when every call of it (a check
+// run for several heights or themes is called once for each) passed and asserted something; the
+// file is written once, when the run ends, and its last line says the run completed.
+const EVIDENCE = join(HERE, '../../../.smoke/draw-e2e-evidence.jsonl');
+// These two assert in their own modules (renderer-patch.mjs, probe-shadow.mjs), which throw on
+// every failure, rather than through must().
+const DELEGATES = new Set(['rendererPatchCases', 'shadowRootProbe']);
+
 // Every check runs even after one fails, and the run fails with all their messages: WebKit runs
 // only in CI, so one run should show everything it disagrees with.
-export default async function run({ browser, origin }) {
+export default async function run({ browser, origin, engine = browser.browserType().name() }) {
   const failures = [];
+  const passed = new Set();
+  const unproven = new Set(); // failed, or asserted nothing, in at least one call
+  let calls = 0;
+  mkdirSync(dirname(EVIDENCE), { recursive: true });
+  writeFileSync(EVIDENCE, '');
   const check = async (fn, ...args) => {
+    calls++;
+    const before = asserted;
     try {
       await fn(browser, origin, ...args);
+      if (asserted > before || DELEGATES.has(fn.name)) passed.add(fn.name);
+      else {
+        unproven.add(fn.name);
+        console.log(`     draw e2e: ${fn.name}${args.length ? ` (${args.join(', ')})` : ''} asserted nothing, so it is no evidence`);
+      }
     } catch (e) {
+      unproven.add(fn.name);
       failures.push(`${fn.name}${args.length ? ` (${args.join(', ')})` : ''}: ${e.message}`);
     }
   };
@@ -112,6 +146,27 @@ export default async function run({ browser, origin }) {
   await check(aDamagedDraftNeverBlanksTheApp);
   await check(noticesShowOverTheFilesMenu);
   await check(theFilesSheetStaysAboveTheKeyboard);
+  // P0-M5: the code panel's tools, and the shared behaviour SVG Lab's labs have.
+  await check(theLegendExplainsTheTokenColours);
+  await check(colourTokensShowTheirSwatch);
+  await check(theThemeFollowsTheSystemOrTheChoice);
+  await check(tidyLaysOutTheCodeAndNeverTheFile);
+  await check(tidyKeepsEachCloseWithItsTag);
+  await check(copyPutsTheFileOnTheClipboard);
+  await check(tokensTakeTheKeyboard);
+  await check(readOnlyCodeIsPlainText);
+  await check(aMalformedFileOpensAsReadOnlySource);
+  await check(theNumberSheetHoldsAndSlides);
+  await check(sheetsCloseWithDoneTheDimAndEscape);
+  await check(onlyTheChangedTokenFlashes);
+  await check(playStartsTheMotionUnderReducedMotion);
+  await check(aShortMoveOnTheCanvasIsATap);
+  await check(theCodeDocksBesideTheCanvasOnWideScreens);
+  await check(aRenderErrorIsCaughtAndRedrawn);
+  for (const height of [956, 796]) await check(phoneRulesOnTheCodeTools, height);
+  const proven = [...passed].filter((name) => !unproven.has(name));
+  const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), { complete: true, engine, calls }];
+  writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
   if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
 
@@ -885,8 +940,8 @@ async function scrubChangesOnlyItsBytes(browser, origin) {
     must(after.slice(at, at + 3) === '218', `six steps of cx=212 wrote ${after.slice(at, at + 3)}, not 218`);
     const cx = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('circle').getAttribute('cx'));
     must(cx === '218', `the canvas's circle has cx=${cx}, not 218`);
-    const flash = await page.locator('.cv-block', { hasText: '<circle' }).evaluate((el) => el.classList.contains('cv-flash'));
-    must(flash, "the scrubbed block doesn't flash (cv-flash)");
+    const flash = await page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first().evaluate((el) => el.classList.contains('cv-flash'));
+    must(flash, "the scrubbed token doesn't flash (cv-flash)");
     // The outline followed the scrub: its corners are on the circle where it is drawn now.
     const off = await page.evaluate(() => {
       const cr = document.querySelector('.draw-host').shadowRoot.querySelector('circle').getBoundingClientRect();
@@ -1377,11 +1432,12 @@ async function openThroughTheFilePicker(browser, origin) {
     }
     const drawn = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('text').textContent);
     must(drawn === 'Café €', `the Latin-1 file's text draws as ${JSON.stringify(drawn)}`);
-    // A file that fails opens nowhere: the error and where, and the drawing that was open stays.
+    // A file that fails opens nowhere: the error and where, and the drawing that was open stays. (One
+    // that isn't well-formed opens as read-only source: aMalformedFileOpensAsReadOnlySource.)
     const before = await source(page);
-    await pickFile(page, 'broken.svg', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg">\n<rect width="1" height="1">\n</svg>'));
+    await pickFile(page, 'page.svg', Buffer.from('<!-- a page -->\n<html xmlns="http://www.w3.org/1999/xhtml"/>'));
     const said = await page.locator('.draw-failure').textContent();
-    must(said === 'Line 3, column 1: </svg> closes <rect>.', `a file that fails says ${JSON.stringify(said)}`);
+    must(said === 'Line 2, column 1: the root element is <html>, not an <svg> in the SVG namespace.', `a file that fails says ${JSON.stringify(said)}`);
     must(await source(page) === before && await page.locator('.draw-name').textContent() === 'café', 'a file that fails replaced the drawing');
     await closeModal(page);
     // A file that isn't markup at all (a PNG) says so, not "line 1, column 1" over its bytes.
@@ -1415,12 +1471,12 @@ async function pasteOpensSvg(browser, origin) {
     must(await source(page) === figma, "the Files menu's paste field did not open what was pasted into it");
     await closeModal(page);
 
-    const bad = '<svg xmlns="http://www.w3.org/2000/svg">\n  <g>\n    <rect width="4" height="4"/>\n  </svg>\n';
+    const bad = '<!-- a page -->\n  <html xmlns="http://www.w3.org/1999/xhtml"><svg/></html>\n';
     await page.evaluate(firePaste, { selector: null, data: { 'text/plain': bad } });
     await page.locator('.draw-failure').waitFor();
     const said = await page.locator('.draw-failure').textContent();
-    must(said === 'Line 4, column 3: </svg> closes <g>.', `a paste that fails says ${JSON.stringify(said)}`);
-    must((await page.locator('.draw-excerpt').textContent()).includes('</svg>\n  ^'), 'the failure does not point at where it failed');
+    must(said === 'Line 2, column 3: the root element is <html>, not an <svg> in the SVG namespace.', `a paste that fails says ${JSON.stringify(said)}`);
+    must(/<html[^\n]*\n {2}\^$/.test(await page.locator('.draw-excerpt').textContent()), 'the failure does not point at where it failed');
     must(await source(page) === figma, 'a paste that fails changed the drawing');
     await closeModal(page);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
@@ -1769,7 +1825,7 @@ async function phoneRulesOnTheFileSheets(browser, origin, height) {
     must(await page.locator('.draw-draft-delete').first().textContent() === 'Delete?', 'Delete does not ask again first');
     await rules('the Files menu asking to delete');
     await closeModal(page);
-    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>' } });
+    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': '<html xmlns="http://www.w3.org/1999/xhtml"><svg/></html>' } });
     await page.locator('.draw-failure').waitFor();
     await rules('a failed open');
     await closeModal(page);
@@ -1968,7 +2024,7 @@ async function aDamagedDraftNeverBlanksTheApp(browser, origin) {
       window.__crash = true;
     });
     errors.length = 0;
-    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': `<svg xmlns="${SVG_NS}"><g></svg>` } });
+    await page.evaluate(firePaste, { selector: null, data: { 'text/plain': '<html xmlns="http://www.w3.org/1999/xhtml"><svg/></html>' } });
     const crash = page.locator('.draw-crash');
     await crash.waitFor({ timeout: 3000 }).catch(() => {
       throw new Error('a panel that threw left no message');
@@ -2066,6 +2122,762 @@ async function theFilesSheetStaysAboveTheKeyboard(browser, origin) {
     }
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
+}
+
+// ── P0-M5: the code panel's tools ──────────────────────────────────────────────────────────────
+
+const shadowRootOf = () => document.querySelector('.draw-host').shadowRoot;
+const rCount = async (page) => Number(/ r="(\d+(?:\.\d+)?)"/.exec(await source(page))[1]);
+
+// The legend over the code explains its colours, verb first: "Drag" a pink number; "Tap" a blue
+// word, a colour with its swatch, or amber text (yellow in dark). Each sample is a chip (a tint of
+// its colour behind code type, set apart from the words) exactly the colour of the tokens it stands
+// for, in light and in dark. It shows with the Code tab only, and takes no taps.
+async function theLegendExplainsTheTokenColours(browser, origin) {
+  for (const colorScheme of ['light', 'dark']) {
+    await withPage(browser, origin, 956, async (page, errors) => {
+      await showCode(page);
+      const r = await page.evaluate(() => {
+        const c = (sel) => getComputedStyle(document.querySelector(sel)).color;
+        const legend = document.querySelector('.draw-legend');
+        return {
+          text: legend?.textContent.replace(/\s+/g, ' ').trim(),
+          pairs: [
+            ['a number', c('.cv-key--number'), c('.draw-code .cv-number')],
+            ['a keyword', c('.cv-key--word'), c('.draw-code .cv-enum')],
+            ['a colour', c('.cv-key--word'), c('.draw-code .cv-color')],
+            ['text', c('.cv-key--text'), c('.draw-code .cv-text')],
+          ],
+          swatch: legend?.querySelector('.cv-swatch')?.getBoundingClientRect().width ?? 0,
+          chips: [...(legend?.querySelectorAll('.cv-key') ?? [])].map((k) => [getComputedStyle(k).backgroundColor, getComputedStyle(k).fontFamily]),
+          words: legend ? getComputedStyle(legend).fontFamily : '',
+          taps: legend?.querySelectorAll('button, a, [tabindex]').length ?? -1,
+          spread: legend ? (([...t]) => Math.max(...t) - Math.min(...t))([...legend.querySelectorAll('.cv-key')].map((k) => k.getBoundingClientRect().top)) : Infinity,
+        };
+      });
+      must(r.text === 'Drag 12 Tap round coral Hi', `the legend says ${JSON.stringify(r.text)}`);
+      must(r.chips.length === 4 && r.chips.every(([bg, font]) => !/^rgba\(0, 0, 0, 0\)$|transparent/.test(bg) && font !== r.words), `${colorScheme}: the samples are not chips in code type apart from the words: ${JSON.stringify(r.chips)} (words: ${r.words})`);
+      for (const [what, legend, token] of r.pairs) must(legend === token, `${colorScheme}: the legend shows ${what} as ${legend}, the code as ${token}`);
+      must(new Set(r.pairs.map(([, a]) => a)).size === 3, `${colorScheme}: the legend's colours are not three: ${r.pairs.map(([, a]) => a).join(', ')}`);
+      must(r.swatch > 0, 'the legend has no colour swatch');
+      must(r.taps === 0, 'the legend takes taps');
+      must(r.spread < 6, `the legend is on more than one line at 440pt (its samples' tops are ${r.spread.toFixed(1)}pt apart)`);
+      await page.locator('.draw-tabs button', { hasText: 'Inspect' }).tap();
+      must(!(await page.locator('.draw-legend').isVisible()), 'the legend shows over the Inspect tab');
+      must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+    }, { colorScheme });
+  }
+}
+
+// A colour token shows a swatch before its value, in the colour the engine read (#ffd166 is
+// rgb(255, 209, 102)); "none" shows a struck-through swatch. The swatch is not text: the token
+// still reads as its value.
+async function colourTokensShowTheirSwatch(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const r = await page.evaluate(() => {
+      const block = (start) => [...document.querySelectorAll('.draw-code .cv-block')].find((b) => b.textContent.startsWith(start));
+      const look = (tok) => {
+        const sw = tok.querySelector('.cv-swatch');
+        const b = sw?.getBoundingClientRect();
+        const t = tok.getBoundingClientRect();
+        return { text: tok.textContent, before: !!b && b.right <= t.left + b.width + 1 && tok.firstChild === sw, width: b?.width ?? 0, bg: sw ? getComputedStyle(sw).backgroundColor : null, image: sw ? getComputedStyle(sw).backgroundImage : null, none: !!sw?.classList.contains('cv-swatch--none') };
+      };
+      return { fill: look(block('<circle').querySelector('.cv-color')), none: look(block('<polyline').querySelector('.cv-color')) };
+    });
+    must(r.fill.text === '#ffd166' && r.fill.before && r.fill.width > 0, `the circle's fill token reads ${JSON.stringify(r.fill.text)}, its swatch ${r.fill.before ? '' : 'not '}before it`);
+    must(r.fill.bg === 'rgb(255, 209, 102)', `the #ffd166 swatch is ${r.fill.bg}`);
+    must(r.none.text === 'none' && r.none.none && /gradient/.test(r.none.image), `"none" has no struck-through swatch (${JSON.stringify(r.none)})`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The theme follows the system's, and the code recolours the moment it changes (no reload). A theme
+// chosen in Files overrides the system's (data-theme on <html>), is kept on this device, and System
+// follows it again. The drawing stays on white paper throughout.
+async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const look = () => page.evaluate(() => ({
+      number: getComputedStyle(document.querySelector('.draw-code .cv-number')).color,
+      word: getComputedStyle(document.querySelector('.draw-code .cv-enum')).color,
+      bg: getComputedStyle(document.body).backgroundColor,
+      paper: getComputedStyle(document.querySelector('.draw-host')).backgroundColor,
+      theme: document.documentElement.dataset.theme ?? null,
+    }));
+    const light = await look();
+    await page.emulateMedia({ colorScheme: 'dark' });
+    const dark = await look();
+    must(dark.number !== light.number && dark.word !== light.word && dark.bg !== light.bg, `the code did not recolour when the system went dark (numbers ${light.number} → ${dark.number})`);
+    await openFilesMenu(page);
+    await page.locator('.draw-theme button', { hasText: 'Light' }).tap();
+    const chosenLight = await look();
+    must(chosenLight.theme === 'light' && chosenLight.number === light.number && chosenLight.bg === light.bg, `Light chosen in Files over a dark system shows ${JSON.stringify(chosenLight)}`);
+    await page.locator('.draw-theme button', { hasText: 'Dark' }).tap();
+    await page.emulateMedia({ colorScheme: 'light' });
+    const chosenDark = await look();
+    must(chosenDark.theme === 'dark' && chosenDark.number === dark.number && chosenDark.bg === dark.bg, `Dark chosen in Files over a light system shows ${JSON.stringify(chosenDark)}`);
+    await closeModal(page);
+    // Loading again, the theme on <html> when React first puts the app in the page (a microtask
+    // after that commit, so before any paint): the choice must already be there, or the app can
+    // paint once in the system's theme first.
+    await page.addInitScript(() => {
+      new MutationObserver((_, seen) => {
+        if (!document.getElementById('root')?.childElementCount) return;
+        window.__themeAtFirstDraw = document.documentElement.dataset.theme ?? 'system';
+        seen.disconnect();
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.reload({ waitUntil: 'networkidle' });
+    await showCode(page);
+    const first = await page.evaluate(() => window.__themeAtFirstDraw);
+    must(first === 'dark', `a load with Dark chosen drew the app in the system's theme first (the theme when the app first went in: ${first})`);
+    must((await look()).number === dark.number, 'the theme chosen was not kept on this device');
+    await openFilesMenu(page);
+    must(await page.locator('.draw-theme button[aria-pressed="true"]').textContent() === 'Dark', 'Files does not show the theme chosen');
+    await page.locator('.draw-theme button', { hasText: 'System' }).tap();
+    const system = await look();
+    must(system.theme === null && system.number === light.number && system.bg === light.bg, 'System does not follow the system again');
+    for (const l of [light, dark, chosenLight, chosenDark, system]) must(l.paper === 'rgb(255, 255, 255)', `the canvas paper is ${l.paper}, not white`);
+    await closeModal(page);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Tidy (SVG Lab's pretty-print, as a way of showing the code): one element a line, a tag too wide
+// for the panel one attribute a line; only whitespace changes, only on screen, so the file is the
+// same byte for byte and a tap or a scrub still edits its own token's bytes. The width is measured
+// again when the panel changes size, and the choice is kept on this device.
+async function tidyLaysOutTheCodeAndNeverTheFile(browser, origin) {
+  const MINI = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100"><g fill="none" stroke="#264653"><rect x="10" y="10" width="30" height="30" rx="4" ry="4" stroke-width="2"/><circle cx="70" cy="30" r="18"/></g></svg>`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate((t) => window.drawTest.render(t), MINI);
+    await showCode(page);
+    const shown = () => page.locator('.draw-code').evaluate((el) => el.textContent);
+    must(await shown() === MINI, 'as written, the code is not the file');
+    await page.locator('.draw-tidy').tap();
+    must(await page.locator('.draw-tidy').getAttribute('aria-pressed') === 'true', 'Tidy does not show it is on');
+    const tidy = (await shown()).split('\n');
+    must(tidy[0].startsWith('<svg') && tidy.includes('  <g fill="none" stroke="#264653">') && tidy.includes('    <circle cx="70" cy="30" r="18"/>') && tidy.at(-2) === '  </g>' && tidy.at(-1) === '</svg>', `the tidy view shows:\n${tidy.join('\n')}`);
+    const rectLines = tidy.filter((l) => /^ {6}(x|y|width|height|rx|ry|stroke-width)=/.test(l)).length;
+    must(tidy.includes('    <rect') && rectLines === 7, `at 440pt the rect's tag is not one attribute a line:\n${tidy.join('\n')}`);
+    must(tidy.join('').replace(/\s+/g, '') === MINI.replace(/\s+/g, ''), 'the tidy view shows more than the file, or less');
+    must(await source(page) === MINI, 'Tidy changed the file');
+    await tapToken(page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first());
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    must(await source(page) === MINI.replace('cx="70"', 'cx="71"'), 'a token tapped in the tidy view did not edit only its own bytes');
+    await page.locator('.draw-done').tap();
+    // Wider (an iPad upright): measured again, the rect fits on one line.
+    await page.setViewportSize({ width: 760, height: 1024 });
+    await twoFrames(page);
+    const wide = (await shown()).split('\n');
+    must(wide.includes('    <rect x="10" y="10" width="30" height="30" rx="4" ry="4" stroke-width="2"/>'), `at 760pt the rect is not on one line (the width was not measured again):\n${wide.join('\n')}`);
+    await page.setViewportSize({ width: 440, height: 956 });
+    await twoFrames(page);
+    must((await shown()).split('\n').includes('    <rect'), 'back at 440pt the rect is not one attribute a line again');
+    const r = await page.evaluate(rulesNow, TAP_MIN);
+    must(r.sw <= r.cw && r.small.length === 0, `the tidy view breaks the phone rules: ${JSON.stringify({ small: r.small, sw: r.sw, cw: r.cw })}`);
+    await page.reload({ waitUntil: 'networkidle' });
+    await showCode(page);
+    must(await page.locator('.draw-tidy').getAttribute('aria-pressed') === 'true', 'Tidy was not kept on this device');
+    must((await shown()).split('\n').includes('  <title>A sun setting over two hills</title>'), 'the sample does not show tidy after the reload');
+    must(await source(page) === SAMPLE, 'the sample changed');
+    await page.locator('.draw-tidy').tap();
+    must(await shown() === SAMPLE, 'Tidy off does not show the file as written');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Tidy never leaves a tag's close ("/>" or ">") at the start of a line of its own: where a long
+// value wraps (a path's d, a transform list), the close stays after the value's last character, as
+// in SVG Lab. Every tools/ file in the corpus, at 440pt. (Tags inside text are shown as written.)
+async function tidyKeepsEachCloseWithItsTag(browser, origin) {
+  const dir = join(CORPUS, 'tools');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.svg')).map((f) => [f, readFileSync(join(dir, f), 'utf8')]);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    if (await page.locator('.draw-tidy').getAttribute('aria-pressed') !== 'true') await page.locator('.draw-tidy').tap();
+    const alone = [];
+    let closes = 0;
+    for (const [name, text] of files) {
+      await page.evaluate((t) => window.drawTest.render(t), text);
+      await twoFrames(page);
+      const r = await page.evaluate(() => {
+        const box = (n, i) => {
+          const range = document.createRange();
+          range.setStart(n, i);
+          range.setEnd(n, i + 1);
+          const rects = range.getClientRects();
+          return rects[rects.length - 1] ?? range.getBoundingClientRect();
+        };
+        const found = [];
+        let n = 0;
+        [...document.querySelectorAll('.draw-code .cv-block')].forEach((block, i) => {
+          const text = block.textContent;
+          // A block laid out on a line of its own starts with its line break (the first with none).
+          if (!(text.startsWith('\n') || i === 0) || !/^<[^/!?]/.test(text.trimStart()) || !text.endsWith('>')) return;
+          const chars = [];
+          const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+          while (walk.nextNode()) for (let k = 0; k < walk.currentNode.data.length; k++) chars.push([walk.currentNode, k]);
+          const at = (k) => chars[k][0].data[chars[k][1]];
+          let close = chars.length - 1;
+          if (close > 0 && at(close - 1) === '/') close--;
+          let before = close - 1;
+          while (before >= 0 && /\s/.test(at(before))) before--;
+          if (before < 0) return;
+          n++;
+          if (box(...chars[close]).top >= box(...chars[before]).bottom - 1) found.push(text.trimStart().slice(0, 40).replace(/\s+/g, ' '));
+        });
+        return { n, found };
+      });
+      closes += r.n;
+      alone.push(...r.found.map((f) => `${name}: ${f}…`));
+    }
+    must(closes > 300, `test setup: only ${closes} closes measured`);
+    must(alone.length === 0, `${alone.length} tag close(s) start a line of their own in the tidy view:\n${alone.slice(0, 8).join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Copy puts the file on the clipboard exactly as it is (its xmlns and viewBox; Tidy never changes
+// it), through the Clipboard API's write (it never reads), and says "Copied". Where the clipboard
+// is blocked, the text waits in a read-only sheet, and Select all selects all of it.
+async function copyPutsTheFileOnTheClipboard(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      window.__copied = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (t) => {
+            if (window.__blocked) throw new DOMException('blocked here', 'NotAllowedError');
+            window.__copied.push(t);
+          },
+          readText: async () => ((window.__read = true), ''),
+          read: async () => ((window.__read = true), []),
+        },
+      });
+    });
+    await showCode(page);
+    await page.locator('.draw-tidy').tap();
+    await page.locator('.draw-copy').tap();
+    await page.locator('.draw-toast').waitFor({ timeout: 3000 }).catch(() => {
+      throw new Error('Copy said nothing');
+    });
+    must(await page.locator('.draw-toast').textContent() === 'Copied', `Copy says ${JSON.stringify(await page.locator('.draw-toast').textContent())}`);
+    const copied = await page.evaluate(() => window.__copied);
+    must(copied.length === 1 && copied[0] === SAMPLE, 'Copy did not put the file on the clipboard byte for byte');
+    must(copied[0].startsWith(`<svg xmlns="${SVG_NS}" viewBox="0 0 320 240">`), 'the copied file lost its xmlns or viewBox');
+    await page.evaluate(() => (window.__blocked = true));
+    await page.locator('.draw-copy').tap();
+    const area = page.locator('.draw-copy-text');
+    await area.waitFor();
+    must(await area.inputValue() === SAMPLE && await area.evaluate((el) => el.readOnly), 'the sheet does not hold the file, read-only');
+    await page.locator('.draw-select-all').tap();
+    const [a, b, n] = await area.evaluate((el) => [el.selectionStart, el.selectionEnd, el.value.length]);
+    must(a === 0 && b === n, `Select all selected ${a} to ${b} of ${n}`);
+    const r = await page.evaluate(rulesNow, TAP_MIN);
+    must(r.small.length === 0 && r.fields.length === 0 && r.sw <= r.cw && r.sh <= r.ch, `the Copy sheet breaks the phone rules: ${JSON.stringify({ small: r.small, fields: r.fields, sw: r.sw, sh: r.sh })}`);
+    await closeModal(page);
+    must(!(await page.evaluate(() => window.__read ?? false)), 'Copy read the clipboard');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The keyboard reaches every token: on a number the arrow keys step it (one history entry each,
+// and it keeps the focus through the redraw), and Enter or Space opens its Number sheet; on a
+// keyword Enter or Space moves it to its next option, wrapping round; on a colour, its sheet.
+async function tokensTakeTheKeyboard(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    const cx = circle.locator('.cv-number').first();
+    must(await page.locator('.draw-code .cv-tok:not([tabindex="0"])').count() === 0, 'a token cannot be focused');
+    await cx.focus();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowRight');
+    must(await source(page) === SAMPLE.replace('cx="212"', 'cx="214"'), 'ArrowUp and ArrowRight did not step cx up twice');
+    const active = await page.evaluate(() => ({ text: document.activeElement?.textContent, number: document.activeElement?.classList.contains('cv-number') }));
+    must(active.number && active.text === '214', `after the steps the focus is on ${JSON.stringify(active)}, not the number`);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowLeft');
+    must(await source(page) === SAMPLE, 'ArrowDown and ArrowLeft did not step it back');
+    must(await page.locator('.draw-tool', { hasText: 'Undo' }).getAttribute('aria-label') === 'Undo Step cx', 'a key step is not its own history entry');
+    await page.keyboard.press('Enter');
+    await page.locator('.draw-modal input[inputmode="decimal"]').waitFor();
+    must(await page.locator('.draw-modal-title').textContent() === 'cx', 'Enter on cx did not open its Number sheet');
+    await page.keyboard.press('Escape');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    await page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first().focus();
+    await page.keyboard.press(' ');
+    must(await source(page) === SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="square"'), 'Space on a keyword did not move it on');
+    await page.keyboard.press('Enter');
+    must(await source(page) === SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="butt"'), 'Enter on the keyword did not move it on, wrapping round');
+    await circle.locator('.cv-color').first().focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.draw-swatch').first().waitFor({ timeout: 2000 }).catch(() => {
+      throw new Error('Enter on a colour did not open its sheet');
+    });
+    await page.keyboard.press('Escape');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A drawing another tab has open is read-only here, and its code is plain text: no token is
+// coloured, focusable or swatched, the text can be selected, and no tap, drag or key edits it (a tap
+// says why).
+async function readOnlyCodeIsPlainText(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    const second = await context.newPage();
+    const errors2 = [];
+    second.on('pageerror', (e) => errors2.push(`uncaught: ${e.message}`));
+    second.on('console', (m) => m.type() === 'error' && errors2.push(`console error: ${m.text()}`));
+    await second.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
+    await second.locator('.draw-alert', { hasText: 'read-only' }).waitFor({ timeout: 5000 });
+    await showCode(second);
+    const r = await second.evaluate(() => {
+      const code = document.querySelector('.draw-code');
+      const plain = getComputedStyle(code).color;
+      const toks = [...code.querySelectorAll('.cv-tok')];
+      const cs = getComputedStyle(code);
+      return {
+        n: toks.length,
+        coloured: toks.filter((t) => getComputedStyle(t).color !== plain).map((t) => t.textContent),
+        focusable: toks.filter((t) => t.hasAttribute('tabindex')).length,
+        swatches: [...code.querySelectorAll('.cv-swatch')].filter((w) => w.getBoundingClientRect().width > 0).length,
+        select: cs.userSelect || cs.webkitUserSelect,
+      };
+    });
+    must(r.n > 20, `test setup: only ${r.n} tokens`);
+    must(r.coloured.length === 0, `read-only tokens are still coloured: ${r.coloured.slice(0, 5).join(', ')}`);
+    must(r.focusable === 0 && r.swatches === 0, `read-only tokens: ${r.focusable} focusable, ${r.swatches} swatches shown`);
+    must(r.select === 'text', `read-only code can't be selected (user-select ${r.select})`);
+    must(await second.locator('.draw-legend').count() === 0, 'the legend explains taps and drags that do nothing here');
+    const cx = second.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first();
+    await tapToken(cx);
+    must(await second.locator('.draw-strip').count() === 0, 'a tap on a read-only number opened the Scrub strip');
+    must((await second.locator('.draw-toast').textContent()).includes('read-only'), 'a tap on a read-only number does not say why nothing happens');
+    await scrubToken(second, cx, 6);
+    must(await source(second) === SAMPLE, 'a drag on a read-only number wrote it');
+    await second.close();
+    must(errors.length + errors2.length === 0, `errors:\n${[...errors, ...errors2].join('\n')}`);
+  });
+}
+
+// A file that isn't well-formed opens as read-only source, through the one importer: nothing is
+// drawn and nothing loads, the code holds its text exactly with the failing line and character
+// marked (in view), no token edits it, and it becomes no draft. The canvas and the ContextBar say
+// where it fails; Files is the way on, and the drawing before it reopens from there.
+async function aMalformedFileOpensAsReadOnlySource(browser, origin) {
+  const BAD = `<svg xmlns="${SVG_NS}" viewBox="0 0 10 10">\n  <rect width="1" height="1">\n</svg>\n`;
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    const quiet = watch(page, context, origin);
+    await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
+    await closeModal(page);
+    await page.locator('.draw-save[data-save="saved"]').waitFor();
+    await openFilesMenu(page);
+    await page.locator('.draw-modal input[type="file"]').setInputFiles({ name: 'broken.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(BAD) });
+    await page.locator('.draw-unparsed').waitFor();
+    await twoFrames(page);
+    must(await page.locator('.draw-modal').count() === 0, 'a sheet covers the source');
+    const r = await page.evaluate(() => {
+      const code = document.querySelector('.draw-code');
+      const mark = code.querySelector('.cv-error');
+      const m = mark?.getBoundingClientRect();
+      const body = document.querySelector('.draw-sheet-body').getBoundingClientRect();
+      return {
+        text: code.textContent,
+        drawn: document.querySelector('.draw-host').shadowRoot.childElementCount,
+        mark: mark?.textContent ?? null,
+        line: code.querySelector('.cv-error-line')?.textContent ?? null,
+        inView: !!m && m.top >= body.top && m.bottom <= body.bottom,
+        tokens: code.querySelectorAll('.cv-tok').length,
+        over: document.querySelector('.draw-unparsed').textContent,
+        context: document.querySelector('.draw-context').textContent,
+        name: document.querySelector('.draw-name').textContent,
+        save: document.querySelector('.draw-save')?.textContent ?? null,
+      };
+    });
+    must(r.drawn === 0, 'the canvas drew a file that is not well-formed');
+    must(r.text === BAD, 'the code does not hold the file text exactly');
+    must(r.line === '</svg>' && r.mark === '<', `the mark is on ${JSON.stringify(r.mark)} of the line ${JSON.stringify(r.line)}, not the "<" of </svg> on line 3`);
+    must(r.inView, 'the marked error is not in view');
+    must(r.tokens === 0, `the source has ${r.tokens} tokens to edit`);
+    must(await page.locator('.draw-legend').count() === 0, 'the legend shows over source that nothing can edit');
+    must(r.over.includes('Line 3, column 1: </svg> closes <rect>.'), `the canvas says ${JSON.stringify(r.over)}`);
+    must(r.context.includes('Read-only source · line 3, column 1'), `the ContextBar says ${JSON.stringify(r.context)}`);
+    must(r.name === 'broken' && r.save === 'Read-only', `the top bar says ${r.name}, ${r.save}`);
+    must(await source(page) === '', 'the editor holds a document');
+    must(await page.locator('.draw-tool', { hasText: 'Undo' }).isDisabled(), 'Undo is enabled');
+    await page.locator('.draw-code').tap();
+    must(await page.locator('.draw-modal, .draw-strip').count() === 0, 'a tap on the source opened something');
+    await page.locator('.draw-export').tap();
+    const exporting = (await page.locator('.draw-modal').textContent()) ?? '';
+    must(exporting.includes('A file that isn’t well-formed can’t be exported; Copy (over the code) has its text.') && await page.locator('.draw-export-go').count() === 0, `Export over the source says ${JSON.stringify(exporting)}`);
+    await closeModal(page);
+    const rules = await page.evaluate(rulesNow, TAP_MIN);
+    must(rules.small.length === 0 && rules.sw <= rules.cw && rules.sh <= rules.ch, `the source view breaks the phone rules: ${JSON.stringify({ small: rules.small, sw: rules.sw, sh: rules.sh })}`);
+    await page.locator('.draw-source-files').tap();
+    await page.locator('.draw-draft').first().waitFor();
+    const names = await page.locator('.draw-draft-name').allTextContents();
+    must(names.length === 1 && names[0] === 'sunset', `the drafts are ${JSON.stringify(names)}: the source became one, or the drawing before it was lost`);
+    await page.locator('.draw-draft', { hasText: 'sunset' }).locator('.draw-draft-open').tap();
+    await until('the drawing before it reopens', async () => (await source(page)) === SAMPLE);
+    must(await page.locator('.draw-unparsed').count() === 0 && await drawnCount(page) > 1, 'the drawing did not come back on the canvas');
+    must((await page.locator('.draw-code').textContent()) === SAMPLE, 'its code did not come back');
+    await quiet('a file that is not well-formed opened');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Number sheet: − and + held down repeat (after 400 ms, every 70 ms) and stop when let go; the
+// slider spans the value's range (a radius: 0 to twice the artboard) and writes at the token's
+// precision; Enter closes it; the whole visit is one history entry.
+async function theNumberSheetHoldsAndSlides(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').nth(2)); // r="42"
+    await page.locator('.draw-strip-value').tap();
+    const plus = page.locator('.draw-modal .draw-key[aria-label="Increase"]');
+    await plus.waitFor();
+    const slider = page.locator('.draw-range');
+    const range = await slider.evaluate((el) => [el.min, el.max, el.step, el.value].join());
+    must(range === '0,640,1,42', `the slider is ${range}, not 0 to 640 (twice the 320 artboard) by 1, at 42`);
+    const b = await plus.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(1000);
+    await page.mouse.up();
+    const held = await rCount(page);
+    must(held >= 47 && held <= 56, `holding + for a second wrote r=${held}, not about 51 (one step, then one every 70 ms from 470 ms)`);
+    await page.waitForTimeout(300);
+    must(await rCount(page) === held, 'the repeat did not stop when + was let go');
+    must(await page.locator('.draw-modal input[inputmode="decimal"]').inputValue() === String(held), 'the field does not show what the held + wrote');
+    await slider.fill('100');
+    must(await rCount(page) === 100, `the slider wrote r=${await rCount(page)}, not 100`);
+    must(await page.locator('.draw-modal input[inputmode="decimal"]').inputValue() === '100', 'the field does not follow the slider');
+    // Enter in the field closes the sheet, and the change commits on close.
+    await page.locator('.draw-modal input[inputmode="decimal"]').press('Enter');
+    await page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 2000 }).catch(() => must(false, 'Enter did not close the Number sheet'));
+    must(await rCount(page) === 100, `closing with Enter left r=${await rCount(page)}, not 100`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await undo.tap();
+    must(await source(page) === SAMPLE && await undo.isDisabled(), 'the visit was not one history entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Each sheet slides up over a dimmed drawing, at the bottom of the screen: Escape, a tap on the dim
+// and Done each close it and commit its edit as one history entry. The tap that opened a sheet
+// never reaches a control in it (its click lands where the sheet now is: here, on a swatch).
+async function sheetsCloseWithDoneTheDimAndEscape(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    const shut = (how) => page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 2000 }).catch(() => {
+      throw new Error(`${how} did not close the sheet`);
+    });
+    await tapToken(circle.locator('.cv-number').nth(2)); // r
+    await page.locator('.draw-strip-value').tap();
+    const g = await page.evaluate(() => {
+      const m = document.querySelector('.draw-modal').getBoundingClientRect();
+      const dim = document.querySelector('.draw-scrim');
+      const d = dim.getBoundingClientRect();
+      return { bottom: m.bottom, h: innerHeight, dim: getComputedStyle(dim).backgroundColor, covers: d.top <= 0 && d.bottom >= innerHeight && d.width >= innerWidth };
+    });
+    must(Math.abs(g.bottom - g.h) < 1, `the Number sheet ends at ${g.bottom}, not the bottom of the screen (${g.h})`);
+    must(g.covers && !/rgba\(0, 0, 0, 0\)|transparent/.test(g.dim), `the drawing is not dimmed (${g.dim})`);
+    await page.locator('.draw-modal input').first().fill('30');
+    await page.keyboard.press('Escape');
+    await shut('Escape');
+    must((await source(page)).includes(' r="30"'), 'Escape lost the Number sheet edit');
+    await page.locator('.draw-done').tap();
+    await tapToken(circle.locator('.cv-color').first());
+    await page.locator('.draw-swatch').first().waitFor();
+    await page.waitForTimeout(100);
+    must((await source(page)).includes('fill="#ffd166"'), 'the tap that opened the Color sheet picked a colour in it (its click reached the sheet)');
+    await page.locator('.draw-swatch[aria-label="#2a9d8f"]').tap();
+    await page.waitForTimeout(400);
+    await page.touchscreen.tap(220, 60);
+    await shut('a tap on the dim');
+    must((await source(page)).includes('fill="#2a9d8f"'), 'a tap on the dim lost the Color sheet edit');
+    await tapToken(page.locator('.cv-text', { hasText: /^Draw$/ }));
+    await page.locator('.draw-modal input').first().fill('Drawn');
+    await page.locator('.draw-modal-done').tap();
+    await shut('Done');
+    must((await source(page)).includes('>Drawn</text>'), 'Done lost the Text sheet edit');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    for (let i = 0; i < 3; i++) await undo.tap();
+    must(await source(page) === SAMPLE && await undo.isDisabled(), 'the three sheets were not one history entry each');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The live code: an edit redraws its block, and only the token that changed flashes, not the block
+// or the tokens beside it. The flash is an animation that runs, except under reduced motion.
+async function onlyTheChangedTokenFlashes(browser, origin) {
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    await withPage(browser, origin, 956, async (page, errors) => {
+      await showCode(page);
+      await tapToken(page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first()); // cx
+      await page.locator('.draw-strip button', { hasText: '+' }).tap();
+      const r = await page.evaluate(() => {
+        const block = [...document.querySelectorAll('.draw-code .cv-block')].find((b) => b.textContent.startsWith('<circle'));
+        const toks = [...block.querySelectorAll('.cv-tok')];
+        return {
+          block: block.classList.contains('cv-flash'),
+          flashing: toks.filter((t) => t.classList.contains('cv-flash')).map((t) => t.textContent),
+          running: toks[0].getAnimations().length,
+          canvas: document.querySelector('.draw-host').shadowRoot.querySelector('circle').getAttribute('cx'),
+        };
+      });
+      must(r.canvas === '213', `test setup: the canvas's circle has cx=${r.canvas}`);
+      must(!r.block && r.flashing.length === 1 && r.flashing[0] === '213', `the flash is on ${r.block ? 'the whole block' : JSON.stringify(r.flashing)}, not only the token that changed`);
+      if (reducedMotion === 'reduce') must(r.running === 0, `under reduced motion the flash still runs (${r.running} animation)`);
+      else must(r.running === 1, 'the changed token does not flash (no animation runs)');
+      must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+    }, { reducedMotion });
+  }
+}
+
+// Reduced motion: a drawing that animates opens paused on the frame where its first cycle ends (a
+// fade-in shows, not its empty start), with Play over the canvas. Play runs its SMIL from the top
+// (a fade that animates once moves, rather than staying where it froze), and its CSS animations;
+// Pause stops both again, holding each on its frame. A still drawing has no Play, and without
+// reduced motion nothing waits for it.
+async function playStartsTheMotionUnderReducedMotion(browser, origin) {
+  const FADE = svgDoc('<rect width="100" height="100" fill="#264653" opacity="0"><animate attributeName="opacity" values="0;1" dur="2s" fill="freeze"/></rect>');
+  const SPIN = readFileSync(join(CORPUS, 'lab', 'spin--css.svg'), 'utf8');
+  for (const reducedMotion of ['reduce', 'no-preference']) {
+    await withPage(browser, origin, 956, async (page, errors) => {
+      const open = async (t) => {
+        await page.evaluate((x) => window.drawTest.render(x), t);
+        await twoFrames(page);
+      };
+      const state = () => page.evaluate(() => {
+        const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+        return { paused: svg.animationsPaused(), t: svg.getCurrentTime(), css: svg.getAnimations({ subtree: true }).length };
+      });
+      const play = page.locator('.draw-play-btn');
+      must(await play.count() === 0, 'the still sample offers Play');
+      await open(FADE);
+      if (reducedMotion === 'no-preference') {
+        const s = await state();
+        must(await play.count() === 0 && !s.paused, `without reduced motion the fade ${s.paused ? 'is paused' : 'runs'} and ${await play.count() ? 'offers' : 'needs no'} Play`);
+        return;
+      }
+      must(await play.count() === 1 && await play.textContent() === 'Play', 'an animated drawing under reduced motion offers no Play');
+      const still = await state();
+      // What shows: the rect's dark teal (#264653) over the host's middle, not the paper.
+      const host = await page.locator('.draw-host').boundingBox();
+      const px = decodePng(await page.screenshot()).rgb(Math.round(host.x + host.width / 2), Math.round(host.y + host.height / 2));
+      must(still.paused && still.t > 1.9 && still.t <= 2 && px[0] + px[1] + px[2] < 300, `paused at ${still.t.toFixed(3)} s showing rgb ${px}: not the frame where the fade has arrived`);
+      await play.tap();
+      const started = await state();
+      must(await play.textContent() === 'Pause' && !started.paused, 'Play did not start the SMIL');
+      // It moves: from the top (the fade is still faint where the still showed it arrived), and on.
+      const px2 = decodePng(await page.screenshot()).rgb(Math.round(host.x + host.width / 2), Math.round(host.y + host.height / 2));
+      await page.waitForTimeout(300);
+      const later = await state();
+      must(started.t < 1 && px2[0] + px2[1] + px2[2] > px[0] + px[1] + px[2] + 100 && later.t > started.t, `Play shows no motion: at ${started.t.toFixed(3)} s then ${later.t.toFixed(3)} s, rgb ${px2} after rgb ${px} (it has to start again from the top)`);
+      await play.tap();
+      must((await state()).paused, 'Pause did not stop it');
+      await open(SPIN);
+      must((await state()).css === 0, 'test setup: the CSS spin runs under reduced motion before Play');
+      await play.tap();
+      await twoFrames(page);
+      must((await state()).css > 0, 'Play did not start the CSS animation');
+      await play.tap();
+      await twoFrames(page);
+      const frames = () => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getAnimations({ subtree: true }).map((a) => [a.playState, a.currentTime]));
+      const held = await frames();
+      await twoFrames(page);
+      const after = JSON.stringify(await frames());
+      must(held.length > 0 && held.every(([state, t]) => state === 'paused' && t > 0) && after === JSON.stringify(held), `Pause did not hold the CSS animation on its frame: ${JSON.stringify(held)}, then ${after}`);
+      const b = await play.boundingBox();
+      must(b.width >= TAP_MIN - 0.5 && b.height >= TAP_MIN - 0.5, `Play is ${Math.round(b.width)}×${Math.round(b.height)}`);
+      await open(SAMPLE);
+      must(await play.count() === 0, 'Play stayed for a still drawing');
+      must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+    }, { reducedMotion });
+  }
+}
+
+// One finger on the canvas: from (at), `dx` points sideways in four moves, then up. Chromium gets
+// real touch (CDP); WebKit the same Pointer Events.
+async function oneFinger(browser, page, at, dx) {
+  if (chromium(browser)) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+    for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x + (dx * i) / 4, y: at.y }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.evaluate(({ at, dx }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (type, x) => area.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: x, clientY: at.y, bubbles: true, cancelable: true }));
+      fire('pointerdown', at.x);
+      for (let i = 1; i <= 4; i++) fire('pointermove', at.x + (dx * i) / 4);
+      fire('pointerup', at.x + dx);
+    }, { at, dx });
+  }
+  await page.waitForTimeout(50);
+}
+
+// On the canvas, a touch that moves less than 5pt is a tap, which selects what is under it; one
+// that moves further is a drag, which (with P0's Select tool) selects nothing.
+async function aShortMoveOnTheCanvasIsATap(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const c = await circleCentre(page);
+    const selected = () => page.locator('.draw-sel').textContent();
+    await oneFinger(browser, page, c, 8);
+    must(await selected() === 'nothing selected', 'a touch that moved 8pt selected the circle: it was taken for a tap');
+    await oneFinger(browser, page, c, 4);
+    must(await selected() === '<circle>', 'a touch that moved 4pt did not select the circle: it was taken for a drag');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Wide screens (an iPad on its side, a desktop) and a phone on its side dock the code beside the
+// canvas, at its full height and shown at once; a phone or an iPad upright keeps the sheet under
+// the canvas. No size scrolls the page or sideways, and every tap target keeps its floor.
+async function theCodeDocksBesideTheCanvasOnWideScreens(browser, origin) {
+  const problems = [];
+  for (const [width, height, docked] of [[1180, 820, true], [956, 440, true], [1440, 900, true], [820, 1180, false], [440, 956, false]]) {
+    const context = await browser.newContext({ ...PHONE, viewport: { width, height } });
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
+      await twoFrames(page);
+      const at = `${width}×${height}`;
+      const r = await page.evaluate(() => {
+        const b = (sel) => document.querySelector(sel).getBoundingClientRect().toJSON();
+        const code = document.querySelector('.draw-code .cv-block');
+        return { canvas: b('.draw-canvas'), sheet: b('.draw-sheet'), code: code ? code.getBoundingClientRect().height : 0, handle: getComputedStyle(document.querySelector('.draw-handle')).display, svg: document.querySelector('.draw-host').shadowRoot.querySelector('svg').getBoundingClientRect().width };
+      });
+      if (docked) {
+        if (!(r.sheet.left >= r.canvas.right - 1 && Math.abs(r.sheet.top - r.canvas.top) < 1 && Math.abs(r.sheet.bottom - r.canvas.bottom) < 1)) problems.push(`${at}: the code is not docked beside the canvas (canvas ${rect(r.canvas)}, code ${rect(r.sheet)})`);
+        if (!(r.code > 0) || r.handle !== 'none') problems.push(`${at}: the docked code ${r.code > 0 ? '' : 'is not shown at once'}${r.handle !== 'none' ? ' has a handle' : ''}`);
+        if (r.canvas.width < r.sheet.width) problems.push(`${at}: the canvas (${Math.round(r.canvas.width)}) is narrower than the code (${Math.round(r.sheet.width)})`);
+      } else if (!(r.sheet.top >= r.canvas.bottom - 1)) problems.push(`${at}: the sheet is not under the canvas`);
+      if (!(r.svg > 0)) problems.push(`${at}: nothing drawn`);
+      const rules = await page.evaluate(rulesNow, TAP_MIN);
+      if (rules.small.length) problems.push(`${at}: tap targets under ${TAP_MIN}pt: ${rules.small.join(', ')}`);
+      if (rules.sw > rules.cw || rules.sh > rules.ch) problems.push(`${at}: the page scrolls (${rules.sw}/${rules.cw}, ${rules.sh}/${rules.ch})`);
+      if (errors.length) problems.push(`${at}: errors: ${errors.join('; ')}`);
+    } finally {
+      await context.close();
+    }
+  }
+  must(problems.length === 0, problems.join('\n'));
+}
+
+// A render error is caught. When the canvas throws while drawing an edit, the whole drawing is drawn
+// again from the model, with the edit. When that throws too, the canvas says so (with Files), draws
+// nothing, and the file and the code keep the edit; the next change (an undo) draws it again and the
+// message goes. Nothing throws uncaught.
+async function aRenderErrorIsCaughtAndRedrawn(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot;
+      window.__breaks = 0;
+      const trip = () => {
+        if (window.__breaks > 0) {
+          window.__breaks--;
+          throw new Error('injected render error');
+        }
+      };
+      for (const name of ['setAttribute', 'setAttributeNS', 'removeAttributeNode']) {
+        const f = Element.prototype[name];
+        Element.prototype[name] = function (...a) {
+          if (this.getRootNode() === root) trip();
+          return f.apply(this, a);
+        };
+      }
+      const replace = ShadowRoot.prototype.replaceChildren;
+      ShadowRoot.prototype.replaceChildren = function (...a) {
+        if (this === root && a.length) trip();
+        return replace.apply(this, a);
+      };
+    });
+    await showCode(page);
+    const cxOnCanvas = () => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('circle')?.getAttribute('cx') ?? null);
+    await tapToken(page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first());
+    await page.evaluate(() => (window.__breaks = 1));
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    must(await page.evaluate(() => window.__breaks) === 0, 'test setup: the injected error did not fire');
+    must(await cxOnCanvas() === '213', `after a patch that threw, the canvas has cx=${await cxOnCanvas()}, not the 213 a fresh drawing gives`);
+    must(await page.locator('.draw-broken').count() === 0, 'a redraw that worked still shows a message');
+    await page.evaluate(() => (window.__breaks = 2));
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    const broken = page.locator('.draw-broken');
+    await broken.waitFor({ timeout: 2000 }).catch(() => {
+      throw new Error('a canvas that could not draw says nothing');
+    });
+    must((await broken.textContent()).includes('injected render error'), `the message says ${JSON.stringify(await broken.textContent())}`);
+    must(await broken.locator('.draw-over-go').textContent() === 'Files', 'the message has no Files');
+    must(await drawnCount(page) === 0, 'the canvas still shows a drawing that may be half drawn');
+    must((await source(page)).includes('cx="214"') && (await page.locator('.cv-block', { hasText: '<circle' }).textContent()).includes('cx="214"'), 'the file or the code lost the edit');
+    await page.locator('.draw-done').tap();
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    must(await cxOnCanvas() === '213' && await page.locator('.draw-broken').count() === 0, 'the next change did not draw it again');
+    must(errors.length === 0, `errors (none may escape):\n${errors.join('\n')}`);
+  });
+}
+
+// The phone rules on the code panel's new states: the code bar with Tidy on, at half and at full;
+// Play over a paused drawing; a canvas that could not draw.
+async function phoneRulesOnTheCodeTools(browser, origin, height) {
+  const problems = [];
+  const rules = async (page, state) => {
+    const r = await page.evaluate(rulesNow, TAP_MIN);
+    if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+    if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+    if (r.split.length) problems.push(`${state}: token(s) split across lines: ${r.split.slice(0, 5).join(', ')}`);
+    if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+    if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+  };
+  await withPage(browser, origin, height, async (page, errors) => {
+    await showCode(page);
+    await rules(page, 'the code bar');
+    await page.locator('.draw-tidy').tap();
+    await rules(page, 'Tidy at half');
+    await page.locator('.draw-handle').tap();
+    await rules(page, 'Tidy at full');
+    await page.locator('.draw-handle').tap();
+    await showCode(page);
+    await page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot;
+      const f = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (...a) {
+        if (this.getRootNode() === root && window.__break) throw new Error('injected');
+        return f.apply(this, a);
+      };
+      const g = ShadowRoot.prototype.replaceChildren;
+      ShadowRoot.prototype.replaceChildren = function (...a) {
+        if (this === root && a.length && window.__break) throw new Error('injected');
+        return g.apply(this, a);
+      };
+      window.__break = true;
+    });
+    await tapToken(page.locator('.cv-block', { hasText: '<circle' }).locator('.cv-number').first());
+    await page.locator('.draw-strip button', { hasText: '+' }).tap();
+    await page.locator('.draw-broken').waitFor();
+    await rules(page, 'a canvas that could not draw');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+  await withPage(browser, origin, height, async (page, errors) => {
+    await page.evaluate((t) => window.drawTest.render(t), readFileSync(join(CORPUS, 'tools', 'animated-smil.svg'), 'utf8'));
+    await page.locator('.draw-play-btn').waitFor();
+    await rules(page, 'Play');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { reducedMotion: 'reduce' });
+  must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
 }
 
 // Runs in the page: open each file through drawTest, then read what reached the shadow root.
@@ -2168,6 +2980,9 @@ async function withPage(browser, origin, height, fn, options = {}) {
 const same = (a, b) => ['x', 'y', 'width', 'height'].every((k) => Math.abs(a[k] - b[k]) < 1);
 const rect = (b) => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}×${Math.round(b.height)}`;
 
+// Every assertion counts: a check that made none is no evidence (see run()).
+let asserted = 0;
 function must(cond, message) {
+  asserted++;
   if (!cond) throw new Error(message);
 }

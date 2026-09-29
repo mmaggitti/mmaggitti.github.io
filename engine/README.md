@@ -31,11 +31,11 @@ Tests live in `engine/test/` and run in Draw's build (`npm run test:unit` in `pr
 
 ## The round-trip corpus
 
-`test/fixtures/corpus/` holds 252 files that must open and save byte for byte:
+`test/fixtures/corpus/` holds 260 files that must open and save byte for byte:
 - `icons/`: 150 unmodified icons from six open-source sets, with their licenses.
 - `lab/`: every SVG Lab screen, mode and Create template, downloaded by
   `projects/draw/tools/capture-lab-corpus.mjs`.
-- `tools/`: 36 hand-written files in the shapes Inkscape, Illustrator, Figma, Sketch, SVGO, draw.io
+- `tools/`: 44 hand-written files in the shapes Inkscape, Illustrator, Figma, Sketch, SVGO, draw.io
   and others produce, plus XML edge cases.
 
 Their exact bytes are the test (CRLF, lone CR, tabs, a BOM), so `.gitattributes` there turns off
@@ -44,7 +44,9 @@ line-ending conversion.
 ## Open findings (engine/xml)
 
 The P0-M1 review found these, and they are not fixed yet:
-- **Well-formedness is looser than a browser's.** These are accepted, but browsers refuse such files:
+- **Well-formedness is looser than a browser's.** These are accepted, but browsers refuse such files
+  (so such a file opens in Draw as a drawing, not as read-only source; ledger row
+  `syntax:strict-well-formedness`, phase 1):
   - duplicate attributes (the canvas refuses such an element: `hasDuplicateAttrs` in
     `policy/render-policy.ts`);
   - a bare `&`;
@@ -55,6 +57,11 @@ The P0-M1 review found these, and they are not fixed yet:
   - a lowercase `<!doctype`;
   - non-XML whitespace outside the root.
 - **A processing instruction inside the DOCTYPE** that contains `]` or `'` fails to parse.
+
+Fixed in P0-M5:
+- a failure over a limit (size, node count, depth, the entity budget and depth, an entity that
+  expands to markup) says so (`kind: 'limit'`), so Draw refuses such a file rather than showing it
+  as source that isn't well-formed.
 
 Fixed in P0-M3:
 - an XML declaration after the start, and a DOCTYPE anywhere but before the root, are refused as a

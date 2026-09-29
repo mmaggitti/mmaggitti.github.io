@@ -7,8 +7,13 @@
 //
 //   node tools/ledger-check.mjs                    check (CI): any problem or a stale generated file fails
 //   node tools/ledger-check.mjs --write            regenerate the generated files and extend ids.lock, then check
-//   node tools/ledger-check.mjs --evidence <file>  also require every cited test to have passed, from the
-//                                                  run recorded by tools/evidence-reporter.mjs
+//   node tools/ledger-check.mjs --evidence <file>  also require every cited unit test to have passed, from
+//                                                  the run recorded by tools/evidence-reporter.mjs
+//   node tools/ledger-check.mjs --e2e-evidence <file>
+//                                                  also require every cited e2e check to have passed, from
+//                                                  the run test/e2e.mjs recorded (.smoke/draw-e2e-evidence.jsonl;
+//                                                  after `npm test` in `npm run verify`, and in CI, where
+//                                                  the engine is WebKit)
 //
 // Checks:
 // - schema: ids, kinds, classes, phases, statuses; `partial` needs a reason, `done` needs tests,
@@ -22,14 +27,17 @@
 // - coverage: every element and element/attribute pair in svg-tag-names and svg-element-attributes
 //   (SVG 1.1, Tiny 1.2 and 2), every SVG Lab lesson, and every extracted lesson capability
 //   (engine/ledger/lesson-capabilities.json) has a row;
-// - evidence: a cited test lives in a unit-test file, and with --evidence it passed;
+// - evidence: a cited test lives in a unit-test file, and with --evidence it passed; or it is an e2e
+//   check, `projects/draw/test/e2e.mjs#<function>`, a function of e2e.mjs that run() calls through
+//   check(), and with --e2e-evidence it passed in every call and asserted something, in a complete
+//   run newer than the e2e, its helpers (projects/draw/test/ outside unit/) and the built page;
 // - the phase gate: every row of a phase before meta.currentPhase is done or superseded. Raising
 //   currentPhase is the phase exit; 9 means the ledger is closed.
 //
 // Generated: scripts/lib/svg-profile-tables.mjs (the served profile), engine/policy/tables.ts
 // (what the canvas may render) and engine/ledger/LEDGER.md (the coverage report).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { svgTagNames } from 'svg-tag-names';
@@ -38,6 +46,7 @@ import { svgElementAttributes } from 'svg-element-attributes';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const WRITE = process.argv.includes('--write');
 const EVIDENCE = process.argv.includes('--evidence') ? process.argv[process.argv.indexOf('--evidence') + 1] : null;
+const E2E_EVIDENCE = process.argv.includes('--e2e-evidence') ? process.argv[process.argv.indexOf('--e2e-evidence') + 1] : null;
 // Read, not imported: the profile imports the tables this script generates, so importing it would
 // make a broken generated file impossible to regenerate.
 const PROFILE_VERSION = Number(/export const PROFILE_VERSION = (\d+);/.exec(readFileSync(resolve(ROOT, 'scripts/lib/svg-profile.mjs'), 'utf8'))?.[1]);
@@ -52,8 +61,10 @@ const ELEMENT_NS = ['svg', 'xhtml', 'mathml', '*'];
 const CLOSED = 9; // meta.currentPhase after the P8 exit
 // Attribute patterns the canvas may render (so <style> selectors on them match), as regexes.
 const RENDERABLE_PATTERNS = { 'data-*': '^data-[^\\s:]+$', 'aria-*': '^aria-[a-z]+$' };
-// Where cited tests may live: the files the build's unit run executes.
+// Where cited tests may live: the files the build's unit run executes, or the e2e (a check function).
 const TEST_FILES = [/^engine\/test\/.+\.test\.ts$/, /^projects\/draw\/test\/unit\/.+\.test\.ts$/];
+const E2E_FILE = 'projects/draw/test/e2e.mjs';
+const isE2e = (t) => t.startsWith(`${E2E_FILE}#`);
 const isPattern = (name) => /[*(]/.test(name);
 const baseId = (r) => r.id.split('@')[0];
 
@@ -77,6 +88,7 @@ function main() {
       checkCoverage(rows, lessons);
       checkLock(rows);
       if (EVIDENCE) checkEvidence(rows);
+      if (E2E_EVIDENCE) checkE2eEvidence(rows);
       if (!errors.length) generate(meta, rows, lessons);
     }
   }
@@ -88,7 +100,7 @@ function main() {
     process.exitCode = 1;
   } else {
     const n = (s) => ledger.rows.filter((r) => r.status === s).length;
-    const cited = EVIDENCE ? '; every cited test passed' : '';
+    const cited = `${EVIDENCE ? '; every cited test passed' : ''}${E2E_EVIDENCE ? `; every cited e2e check passed (${e2eEngine})` : ''}`;
     console.log(`ledger-check: ok (phase ${ledger.meta.currentPhase}; ${ledger.rows.length} rows: ${n('done')} done, ${n('partial')} partial, ${n('planned')} planned, ${n('superseded')} superseded${cited})`);
   }
 }
@@ -148,7 +160,12 @@ function checkRows(meta, rows, lessons) {
       const i = t.indexOf('#');
       const file = i > 0 ? t.slice(0, i) : '';
       if (!file || i === t.length - 1) fail(`${r.id}: test "${t}" must be "path#test name"`);
-      else if (!TEST_FILES.some((re) => re.test(file))) fail(`${r.id}: ${file} is not a unit-test file the build runs`);
+      else if (file === E2E_FILE) {
+        const name = t.slice(i + 1);
+        const { declared, checked } = e2eChecks();
+        if (!declared.has(name)) fail(`${r.id}: ${name} is not a function in ${E2E_FILE}`);
+        else if (!checked.has(name)) fail(`${r.id}: ${E2E_FILE}#${name} is not run through check() in run(), so it is never evidence`);
+      } else if (!TEST_FILES.some((re) => re.test(file))) fail(`${r.id}: ${file} is not a unit-test file the build runs, nor ${E2E_FILE}`);
       else if (!existsSync(resolve(ROOT, file))) fail(`${r.id}: test file ${file} does not exist`);
     }
 
@@ -273,7 +290,59 @@ function checkEvidence(rows) {
     return `${file}#${name}`;
   }));
   if (passed.size < 50) fail(`--evidence ${EVIDENCE}: only ${passed.size} passing tests recorded; the run looks incomplete`);
-  for (const r of rows) for (const t of r.tests ?? []) if (!passed.has(t)) fail(`${r.id}: cited test did not pass (or does not exist): ${t}`);
+  // e2e checks are not unit tests: --e2e-evidence proves them, after the smoke test.
+  for (const r of rows) for (const t of r.tests ?? []) if (!isE2e(t) && !passed.has(t)) fail(`${r.id}: cited test did not pass (or does not exist): ${t}`);
+}
+
+// ── e2e evidence: cited e2e checks must have passed ────────────────────────────────────────────
+
+let e2eCache = null;
+/** The functions test/e2e.mjs declares, and those run() calls through check() (by name, or inline). */
+function e2eChecks() {
+  if (e2eCache) return e2eCache;
+  const path = resolve(ROOT, E2E_FILE);
+  // Comments may mention a check; only code counts.
+  const code = existsSync(path) ? readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1') : '';
+  e2eCache = {
+    declared: new Set([...code.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1])),
+    checked: new Set([...code.matchAll(/\bawait\s+check\(\s*(?:(?:async\s+)?function\s+)?([A-Za-z_$][\w$]*)/g)].map((m) => m[1])),
+  };
+  return e2eCache;
+}
+
+let e2eEngine = '';
+function checkE2eEvidence(rows) {
+  const path = resolve(process.cwd(), E2E_EVIDENCE);
+  if (!existsSync(path)) {
+    fail(`--e2e-evidence ${E2E_EVIDENCE}: no such file (run the smoke test first: npm test)`);
+    return;
+  }
+  // Evidence from an earlier run proves nothing about this e2e, its helpers or this build.
+  const when = statSync(path).mtimeMs;
+  const site = resolve(ROOT, '_site/draw/index.html');
+  if (!existsSync(site)) fail(`--e2e-evidence ${E2E_EVIDENCE}: there is no _site/draw/index.html, so no build it could be evidence of`);
+  for (const rel of [...e2eFiles(), '_site/draw/index.html']) {
+    const other = resolve(ROOT, rel);
+    if (existsSync(other) && statSync(other).mtimeMs > when) fail(`--e2e-evidence ${E2E_EVIDENCE}: older than ${rel}; run the smoke test again`);
+  }
+  const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  // test/e2e.mjs writes the file once, when its run ends, with this line last.
+  if (!lines.at(-1)?.complete) fail(`--e2e-evidence ${E2E_EVIDENCE}: not a complete run (no {"complete":true} line at the end)`);
+  const engines = [...new Set(lines.map((l) => l.engine))];
+  e2eEngine = engines.join(', ');
+  if (engines.length > 1) fail(`--e2e-evidence ${E2E_EVIDENCE}: one run is one engine, but it records ${e2eEngine}`);
+  const passed = new Set(lines.filter((l) => l.name).map((l) => `${l.file}#${l.name}`));
+  if (passed.size < 40) fail(`--e2e-evidence ${E2E_EVIDENCE}: only ${passed.size} passing e2e checks recorded; the run looks incomplete`);
+  for (const r of rows) for (const t of r.tests ?? []) if (isE2e(t) && !passed.has(t)) fail(`${r.id}: cited e2e check did not pass in every call (or did not run, or asserted nothing): ${t}`);
+}
+
+/** The e2e and every helper it runs: the files under projects/draw/test/ outside unit/. */
+function e2eFiles(dir = 'projects/draw/test') {
+  return readdirSync(resolve(ROOT, dir), { withFileTypes: true }).flatMap((d) => {
+    const rel = `${dir}/${d.name}`;
+    if (d.isDirectory()) return rel === 'projects/draw/test/unit' ? [] : e2eFiles(rel);
+    return [rel];
+  });
 }
 
 // ── generated files ────────────────────────────────────────────────────────────────────────────
@@ -467,7 +536,7 @@ function report(meta, rows, lessons, lock) {
   out.push('GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.', '');
   const phase = meta.currentPhase === CLOSED ? '**closed**' : `**P${meta.currentPhase}**`;
   out.push(`Current phase: ${phase}. ${rows.length} rows: ${STATUSES.map((s) => `${count(rows, s)} ${s}`).join(', ')}.`, '');
-  out.push('A row is `done` only when the tests it cites passed in the build. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.', '');
+  out.push('A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.', '');
 
   out.push('## By kind', '', ...head('Kind'));
   for (const k of KINDS) {

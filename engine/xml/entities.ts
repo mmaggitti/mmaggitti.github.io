@@ -52,8 +52,13 @@ export function readEntityTable(subset: string | null): EntityTable {
   return table;
 }
 
-export class EntityBudgetError extends Error {}
-export class EntityMarkupError extends Error {}
+// Both are limits of Draw's (a file that hits one may be well-formed), not well-formedness errors.
+export class EntityBudgetError extends Error {
+  readonly kind = 'limit';
+}
+export class EntityMarkupError extends Error {
+  readonly kind = 'limit';
+}
 
 /** A per-document budget shared by every decode of that document. */
 export interface Budget {

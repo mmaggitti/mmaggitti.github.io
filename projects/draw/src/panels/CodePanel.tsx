@@ -2,14 +2,22 @@
 // detents (peek, half, full): drag the handle between them, or tap it to step through them; the
 // canvas takes whatever height the sheet leaves. The code view is framework-free (codeview/): React
 // owns only its container, which stays mounted while hidden so edits keep patching it.
+//
+// Over the code: the legend ("Drag" a pink number; "Tap" a blue word or colour, or amber text,
+// which is yellow in dark; not shown when nothing can be edited), Tidy (the tidy view: a way of
+// showing the code, never a change to the file) and Copy.
+// On a wide screen, or a phone on its side (media.ts DOCK), the sheet docks beside the canvas at
+// full height instead. A file open as read-only source shows its text here, at the error.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { decodeAttr } from '../../../../engine/xml/entities.ts';
 import type { ElementNode } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../editor.ts';
 import { CodeView } from '../codeview/code-view.ts';
 import { detentHeights, dragHeight, nextDetent, settle, TAP_SLOP, type Detent, type Heights } from '../detents.ts';
+import { readPref, writePref } from '../platform/prefs.ts';
 import { elementLabel } from './label.ts';
+import { DOCK, useMedia } from './media.ts';
 import { useStore } from './store.ts';
 import { Support } from './Support.tsx';
 import { Guard } from './Guard.tsx';
@@ -28,16 +36,28 @@ interface Press {
   moved: boolean;
 }
 
-export function CodePanel({ editor, views, files }: { editor: Editor; views: Views; files: () => void }) {
+interface Props {
+  editor: Editor;
+  views: Views;
+  files: () => void;
+  copy: () => void;
+  /** A file open as read-only source (not well-formed): the code shows its text, at the error. */
+  source: boolean;
+}
+
+export function CodePanel({ editor, views, files, copy, source }: Props) {
   const sheet = useRef<HTMLElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const code = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   const dragged = useRef(false);
+  const docked = useMedia(DOCK);
   const [detent, setDetent] = useState<Detent>('peek');
   const [tab, setTab] = useState<Tab>('code');
   const [heights, setHeights] = useState<Heights | null>(null);
   const [live, setLive] = useState<number | null>(null); // the height while the handle is dragged
+  const [tidy, setTidy] = useState(() => readPref('tidy') === 'on');
+  const readOnly = useStore(editor.readOnly);
 
   useEffect(() => {
     const view = new CodeView(code.current!, {
@@ -46,6 +66,7 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
       scrubStart: (block, token) => editor.scrubStart(block, token),
       scrub: (steps) => editor.scrub(steps),
       scrubEnd: (committed) => editor.scrubEnd(committed),
+      key: (block, token, key) => editor.keyToken(block, token, key),
     });
     views.code = view;
     return () => {
@@ -53,6 +74,10 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
       views.code = null;
     };
   }, [editor, views]);
+
+  useEffect(() => {
+    views.code?.layout(tidy);
+  }, [tidy, views]);
 
   // The detents follow the space the canvas and the sheet share, and the sheet's head (from the
   // sheet's top edge, its hairline included, so peek is the height the sheet has there).
@@ -65,10 +90,19 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
     return () => ro.disconnect();
   }, []);
 
+  const open = docked || detent !== 'peek';
   // Code shown again: bring the selection's block into view.
   useEffect(() => {
-    if (detent !== 'peek' && tab === 'code') editor.revealSelection();
-  }, [detent, tab, editor]);
+    if (open && tab === 'code') editor.revealSelection();
+  }, [open, tab, editor]);
+
+  // A file opened as source: the code, at half at least, with its error in view.
+  useEffect(() => {
+    if (!source) return;
+    setTab('code');
+    setDetent((d) => (d === 'peek' ? 'half' : d));
+    requestAnimationFrame(() => views.code?.revealError());
+  }, [source, views]);
 
   const down = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -108,16 +142,21 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
     setTab(t);
     if (detent === 'peek') setDetent('half');
   };
+  const toggleTidy = () => {
+    writePref('tidy', tidy ? null : 'on');
+    setTidy(!tidy);
+  };
 
-  const height = live ?? (detent === 'peek' || !heights ? undefined : heights[detent]);
+  const height = docked ? undefined : live ?? (detent === 'peek' || !heights ? undefined : heights[detent]);
   return (
-    <section ref={sheet} className={`draw-sheet draw-sheet--${detent}`} style={height === undefined ? undefined : { height }} aria-label="Code panel">
+    <section ref={sheet} className={`draw-sheet draw-sheet--${docked ? 'dock' : detent}`} style={height === undefined ? undefined : { height }} aria-label="Code panel">
       <div ref={head} className="draw-sheet-head">
         <button
           type="button"
           className="draw-handle"
           aria-label={HANDLE_LABEL[detent]}
           aria-expanded={detent !== 'peek'}
+          hidden={docked}
           onPointerDown={down}
           onPointerMove={move}
           onPointerUp={up}
@@ -141,7 +180,18 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
           <SelectionLabel editor={editor} />
         </div>
       </div>
-      <div className="draw-sheet-body" hidden={detent === 'peek' && live === null}>
+      <div className="draw-sheet-body" hidden={!open && live === null}>
+        <div className="draw-code-bar" hidden={tab !== 'code'}>
+          {!source && !readOnly && <Legend />}
+          {!source && (
+            <button type="button" className="draw-bar-key draw-tidy" aria-pressed={tidy} aria-label="Tidy view (display only: the file is unchanged)" onClick={toggleTidy}>
+              Tidy
+            </button>
+          )}
+          <button type="button" className="draw-bar-key draw-copy" onClick={copy}>
+            Copy
+          </button>
+        </div>
         <div ref={code} className="draw-code" role="region" aria-label="SVG source" hidden={tab !== 'code'} />
         <Guard files={files}>
           {tab === 'inspect' && <Inspect editor={editor} />}
@@ -149,6 +199,28 @@ export function CodePanel({ editor, views, files }: { editor: Editor; views: Vie
         </Guard>
       </div>
     </section>
+  );
+}
+
+/**
+ * What the code's colours mean, verb first: drag a pink number; tap a blue word or colour, or amber
+ * text. Each sample is a chip in its tokens' colour, so it reads as code apart from the words.
+ */
+function Legend() {
+  return (
+    <p className="draw-legend">
+      <span className="draw-legend-item">
+        Drag <span className="cv-key cv-key--number">12</span>
+      </span>{' '}
+      <span className="draw-legend-item">
+        Tap <span className="cv-key cv-key--word">round</span>{' '}
+        <span className="cv-key cv-key--word">
+          <span className="cv-swatch" style={{ '--cv-swatch': '#ff7f50' } as CSSProperties} />
+          coral
+        </span>{' '}
+        <span className="cv-key cv-key--text">Hi</span>
+      </span>
+    </p>
   );
 }
 

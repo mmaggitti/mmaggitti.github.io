@@ -14,6 +14,12 @@
 // animations under prefers-reduced-motion, when its SMIL animations also start paused. The view
 // (zoom and pan) is the rendered root's viewBox, set by setCamera: never the file's. An edit writes
 // only the attributes that changed, so a scrub frame is one attribute mutation on the canvas.
+//
+// Under reduced motion a document that animates opens paused, on the frame where its first cycle
+// ends (where a drawing that animates in has arrived), and Play starts the motion: its SMIL runs
+// (the first Play from that still starts it from the top, so a drawing that animates once moves),
+// and the canvas stylesheet lets its CSS animations run too (the host's draw-play class). Pause
+// holds both where they are (draw-held keeps CSS animations on their frame).
 
 import { NS, attrValue, el, findAttr, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { buildRefIndex } from '../../../../engine/model/refs.ts';
@@ -40,6 +46,31 @@ interface Rendered {
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const plainId = (doc: Doc, n: ElementNode) => attrValue(doc, n, null, 'id');
 
+/** A drawing's motion: none, running, or (under reduced motion) paused until Play, or playing. */
+export type Motion = 'still' | 'running' | 'paused' | 'playing';
+
+const SMIL = 'animate, set, animateMotion, animateTransform, animateColor';
+// CSS that moves: a @keyframes rule, or an animation or animation-name declaration that isn't none
+// (not a class named "animation-…", nor "animation: none").
+const CSS_MOTION = /@keyframes|(?:^|[{;\s])animation(?:-name)?\s*:(?!\s*none\s*(?:[;}!]|$))/i;
+
+/** Whether a <style> sheet or a style attribute animates anything. */
+export const cssAnimates = (css: string): boolean => CSS_MOTION.test(css);
+
+/** Where the longest first cycle of the drawing's SMIL ends (a moment before), or 0. */
+function stillTime(svg: SVGSVGElement): number {
+  let end = 0;
+  for (const a of svg.querySelectorAll(SMIL)) {
+    try {
+      const e = a as SVGAnimationElement;
+      end = Math.max(end, e.getStartTime() + e.getSimpleDuration());
+    } catch {
+      // indefinite, or no interval yet: it says nothing about where the drawing arrives
+    }
+  }
+  return Number.isFinite(end) && end > 0 ? Math.min(end, 3600) - 0.001 : 0;
+}
+
 export class Renderer {
   #host: ShadowRoot;
   #doc: Doc | null = null;
@@ -50,6 +81,8 @@ export class Renderer {
   #ids: { version: number; ids: Map<string, NodeId[]> } | null = null;
   #back = new WeakMap<Node, NodeId>(); // drawn node → its NodeId, for hit testing
   #camera: string | null = null; // the viewBox the view gives the root, or null for the file's own
+  #playing = false; // Play was pressed (reduced motion)
+  #fromStill = false; // on the opening still (reduced motion): Play starts from the beginning
 
   constructor(host: ShadowRoot) {
     this.#host = host;
@@ -70,11 +103,63 @@ export class Renderer {
       const dom = root.ns === NS.svg && root.local === 'svg' ? this.#build(root, false, null) : null;
       this.#host.replaceChildren(...(dom ? [dom] : []));
       this.#rootSkipped = dom === null;
-      if (dom && reducedMotion()) (dom as SVGSVGElement).pauseAnimations();
+      this.#play(false);
+      this.#fromStill = !!dom && reducedMotion();
+      if (this.#fromStill) {
+        (dom as SVGSVGElement).pauseAnimations();
+        (dom as SVGSVGElement).setCurrentTime(stillTime(dom as SVGSVGElement));
+      }
     } catch (e) {
       [this.#doc, this.#nodes, this.#skipped, this.#linked, this.#ids] = prev;
       throw e;
     }
+  }
+
+  /** Draw nothing (a file that isn't well-formed is shown only as source). */
+  clear(): void {
+    this.#doc = null;
+    this.#nodes = new Map();
+    this.#skipped = new Map();
+    this.#linked = new Set();
+    this.#ids = null;
+    this.#rootSkipped = false;
+    this.#play(false);
+    this.#host.replaceChildren();
+  }
+
+  /** Whether the drawing moves (SMIL, or CSS animation in its styles), and if it waits for Play. */
+  motion(): Motion {
+    const svg = this.#root();
+    if (!svg) return 'still';
+    const css = () => [svg, ...svg.querySelectorAll('style, [style]')].some((e) => cssAnimates((e.localName === 'style' ? e.textContent : e.getAttribute('style')) ?? ''));
+    if (!svg.querySelector(SMIL) && !css()) return 'still';
+    if (!reducedMotion()) return 'running';
+    return this.#playing ? 'playing' : 'paused';
+  }
+
+  /** Play (or pause again, holding the frame) a drawing that reduced motion paused. */
+  play(on: boolean): void {
+    this.#play(on, !on);
+    const svg = this.#root();
+    if (!svg) return;
+    if (on) {
+      // The opening still is where the first cycle ends: a drawing that animates once (fill="freeze")
+      // would show no motion at all from there, so the first Play starts it from the top.
+      if (this.#fromStill) svg.setCurrentTime(0);
+      this.#fromStill = false;
+      svg.unpauseAnimations();
+    } else svg.pauseAnimations();
+  }
+
+  #play(on: boolean, held = false): void {
+    this.#playing = on;
+    this.#host.host.classList.toggle('draw-play', on);
+    this.#host.host.classList.toggle('draw-held', held);
+  }
+
+  #root(): SVGSVGElement | null {
+    const dom = this.#doc ? this.#nodes.get(this.#doc.root)?.dom : undefined;
+    return dom?.nodeType === 1 ? (dom as SVGSVGElement) : null;
   }
 
   /** Re-apply one element's attributes after an edit. */

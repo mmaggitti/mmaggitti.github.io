@@ -9,7 +9,16 @@
 // which commits as ONE history entry). Each emit is routed in the plan's fixed order: the canvas
 // patch, the code view patch, the overlay, the store bumps, then the change listeners (the draft
 // autosave, src/workspace.ts). The view is applied as the rendered root's viewBox, never written
-// to the file. A draft another tab holds opens read-only: every edit is refused, with a notice.
+// to the file. A draft another tab holds opens read-only: every edit is refused, with a notice, and
+// the code shows it as plain text.
+//
+// - A file that isn't well-formed is shown as its source only (showSource): nothing is drawn and
+//   nothing can be edited until another drawing opens.
+// - The canvas can fail to draw an edit (a render error): the editor draws the whole document
+//   again from the model; if that fails too, the canvas is cleared and says why, while the file,
+//   the code and undo carry on. Each later change tries a whole drawing again.
+// - Every token takes the keyboard: Enter or Space does what a tap does (a number opens its sheet),
+//   and the arrow keys step a number, one history entry each.
 
 import { NS, el, parseDoc, serialize, serializeNode, type Doc, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
@@ -23,10 +32,10 @@ import { createStore, type Store } from './panels/store.ts';
 import { attached, route, type Route } from './routing.ts';
 import { elementOf, outlineable, selectionTarget } from './selectable.ts';
 import { blockKey, viewBlock } from './codeview/blocks.ts';
-import type { FocusMark, ViewBlock, ViewToken } from './codeview/code-view.ts';
+import type { FocusMark, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
 import { artboard, fitsNatively } from './canvas/artboard.ts';
 import { camera, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
-import type { RenderStats } from './canvas/renderer.ts';
+import type { Motion, RenderStats } from './canvas/renderer.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
@@ -39,6 +48,11 @@ export interface CanvasPort {
   setCamera(rect: Rect | null): void;
   nodeFor(id: NodeId): unknown;
   stats(): RenderStats;
+  /** Draw nothing. */
+  clear(): void;
+  /** Whether the drawing moves, and whether reduced motion has it waiting for Play. */
+  motion(): Motion;
+  play(on: boolean): void;
 }
 export interface CodePort {
   set(blocks: readonly ViewBlock[]): void;
@@ -46,6 +60,10 @@ export interface CodePort {
   select(nodes: ReadonlySet<number>): void;
   /** Mark the number the Scrub strip holds, or none. */
   focus(mark: FocusMark | null): void;
+  /** Show every token as plain text that nothing edits (a read-only drawing), or not. */
+  readOnly(on: boolean): void;
+  /** Show a file's text as read-only source, with the character at `at` marked (not well-formed). */
+  source(text: string, at: number): void;
 }
 export interface OverlayPort {
   /** Measure and outline these elements (each outlineable and on the canvas). */
@@ -118,6 +136,10 @@ export class Editor {
   readonly version: Store<number> = createStore(0);
   /** True while another tab holds this document's draft: every edit is refused. */
   readonly readOnly: Store<boolean> = createStore(false);
+  /** Why the canvas can't show the document now (a render error), or null. */
+  readonly canvasError: Store<string | null> = createStore<string | null>(null);
+  /** Whether the drawing moves, and whether it waits for Play (reduced motion). */
+  readonly motion: Store<Motion> = createStore<Motion>('still');
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -136,6 +158,7 @@ export class Editor {
   constructor(ports: EditorPorts) {
     this.#ports = ports;
     this.focus.subscribe(() => this.#markFocus());
+    this.readOnly.subscribe(() => this.#ports.code.readOnly(this.readOnly.get()));
   }
 
   get doc(): Doc | null {
@@ -191,6 +214,7 @@ export class Editor {
       return { ok: false, error: String(e), ...NO_STATS };
     }
     this.#doc = doc;
+    this.canvasError.set(null);
     this.#session = new Session(doc);
     this.#wire(this.#session);
     this.#board = artboard(doc);
@@ -222,8 +246,13 @@ export class Editor {
       r = route(session.doc, cs);
       if (cs.attrs.has(session.doc.root)) this.#artboardChanged();
       const canvas = this.#ports.canvas;
-      for (const id of r.subtrees) canvas.patchSubtree(id);
-      for (const id of r.attrs) canvas.patchAttributes(id);
+      if (this.canvasError.get() !== null) return this.#redraw(); // it failed before: the whole drawing, again
+      try {
+        for (const id of r.subtrees) canvas.patchSubtree(id);
+        for (const id of r.attrs) canvas.patchAttributes(id);
+      } catch {
+        this.#redraw();
+      }
     });
     session.subscribe(() => {
       if (r.code.reset) return this.#resetCode();
@@ -248,8 +277,32 @@ export class Editor {
     const doc = this.#doc!;
     const blocks = codeBlocks(doc);
     this.#blocks = new Map(blocks.map((b) => [blockKey(b.node, b.part), b]));
-    this.#ports.code.set(blocks.map(viewBlock));
+    const memo = new Map<NodeId, boolean>();
+    this.#ports.code.set(blocks.map((b) => viewBlock(doc, b, memo)));
     this.#ports.code.select(this.selection.get());
+  }
+
+  /**
+   * The canvas couldn't draw a change: draw the whole document from the model (a fresh render equals
+   * a patched one). If that fails too, the canvas is cleared and says why; the file, the code and
+   * the history are untouched, and the next change tries again.
+   */
+  #redraw(): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const canvas = this.#ports.canvas;
+    try {
+      canvas.render(doc);
+      this.canvasError.set(null);
+      this.#applyView();
+    } catch (e) {
+      try {
+        canvas.clear();
+      } catch {
+        // nothing more to take away
+      }
+      this.canvasError.set(e instanceof Error ? e.message : String(e));
+    }
   }
 
   #patchCode(id: NodeId): void {
@@ -259,7 +312,7 @@ export class Editor {
     const key = blockKey(b.node, b.part);
     if (!this.#blocks.has(key)) return; // not in the listing (detached)
     this.#blocks.set(key, b);
-    this.#ports.code.patch(viewBlock(b));
+    this.#ports.code.patch(viewBlock(doc, b));
   }
 
   // The code view marks the number the Scrub strip holds: its block and its index there, read again
@@ -283,6 +336,7 @@ export class Editor {
       const token = doc && attached(doc, f.ref.node) ? tokenAt(doc, f.ref) : null;
       this.focus.set(token?.kind === 'number' ? { ref: f.ref, token } : null);
     }
+    this.motion.set(this.#doc && !this.canvasError.get() ? this.#ports.canvas.motion() : 'still');
     this.version.set(this.version.get() + 1);
   }
 
@@ -383,6 +437,7 @@ export class Editor {
     this.focus.set(null);
     const own = elementOf(doc, ref.node);
     if (t.kind !== 'ref' && own !== null) this.select([own]);
+    if (t.kind !== 'ref' && !this.#writable()) return; // read-only: plain text, and a tap says why
     switch (t.kind) {
       case 'number':
         this.focus.set({ ref, token: t });
@@ -408,6 +463,28 @@ export class Editor {
     const doc = this.#doc;
     if (!f || !doc) return;
     this.#dispatch(labelFor('Step', f.token), (apply) => apply(tokenOp(doc, f.ref, stepped(f.token, steps))));
+  }
+
+  /**
+   * A key on a focused token: Enter or Space does what a tap does (a number opens its Number
+   * sheet), and an arrow steps a number (one history entry each, and the Scrub strip follows it).
+   */
+  keyToken(block: ViewBlock, token: ViewToken, key: TokenKey): void {
+    const doc = this.#doc;
+    if (!doc || this.#live) return;
+    if (key === 'open') {
+      this.tapToken(block, token);
+      if (this.focus.get()) this.openNumberSheet();
+      return;
+    }
+    const hit = this.#resolve(block, token);
+    const t = hit?.bt.token;
+    if (!hit || t?.kind !== 'number') return;
+    const own = elementOf(doc, hit.ref.node);
+    if (own !== null) this.select([own]);
+    if (!this.#writable()) return;
+    this.focus.set({ ref: hit.ref, token: t });
+    this.stepFocus(key === 'up' ? 1 : -1);
   }
 
   negateFocus(): void {
@@ -567,6 +644,41 @@ export class Editor {
 
   closeSource(): void {
     if (this.sheet.get()?.kind === 'source') this.sheet.set(null);
+  }
+
+  /** The artboard's larger side (the Number sheet's slider spans from minus it to twice it), or 100. */
+  extent(): number {
+    const b = this.#board;
+    return b && b.width > 0 && b.height > 0 ? Math.max(b.width, b.height) : 100;
+  }
+
+  /** Play or pause a drawing that reduced motion opened paused. */
+  togglePlay(): void {
+    const m = this.motion.get();
+    if (m !== 'paused' && m !== 'playing') return;
+    this.#ports.canvas.play(m === 'paused');
+    this.motion.set(this.#ports.canvas.motion());
+  }
+
+  /**
+   * A file that isn't well-formed: its text as read-only source in the code, with the error's
+   * place marked, and nothing on the canvas. The document that was open closes (as when another
+   * opens), and nothing here can be edited until another drawing opens.
+   */
+  showSource(text: string, at: number): void {
+    this.#endLive(false);
+    this.#doc = null;
+    this.#session = null;
+    this.#blocks = new Map();
+    this.#board = null;
+    this.canvasError.set(null);
+    this.sheet.set(null);
+    this.focus.set(null);
+    this.selection.set(new Set());
+    this.#ports.canvas.clear();
+    this.#ports.code.source(text, at);
+    this.#ports.overlay.outline([]);
+    this.#bump();
   }
 
   // ── the view: zoom and pan (the rendered root's viewBox, never the file) ─────────────────────

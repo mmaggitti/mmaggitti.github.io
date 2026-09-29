@@ -14,9 +14,11 @@
 // outside) the shadow tree means isolation, not a rule that never applied. The shadow host carries
 // the app's .draw-host class, so the inherited-style row tests the canvas as the app hosts it.
 //
-// Known shadow-root gaps are reported, never gated: a document's own @font-face does not register
-// in a shadow tree (Chromium; the probe shows it), so embedded fonts need a decision before Draw
-// depends on them (register them on document.fonts, or the light-DOM fallback).
+// Known shadow-root gaps are reported, not gated, in the engines listed for them (a case's `gap`),
+// and gated like any other row everywhere else: a document's own @font-face does not register in a
+// shadow tree in Chromium (the probe shows it), so embedded fonts need a decision before Draw
+// depends on them (register them on document.fonts, or the light-DOM fallback). WebKit, the phone's
+// engine, must pass every row.
 
 import { readFileSync } from 'node:fs';
 import { decodePng } from './probe-helpers/png.mjs';
@@ -109,8 +111,9 @@ const CASES = [
     build: (id) => [['rect', { width: 10, height: 40, fill: 'lime' },
       ['animate', { id: id('a').replace('-', '_'), attributeName: 'width', values: '20;20', dur: '1s' }],
       ['animate', { attributeName: 'width', values: '40;40', begin: `${id('a').replace('-', '_')}.end`, dur: '10s' }]]] },
-  // A known gap (reported, not gated): the document's own face, measured against the serif fallback.
-  { feature: "@font-face in the document's <style>", gap: true, font: true,
+  // A known gap in Chromium (reported there, gated elsewhere): the document's own face, measured
+  // against the serif fallback.
+  { feature: "@font-face in the document's <style>", gap: ['chromium'], font: true,
     build: (id) => [
       ['style', {}, `@font-face{font-family:${id('f')};src:url(${FONT})}`],
       ['text', { y: 20, 'font-size': 10, 'font-family': `${id('f')}, serif` }, 'iiii'],
@@ -162,16 +165,18 @@ export default async function probe({ browser, origin }) {
     console.log(cols('browser', 'feature', 'shadow root', 'light-DOM control'));
     for (const r of rows) console.log(cols(name, r.feature, cell(r.shadow), cell(r.control)));
     const features = (pick) => rows.filter(pick).map((r) => r.feature);
-    const gaps = features((r) => r.gap && r.control.ok && !r.shadow.ok);
-    if (gaps.length) console.log(`  known shadow-root gaps (reported, not gated): ${gaps.join('; ')}`);
+    const engine = browser.browserType().name();
+    const known = (r) => (r.gap ?? []).includes(engine); // a known gap in this engine
+    const gaps = features((r) => known(r) && r.control.ok && !r.shadow.ok);
+    if (gaps.length) console.log(`  known shadow-root gaps in ${engine} (reported, not gated): ${gaps.join('; ')}`);
 
-    const known = KNOWN_UNSUPPORTED[browser.browserType().name()] ?? [];
-    const inconclusive = features((r) => !r.control.ok && !known.includes(r.feature));
+    const unsupported = KNOWN_UNSUPPORTED[engine] ?? [];
+    const inconclusive = features((r) => !r.control.ok && !unsupported.includes(r.feature));
     if (inconclusive.length) throw new Error(`probe inconclusive in ${name}: the light-DOM control fails ${inconclusive.join('; ')}`);
     if (layout.violations.length) throw new Error(`probe: CSP violations in ${name}: ${layout.violations.join(', ')}`);
     const leaks = features((r) => r.isolation && r.control.ok && !r.shadow.ok);
     if (leaks.length) throw new Error(`the canvas is not isolated in ${name}: ${leaks.join('; ')}`);
-    const broken = features((r) => !r.isolation && !r.gap && r.control.ok && !r.shadow.ok);
+    const broken = features((r) => !r.isolation && !known(r) && r.control.ok && !r.shadow.ok);
     if (broken.length) {
       throw new Error(`shadow root breaks ${broken.length} feature(s) that work in the light DOM in ${name}: ${broken.join('; ')}. M2 gate: use the light-DOM id-prefix fallback.`);
     }

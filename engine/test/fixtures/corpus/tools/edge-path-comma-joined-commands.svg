@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="200" viewBox="0 0 140 100">
+  <!-- A chart from a script that joined its path commands with commas. Blink and WebKit draw every
+       line; Gecko stops at the first comma before a command or at the end, as the path grammar says. -->
+  <path d="M10 10 V90 H130" fill="none" stroke="#264653"/>
+  <path d="M10,90,L50,40,L90,70,L130,20" fill="none" stroke="#e76f51" stroke-width="2"/>
+  <path d="M10 80 L50 72 L90 52 L130 46," fill="none" stroke="#2a9d8f" stroke-width="2"/>
+</svg>

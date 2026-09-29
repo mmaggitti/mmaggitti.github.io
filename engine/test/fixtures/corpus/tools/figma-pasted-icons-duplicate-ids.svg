@@ -1,0 +1,32 @@
+<svg width="48" height="24" viewBox="0 0 48 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_12_7)">
+<rect width="24" height="24" rx="6" fill="url(#paint0_linear_12_7)"/>
+<path d="M7 12L10.5 15.5L17 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<defs>
+<linearGradient id="paint0_linear_12_7" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2A9D8F"/>
+<stop offset="1" stop-color="#264653"/>
+</linearGradient>
+<clipPath id="clip0_12_7">
+<rect width="24" height="24" fill="white"/>
+</clipPath>
+</defs>
+</svg>
+<svg x="24" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_12_7)">
+<rect width="24" height="24" rx="6" fill="url(#paint0_linear_12_7)"/>
+<path d="M8 8L16 16M16 8L8 16" stroke="white" stroke-width="2" stroke-linecap="round"/>
+</g>
+<defs>
+<linearGradient id="paint0_linear_12_7" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+<stop stop-color="#E76F51"/>
+<stop offset="1" stop-color="#9D0208"/>
+</linearGradient>
+<clipPath id="clip0_12_7">
+<rect width="20" height="20" x="2" y="2" fill="white"/>
+</clipPath>
+</defs>
+</svg>
+</svg>

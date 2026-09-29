@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { parseDoc, descendants, type ElementNode } from '../../model/doc.ts';
+import { parseDoc, descendants, serialize, type ElementNode } from '../../model/doc.ts';
+import { buildRefIndex, duplicateIds } from '../../model/refs.ts';
 import { importReport } from '../../report/import-report.ts';
 import { classifyAttribute, classifyElement } from '../../policy/classify.ts';
 
@@ -127,4 +128,37 @@ test("a plain attribute on a foreign element takes that element's class, not an 
   const pagecolor = r.items.find((i) => i.kind === 'attribute' && i.name === 'pagecolor');
   assert.equal(pagecolor?.bucket, 'kept');
   assert.deepEqual(r.items.filter((i) => i.bucket === 'unclassified').map((i) => i.name).sort(), ['flowPara', 'flowRegion', 'flowRoot'], 'only the SVG 1.2 flow elements no row names');
+});
+
+test("what only WebKit draws is flagged, with whether Draw's canvas draws it too", () => {
+  // tref and altGlyph render on the canvas (element:tref, element:altGlyph), so Safari shows them
+  // in Draw as it does on its own; SVG fonts are kept but never rendered.
+  const text = importReport(load('tools/edge-svg11-tref-altglyph.svg'));
+  assert.ok(text.notes.includes("Safari draws <altGlyph>, <tref>, and so does Draw's canvas there; Chrome and Firefox do not."), text.notes.join(' | '));
+  assert.ok(!text.notes.some((n) => n.includes("Chrome, Firefox and Draw's canvas do not")), 'nothing in it is hidden from the canvas');
+  assert.deepEqual(text.items.filter((i) => ['altGlyph', 'tref'].includes(i.name)).map((i) => `${i.name} ${i.bucket} ${i.cls}`).sort(), ['altGlyph kept preserve', 'tref kept preserve']);
+  const fonts = importReport(load('tools/edge-legacy-fonts-tiny-rdfa.svg'));
+  assert.ok(fonts.notes.includes("Safari draws <font>, <font-face>, <glyph>, <hkern>, <missing-glyph>, <vkern>; Chrome, Firefox and Draw's canvas do not."), fonts.notes.join(' | '));
+});
+
+test('duplicate ids are kept as written, and the report names them: browsers use the first', () => {
+  // Two Figma icons pasted into one file: each brought its own clip0_12_7 and paint0_linear_12_7.
+  const rel = 'tools/figma-pasted-icons-duplicate-ids.svg';
+  const src = readFileSync(new URL(rel, CORPUS), 'utf8');
+  const doc = load(rel);
+  assert.equal(serialize(doc), src, 'kept byte for byte');
+  const refs = buildRefIndex(doc);
+  assert.deepEqual(duplicateIds(refs), ['paint0_linear_12_7', 'clip0_12_7']);
+  for (const id of duplicateIds(refs)) {
+    const [first, second] = refs.ids.get(id)!;
+    const order = [...descendants(doc, doc.root)].map((n) => n.id);
+    assert.ok(order.indexOf(first) < order.indexOf(second), `${id}: the first carrier comes first, as browsers resolve it`);
+    assert.equal(refs.refs.get(id)!.length, 2, `${id}: both icons point at it`);
+  }
+  assert.deepEqual(refs.dangling, []);
+  assert.ok(importReport(doc).notes.includes('2 ids are used more than once (paint0_linear_12_7, clip0_12_7); browsers use the first.'), importReport(doc).notes.join(' | '));
+  const one = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"><g id="a"/><g id="a"/></svg>');
+  assert.ok(one.ok);
+  assert.ok(importReport(one.doc).notes.includes('1 id is used more than once (a); browsers use the first.'));
+  assert.ok(!importReport(load('tools/figma-card-drop-shadow.svg')).notes.some((n) => /more than once/.test(n)), 'a file without any says nothing');
 });
