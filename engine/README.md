@@ -53,7 +53,10 @@ to a browser rule by rule), and not fixed yet. Browsers refuse these files, and 
   over its limits);
 - a colon in a processing instruction's target (`<?a:b?>`);
 - a name character outside XML's (`a×b`: the lexer's names are permissive about non-ASCII);
-- an XML declaration whose `standalone` is neither `yes` nor `no`;
+- an XML declaration whose own syntax is wrong (its fields aren't checked): no `version`, a version
+  other than `1.` and digits, an encoding that isn't a name, or a `standalone` other than `yes` or
+  `no`;
+- a public identifier holding a character XML doesn't allow there (`PUBLIC "a&b"`);
 - a namespace name that isn't a URI (`xmlns:p="a b"`).
 
 The other way round, one file browsers accept is refused, as over Draw's limits (so it isn't shown

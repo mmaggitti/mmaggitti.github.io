@@ -328,7 +328,9 @@ async function corpusStaysInert(browser, origin) {
 
 // Ordinary content at the policy's edges, and its fate. The ledger renders three attributes that
 // DOMPurify refuses: a data: image on feImage, and SMIL from/to. An id that names a document
-// property (title) is kept: DOMPurify's SANITIZE_DOM is off. The policy refuses the rest: a <style>
+// property (title) is kept: DOMPurify's SANITIZE_DOM is off. So are a data-* and an aria-*
+// attribute (pattern rows, drawn from P1-M0): both judges let them through, so a [data-…] selector
+// matches on the canvas as it does in the file on its own. The policy refuses the rest: a <style>
 // with a url() to another file, the same in a style attribute, an image and a <use> pointing
 // outside the document, a <set> of an attribute the tables don't render (cursor), and an animation
 // of r on a rect (r renders on circles, not rects). An animation of r whose href names a circle
@@ -336,7 +338,7 @@ async function corpusStaysInert(browser, origin) {
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const EDGES = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
   <style>.far { fill: url(other.svg#a) }</style>
-  <rect id="title" class="near" width="10" height="10"/>
+  <rect id="title" class="near" data-state="on" aria-label="near" width="10" height="10"/>
   <filter id="f"><feImage width="10" href="data:image/png;base64,${PNG}"/></filter>
   <circle r="5"><animate attributeName="opacity" from="1" to="0.5" dur="1s"/><set attributeName="cursor" to="crosshair"/></circle>
   <rect width="10" height="10" style="fill: url(https://example.com/x.png)"/>
@@ -371,7 +373,8 @@ async function policyEdges(browser, origin) {
       purified: { feImage: 'width', animate: 'attributeName dur' },
       policy: { style: null, 'rect:not(.near)': 'height width', image: 'height width', use: 'width', set: null, 'rect > animate': null, 'g > animate': 'attributeName dur href values' },
     };
-    must(r.kept === 'class height id width', `the canvas has <rect id="title"> as [${r.kept}], not [class height id width]: is DOMPurify dropping ordinary ids again (SANITIZE_DOM)?`);
+    must(/\bdata-state\b/.test(r.kept) && /\baria-label\b/.test(r.kept), `the canvas has <rect id="title"> as [${r.kept}], without data-state or aria-label: the pattern rows (data-*, aria-*) must pass both judges, the policy and DOMPurify`);
+    must(r.kept === 'aria-label class data-state height id width', `the canvas has <rect id="title"> as [${r.kept}], not [aria-label class data-state height id width]: is DOMPurify dropping ordinary ids again (SANITIZE_DOM)?`);
     for (const [sel, got] of Object.entries(r.purified)) {
       must(got === want.purified[sel], `DOMPurify refuses part of ${sel}, but the canvas has [${got}], not [${want.purified[sel]}]: is the sink still asking DOMPurify?`);
     }

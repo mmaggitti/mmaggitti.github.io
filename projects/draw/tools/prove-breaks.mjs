@@ -209,7 +209,7 @@ const BREAKS = [
   // P0-M2 review: the render policy's rules, each seen failing its own test.
   {
     id: 'B33', what: "the policy ignores an attribute scope's except list",
-    file: 'engine/policy/render-policy.ts', from: 'if (!scope || scope.except?.includes(elLocal)) return false;', to: 'if (!scope) return false;',
+    file: 'engine/policy/render-policy.ts', from: '  if (scope.except?.includes(elLocal)) return false;\n', to: '',
     run: POLICY_TESTS, expect: /✖ every rendered attribute renders on the elements in its scope/,
   },
   {
@@ -1517,6 +1517,11 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ an entity a parameter entity may declare is over Draw's limits, not malformed/,
   },
   {
+    id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
+    run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
+  },
+  {
     id: 'B288', what: 'the parser tree check compares no corpus file', slow: true,
     file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, file] of corpus.entries()) {', to: '    for (const [i, file] of corpus.slice(0, 0).entries()) {',
     run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: compared 0 of \d+ corpus files/,
@@ -1543,9 +1548,10 @@ const BREAKS = [
     run: POLICY_TESTS, expect: /✖ data-\* \(a pattern row\): rendered on every element, kept byte for byte, served/,
   },
   {
-    id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
-    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
-    run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
+    // The policy draws the pattern rows; the sink's second judge must agree, or they never land.
+    id: 'B294', what: "DOMPurify's second opinion refuses data-* (a pattern row the policy draws never reaches the canvas)", slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '  SANITIZE_DOM: false,\n', to: '  SANITIZE_DOM: false,\n  ALLOW_DATA_ATTR: false,\n',
+    run: SITE_E2E, expect: /without data-state or aria-label: the pattern rows \(data-\*, aria-\*\) must pass both judges/,
   },
 ];
 
