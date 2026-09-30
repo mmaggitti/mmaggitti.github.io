@@ -1,5 +1,5 @@
 // The keyboard on the canvas selection (P1-M1): Delete, Escape, the arrows and ⌘A, handed to the
-// editor. Installed once on window by panels/App.tsx; P0's ⌘Z, ⇧⌘Z and ⌘Y stay there (M5's command
+// editor; and Enter, the Pen's Done (P1-M3). Installed once on window by panels/App.tsx; P0's ⌘Z, ⇧⌘Z and ⌘Y stay there (M5's command
 // registry takes every key over).
 //
 // A key never acts when something else has it: a field (input, textarea, select, contenteditable),
@@ -20,6 +20,8 @@ export interface KeyEditor {
   readonly selection: { get(): ReadonlySet<NodeId> };
   delete(): void;
   escape(): void;
+  /** Enter: true when the editor took it (the Pen's Done). */
+  enter(): boolean;
   selectAll(): void;
   nudge(dx: number, dy: number): void;
   nudgeEnd(commit?: boolean): void;
@@ -73,6 +75,8 @@ export class Keys {
       ed.delete();
     } else if (e.key === 'Escape') {
       ed.escape();
+    } else if (e.key === 'Enter' && plain && !e.shiftKey) {
+      if (ed.enter()) e.preventDefault();
     } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       ed.selectAll();

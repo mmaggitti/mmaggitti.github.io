@@ -32,7 +32,8 @@ export function Sheets({ editor }: { editor: Editor }) {
   if (!sheet) return null;
   const key = sheet.kind === 'source' ? `source:${sheet.node}` : sheet.kind === 'style' ? `style:${sheet.prop}:${sheet.ids.join(',')}` : `${sheet.kind}:${sheet.ref.node}:${sheet.ref.index}`;
   const close = () => (sheet.kind === 'source' ? editor.closeSource() : editor.closeSheet());
-  const title = sheet.kind === 'source' ? 'Edit source' : sheet.kind === 'style' ? sheet.prop : sheet.token.prop;
+  // A path's number is named for what it is ("point 2 x", "control 1 y": P1-M3), else its property.
+  const title = sheet.kind === 'source' ? 'Edit source' : sheet.kind === 'style' ? sheet.prop : sheet.kind === 'number' ? (sheet.token.label ?? sheet.token.prop) : sheet.token.prop;
   return (
     <Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>
       <Body editor={editor} sheet={sheet} close={close} />

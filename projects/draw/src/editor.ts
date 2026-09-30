@@ -28,7 +28,7 @@
 //   one drag while it has focus, and the style sheet (the Colour sheet over the selection) one drag
 //   per visit. Elements a <style> rule decides are left as they are, and one notice names them.
 
-import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
+import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
@@ -81,6 +81,13 @@ import { glossOf, glossOff, glossOn, glossable } from '../../../engine/paint/glo
 import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
 import { parsePaint } from '../../../engine/values/color.ts';
 import { elementLabel } from './panels/label.ts';
+import { pathNodes, planBendTap, planNodeDrag, type NodeKind } from '../../../engine/path/nodes.ts';
+import { closeLast, cycleSegment as cycleSegmentOf, lastClosed, makeCorner, makeSmooth, nodeType, openLast, readsRelative, toggleRelative as toggleRelativeOf } from '../../../engine/path/segments.ts';
+import { parsePath } from '../../../engine/path/parse.ts';
+import { toAbsolute } from '../../../engine/path/abs.ts';
+import { cssWhy } from '../../../engine/geometry/write.ts';
+import { appendSegment, closingText, penColour, penPathMarkup, segmentInto, type PenAnchor } from './interact/pen.ts';
+import { pathMarks, penArms, type PathMarks } from './interact/path-marks.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
 
@@ -261,11 +268,16 @@ export class Editor {
   readonly shapeKind: Store<ShapeKind> = createStore<ShapeKind>('rect');
   /** Edit on canvas (P1-M2): the paint of the one selected element whose gradient handles the overlay shows instead of the shape's; off when the selection changes. */
   readonly editGradient: Store<PaintProp | null> = createStore<PaintProp | null>(null);
+  /** The Pen while it is on (P1-M3): how many anchors it has, and what its bar offers. */
+  readonly pen: Store<PenView | null> = createStore<PenView | null>(null);
+  /** The Node tool's chosen node (P1-M3): an anchor's handle id on the one selected path, until another is tapped, the selection or the tool changes. */
+  readonly chosenNode: Store<string | null> = createStore<string | null>(null);
   #shapes = 0; // shapes placed or drawn since the document opened: the colour cycle's n
   #detached: NodeId[] = []; // what the finish hook detached in the latest run (the notice, after a commit)
   #field: FieldSession | null = null; // an Inspect field being typed in: one entry while it has focus
   #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
   #stepDrag: { drag: Drag; from: DrawState } | null = null; // the Snap sheet's Grid step field, while it is being typed in
+  #pen: PenState | null = null; // the Pen's state (never in the file): its path, anchors and entries
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -294,6 +306,7 @@ export class Editor {
     this.selection.subscribe(() => {
       if (!this.selection.get().size && this.selectMore.get()) this.selectMore.set(false);
       if (this.editGradient.get() !== null) this.editGradient.set(null); // Edit on canvas ends with the selection
+      if (this.chosenNode.get() !== null) this.chosenNode.set(null); // the chosen node too
     });
   }
 
@@ -356,6 +369,9 @@ export class Editor {
     this.#session = new Session(doc, { finish: (d, ops, apply) => void (this.#detached = finishGenerators(d, ops, apply)) });
     this.#detached = [];
     this.#shapes = 0;
+    this.#pen = null;
+    this.pen.set(null);
+    this.chosenNode.set(null);
     this.tool.set('select');
     this.#wire(this.#session);
     this.#board = artboard(doc);
@@ -527,7 +543,8 @@ export class Editor {
 
   #bump(): void {
     const s = this.#session;
-    const h: HistoryState = s ? { canUndo: s.canUndo, canRedo: s.canRedo, undoLabel: s.undoLabel, redoLabel: s.redoLabel } : NO_HISTORY;
+    const pen = this.tool.get() === 'pen';
+    const h: HistoryState = s ? { canUndo: s.canUndo, canRedo: s.canRedo && !pen, undoLabel: s.undoLabel, redoLabel: pen ? null : s.redoLabel } : NO_HISTORY;
     const was = this.history.get();
     if (h.canUndo !== was.canUndo || h.canRedo !== was.canRedo || h.undoLabel !== was.undoLabel || h.redoLabel !== was.redoLabel) this.history.set(h);
     const f = this.focus.get();
@@ -595,6 +612,7 @@ export class Editor {
     const hs = this.#handleSet(ids, measured, outlines.map((o) => o.quad), gv);
     model.handles = hs.handles;
     model.rotGuide = hs.rotGuide;
+    model.paths = this.#pathMarks(ids, measured);
     model.guides = this.#guideMarks();
     // One transformed element: its own grid, through its CTM.
     const one = ids.length === 1 ? measured.get(ids[0]) : undefined;
@@ -643,10 +661,18 @@ export class Editor {
   pointerDown(at: Point, hits: readonly NodeId[], mods: { add: boolean }): void {
     const doc = this.#doc;
     if (!doc || this.#live || this.#gesture || this.#nudge || this.#field) return;
+    // The Pen (P1-M3): every one-finger gesture adds a point, closes or continues a path; it never
+    // selects, moves or marquees, and no handle but the pen's own takes a press.
+    if (this.tool.get() === 'pen') {
+      if (!this.#writable() || !this.#pen) return;
+      const took = pickHandle(this.#penHandles(true), at);
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: took?.id ?? null, handleAt: took?.at ?? null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: { take: (took?.id ?? null) as PenGesture['take'], p: null, f: null, drag: null, label: null } };
+      return;
+    }
     // The Shapes tool: every one-finger gesture places or draws, never selects or moves.
     if (this.tool.get() === 'shapes') {
       if (!this.#writable()) return;
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null } };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null }, pen: null };
       return;
     }
     const all = this.#withThin(at, hits);
@@ -657,7 +683,7 @@ export class Editor {
     const pill = pickPill(model.guides, at);
     const picked = pill === null ? pickHandle(model.handles, at) : null;
     const onLocked = targets.length > 0 && isLocked(doc, targets[0]);
-    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null };
+    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null, pen: null };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -665,6 +691,7 @@ export class Editor {
     const g = this.#gesture;
     if (!g || !this.#doc) return;
     g.at = at;
+    if (g.pen) return this.#penFrame(g);
     if (g.draw) return this.#drawFrame(g);
     if (g.mode === 'pending') this.#startDrag(g, held);
     if (g.mode === 'move') this.#moveFrame(g);
@@ -679,9 +706,13 @@ export class Editor {
     if (!g) return;
     g.at = at;
     this.#gesture = null;
-    if (g.draw) this.#endDraw(g, true);
+    if (g.pen) this.#penUp(g);
+    else if (g.draw) this.#endDraw(g, true);
     else if (g.mode === 'pending') {
-      if (g.handle === null && g.guide === null) this.#tap(g.target, g.add); // a tap on a handle or a pill does nothing in M1
+      // A tap on a node handle (P1-M3): a bend curves its segment, an anchor becomes the chosen node.
+      // A tap on any other handle, or on a pill, does nothing.
+      if (g.handle !== null && this.tool.get() === 'node') this.#tapNodeHandle(g.handle);
+      else if (g.handle === null && g.guide === null) this.#tap(g.target, g.add);
     } else if (g.mode === 'move') this.#endMove(g, true);
     else if (g.mode === 'handle') this.#endHandle(g, true);
     else if (g.mode === 'guide') this.#endGuide(g, true);
@@ -694,7 +725,8 @@ export class Editor {
     const g = this.#gesture;
     if (!g) return;
     this.#gesture = null;
-    if (g.draw) this.#endDraw(g, false);
+    if (g.pen) this.#penCancel(g);
+    else if (g.draw) this.#endDraw(g, false);
     else if (g.mode === 'move') this.#endMove(g, false);
     else if (g.mode === 'handle') this.#endHandle(g, false);
     else if (g.mode === 'guide') this.#endGuide(g, false);
@@ -703,16 +735,24 @@ export class Editor {
 
   /** Is a pointer gesture, a scrub or a nudge under way (Escape cancels one)? */
   get busy(): boolean {
-    return !!this.#live || !!this.#gesture?.move || !!this.#gesture?.hd || !!this.#gesture?.gd || !!this.#gesture?.draw?.drag || !!this.#nudge || !!this.#field;
+    return !!this.#live || !!this.#gesture?.move || !!this.#gesture?.hd || !!this.#gesture?.gd || !!this.#gesture?.draw?.drag || !!this.#gesture?.pen?.drag || !!this.#nudge || !!this.#field;
   }
 
-  /** Escape: cancel a live drag if one is running, else leave the Shapes tool, else deselect. */
+  /** Escape: cancel a live drag if one is running, else end the Pen, else leave the Shapes or Node tool, else deselect. */
   escape(): void {
     if (this.#gesture) return this.pointerCancel();
     if (this.#live) return this.#endLive(false);
     if (this.#nudge) return this.nudgeEnd(false);
-    if (this.tool.get() === 'shapes') return this.pickTool('select');
+    if (this.tool.get() === 'pen') return this.penDone();
+    if (this.tool.get() === 'shapes' || this.tool.get() === 'node') return this.pickTool('select');
     this.deselect();
+  }
+
+  /** Enter (keys.ts, never in a field or the code): the Pen's Done. True when it took the key. */
+  enter(): boolean {
+    if (this.tool.get() !== 'pen' || this.#gesture) return false;
+    this.penDone();
+    return true;
   }
 
   /** Select all: what a marquee around the whole document would take. */
@@ -736,6 +776,7 @@ export class Editor {
 
   /** Delete the selected elements, each with its leading whitespace, in one entry. The root is refused. */
   delete(): void {
+    if (this.tool.get() === 'pen' && !this.#gesture) this.#endPen(true); // Delete ends the Pen first
     const doc = this.#doc;
     const sel = [...this.selection.get()];
     if (!doc || !sel.length || this.#live || this.#gesture) return;
@@ -1057,6 +1098,7 @@ export class Editor {
     const doc = this.#doc!;
     const g = this.#gesture;
     const none = { handles: [], rotGuide: null };
+    if (this.tool.get() === 'pen') return { handles: this.#penHandles(), rotGuide: null }; // only the Pen's own
     if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
     const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
     // Edit on canvas: the gradient's handles instead of the shape's (none when they can't be placed).
@@ -1069,6 +1111,19 @@ export class Editor {
     if (!m) return none;
     const n = doc.nodes.get(ids[0]) as ElementNode;
     const p = this.#pivots(ids[0], m);
+    // The Node tool (P1-M3): a path's anchors, controls and bend handles (engine/path/nodes.ts)
+    // instead of the corners, the ring and the diamond, through its own CTM; M1's centre stays (it
+    // moves the whole path). The chosen node is drawn active.
+    const nodes = this.#nodesShown(n.id);
+    if (nodes) {
+      const chosen = this.chosenNode.get();
+      const centre = handlesFor({ quad: quadOf(m.box, m.toHost), corners: false, rotPivot: null, scalePivot: null }, active).handles;
+      const own = nodes.handles.map((h) => {
+        const [x, y] = applyM(m.toHost, h.at.x, h.at.y);
+        return { id: h.id, kind: h.kind, at: { x, y }, active: h.id === active || h.id === chosen };
+      });
+      return { handles: [...centre, ...own], rotGuide: null };
+    }
     // Circles, ellipses, lines, polygons, polylines and generated shapes: their own handles (engine/
     // geometry/shape-handles.ts) instead of the corners, placed through their own CTM; the centre on
     // the shape's own centre.
@@ -1136,13 +1191,30 @@ export class Editor {
     // The offset from the finger to the handle at the press: the handle moves by the finger's
     // movement, never jumping to it (26 pt pick radius).
     const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, grab };
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, node: null, grab };
     if (g.handle!.startsWith('g-')) {
       // A gradient handle (Edit on canvas): raw, no snapping (as in the lab), so no targets.
       const gv = this.#gradientView([id], measured);
       if (!gv || 'refused' in gv.out) return;
       hd.gradient = { prop: gv.prop, geo: gv.geo, handle: g.handle as GradientHandleId };
       hd.drag = this.#drag(GRADIENT_LABELS[g.handle as GradientHandleId]);
+      g.hd = hd;
+      g.mode = 'handle';
+      return;
+    }
+    const node = kind === 'Shape' ? this.#nodesShown(id)?.handles.find((h) => h.id === g.handle) : undefined;
+    if (node) {
+      // A node handle (P1-M3): in the path's own units, re-planned from the document before the drag
+      // every frame; an anchor snaps as a position handle (its targets gathered once), a control to
+      // the step only, and a bend's control is rounded there.
+      const toUnits = invert(m.toHost);
+      if (!toUnits) return;
+      hd.node = { id: node.id, kind: node.kind, at0: node.at };
+      hd.toUnits = toUnits;
+      const [a, b, c, d] = toUnits;
+      hd.step = snapStep(1 / Math.sqrt(Math.abs(a * d - b * c)));
+      if (node.kind === 'anchor' || node.kind === 'start') hd.targets = this.#snapTargets([id]); // once for the drag
+      hd.drag = this.#drag(node.kind === 'bend' ? 'Bend' : node.kind === 'ctrl' ? 'Move control' : 'Move point');
       g.hd = hd;
       g.mode = 'handle';
       return;
@@ -1208,6 +1280,20 @@ export class Editor {
         return r ? planGradientHandle(doc, r, gh.handle, f, gh.geo) : { refused: 'Its paint is no longer a gradient.' };
       };
       g.snapLines = [];
+    } else if (hd.node) {
+      const nd = hd.node;
+      const [ux, uy] = applyM(hd.toUnits!, f.x, f.y);
+      const dec = stepDecimals(hd.step);
+      let to: Point;
+      if (nd.kind === 'anchor' || nd.kind === 'start') to = this.#cornerPoint(g, hd, f);
+      else {
+        to = nd.kind === 'ctrl' ? { x: toStep(ux, hd.step), y: toStep(uy, hd.step) } : { x: ux, y: uy };
+        g.snapLines = [];
+      }
+      // A bend's tooltip is its control, 2·f − mid on the step (what the plan writes).
+      const at = nd.kind === 'bend' ? { x: toStep(2 * to.x - nd.at0.x, hd.step), y: toStep(2 * to.y - nd.at0.y, hd.step) } : to;
+      hd.tip = `x ${fmt(at.x, dec)}, y ${fmt(at.y, dec)}`;
+      plan = () => planNodeDrag(doc, hd.id, nd.id, to, { step: hd.step, k: boardScale(this.#board) });
     } else if (hd.shape) {
       const shape = hd.shape;
       let to: Point;
@@ -1368,22 +1454,440 @@ export class Editor {
 
   // ── the Shapes tool and generated shapes (P1-M2) ───────────────────────────────────────────
 
-  /** Pick a tool: Shapes (a tap places, a drag draws) or Select. The Shapes tool says how it works. */
+  /**
+   * Pick a tool: Select, Shapes (a tap places, a drag draws), the Pen or the Node tool (P1-M3). Picking
+   * one ends the Pen first. The Shapes tool and the Pen say how they work.
+   */
   pickTool(tool: Tool): void {
-    if (tool === 'shapes' && (!this.#doc || this.readOnly.get())) return;
+    if (tool !== 'select' && (!this.#doc || this.readOnly.get())) return;
     if (this.#gesture) this.pointerCancel();
     if (this.tool.get() === tool) return;
+    if (this.tool.get() === 'pen') this.#endPen(false);
+    this.chosenNode.set(null);
     this.tool.set(tool);
     if (tool === 'shapes') {
       this.focus.set(null);
       this.notice.set('Tap to place, or drag to draw.');
     }
+    if (tool === 'pen') {
+      this.focus.set(null);
+      this.#startPen();
+      this.notice.set(PEN_NOTICE);
+    }
+    if (tool === 'node') this.#noteHidden();
+    this.#bump();
     this.#show();
   }
 
   /** The kind the Shapes tool places. */
   pickShape(kind: ShapeKind): void {
     this.shapeKind.set(kind);
+  }
+
+  // ── the Pen (P1-M3, src/interact/pen.ts) ───────────────────────────────────────────────────
+
+  // The Pen starts with nothing drawn; a selected open path (not locked, its d its own and free of
+  // references) can be continued from its end.
+  #startPen(): void {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    let candidate: NodeId | null = null;
+    if (doc && ids.length === 1 && ids[0] !== doc.root && !isLocked(doc, ids[0])) {
+      const n = doc.nodes.get(ids[0]);
+      const a = n?.kind === 'element' && n.ns === NS.svg && n.local === 'path' ? findAttr(n, null, 'd') : undefined;
+      if (a && !a.raw.includes('&') && cssSets(doc, ids[0], 'd') === 'no') {
+        const p = parsePath(a.raw);
+        if (p.segs.length && !lastClosed(p)) candidate = ids[0];
+      }
+    }
+    this.#pen = { id: null, anchors: [], entries: [], continued: false, candidate };
+    this.#penChanged();
+  }
+
+  // The Pen's bar follows its state.
+  #penChanged(): void {
+    const pen = this.#pen;
+    this.pen.set(pen && { anchors: pen.anchors.length, canClose: pen.anchors.length >= 3 && pen.id !== null, canUndo: pen.entries.length > 0 || (!pen.continued && pen.anchors.length === 1) });
+    this.#show();
+  }
+
+  // The Pen's units → host px: the root's for a new path, a continued path's own as the canvas measures it.
+  #penToHost(): Affine | null {
+    const pen = this.#pen;
+    const box = this.#box;
+    if (!pen || !box) return null;
+    const id = pen.continued ? pen.id : pen.candidate;
+    if (id === null) return rootToHostMatrix(box, this.#viewport, this.#M);
+    return this.#ports.canvas.measure([id]).get(id)?.toHost ?? null;
+  }
+
+  // The snap step in the Pen's units at this zoom.
+  #penStep(): number {
+    const m = this.#penToHost();
+    return m ? snapStep(Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]))) : 1;
+  }
+
+  // A press point in the Pen's units: snapped as a Shapes tap is (the targets within 8 px, gathered
+  // once per gesture, else the step) where its units are the root's; else on the step.
+  #penPoint(at: Point): Point | null {
+    const pen = this.#pen!;
+    const m = this.#penToHost();
+    const box = this.#box;
+    if (!m || !box) return null;
+    const root = rootToHostMatrix(box, this.#viewport, this.#M);
+    if (m.every((v, i) => Math.abs(v - root[i]) <= 1e-9)) return this.#snapRoot(at, this.#snapTargets(pen.id !== null ? [pen.id] : []), this.#penStep()).p;
+    return this.#penFinger(at);
+  }
+
+  // The finger in the Pen's units, on the step (an out-handle snaps to the step only).
+  #penFinger(at: Point): Point | null {
+    const m = this.#penToHost();
+    const inv = m && invert(m);
+    if (!inv) return null;
+    const [x, y] = applyM(inv, at.x, at.y);
+    const step = this.#penStep();
+    return { x: toStep(x, step), y: toStep(y, step) };
+  }
+
+  // The Pen's own handles, host px: its start (the first anchor; picked for its out-handle while it is
+  // alone, and to close from 3 anchors), or the end of a selected open path it can continue.
+  #penHandles(forPick = false): Handle[] {
+    const pen = this.#pen;
+    const m = this.#penToHost();
+    if (!pen || !m) return [];
+    const host = (p: Point): Point => {
+      const [x, y] = applyM(m, p.x, p.y);
+      return { x, y };
+    };
+    if (pen.anchors.length) {
+      if (forPick && pen.anchors.length === 2) return [];
+      return [{ id: 'pen-start', kind: 'start', at: host(pen.anchors[0].at), active: false }];
+    }
+    if (pen.candidate === null || !this.#doc) return [];
+    const end = this.#subpathOf(pen.candidate).at(-1);
+    return end ? [{ id: 'pen-end', kind: 'anchor', at: host(end.at), active: false }] : [];
+  }
+
+  // The anchors of a path's last subpath, its units (a continued path's, for the Pen).
+  #subpathOf(id: NodeId): PenAnchor[] {
+    const doc = this.#doc!;
+    const abs = toAbsolute(parsePath(attrValueOf(doc, id, 'd') ?? ''));
+    let from = 0;
+    abs.forEach((s, i) => {
+      if (s.type === 'M' || (i > 0 && abs[i - 1].type === 'Z')) from = i;
+    });
+    return abs.slice(from).filter((s) => s.type !== 'Z').map((s) => ({ at: { x: s.x, y: s.y }, out: null }));
+  }
+
+  // Continuing a selected path: the Pen takes its id and its last subpath's anchors.
+  #continue(): void {
+    const pen = this.#pen;
+    if (!pen || pen.candidate === null) return;
+    pen.id = pen.candidate;
+    pen.anchors = this.#subpathOf(pen.candidate);
+    pen.continued = true;
+    this.select([pen.id]);
+    this.#penChanged();
+  }
+
+  // One frame of a Pen drag: from the press point p to the finger f, an anchor whose out-handle is f
+  // (its in-handle 2p − f). The first anchor's is kept (nothing in the file yet); the second inserts
+  // the path, and each later one appends its segment, as one drag re-planned from the document before
+  // it. A press on the start (while it is alone) or on a path's end sets that anchor's out-handle.
+  #penFrame(g: Gesture): void {
+    const pen = this.#pen;
+    const pg = g.pen!;
+    if (!pen || !this.#session) return;
+    if (g.mode === 'pending') {
+      g.mode = 'pen';
+      if (pg.take === 'pen-end') this.#continue();
+      if (pg.take === 'pen-start' && pen.anchors.length >= 3) pg.p = null; // a close, on the lift
+      else if (pg.take !== null) pg.p = pen.anchors.at(-1)?.at ?? null;
+      else {
+        pg.p = this.#penPoint(g.at0);
+        if (pen.anchors.length) {
+          pg.label = pen.id === null ? 'Draw path' : 'Add point';
+          pg.drag = this.#drag(pg.label);
+        }
+      }
+    }
+    if (!pg.p) return this.#show();
+    pg.f = this.#penFinger(g.at);
+    const drag = pg.drag;
+    if (drag && pg.f) {
+      const anchor = { at: pg.p, out: pg.f };
+      try {
+        drag.update((apply) => this.#writePoint(anchor, apply));
+      } catch (e) {
+        if (!(e instanceof TokenEditError)) throw e;
+        this.notice.set(e.message);
+      }
+    }
+    this.#show();
+  }
+
+  // Write the Pen's next anchor: the new path (from its first anchor), or the segment into it appended
+  // to the path's d right after its last segment. The new path's id, when one was inserted.
+  #writePoint(anchor: PenAnchor, apply: (op: Op) => void): NodeId | null {
+    const doc = this.#doc!;
+    const pen = this.#pen!;
+    const step = this.#penStep();
+    if (pen.id === null) {
+      const ctx = { svg: el(doc, doc.root).prefix, k: boardScale(this.#board), step, colour: penColour(this.#shapes) };
+      return insertMarkup(doc, { last: doc.root }, penPathMarkup(pen.anchors[0], anchor, ctx), apply);
+    }
+    const raw = findAttr(el(doc, pen.id), null, 'd')!.raw;
+    apply(opSetAttrRaw(doc, pen.id, null, 'd', appendSegment(raw, parsePath(raw).tail.length, segmentInto(pen.anchors.at(-1)!, anchor, step))));
+    return null;
+  }
+
+  // The lift: a tap adds an anchor at the snapped point (or continues a path, or closes from 3
+  // anchors); a drag keeps what it drew, or the out-handle it set.
+  #penUp(g: Gesture): void {
+    const pen = this.#pen;
+    const pg = g.pen!;
+    if (!pen) return;
+    if (pg.take === 'pen-start' && pen.anchors.length >= 3) return this.penClose();
+    if (g.mode === 'pending') {
+      if (pg.take === 'pen-end') return this.#continue();
+      if (pg.take === 'pen-start') return; // a tap on the first point adds nothing
+      const p = this.#penPoint(g.at0);
+      if (p) this.#addAnchor({ at: p, out: null });
+      return;
+    }
+    if (!pg.p || !pg.f) {
+      pg.drag?.cancel();
+      return;
+    }
+    if (pg.take !== null || !pg.drag) {
+      // the start's or a continued end's out-handle, or the first anchor, dragged: nothing in the file
+      if (pg.take !== null) pen.anchors[pen.anchors.length - 1].out = pg.f;
+      else pen.anchors.push({ at: pg.p, out: pg.f });
+      return this.#penChanged();
+    }
+    // Committed only once the frame wrote (the finger past the slop); the entry is the drag's.
+    const anchor = { at: pg.p, out: pg.f };
+    let id: NodeId | null = null;
+    try {
+      pg.drag.update((apply) => void (id = this.#writePoint(anchor, apply)));
+    } catch (e) {
+      if (!(e instanceof TokenEditError)) throw e;
+      pg.drag.cancel();
+      this.notice.set(e.message);
+      return this.#penChanged();
+    }
+    pg.drag.commit();
+    this.#added(pg.label!, anchor, id);
+    this.#bump();
+    this.#changed();
+  }
+
+  // A tap's anchor: kept alone (the first), or written as one entry ("Draw path", "Add point").
+  #addAnchor(anchor: PenAnchor): void {
+    const pen = this.#pen!;
+    if (!pen.anchors.length) {
+      pen.anchors.push(anchor);
+      return this.#penChanged();
+    }
+    const label = pen.id === null ? 'Draw path' : 'Add point';
+    let id: NodeId | null = null;
+    if (this.#dispatch(label, (apply) => void (id = this.#writePoint(anchor, apply)))) this.#added(label, anchor, id);
+  }
+
+  // An anchor written: the Pen's state follows its entry; a new path moves the colour cycle on and is selected.
+  #added(label: string, anchor: PenAnchor, id: NodeId | null): void {
+    const pen = this.#pen!;
+    pen.entries.push(label);
+    pen.anchors.push(anchor);
+    if (id !== null) {
+      pen.id = id;
+      this.#shapes++;
+      this.select([id]);
+    }
+    this.#penChanged();
+  }
+
+  // A second finger, the Pencil or Escape during a drag: the gesture in progress adds nothing; the
+  // anchors already added stay.
+  #penCancel(g: Gesture): void {
+    g.pen?.drag?.cancel();
+    this.#bump();
+    this.#penChanged();
+  }
+
+  /** Undo point (the Pen's bar, and Undo while the Pen is on): its last entry undone, its state following; the first point alone just goes. */
+  undoPoint(): void {
+    const pen = this.#pen;
+    if (!pen || this.#gesture || this.#live) return;
+    if (pen.entries.length) {
+      if (!this.#session?.canUndo || !this.#writable()) return;
+      const label = pen.entries.pop()!;
+      this.#session.undo();
+      pen.anchors.pop();
+      if (label === 'Draw path') {
+        pen.id = null;
+        this.select([]);
+      }
+    } else if (!pen.continued && pen.anchors.length === 1) pen.anchors = [];
+    this.#bump();
+    this.#penChanged();
+  }
+
+  /** Close (the Pen's bar from 3 anchors, or a tap on its start): the closing segment and Z, one entry; the Pen ends. */
+  penClose(): void {
+    const pen = this.#pen;
+    const doc = this.#doc;
+    if (!pen || !doc || pen.id === null || pen.anchors.length < 3) return;
+    const id = pen.id;
+    const raw = findAttr(el(doc, id), null, 'd')!.raw;
+    const text = closingText(pen.anchors.at(-1)!, pen.anchors[0], this.#penStep());
+    if (this.#dispatch('Close path', (apply) => apply(opSetAttrRaw(doc, id, null, 'd', appendSegment(raw, parsePath(raw).tail.length, text))))) this.#endPen(true);
+  }
+
+  /** Done (the Pen's bar, Enter, Escape): the Pen ends; with a path drawn the Node tool shows it, else Select. */
+  penDone(): void {
+    this.#endPen(true);
+  }
+
+  // The Pen ends (its entries stay in the history as ordinary ones). `switchTool`: the Node tool with
+  // the path selected, or Select with none (a tool change picks its own).
+  #endPen(switchTool: boolean): void {
+    const pen = this.#pen;
+    if (!pen) return;
+    if (this.#gesture?.pen) this.pointerCancel();
+    this.#pen = null;
+    this.pen.set(null);
+    if (switchTool) {
+      const id = pen.id !== null && this.#doc && attached(this.#doc, pen.id) ? pen.id : null;
+      this.tool.set(id !== null ? 'node' : 'select');
+      if (id !== null) this.select([id]);
+    }
+    this.#bump();
+    this.#show();
+  }
+
+  // ── the Node tool (P1-M3, engine/path/nodes.ts and segments.ts) ────────────────────────────
+
+  // The node model the Node tool shows for an element: one selected <path> that isn't the root or
+  // locked, in the Node tool; else null (Select keeps M1's corners on a path).
+  #nodesShown(id: NodeId): ReturnType<typeof pathNodes> {
+    const doc = this.#doc;
+    if (!doc || this.tool.get() !== 'node' || id === doc.root || isLocked(doc, id) || this.selection.get().size !== 1) return null;
+    return pathNodes(doc, id);
+  }
+
+  // The overlay's path marks: the Pen's arms while it drags, or the Node tool's arms and mirror guides.
+  #pathMarks(ids: readonly NodeId[], measured: ReadonlyMap<NodeId, Measured>): PathMarks | null {
+    const pg = this.#gesture?.pen;
+    if (pg?.p && pg.f) {
+      const m = this.#penToHost();
+      if (!m) return null;
+      const [px, py] = applyM(m, pg.p.x, pg.p.y);
+      const [fx, fy] = applyM(m, pg.f.x, pg.f.y);
+      return { arms: penArms({ x: px, y: py }, { x: fx, y: fy }), mirrors: [], dots: [] };
+    }
+    const nodes = ids.length === 1 ? this.#nodesShown(ids[0]) : null;
+    const m = nodes && measured.get(ids[0]);
+    if (!nodes || !m || this.#gesture?.mode === 'marquee') return null;
+    return pathMarks(nodes, m.toHost);
+  }
+
+  // A path whose anchors pass the cap says so once, when the Node tool shows it.
+  #noteHidden(): void {
+    const ids = [...this.selection.get()];
+    const nodes = ids.length === 1 ? this.#nodesShown(ids[0]) : null;
+    if (nodes?.hidden) this.notice.set(`Its first ${nodes.handles.filter((h) => h.kind === 'anchor' || h.kind === 'start').length} points have handles; the code has the other ${nodes.hidden}.`);
+  }
+
+  // The snap step in a path's own units at this zoom.
+  #nodeStep(id: NodeId): number {
+    const m = this.#ports.canvas.measure([id]).get(id)?.toHost;
+    return m ? snapStep(Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]))) : this.#rootStep();
+  }
+
+  // A tap on a node handle: a bend curves its segment ("Curve"); an anchor becomes the chosen node.
+  #tapNodeHandle(handle: string): void {
+    const doc = this.#doc;
+    const id = [...this.selection.get()][0];
+    if (!doc || id === undefined) return;
+    if (/^b\d+$/.test(handle)) {
+      if (!this.#writable()) return;
+      const plan = planBendTap(doc, id, handle, { step: this.#nodeStep(id), k: boardScale(this.#board) });
+      if ('refused' in plan) return void this.notice.set(plan.refused);
+      this.#dispatch('Curve', (apply) => applyPlan(doc, plan, apply));
+    } else if (/^a\d+$/.test(handle)) this.chosenNode.set(handle);
+  }
+
+  /** The Node tool's bar for the one selected path: the chosen node's type (Smooth shows when one applies), Close or Open, Relative or Absolute. */
+  nodeBar(): { smooth: 'smooth' | 'corner' | null; closed: boolean; relative: boolean } | null {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    if (!doc || this.tool.get() !== 'node' || ids.length !== 1 || ids[0] === doc.root) return null;
+    const n = doc.nodes.get(ids[0]);
+    const d = n?.kind === 'element' && n.ns === NS.svg && n.local === 'path' ? attrValue(doc, n, null, 'd') : null;
+    if (d === null) return null;
+    const p = parsePath(d);
+    const chosen = this.chosenNode.get();
+    return { smooth: chosen ? nodeType(p, Number(chosen.slice(1))) : null, closed: lastClosed(p), relative: readsRelative(p) };
+  }
+
+  // One write of a path's d through engine/path/segments.ts, one entry; refused (the notice) when it
+  // is locked, CSS sets its d, or the rewrite can't be written.
+  #pathEdit(id: NodeId, label: string, write: (raw: string) => string): boolean {
+    const doc = this.#doc;
+    const n = doc?.nodes.get(id);
+    if (!doc || n?.kind !== 'element' || n.ns !== NS.svg || n.local !== 'path') return false;
+    if (isLocked(doc, id)) return void this.notice.set(LOCKED), false;
+    const css = cssSets(doc, id, 'd');
+    if (css !== 'no') return void this.notice.set(cssWhy('d', css)), false;
+    const a = findAttr(n, null, 'd');
+    if (!a) return false;
+    let raw: string;
+    try {
+      raw = write(a.raw);
+    } catch (e) {
+      if (!(e instanceof TokenEditError)) throw e;
+      this.notice.set(e.message);
+      return false;
+    }
+    return raw !== a.raw && this.#dispatch(label, (apply) => apply(opSetAttrRaw(doc, id, null, 'd', raw)));
+  }
+
+  /** A letter token's tap: its segment cycles L → Q → C → L ("Set segment"), new controls on the root's step. */
+  cycleSegment(node: NodeId, segment: number): void {
+    this.#pathEdit(node, 'Set segment', (raw) => cycleSegmentOf(raw, segment, { step: this.#rootStep(), k: boardScale(this.#board) }));
+  }
+
+  // The one selected path (the Node tool's bar acts on it).
+  #onePath(): NodeId | null {
+    const ids = [...this.selection.get()];
+    return ids.length === 1 ? ids[0] : null;
+  }
+
+  /** Close or Open the selected path's last subpath ("Close path", "Open path"). */
+  toggleClosed(): void {
+    const id = this.#onePath();
+    const bar = this.nodeBar();
+    if (id === null || !bar) return;
+    this.#pathEdit(id, bar.closed ? 'Open path' : 'Close path', bar.closed ? openLast : closeLast);
+  }
+
+  /** Make relative, or Make absolute when it reads relative. */
+  toggleRelative(): void {
+    const id = this.#onePath();
+    const bar = this.nodeBar();
+    if (id === null || !bar) return;
+    this.#pathEdit(id, bar.relative ? 'Make absolute' : 'Make relative', toggleRelativeOf);
+  }
+
+  /** The chosen node's Smooth toggle: Make corner when it is smooth, else Make smooth. */
+  toggleSmooth(): void {
+    const id = this.#onePath();
+    const bar = this.nodeBar();
+    const chosen = this.chosenNode.get();
+    if (id === null || !bar?.smooth || !chosen) return;
+    const k = Number(chosen.slice(1));
+    this.#pathEdit(id, bar.smooth === 'smooth' ? 'Make corner' : 'Make smooth', (raw) => (bar.smooth === 'smooth' ? makeCorner(raw, k) : makeSmooth(raw, k)));
   }
 
   // A drag on the Session whose commit shows the notice when the finish hook made a generated shape
@@ -2237,6 +2741,10 @@ export class Editor {
     }
     model.snapLines = g.snapLines;
     if (g.mode === 'draw' && g.draw?.tip) model.tip = tip(g.draw.tip, g.at);
+    if (g.mode === 'pen' && g.pen?.p && g.pen.f) {
+      const dec = stepDecimals(this.#penStep());
+      model.tip = tip(`x ${fmt(g.pen.f.x, dec)}, y ${fmt(g.pen.f.y, dec)}`, g.at);
+    }
     if (g.mode === 'handle' && g.hd?.tip) model.tip = tip(g.hd.tip, g.at);
     if (g.mode === 'guide' && g.gd?.tip) model.tip = tip(g.gd.tip, g.at);
     const m = g.move;
@@ -2267,13 +2775,16 @@ export class Editor {
 
   // ── history ────────────────────────────────────────────────────────────────────────────────
 
+  /** Undo (the ToolRail, ⌘Z, a two-finger tap); while the Pen is on, its Undo point. */
   undo(): void {
+    if (this.tool.get() === 'pen') return this.undoPoint();
     if (this.#live || !this.#session?.canUndo || !this.#writable()) return;
     this.#session.undo();
   }
 
+  /** Redo; never while the Pen is on (as SVG Lab's). */
   redo(): void {
-    if (this.#live || !this.#session?.canRedo || !this.#writable()) return;
+    if (this.tool.get() === 'pen' || this.#live || !this.#session?.canRedo || !this.#writable()) return;
     this.#session.redo();
   }
 
@@ -2290,7 +2801,7 @@ export class Editor {
    * second finger on a panel can't write into the middle of it.
    */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge || this.#stepDrag || this.#field || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge || this.#stepDrag || this.#field || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       this.#noteDetached();
@@ -2323,6 +2834,7 @@ export class Editor {
     if (!doc || this.#live) return;
     const hit = this.#resolve(block, token);
     if (!hit) return;
+    if (this.tool.get() === 'pen') this.#endPen(true); // a code token edit ends the Pen first
     const { ref, bt } = hit;
     const t = bt.token;
     this.focus.set(null);
@@ -2334,6 +2846,8 @@ export class Editor {
         this.focus.set({ ref, token: t });
         return;
       case 'enum':
+        // A path's segment letter (P1-M3) cycles L → Q → C as a segment rewrite, never a token edit.
+        if (t.segment !== undefined) return void this.cycleSegment(ref.node, t.segment);
         this.#dispatch(labelFor('Set', t), (apply) => apply(tokenOp(doc, ref, nextOption(t))));
         return;
       case 'color':
@@ -2371,6 +2885,7 @@ export class Editor {
     const hit = this.#resolve(block, token);
     const t = hit?.bt.token;
     if (!hit || t?.kind !== 'number') return;
+    if (this.tool.get() === 'pen') this.#endPen(true);
     const own = elementOf(doc, hit.ref.node);
     if (own !== null) this.select([own]);
     if (!this.#writable()) return;
@@ -2402,6 +2917,7 @@ export class Editor {
   scrubStart(block: ViewBlock, token: ViewToken): void {
     const doc = this.#doc;
     if (!doc || this.#live || this.#nudge || !this.#session) return;
+    if (this.tool.get() === 'pen') this.#endPen(true);
     const hit = this.#resolve(block, token);
     const t = hit?.bt.token;
     if (!hit || t?.kind !== 'number' || !this.#writable()) return;
@@ -2495,6 +3011,7 @@ export class Editor {
 
   /** Open the selected element's source (one element, not the root). */
   openSource(): void {
+    if (this.tool.get() === 'pen') this.#endPen(true);
     const doc = this.#doc;
     const ids = [...this.selection.get()];
     if (!doc || this.#live || ids.length !== 1 || !this.#writable()) return;
@@ -2686,7 +3203,32 @@ export class Editor {
 /** Screen px within which a tap takes a thin shape (plus half its stroke): SVG Lab's hitThin. */
 export const THIN_PX = 22;
 /** The tools the ToolRail offers now. */
-export type Tool = 'select' | 'shapes';
+export type Tool = 'select' | 'shapes' | 'pen' | 'node';
+/** What the Pen's bar shows (P1-M3). */
+export interface PenView {
+  anchors: number;
+  canClose: boolean; // from 3 anchors
+  canUndo: boolean; // Undo point has something to take back
+}
+// The Pen's state: the path it draws or continues (none until its second anchor), its anchors in that
+// path's units (a continued path's last subpath's), and its own history entries, newest last.
+interface PenState {
+  id: NodeId | null;
+  anchors: PenAnchor[];
+  entries: string[];
+  continued: boolean;
+  candidate: NodeId | null; // an open path selected when the Pen was picked: a press on its end continues it
+}
+// The Pen's gesture: what the press took (its start handle, a path's end to continue, or nothing: a
+// new point), the snapped point and the finger, in the pen's units, and the drag writing it.
+interface PenGesture {
+  take: 'pen-start' | 'pen-end' | null;
+  p: { x: number; y: number } | null;
+  f: { x: number; y: number } | null;
+  drag: Drag | null;
+  label: string | null;
+}
+export const PEN_NOTICE = 'Tap to add points, or drag to curve.';
 /** The notice when an edit makes a generated shape plain. */
 export const DETACHED = 'It’s a plain shape now: its generator inputs were dropped.';
 // A style sheet opened on a value a rule may decide for the first element starts from the initial one.
@@ -2730,11 +3272,12 @@ interface Gesture {
   target: NodeId | null; // what a tap selects: the topmost hit's selectable element that isn't locked
   onLocked: boolean; // the topmost hit is locked: a drag from it is a marquee
   add: boolean; // Select more, or ⇧/⌘ on the press
-  mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'draw' | 'none';
+  mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'draw' | 'pen' | 'none';
   move: MoveState | null;
   handle: string | null; // the handle the press took (handles.ts), if any
   handleAt: Point | null; // where that handle was, host px (the grab offset)
   draw: DrawGesture | null; // the Shapes tool's gesture
+  pen: PenGesture | null; // the Pen's gesture (P1-M3)
   hd: HandleDrag | null; // a resize, rotate or scale drag
   guide: number | null; // the guide whose pill the press took, by index
   gd: { drag: Drag; step: number; tip: string | null } | null; // a guide's drag
@@ -2759,6 +3302,7 @@ interface HandleDrag {
   targets: SnapTargets | null; // a corner's or a position handle's snap targets, gathered once when the drag starts
   shape: { id: string; role: 'position' | 'length' } | null; // a shape handle (engine/geometry/shape-handles.ts)
   gradient: { prop: PaintProp; geo: GradientGeo; handle: GradientHandleId } | null; // a gradient handle (engine/paint/handles.ts), Edit on canvas
+  node: { id: string; kind: NodeKind; at0: Point } | null; // a node handle (engine/path/nodes.ts), the Node tool (P1-M3): where it was, in the path's units
   grab: Point; // the handle's offset from the finger at the press, host px: kept for the whole drag
 }
 // Edit on canvas: the painted element's gradient, where the canvas measured it, and its handles

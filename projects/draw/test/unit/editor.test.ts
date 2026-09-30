@@ -1966,3 +1966,161 @@ test('generated shapes: the Tips field, typed "12", draws 24 points after each k
   assert.equal(r.editor.source(), F.replace(STAR5(), STAR5(57, 47)));
   assert.ok(r.editor.generated(), 'still generated');
 });
+
+// ── P1-M3: the Node tool ───────────────────────────────────────────────────────────────────────
+
+const WAVE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path id="w" d="M 30 44 Q 40 32, 50 44 Q 60 56, 70 44" fill="none" stroke="#264653"/>
+  <path id="s" d="M 20 75 L 50 30" fill="none" stroke="#264653"/>
+  <path id="c" d="M 10 55 C 22 20, 40 20, 50 55 C 60 90, 78 90, 90 55" fill="none" stroke="#264653"/>
+  <rect id="r" x="80" y="80" width="10" height="10"/>
+</svg>`;
+const handleAt = (r: Rig, id: string) => {
+  const h = r.editor.overlayModel().handles.find((x) => x.id === id);
+  assert.ok(h, `no ${id} handle: ${r.editor.overlayModel().handles.map((x) => x.id)}`);
+  return h.at;
+};
+
+test('node handles show only in the Node tool, for one selected path, instead of M1’s corners, ring and diamond (the centre stays); Select keeps the corners on a path; Escape from the Node tool returns to Select', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  r.editor.select([idOf(r, 'w')]);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id).sort();
+  assert.deepEqual(ids(), ['bl', 'br', 'center', 'rot', 'tl', 'tr'].sort().filter((h) => ids().includes(h)), 'Select: M1’s handles');
+  assert.ok(!ids().some((h) => /^[abc]\d/.test(h)), 'no node handles in Select');
+  r.editor.pickTool('node');
+  assert.deepEqual(ids(), ['a0', 'a1', 'a2', 'c1', 'c2', 'center']);
+  assert.ok(r.editor.overlayModel().paths!.arms.length === 4, 'the Q arms');
+  r.editor.select([idOf(r, 'w'), idOf(r, 's')]);
+  assert.deepEqual(ids(), ['center'], 'two selected: M1’s one centre');
+  r.editor.select([idOf(r, 'r')]);
+  assert.ok(ids().includes('tl') && !ids().some((h) => /^a\d/.test(h)), 'a rect in the Node tool: Select’s handles');
+  r.editor.escape();
+  assert.equal(r.editor.tool.get(), 'select', 'Escape leaves the Node tool');
+  assert.deepEqual([...r.editor.selection.get()], [idOf(r, 'r')], 'and keeps the selection');
+});
+
+test('a node drag gathers its snap targets once, when it starts, not on every frame; it is one "Move point" entry and moves only its numbers', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  r.editor.open(WAVE);
+  const [w, rect] = [idOf(r, 'w'), idOf(r, 'r')];
+  r.editor.pickTool('node');
+  r.editor.select([w]);
+  r.editor.snap.set({ ...NO_SNAP, shapes: true }); // the other shapes are targets (and nothing near (50, 49))
+  const a1 = handleAt(r, 'a1');
+  measured.length = 0;
+  r.editor.pointerDown(a1, [w], { add: false });
+  const to = hostAt(r, 50, 49);
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: a1.x + ((to.x - a1.x) * i) / 6, y: a1.y + ((to.y - a1.y) * i) / 6 });
+  r.editor.pointerUp(to);
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+  assert.ok(r.editor.source().includes('d="M 30 44 Q 40 32, 50 49 Q 60 56, 70 44"'), 'the Q controls stay (the lab’s rule)');
+  const gathers = measured.filter((ids) => ids.includes(rect)).length;
+  assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
+});
+
+test('a bend tap makes a Q ("Curve") off the midpoint by the lab’s rule, and a bend drag a Q through the finger ("Bend"); a control drag is "Move control"', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const s = idOf(r, 's');
+  r.editor.pickTool('node');
+  r.editor.select([s]);
+  const b = handleAt(r, 'b1');
+  r.editor.pointerDown(b, [s], { add: false });
+  r.editor.pointerUp(b);
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 49 62 50 30');
+  assert.equal(r.editor.history.get().undoLabel, 'Curve');
+  r.editor.undo();
+  r.editor.snap.set(NO_SNAP);
+  const b2 = handleAt(r, 'b1');
+  r.editor.pointerDown(b2, [s], { add: false });
+  r.editor.pointerDrag(hostAt(r, 38, 50));
+  r.editor.pointerDrag(hostAt(r, 40, 45));
+  r.editor.pointerUp(hostAt(r, 40, 45));
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 45 38 50 30', '2·(40, 45) − (35, 52.5), the grab kept');
+  assert.equal(r.editor.history.get().undoLabel, 'Bend');
+  const c = handleAt(r, 'c1');
+  r.editor.pointerDown(c, [s], { add: false });
+  r.editor.pointerDrag({ x: c.x + 5, y: c.y });
+  r.editor.pointerUp({ x: c.x + 5, y: c.y });
+  assert.equal(r.editor.history.get().undoLabel, 'Move control');
+});
+
+test('a tap on an anchor chooses it (drawn active) and the Node tool’s bar shows Smooth where it applies; Make smooth and Make corner are one entry each; Close/Open and Relative/Absolute act on the path', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const c = idOf(r, 'c');
+  r.editor.pickTool('node');
+  r.editor.select([c]);
+  assert.deepEqual(r.editor.nodeBar(), { smooth: null, closed: false, relative: false }, 'no node chosen: no Smooth');
+  const a1 = handleAt(r, 'a1');
+  r.editor.pointerDown(a1, [c], { add: false });
+  r.editor.pointerUp(a1);
+  assert.equal(r.editor.chosenNode.get(), 'a1');
+  assert.ok(r.editor.overlayModel().handles.find((h) => h.id === 'a1')!.active, 'the chosen node is drawn active');
+  assert.equal(r.editor.nodeBar()!.smooth, 'corner', 'a C into a C: Make smooth applies');
+  r.editor.toggleSmooth();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'M 10 55 C 22 20, 40 20, 50 55 S 78 90, 90 55');
+  assert.equal(r.editor.history.get().undoLabel, 'Make smooth');
+  assert.equal(r.editor.nodeBar()!.smooth, 'smooth');
+  r.editor.toggleSmooth();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'M 10 55 C 22 20, 40 20, 50 55 C 60 90, 78 90, 90 55', 'Make corner writes the mirror out: the file as it was');
+  assert.equal(r.editor.history.get().undoLabel, 'Make corner');
+  r.editor.toggleClosed();
+  assert.ok(attr(element(doc(r), (n) => n.id === c), 'd')!.endsWith('90 55 Z'));
+  assert.equal(r.editor.history.get().undoLabel, 'Close path');
+  assert.equal(r.editor.nodeBar()!.closed, true);
+  r.editor.toggleClosed();
+  assert.equal(r.editor.history.get().undoLabel, 'Open path');
+  r.editor.toggleRelative();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'm 10 55 c 12 -35, 30 -35, 40 0 c 10 35, 28 35, 40 0');
+  assert.equal(r.editor.history.get().undoLabel, 'Make relative');
+  assert.equal(r.editor.nodeBar()!.relative, true);
+  r.editor.toggleRelative();
+  assert.equal(r.editor.history.get().undoLabel, 'Make absolute');
+  r.editor.select([idOf(r, 'w')]);
+  assert.equal(r.editor.chosenNode.get(), null, 'another selection: no chosen node');
+});
+
+test('a panel edit during a node drag is refused, quietly (M1 fix F3)', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const w = idOf(r, 'w');
+  r.editor.pickTool('node');
+  r.editor.select([w]);
+  const a1 = handleAt(r, 'a1');
+  r.editor.pointerDown(a1, [w], { add: false });
+  r.editor.pointerDrag({ x: a1.x, y: a1.y + 20 });
+  const mid = r.editor.source();
+  r.editor.toggleRelative(); // a ContextBar button while the finger is down
+  r.editor.setStyle('stroke', '#e76f51');
+  assert.equal(r.editor.source(), mid, 'nothing written into the drag');
+  r.editor.pointerUp({ x: a1.x, y: a1.y + 20 });
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+  r.editor.undo();
+  assert.equal(r.editor.source(), WAVE, 'one entry: the drag alone');
+});
+
+test('a letter token’s tap cycles its segment ("Set segment"), and a locked path or a d a <style> rule sets refuses with M1’s words', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const s = idOf(r, 's');
+  const L = tokenIn(r, s, 'enum', 0, 'd=');
+  assert.equal(L.block.text.slice(L.token.start, L.token.end), 'L');
+  r.editor.tapToken(L.block, L.token);
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 49 62 50 30');
+  assert.equal(r.editor.history.get().undoLabel, 'Set segment');
+  const LOCK = WAVE.replace('<path id="s"', '<path id="s" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:locked="true"').replace('viewBox', 'xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox').replace(' xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:locked', ' draw:locked');
+  r.editor.open(LOCK);
+  const L2 = tokenIn(r, idOf(r, 's'), 'enum', 0, 'd=');
+  r.editor.tapToken(L2.block, L2.token);
+  assert.equal(r.editor.notice.get(), LOCKED);
+  assert.equal(r.editor.source(), LOCK);
+  const CSS = WAVE.replace('<path id="w"', '<style>#s { d: path("M 0 0 L 1 1") }</style>\n  <path id="w"');
+  r.editor.open(CSS);
+  const L3 = tokenIn(r, idOf(r, 's'), 'enum', 0, 'd=');
+  r.editor.tapToken(L3.block, L3.token);
+  assert.match(r.editor.notice.get() ?? '', /Its d is set by CSS \(a <style> rule\)/);
+  assert.equal(r.editor.source(), CSS);
+});
