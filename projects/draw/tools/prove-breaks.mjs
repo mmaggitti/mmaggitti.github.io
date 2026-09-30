@@ -1993,6 +1993,28 @@ const BREAKS = [
     file: 'projects/draw/src/app.css', from: '.draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }', to: '.draw-ctx-btn { display: inline-grid; place-items: center; width: 2.5rem; min-width: 0; padding: 0; }',
     run: DRAW_E2E, expect: /phoneRulesOnTheSelectionTools \(956\): 440×956:\n\s+one selected: Deselect is 30×44/,
   },
+  // P1-M1 review fixes (F1–F17).
+  {
+    id: 'B375', what: 'F5: the CSS sheet cache is keyed on doc.version again (a move of k shapes reads every <style> k times)',
+    file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
+    run: drawTests('editor.test.ts'), expect: /✖ a command over a large selection takes linear time/,
+  },
+  {
+    id: 'B376', what: 'F5: a <style> that comes into the document is not noticed (a stale sheet)',
+    file: 'engine/model/doc.ts', from: '  if (inStyle(doc, parent) || holdsStyle(doc, id)) doc.styleVersion++;\n  return at;', to: '  return at;',
+    run: engineTests('geometry/css.test.ts'), expect: /✖ the sheets are read again whenever what a <style> says can change/,
+  },
+  {
+    id: 'B377', what: 'F5: the code view is told about each moved node on its own again',
+    file: 'projects/draw/src/editor.ts', from: '    if (placements.length) code.place(placements);', to: '    for (const one of placements) code.place([one]);',
+    run: drawTests('editor.test.ts'), expect: /✖ Bring forward and Send back swap each selected element/,
+  },
+  // P1-M1 review fixes, slow.
+  {
+    id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
+    file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
+    run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms at best/,
+  },
 ];
 
 const args = process.argv.slice(2);

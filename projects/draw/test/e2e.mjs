@@ -213,6 +213,8 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(layersHideAndLockShapes);
   await check(drawStateStaysOutOfAsIsAndClean);
   for (const height of [956, 796]) await check(phoneRulesOnTheSelectionTools, height);
+  // The P1-M1 review adds these.
+  await check(aLargeSelectionDragsWithoutStalling);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -3429,6 +3431,58 @@ async function zOrderAndDeletePatchOnlyWhatMoved(browser, origin) {
     await step('its undo', undo, BIG, MOVED);
     await step('Delete', tap('Delete'), svg(rects.filter((_, i) => i !== 1000)), { drawn: [], blocks: [] });
     await step('its undo', undo, BIG, MOVED);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A large selection keeps up (the P1-M1 review, F5): with 2,000 rects selected (⌘A), each frame of
+// a drag of them all takes under 380 ms, 5× under the 1.9 s a frame took when every element read the
+// whole document's stylesheets again (the fastest of five frames, so a pause of the runner's doesn't
+// count; the code at peek, as that was measured), and the drag is one Move. With the code open,
+// Delete of them all, and its undo, leave the code listing the file exactly.
+async function aLargeSelectionDragsWithoutStalling(browser, origin) {
+  const N = 2000;
+  const side = Math.ceil(Math.sqrt(N));
+  const cell = 1000 / side;
+  const at = (v) => (v * cell).toFixed(2);
+  const BIG = `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n${Array.from({ length: N }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n')}\n</svg>\n`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const stats = await page.evaluate((t) => window.drawTest.render(t), BIG);
+    must(stats.ok && stats.rendered === N + 1, `test setup: the drawing rendered ${stats.rendered} elements`);
+    const listing = () => page.evaluate(() => [...document.querySelectorAll('.draw-code .cv-block')].map((b) => b.textContent).join('') === window.drawTest.source());
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+    must(await page.locator('.draw-label').textContent() === `${N} selected`, `test setup: Select all took "${await page.locator('.draw-label').textContent()}"`);
+    const frames = await page.evaluate((c) => {
+      const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+      const p = new DOMPoint(c * 0.3, c * 0.3).matrixTransform(svg.getScreenCTM());
+      const area = document.querySelector('.draw-canvas');
+      const fire = (type, x, y) => area.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      fire('pointerdown', p.x, p.y);
+      fire('pointermove', p.x + 8, p.y + 3); // past the slop: the move starts
+      const ms = [];
+      for (let i = 2; i <= 6; i++) {
+        const t = performance.now();
+        fire('pointermove', p.x + 8 * i, p.y + 3 * i);
+        ms.push(performance.now() - t);
+      }
+      fire('pointerup', p.x + 48, p.y + 18);
+      return ms;
+    }, cell);
+    const fastest = Math.min(...frames);
+    must(fastest < 380, `a drag frame over ${N} selected shapes took ${fastest.toFixed(0)} ms at best (${frames.map((f) => f.toFixed(0)).join('/')}), not under 380`);
+    must(await page.locator('.draw-tool', { hasText: 'Undo' }).getAttribute('aria-label') === 'Undo Move', 'the drag of them all was not one Move');
+    must(await page.evaluate((t) => window.drawTest.source() !== t, BIG), 'the drag moved nothing');
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Move did not undo to the file');
+    await showCode(page);
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+    await page.locator('.draw-ctx-btn[aria-label="Delete"]').tap();
+    must(await page.evaluate(() => window.drawTest.source()) === `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n</svg>\n`, 'Delete of them all left more than the root');
+    must(await listing(), 'after Delete of them all, the code listing is not the file');
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Delete did not undo to the file');
+    must(await listing(), 'after the undo of Delete, the code listing is not the file');
+    console.log(`     draw: a drag frame over ${N} selected shapes: ${fastest.toFixed(0)} ms at best`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

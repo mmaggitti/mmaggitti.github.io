@@ -514,7 +514,7 @@ export class Editor {
       const lg = localGridModel(one.box, one.toHost);
       model.localGrid = { lines: lg.lines, axes: lg.axes, labels: lg.labels };
     }
-    this.#gestureMarks(model, paper);
+    this.#gestureMarks(model, paper, measured);
     return model;
   }
 
@@ -1413,8 +1413,9 @@ export class Editor {
   }
 
   // The gesture's marks: the marquee, or while moving the tooltip and (for one element) the
-  // coordinate guides from the artboard's edges.
-  #gestureMarks(model: OverlayModel, paper: Rect): void {
+  // coordinate guides from the artboard's edges. `measured`: what the model measured this frame (the
+  // selection), so a move of 2,000 shapes isn't measured twice.
+  #gestureMarks(model: OverlayModel, paper: Rect, measured: ReadonlyMap<NodeId, Measured>): void {
     const g = this.#gesture;
     const doc = this.#doc!;
     if (!g) return;
@@ -1427,9 +1428,10 @@ export class Editor {
     if (g.mode === 'guide' && g.gd?.tip) model.tip = tip(g.gd.tip, g.at);
     const m = g.move;
     if (g.mode !== 'move' || !m || !m.delta) return;
-    const measured = this.#ports.canvas.measure(m.ids);
+    const missing = m.ids.filter((id) => !measured.has(id));
+    const more = missing.length ? this.#ports.canvas.measure(missing) : null;
     const quads = m.ids.flatMap((id) => {
-      const x = measured.get(id);
+      const x = measured.get(id) ?? more?.get(id);
       return x ? [quadOf(x.box, x.toHost)] : ([] as Quad[]);
     });
     const u = unionBox(quads);

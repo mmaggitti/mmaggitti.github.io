@@ -48,7 +48,7 @@ export interface RenderStats {
 interface Rendered {
   dom: Element | Text;
   parent: NodeId | null;
-  kids: NodeId[]; // rendered children, so a patch can forget a whole subtree
+  kids: Set<NodeId>; // rendered children, so a patch can forget a whole subtree (a set: one leaves at no cost)
   dropped: number;
   id: string | null; // its plain id as drawn: a change re-judges the animations that name ids
 }
@@ -283,9 +283,13 @@ export class Renderer {
 
   // Before the next sibling already drawn under the same parent: the node's place in the model.
   #insert(parent: Rendered, at: NodeId, id: NodeId, dom: Node): void {
-    parent.kids.push(id);
+    parent.kids.add(id);
     const siblings = el(this.#doc!, at).children;
-    const next = siblings.slice(siblings.indexOf(id) + 1).map((s) => this.#nodes.get(s)?.dom).find((d) => d?.parentNode === parent.dom);
+    let next: Node | undefined;
+    for (let i = siblings.lastIndexOf(id) + 1; i < siblings.length && !next; i++) {
+      const d = this.#nodes.get(siblings[i])?.dom;
+      if (d?.parentNode === parent.dom) next = d;
+    }
     (parent.dom as Element).insertBefore(dom, next ?? null);
   }
 
@@ -306,7 +310,7 @@ export class Renderer {
       if (dropped === null) return null;
       made.dropped = dropped;
     }
-    const done: Rendered = { dom: made.el, parent, kids: [], dropped: made.dropped, id: plainId(doc, node) };
+    const done: Rendered = { dom: made.el, parent, kids: new Set(), dropped: made.dropped, id: plainId(doc, node) };
     this.#nodes.set(node.id, done);
     this.#back.set(made.el, node.id);
     const inside = inForeignObject || (node.ns === NS.svg && node.local === 'foreignObject');
@@ -315,7 +319,7 @@ export class Renderer {
       const dom = child.kind === 'element' ? this.#build(child, inside, node.id) : this.#text(child, node);
       if (dom) {
         made.el.append(dom);
-        done.kids.push(id);
+        done.kids.add(id);
       } else if (child.kind === 'element') this.#skipped.set(id, node.id);
     }
     return made.el;
@@ -325,7 +329,7 @@ export class Renderer {
     this.#detach(node.id);
     const dom = sinkText(this.#doc!, node, parent);
     if (dom) {
-      this.#nodes.set(node.id, { dom, parent: parent.id, kids: [], dropped: 0, id: null });
+      this.#nodes.set(node.id, { dom, parent: parent.id, kids: new Set(), dropped: 0, id: null });
       this.#back.set(dom, node.id);
     }
     return dom;
@@ -337,7 +341,7 @@ export class Renderer {
     if (old) {
       old.dom.remove();
       const p = old.parent === null ? undefined : this.#nodes.get(old.parent);
-      if (p) p.kids = p.kids.filter((k) => k !== id);
+      p?.kids.delete(id);
       this.#forget(id);
     }
     this.#skipped.delete(id);
