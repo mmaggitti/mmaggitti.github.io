@@ -165,7 +165,7 @@ export function groupRefusal(doc: Doc, ids: readonly NodeId[]): string | null {
   if (ids.some((id) => isLocked(doc, id))) return 'It’s locked. Unlock it in Layers first.';
   const p = doc.nodes.get(ids[0])!.parent;
   if (ids.some((id) => doc.nodes.get(id)!.parent !== p)) return 'Group needs shapes with the same parent.';
-  if (depthOf(doc, p!) + 1 + Math.max(0, ...ids.map((id) => height(doc, id))) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;
+  if (depthOf(doc, p!) + 1 + ids.reduce((h, id) => Math.max(h, height(doc, id)), 0) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;
   return null;
 }
 

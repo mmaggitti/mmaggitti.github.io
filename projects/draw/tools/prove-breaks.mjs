@@ -588,7 +588,7 @@ const BREAKS = [
   },
   {
     id: 'B98', what: 'a token edit writes a character XML cannot hold (the Text sheet)',
-    file: 'engine/code/edit.ts', from: 'const bad = NOT_XML_CHAR.exec(text);', to: 'const bad = null as RegExpExecArray | null;',
+    file: 'engine/code/edit.ts', from: '(token: Token, text: string): string | null {\n  const bad = NOT_XML_CHAR.exec(text);', to: '(token: Token, text: string): string | null {\n  const bad = null as RegExpExecArray | null;',
     run: engineTests('code/edit.test.ts'), expect: /✖ no token takes a character XML 1\.0 cannot hold/,
   },
   {
@@ -2012,7 +2012,7 @@ const BREAKS = [
   },
   {
     id: 'B379', what: 'F4: Group nests a shape past the depth the parser opens (a working copy that no longer opens)',
-    file: 'projects/draw/src/interact/structure.ts', from: "  if (depthOf(doc, p!) + 1 + Math.max(0, ...ids.map((id) => height(doc, id))) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;\n", to: '',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (depthOf(doc, p!) + 1 + ids.reduce((h, id) => Math.max(h, height(doc, id)), 0) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ Group refuses to nest a shape past the depth the parser opens/,
   },
   {
