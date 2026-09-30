@@ -165,8 +165,9 @@ const OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(Object.entries(E
  * The decoded text of a raw value, with each decoded character's raw offset. Characters that came
  * from a reference (or a bare '&', or a CDATA delimiter) are `bad`: no token may include them.
  * Literal characters are one raw code unit each, so a token of good characters maps back exactly.
+ * Exported for style/where.ts, which maps a style="" declaration's value span back the same way.
  */
-interface Src {
+export interface Src {
   raw: string;
   s: string;
   map: number[] | null; // null: s === raw
@@ -175,7 +176,7 @@ interface Src {
 
 const REF = new RegExp(`&(#x[0-9a-fA-F]+|#\\d+|${NAME_PATTERN});`, 'y');
 
-function decodedSrc(doc: Doc, raw: string, attr: boolean): Src {
+export function decodedSrc(doc: Doc, raw: string, attr: boolean): Src {
   if (!raw.includes('&')) return { raw, s: raw, map: null, bad: null };
   let s = '';
   const map: number[] = [];

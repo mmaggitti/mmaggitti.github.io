@@ -217,6 +217,87 @@ export function toOklch(c: Color): [number, number, number] {
   return [l, Math.hypot(a, b), h < 0 ? h + 360 : h];
 }
 
+// ── notation families: a colour written back in the notation it came in (the Colour sheet's picker) ─
+
+/** How a colour was written: the family the Colour sheet's picker writes every move in. */
+export type Notation = 'hex' | 'named' | 'transparent' | 'current' | 'rgb' | 'rgb-modern' | 'hsl' | 'hsl-modern' | 'hwb' | 'lab' | 'lch' | 'oklab' | 'oklch';
+
+/** The notation a colour was written in, from its space and spelling (rgb() and hsl() with commas are the legacy families). */
+export function notationOf(c: Color): Notation {
+  if (c.kind === 'current') return 'current';
+  const s = c.spelling.toLowerCase();
+  if (s[0] === '#') return 'hex';
+  if (s === 'transparent') return 'transparent';
+  if (NAMED_COLORS.has(s)) return 'named';
+  if (c.space === 'srgb') return s.includes(',') ? 'rgb' : 'rgb-modern';
+  if (c.space === 'hsl') return s.includes(',') ? 'hsl' : 'hsl-modern';
+  return c.space;
+}
+
+/** Is the colour's alpha written as a percentage (rgb(… / 50%), rgba(…, 50%))? */
+export function alphaIsPercent(c: Color): boolean {
+  const body = /^[a-z]+\(([^()]*)\)$/i.exec(c.spelling)?.[1];
+  if (body === undefined) return false;
+  const slash = body.lastIndexOf('/');
+  const parts = body.split(',');
+  const alpha = slash !== -1 ? body.slice(slash + 1) : parts.length === 4 ? parts[3] : null;
+  return alpha !== null && trimWs(alpha).endsWith('%');
+}
+
+/**
+ * A colour (gamma-encoded sRGB, clipped into 0..1, and an alpha) written in a notation family:
+ * - hex, named, transparent and currentColor as #rrggbb, or #rrggbbaa below alpha 1 (a name can't
+ *   hold an arbitrary colour);
+ * - rgb(R, G, B) / rgba(R, G, B, A), and rgb(R G B / A), R = fmt(r·255, 2);
+ * - hsl(H, S%, L%) / hsla(…, A), and hsl(H S% L% / A); hwb(H W% B% / A); each fmt(·, 2);
+ * - lab(L a b / A), each fmt(·, 3); lch(L C H / A), fmt(L, 3) fmt(C, 3) fmt(H, 2);
+ * - oklab(L a b / A), each fmt(·, 5); oklch as formatColor writes it, then / A.
+ * A is fmt(alpha, 2), or a whole percentage when `alphaPercent` (the original's was one); alpha 1 is
+ * left out. A grey's hue is 0.
+ */
+export function writeColor(rgb: readonly [number, number, number], alpha: number, notation: Notation, alphaPercent = false): string {
+  const [r, g, b] = [clamp(rgb[0], 0, 1), clamp(rgb[1], 0, 1), clamp(rgb[2], 0, 1)];
+  const a = clamp(alpha, 0, 1);
+  const A = a >= 1 ? null : alphaPercent ? `${fmt(a * 100, 0)}%` : fmt(a, 2);
+  const modern = (fn: string, parts: readonly string[]) => `${fn}(${parts.join(' ')}${A === null ? '' : ` / ${A}`})`;
+  const legacy = (fn: string, parts: readonly string[]) => (A === null ? `${fn}(${parts.join(', ')})` : `${fn}a(${parts.join(', ')}, ${A})`);
+  const srgb: Color = { kind: 'color', space: 'srgb', r, g, b, alpha: a, spelling: '' };
+  switch (notation) {
+    case 'hex':
+    case 'named':
+    case 'transparent':
+    case 'current':
+      return toHex(srgb)!;
+    case 'rgb':
+    case 'rgb-modern': {
+      const v = [r, g, b].map((x) => fmt(x * 255, 2));
+      return notation === 'rgb' ? legacy('rgb', v) : modern('rgb', v);
+    }
+    case 'hsl':
+    case 'hsl-modern': {
+      const [h, sat, l] = rgbToHsl(r, g, b);
+      const v = [fmt(h, 2), `${fmt(sat, 2)}%`, `${fmt(l, 2)}%`];
+      return notation === 'hsl' ? legacy('hsl', v) : modern('hsl', v);
+    }
+    case 'hwb':
+      return modern('hwb', [fmt(rgbToHsl(r, g, b)[0], 2), `${fmt(Math.min(r, g, b) * 100, 2)}%`, `${fmt((1 - Math.max(r, g, b)) * 100, 2)}%`]);
+    case 'lab':
+      return modern('lab', rgbToLab(r, g, b).map((x) => fmt(x, 3)));
+    case 'lch': {
+      const [l, x, y] = rgbToLab(r, g, b);
+      const c = fmt(Math.hypot(x, y), 3);
+      const h = (Math.atan2(y, x) * 180) / Math.PI;
+      return modern('lch', [fmt(l, 3), c, c === '0' ? '0' : fmt(h < 0 ? h + 360 : h, 2)]);
+    }
+    case 'oklab':
+      return modern('oklab', rgbToOklab(r, g, b).map((x) => fmt(x, 5)));
+    case 'oklch': {
+      const base = formatColor({ ...srgb, alpha: 1 }, 'oklch');
+      return A === null ? base : `${base.slice(0, -1)} / ${A})`;
+    }
+  }
+}
+
 // ── conversions (the spec's sample code) ─────────────────────────────────────────────────────────
 
 type Vec3 = [number, number, number];
@@ -301,6 +382,51 @@ function labToRgb(l: number, a: number, b: number): Vec3 {
   const inv = (f: number): number => (f > 24 / 116 ? f ** 3 : (116 * f - 16) / KAPPA);
   const xyz = [inv(fx) * D50[0], (l > 8 ? fy ** 3 : l / KAPPA) * D50[1], inv(fz) * D50[2]];
   return linearToRgb(mul(XYZ_TO_LRGB, mul(D50_TO_D65, xyz)));
+}
+
+const D65_TO_D50: Mat3 = invert3(D50_TO_D65);
+
+function invert3(m: Mat3): Mat3 {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  const A = e * i - f * h;
+  const B = f * g - d * i;
+  const C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [
+    [A / det, (c * h - b * i) / det, (b * f - c * e) / det],
+    [B / det, (a * i - c * g) / det, (c * d - a * f) / det],
+    [C / det, (b * g - a * h) / det, (a * e - b * d) / det],
+  ];
+}
+
+/** CIE Lab (D50) of a gamma-encoded sRGB colour: labToRgb's inverse. */
+function rgbToLab(r: number, g: number, b: number): Vec3 {
+  const xyz = mul(D65_TO_D50, mul(LRGB_TO_XYZ, [toLinear(r), toLinear(g), toLinear(b)]));
+  const f = (t: number): number => (t > 216 / 24389 ? Math.cbrt(t) : (KAPPA * t + 16) / 116);
+  const [fx, fy, fz] = [f(xyz[0] / D50[0]), f(xyz[1] / D50[1]), f(xyz[2] / D50[2])];
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+/** Hue (degrees, 0 for a grey), saturation and value (0..1) of a gamma-encoded sRGB colour: the picker's space. */
+export function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  let h = 0;
+  if (d > 0) {
+    h = 60 * (max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4);
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : d / max, max];
+}
+
+/** Gamma-encoded sRGB (0..1) of a hue (degrees), saturation and value (0..1). */
+export function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const hh = (((h % 360) + 360) % 360) / 60;
+  const f = (n: number) => {
+    const k = (n + hh) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return [f(5), f(3), f(1)];
 }
 
 function oklabToRgb(l: number, a: number, b: number): Vec3 {

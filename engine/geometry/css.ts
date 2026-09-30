@@ -1,6 +1,8 @@
 // Where CSS may set a property on an element: its own style="" declarations ('inline'), or a
 // <style> rule whose selector may match it ('sheet'). CSS wins over the presentation attribute, so
 // geometry a rule sets is not the attribute's, and Draw refuses to write the attribute in its place.
+// sheetSets asks the sheets alone (whatever style="" says), and whether such a rule marks the
+// property !important (P1-M2's Inspect: a rule's !important wins over style="" too).
 //
 // "May match" is conservative, and selectors are never evaluated: a rule may match when its last
 // compound selector names the element's local name, `*`, its id or one of its classes, or names
@@ -15,10 +17,17 @@ export type CssSource = 'no' | 'inline' | 'sheet';
 /** Shorthands that also set a property. */
 const SHORTHANDS: Readonly<Record<string, readonly string[]>> = { 'font-size': ['font'] };
 
-interface Decl {
+export interface Decl {
   name: string; // lowercase
   value: string; // without !important, trimmed
+  important: boolean;
+  /** The value's span in the text read, [start, end): trimmed, without !important (comments inside it kept). */
+  start: number;
+  end: number;
 }
+
+const IMPORTANT = /![ \t\n\r\f]*important[ \t\n\r\f]*$/i;
+const blankChar = (c: string) => c.trim() === ''; // what String.prototype.trim takes off
 
 /** The declarations of a declaration block (a style attribute's value), in order. */
 export function declarations(css: string): Decl[] {
@@ -30,8 +39,17 @@ export function declarations(css: string): Decl[] {
     if (colon === -1) return;
     const name = text.slice(0, colon).trim().toLowerCase();
     if (!/^-?[a-z][a-z0-9-]*$/.test(name)) return;
-    const value = text.slice(colon + 1).replace(/![ \t\n\r\f]*important[ \t\n\r\f]*$/i, '').trim();
-    out.push({ name, value });
+    const value = text.slice(colon + 1).replace(IMPORTANT, '').trim();
+    // The value's span, read on the same text with each comment blanked character for character
+    // (so every offset holds), then trimmed by loops (a regex would retry at every space).
+    const blank = blankComments(css.slice(a, b));
+    let end = blank.length;
+    const bang = IMPORTANT.exec(blank);
+    if (bang) end = bang.index;
+    let start = blank.indexOf(':') + 1;
+    while (start < end && blankChar(blank[start])) start++;
+    while (end > start && blankChar(blank[end - 1])) end--;
+    out.push({ name, value, important: !!bang, start: a + start, end: a + end });
   };
   for (let i = 0; i < css.length; ) {
     const c = css[i];
@@ -63,14 +81,42 @@ export function cssSets(doc: Doc, id: NodeId, prop: string): CssSource {
   const names = [prop, ...(SHORTHANDS[prop] ?? [])];
   const style = attrValue(doc, el(doc, id), null, 'style');
   if (style !== null && declarations(style).some((d) => names.includes(d.name))) return 'inline';
+  return sheetSets(doc, id, prop) === 'no' ? 'no' : 'sheet';
+}
+
+/** Whether a <style> rule may set a property, and marks it !important. */
+export type SheetSource = 'no' | 'rule' | 'important';
+
+/**
+ * Whether a <style> rule may set `prop` on this element, whatever its own style="" says: 'important'
+ * when such a rule declares it !important, else 'rule' (a @keyframes animation counts as a rule),
+ * else 'no'. Read from the cached sheet, so asking about many elements reads the sheets once.
+ */
+export function sheetSets(doc: Doc, id: NodeId, prop: string): SheetSource {
+  const names = [prop, ...(SHORTHANDS[prop] ?? [])];
   const sheet = sheetOf(doc);
   const node = el(doc, id);
-  if (sheet.rules.some((r) => r.decls.some((d) => names.includes(d)) && r.selectors.some((s) => mayMatch(s, doc, node)))) return 'sheet';
+  let out: SheetSource = 'no';
+  for (const r of sheet.rules) {
+    let sets = false;
+    let important = false;
+    for (const d of r.decls) {
+      if (!names.includes(d.name)) continue;
+      sets = true;
+      if (d.important) important = true;
+    }
+    // Once a rule may set it, only an !important one can change the answer.
+    if (!sets || (!important && out === 'rule') || !r.selectors.some((s) => mayMatch(s, doc, node))) continue;
+    if (important) return 'important';
+    out = 'rule';
+  }
+  if (out !== 'no') return out;
   // A @keyframes rule sets what it animates on an element that some rule (or its style) animates.
   if (sheet.keyframes.has(prop) || names.some((n) => sheet.keyframes.has(n))) {
+    const style = attrValue(doc, node, null, 'style');
     const animated = (style !== null && declarations(style).some((d) => d.name === 'animation' || d.name === 'animation-name'))
-      || sheet.rules.some((r) => r.decls.some((d) => d === 'animation' || d === 'animation-name') && r.selectors.some((s) => mayMatch(s, doc, node)));
-    if (animated) return 'sheet';
+      || sheet.rules.some((r) => r.decls.some((d) => d.name === 'animation' || d.name === 'animation-name') && r.selectors.some((s) => mayMatch(s, doc, node)));
+    if (animated) return 'rule';
   }
   return 'no';
 }
@@ -96,7 +142,7 @@ const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\
 
 interface Rule {
   selectors: Compound[]; // each selector's last compound
-  decls: string[]; // property names it declares
+  decls: { name: string; important: boolean }[]; // what it declares, and which are !important
 }
 interface Compound {
   type: string | null; // a local name, '*', or null
@@ -142,7 +188,7 @@ function readSheet(css: string, into: Sheet, inKeyframes = false): void {
     else if (prelude.startsWith('@')) {
       // @font-face, @page, @property: nothing that styles an element
     } else if (inKeyframes) for (const d of declarations(body)) into.keyframes.add(d.name);
-    else into.rules.push({ selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => d.name) });
+    else into.rules.push({ selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => ({ name: d.name, important: d.important })) });
     i = close + 1;
   }
 }
@@ -195,6 +241,29 @@ function mayMatch(c: Compound, doc: Doc, node: ElementNode): boolean {
 }
 
 // ── scanning ───────────────────────────────────────────────────────────────────────────────────
+
+/** The text with each comment's characters blanked to spaces, one for one, so offsets hold. */
+function blankComments(css: string): string {
+  if (!css.includes('/*')) return css;
+  let out = '';
+  for (let i = 0; i < css.length; ) {
+    const c = css[i];
+    if (c === '/' && css[i + 1] === '*') {
+      const e = css.indexOf('*/', i + 2);
+      const end = e === -1 ? css.length : e + 2;
+      out += ' '.repeat(end - i);
+      i = end;
+    } else if (c === '"' || c === "'") {
+      const e = skipString(css, i);
+      out += css.slice(i, e);
+      i = e;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
 
 function stripComments(css: string): string {
   let out = '';

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NAMED_COLORS, clampRgb, formatColor, parseColor, parsePaint, toHex, toOklch, type Color } from '../../values/color.ts';
+import { NAMED_COLORS, alphaIsPercent, clampRgb, formatColor, hsvToRgb, notationOf, parseColor, parsePaint, rgbToHsv, toHex, toOklch, writeColor, type Color, type Notation } from '../../values/color.ts';
 import { lineFindings } from '../../../scripts/lib/public-rules.mjs';
 import { mulberry32 } from './rng.ts';
 
@@ -448,4 +448,97 @@ test('parsing is linear: 1e5-space values of every shape finish fast', () => {
     const ms = performance.now() - t;
     assert.ok(ms < 100, `${label}: ${ms.toFixed(0)} ms`);
   }
+});
+
+// ── notation families: the Colour sheet's picker writes a colour back as it was written ──────────
+
+const FAMILIES: readonly Notation[] = ['hex', 'named', 'transparent', 'current', 'rgb', 'rgb-modern', 'hsl', 'hsl-modern', 'hwb', 'lab', 'lch', 'oklab', 'oklch'];
+
+test('notationOf: each colour’s family from its spelling (rgb() and hsl() with commas are the legacy ones), and whether its alpha is a percentage', () => {
+  const cases: [string, Notation, boolean][] = [
+    ['#E76F51', 'hex', false], ['Tomato', 'named', false], ['transparent', 'transparent', false], ['currentColor', 'current', false],
+    ['rgb(231, 111, 81)', 'rgb', false], ['rgba(231, 111, 81, 50%)', 'rgb', true], ['rgb(231 111 81 / 50%)', 'rgb-modern', true], ['rgba(231 111 81 / .5)', 'rgb-modern', false],
+    ['hsl(12, 76%, 61%)', 'hsl', false], ['hsla(12 76% 61% / 40%)', 'hsl-modern', true], ['hwb(12 32% 9%)', 'hwb', false],
+    ['lab(60 40 40)', 'lab', false], ['lch(60 50 40 / 0.5)', 'lch', false], ['oklab(0.6 0.1 0.1)', 'oklab', false], ['oklch(0.66 0.15 36 / 25%)', 'oklch', true],
+  ];
+  for (const [text, family, percent] of cases) {
+    const c = parseColor(text)!;
+    assert.equal(notationOf(c), family, text);
+    assert.equal(alphaIsPercent(c), percent, `${text}: alpha a percentage`);
+  }
+});
+
+test('writeColor: each family writes in its own notation, with and without alpha (a percentage alpha stays one, alpha 1 is left out); hex, a name, transparent and currentColor write hex', () => {
+  // lab, lch, oklab and oklch checked against an independent computation (Lindbloom's Bradford
+  // matrix and Ottosson's OKLab): lab(61.373 45.953 39.526), oklab(0.67833 0.12744 0.08985).
+  const rgb: [number, number, number] = [231 / 255, 111 / 255, 81 / 255];
+  const expect: Record<Notation, [string, string]> = {
+    hex: ['#e76f51', '#e76f5180'],
+    named: ['#e76f51', '#e76f5180'],
+    transparent: ['#e76f51', '#e76f5180'],
+    current: ['#e76f51', '#e76f5180'],
+    rgb: ['rgb(231, 111, 81)', 'rgba(231, 111, 81, 0.5)'],
+    'rgb-modern': ['rgb(231 111 81)', 'rgb(231 111 81 / 0.5)'],
+    hsl: ['hsl(12, 75.76%, 61.18%)', 'hsla(12, 75.76%, 61.18%, 0.5)'],
+    'hsl-modern': ['hsl(12 75.76% 61.18%)', 'hsl(12 75.76% 61.18% / 0.5)'],
+    hwb: ['hwb(12 31.76% 9.41%)', 'hwb(12 31.76% 9.41% / 0.5)'],
+    lab: ['lab(61.372 45.948 39.527)', 'lab(61.372 45.948 39.527 / 0.5)'],
+    lch: ['lch(61.372 60.61 40.7)', 'lch(61.372 60.61 40.7 / 0.5)'],
+    oklab: ['oklab(0.67833 0.12744 0.08985)', 'oklab(0.67833 0.12744 0.08985 / 0.5)'],
+    oklch: ['oklch(0.67833 0.15593 35.18)', 'oklch(0.67833 0.15593 35.18 / 0.5)'],
+  };
+  for (const f of FAMILIES) {
+    assert.equal(writeColor(rgb, 1, f), expect[f][0], `${f}, opaque`);
+    assert.equal(writeColor(rgb, 0.5, f), expect[f][1], `${f}, alpha 0.5`);
+  }
+  assert.equal(writeColor([1, 99 / 255, 71 / 255], 1, 'named'), '#ff6347', 'tomato’s own colour is written as hex too: a picker move is a colour of its own');
+  assert.equal(writeColor([1, 99 / 255, 71 / 255], 1, 'hex'), '#ff6347');
+  assert.equal(writeColor(rgb, 0.5, 'rgb-modern', true), 'rgb(231 111 81 / 50%)');
+  assert.equal(writeColor(rgb, 0.5, 'rgb', true), 'rgba(231, 111, 81, 50%)');
+  assert.equal(writeColor(rgb, 0.25, 'oklch', true), 'oklch(0.67833 0.15593 35.18 / 25%)');
+  assert.equal(writeColor([0.5, 0.5, 0.5], 1, 'hsl-modern'), 'hsl(0 0% 50%)', 'a grey’s hue is 0');
+  assert.equal(writeColor([0.5, 0.5, 0.5], 1, 'lch'), 'lch(53.389 0 0)');
+  assert.equal(writeColor([1.2, -0.1, 0.5], 1, 'rgb-modern'), 'rgb(255 0 127.5)', 'clipped into sRGB');
+});
+
+test('property: 4,096 sRGB colours written in every family read back to the same 8-bit hex, opaque and at alpha 0.5', () => {
+  for (let r = 0; r < 256; r += 17)
+    for (let g = 0; g < 256; g += 17)
+      for (let b = 0; b < 256; b += 17) {
+        const rgb: [number, number, number] = [r / 255, g / 255, b / 255];
+        const hex = toHex({ kind: 'color', space: 'srgb', r: rgb[0], g: rgb[1], b: rgb[2], alpha: 1, spelling: '' }, false);
+        for (const f of FAMILIES)
+          for (const alpha of [1, 0.5]) {
+            const text = writeColor(rgb, alpha, f);
+            const back = parseColor(text);
+            assert.ok(back, `${f}: ${text} parses`);
+            assert.equal(toHex(back, false), hex, `${f}: ${text}`);
+            assert.equal(Math.abs(back.alpha - alpha) <= 1 / 255, true, `${f}: ${text}'s alpha`);
+          }
+      }
+});
+
+test('HSV ↔ sRGB: the primaries, greys, and round trips both ways', () => {
+  assert.deepEqual(rgbToHsv(1, 0, 0), [0, 1, 1]);
+  assert.deepEqual(rgbToHsv(0, 0, 1), [240, 1, 1]);
+  assert.deepEqual(rgbToHsv(0.5, 0.5, 0.5), [0, 0, 0.5], 'a grey: hue 0, saturation 0');
+  assert.deepEqual(rgbToHsv(0, 0, 0), [0, 0, 0]);
+  assert.deepEqual(hsvToRgb(120, 1, 1), [0, 1, 0]);
+  assert.deepEqual(hsvToRgb(360, 1, 1), [1, 0, 0], 'hue 360 is 0');
+  const rnd = mulberry32(7);
+  for (let i = 0; i < 2000; i++) {
+    const rgb: [number, number, number] = [rnd(), rnd(), rnd()];
+    close(hsvToRgb(...rgbToHsv(...rgb)), rgb, 1e-12, 'sRGB → HSV → sRGB');
+    const hsv: [number, number, number] = [rnd() * 360, 0.01 + rnd() * 0.99, 0.01 + rnd() * 0.99];
+    close(rgbToHsv(...hsvToRgb(...hsv)), hsv, 1e-9, 'HSV → sRGB → HSV');
+  }
+});
+
+test('a lab() colour outside sRGB is shown clipped: written in its family from the clipped channels, it reads back as the clipped colour', () => {
+  const c = parseColor('lab(60 120 40)')!;
+  assert.ok(c.r > 1 || c.g < 0 || c.b < 0, 'outside sRGB');
+  const { r, g, b } = clampRgb(c);
+  const text = writeColor([r, g, b], 1, notationOf(c));
+  assert.match(text, /^lab\(/);
+  assert.equal(toHex(parseColor(text)!), toHex(c), 'the colour shown is the clipped one');
 });

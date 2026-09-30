@@ -1716,7 +1716,7 @@ const BREAKS = [
   },
   {
     id: 'B321', what: 'cssSets never reports a <style> rule',
-    file: 'engine/geometry/css.ts', from: "  if (sheet.rules.some((r) => r.decls.some((d) => names.includes(d)) && r.selectors.some((s) => mayMatch(s, doc, node)))) return 'sheet';\n", to: '',
+    file: 'engine/geometry/css.ts', from: "  return sheetSets(doc, id, prop) === 'no' ? 'no' : 'sheet';", to: "  return 'no';",
     run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
   },
   {
@@ -2298,6 +2298,42 @@ const BREAKS = [
     id: 'B433', what: 'an Inspect input edit doesn’t redraw the generated shape (the hook leaves the old points)', slow: true, checks: ['generatorsRegenerateAndDetach'],
     file: 'engine/generators/index.ts', from: '      apply(opSetAttr(doc, id, null, g.attr, expected));\n', to: '',
     run: DRAW_E2E, expect: /generatorsRegenerateAndDetach: Tips \+ did not draw 12 points/,
+  },
+  // P1-M2 S2: Inspect and colour. The style engine and the colour notations first (quick).
+  {
+    id: 'B434', what: 'a style="" declaration’s value is written without the spacing around it (its neighbours’ bytes change)',
+    file: 'engine/style/write.ts', from: 'raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };', to: 'raw: raw.slice(0, d.start).trimEnd() + escape(v, a.quote) + raw.slice(d.end).trimStart(), add: false };',
+    run: engineTests('style/style.test.ts'), expect: /✖ a declaration among others is rewritten alone/,
+  },
+  {
+    id: 'B435', what: 'a value a <style> rule sets is written as the attribute anyway (it changes nothing on screen)',
+    file: 'engine/style/write.ts', from: "  if (s.sheet === 'rule') return { refused: RULE_SETS(prop) };\n", to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ refused, with the reason, and nothing written/,
+  },
+  {
+    id: 'B436', what: 'a style="" declaration’s !important is dropped when its value is written (the span runs over it)',
+    file: 'engine/geometry/css.ts', from: '    if (bang) end = bang.index;\n', to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ a declaration among others is rewritten alone/,
+  },
+  {
+    id: 'B437', what: 'the width-2 rule writes a width over the one the shape has',
+    file: 'engine/style/write.ts', from: '      if (w.value === null || parseFloat(w.value) === 0) {', to: '      if (true) {',
+    run: engineTests('style/style.test.ts'), expect: /✖ the width-2 rule/,
+  },
+  {
+    id: 'B438', what: 'the rule scan drops !important again (a rule’s !important no longer refuses)',
+    file: 'engine/geometry/css.ts', from: 'map((d) => ({ name: d.name, important: d.important }))', to: 'map((d) => ({ name: d.name, important: false }))',
+    run: engineTests('style/style.test.ts'), expect: /✖ refused, with the reason, and nothing written/,
+  },
+  {
+    id: 'B439', what: 'writeColor writes a modern rgb() with commas (the legacy family’s)',
+    file: 'engine/values/color.ts', from: "return notation === 'rgb' ? legacy('rgb', v) : modern('rgb', v);", to: "return legacy('rgb', v);",
+    run: engineTests('values/color.test.ts'), expect: /✖ writeColor: each family writes in its own notation/,
+  },
+  {
+    id: 'B440', what: 'a named colour is written back as a name when the picker lands on one',
+    file: 'engine/values/color.ts', from: "    case 'named':\n    case 'transparent':\n", to: "    case 'named':\n      return [...NAMED_COLORS].find(([, h]) => h === toHex(srgb))?.[0] ?? toHex(srgb)!;\n    case 'transparent':\n",
+    run: engineTests('values/color.test.ts'), expect: /✖ writeColor: each family writes in its own notation/,
   },
 ];
 
