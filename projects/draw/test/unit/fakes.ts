@@ -2,8 +2,12 @@
 // nothing, manual timers, a lock table standing in for Web Locks, and small document helpers.
 
 import { readdirSync, readFileSync } from 'node:fs';
-import { descendants, type Doc, type ElementNode } from '../../../../engine/model/doc.ts';
-import { Editor, type EditorPorts } from '../../src/editor.ts';
+import { descendants, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { localBounds } from '../../../../engine/geometry/bounds.ts';
+import { userCtm } from '../../../../engine/geometry/ctm.ts';
+import { multiply } from '../../../../engine/values/affine.ts';
+import { Editor, type EditorPorts, type Measured } from '../../src/editor.ts';
+import { rootToHostMatrix } from '../../src/interact/overlay-model.ts';
 import type { Lock, Timers } from '../../src/autosave.ts';
 
 export const CORPUS = new URL('../../../../engine/test/fixtures/corpus/', import.meta.url);
@@ -12,8 +16,38 @@ export const corpusBytes = (rel: string): Uint8Array => new Uint8Array(readFileS
 export const SAMPLE = readFileSync(new URL('../../src/canvas/sample.svg', import.meta.url), 'utf8');
 export const firstIcon = (): string => 'icons/lucide/' + readdirSync(new URL('icons/lucide/', CORPUS)).find((f) => f.endsWith('.svg'));
 
+/** The page's root font size at Draw's 75% scale (1rem = 12 px): what the canvas measures rem against. */
+export const REM_PX = 12;
+
+/**
+ * The canvas's measure port, answered by the engine: each element's box (bounds.ts) and its units →
+ * host px (ctm.ts, then the editor's camera box), as the DOM's getBBox and getScreenCTM give them.
+ */
+export function measureWith(editor: Editor, ids: readonly NodeId[]): Map<NodeId, Measured> {
+  const out = new Map<NodeId, Measured>();
+  const doc = editor.doc;
+  const { viewport, M, box } = editor.rootBox;
+  if (!doc || !box) return out;
+  const ctx = { viewport, remPx: REM_PX };
+  const toHost = rootToHostMatrix(box, viewport, M);
+  for (const id of ids) {
+    const b = localBounds(doc, id, ctx);
+    const m = b && userCtm(doc, id, ctx, (x) => localBounds(doc, x, ctx));
+    if (b && m) out.set(id, { box: b, toHost: multiply(toHost, m) });
+  }
+  return out;
+}
+
+const bound = new WeakMap<EditorPorts, Editor>();
+
+/** Let fake ports measure through this editor (it is made after its ports). */
+export function bind(ports: EditorPorts, editor: Editor): Editor {
+  bound.set(ports, editor);
+  return editor;
+}
+
 export function fakePorts(options: { refuseRoot?: boolean } = {}): EditorPorts {
-  return {
+  const ports: EditorPorts = {
     canvas: {
       render: () => {},
       patchAttributes: () => {},
@@ -24,15 +58,23 @@ export function fakePorts(options: { refuseRoot?: boolean } = {}): EditorPorts {
       clear: () => {},
       motion: () => 'still',
       play: () => {},
+      measure: (ids) => {
+        const e = bound.get(ports);
+        return e ? measureWith(e, ids) : new Map();
+      },
     },
     code: { set: () => {}, patch: () => {}, select: () => {}, focus: () => {}, readOnly: () => {}, source: () => {} },
-    overlay: { outline: () => {} },
+    overlay: { show: () => {} },
     hostSize: () => ({ width: 416, height: 528 }),
     sinkReady: () => true,
   };
+  return ports;
 }
 
-export const fakeEditor = (options?: { refuseRoot?: boolean }): Editor => new Editor(fakePorts(options));
+export const fakeEditor = (options?: { refuseRoot?: boolean }): Editor => {
+  const ports = fakePorts(options);
+  return bind(ports, new Editor(ports));
+};
 
 /** Timers that fire only when told to. */
 export class FakeTimers implements Timers {

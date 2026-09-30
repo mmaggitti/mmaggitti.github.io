@@ -1,21 +1,25 @@
 // The canvas: a host element whose open shadow root holds the rendered document, so the file's ids
-// and <style> can't collide with the app's, and a layer above it for the selection outlines.
+// and <style> can't collide with the app's; under it the underlay (the surround, and the light
+// checkerboard paper on the artboard, the same in both themes: decision 10, with the grid over it);
+// and a layer above it for the app's marks (outlines, handles, guides, the tooltip).
 // React owns only these elements; the framework-free renderer owns everything inside the host (every
 // node it draws comes through the safe sink), and the stage turns the canvas's input into the
 // editor's view and the Select tool. The host is hidden from assistive tech: the code panel is the
 // accessible view of the document. A file (or SVG text) dropped on the canvas opens (iPad, desktop).
 //
-// Over the drawing, when there is something to say: a file that isn't well-formed (it is shown only
-// as source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
-// under reduced motion, Play for a drawing that animates (it opens paused).
+// Over the drawing: the Grid button at the top-left (a view option kept on this device, never in the
+// file); and when there is something to say, a file that isn't well-formed (it is shown only as
+// source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
+// under reduced motion, Play for a drawing that animates (it opens paused, top-right).
 
 import { useEffect, useRef, type DragEvent as ReactDragEvent } from 'react';
 import type { Editor } from '../editor.ts';
 import type { Unparsed } from '../workspace.ts';
 import { failureText } from '../files-view.ts';
 import { useStore } from './store.ts';
+import { readPref, writePref } from '../platform/prefs.ts';
 import { Renderer } from '../canvas/renderer.ts';
-import { Overlay } from '../canvas/overlay.ts';
+import { Overlay } from '../canvas/overlay/index.ts';
 import { Stage } from '../canvas/stage.ts';
 import type { Views } from './views.ts';
 
@@ -34,12 +38,14 @@ export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }
   const area = useRef<HTMLElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const marks = useRef<HTMLDivElement>(null);
+  const under = useRef<HTMLDivElement>(null);
+  const paper = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = host.current!;
     const shadow = el.shadowRoot ?? el.attachShadow({ mode: 'open' });
     const renderer = new Renderer(shadow);
-    const overlay = new Overlay(marks.current!);
+    const overlay = new Overlay(marks.current!, el, { under: under.current!, paper: paper.current! });
     Object.assign(views, { renderer, overlay, host: el });
     const stage = new Stage(area.current!, el, shadow, editor, renderer);
     return () => {
@@ -57,11 +63,36 @@ export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }
       onDragOver={(e: ReactDragEvent) => onDrag(e.nativeEvent)}
       onDrop={(e: ReactDragEvent) => onDrop(e.nativeEvent)}
     >
+      <div ref={under} className="draw-under" aria-hidden="true">
+        <div ref={paper} className="draw-paper" />
+      </div>
       <div ref={host} className="draw-host" aria-hidden="true" />
       <div ref={marks} className="draw-marks" />
+      <GridButton editor={editor} />
       {error && <p className="draw-error ds-small">Can&rsquo;t show the drawing: {error}.</p>}
       <Over editor={editor} unparsed={unparsed} files={files} />
     </main>
+  );
+}
+
+const GRID_ICON = (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+    <path d="M4 4h16v16H4zM4 9.33h16M4 14.67h16M9.33 4v16M14.67 4v16" />
+  </svg>
+);
+
+/** The Grid button: the grid over the paper, on or off (the device pref draw:grid, never the file). */
+function GridButton({ editor }: { editor: Editor }) {
+  const on = useStore(editor.grid);
+  useEffect(() => editor.grid.set(readPref('grid') === 'on'), [editor]);
+  const toggle = () => {
+    writePref('grid', on ? null : 'on');
+    editor.grid.set(!on);
+  };
+  return (
+    <button type="button" className="draw-chrome draw-grid-btn" aria-label="Grid" aria-pressed={on} onClick={toggle}>
+      {GRID_ICON}
+    </button>
   );
 }
 

@@ -365,8 +365,9 @@ const BREAKS = [
     run: SITE_E2E, expect: /ds tokens reach the document on the canvas: --accent/,
   },
   {
+    // P1-M1: the paper is the underlay's checkerboard now; a checker colour that follows the theme.
     id: 'B57', what: 'the paper follows the theme', slow: true,
-    file: 'projects/draw/src/app.css', from: '  background: #fff;\n', to: '',
+    file: 'projects/draw/src/app.css', from: 'repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%)', to: 'repeating-conic-gradient(#eeeeee 0 25%, var(--surface) 0 50%)',
     run: SITE_E2E, expect: /the canvas paper is/,
   },
   {
@@ -501,13 +502,13 @@ const BREAKS = [
   },
   {
     id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true,
-    file: 'projects/draw/src/canvas/overlay.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
+    file: 'projects/draw/src/canvas/overlay/index.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
     run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
     id: 'B84', what: 'the outline does not follow the zoom', slow: true,
     // P1-M1: re-planted on the camera box's #applyView.
-    file: 'projects/draw/src/editor.ts', from: 'this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);\n    this.#outline();', to: 'this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);',
+    file: 'projects/draw/src/editor.ts', from: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });\n    this.#show();', to: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });',
     run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
@@ -1730,6 +1731,21 @@ const BREAKS = [
     id: 'B325', what: "the dry run misses a stale anchor (it plants a second space in SLOP, B275's anchor)",
     file: 'projects/draw/src/canvas/gestures.ts', from: 'export const SLOP = 5;', to: 'export const SLOP =  5;',
     run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +STALE/,
+  },
+  {
+    id: 'B326', what: "check-sinks' DOM-write allowlist widens from the overlay folder to the whole canvas folder",
+    file: 'projects/draw/tools/check-sinks.mjs', from: "].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay/']],", to: "].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks allows DOM writes in the overlay folder only/,
+  },
+  {
+    id: 'B327', what: 'the tooltip never flips below the finger near the top of the canvas',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  return { text, finger, below: finger.y < TIP_FLIP };', to: '  return { text, finger, below: false };',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the tooltip sits 42 px above the finger/,
+  },
+  {
+    id: 'B328', what: 'the grid step ignores its 12 px floor (lines 1 px apart)',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  const want = GRID_MIN_PX / pxPerUnit;', to: '  const want = 1 / pxPerUnit;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the grid step is the smallest 1, 2 or 5/,
   },
 ];
 

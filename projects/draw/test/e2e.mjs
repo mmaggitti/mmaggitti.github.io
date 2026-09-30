@@ -480,9 +480,11 @@ async function moreEdges(browser, origin) {
 
 // The canvas draws a document as the document, not in the app's theme: currentColor, a font-less
 // <text> and a var() fallback compute as they do with the file opened on its own, in light and
-// dark; no ds token reaches the document; and the paper stays white.
+// dark; no ds token reaches the document; and the paper is the same light checkerboard in both
+// (decision 10), under a host that paints nothing of its own.
 async function canvasIgnoresTheTheme(browser, origin) {
   const text = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100"><path d="M0 0H10V10Z" fill="currentColor"/><text y="20">Hi</text><circle r="5" fill="var(--accent, black)"/></svg>`;
+  const papers = {};
   for (const colorScheme of ['light', 'dark']) {
     const context = await browser.newContext({ ...PHONE, viewport: { width: 440, height: 956 }, colorScheme });
     let alone;
@@ -509,16 +511,19 @@ async function canvasIgnoresTheTheme(browser, origin) {
         window.drawTest.render(`<svg xmlns="http://www.w3.org/2000/svg">${rects}</svg>`);
         const root = document.querySelector('.draw-host').shadowRoot;
         const leaked = [...names].filter((n) => getComputedStyle(root.getElementById(n.slice(2))).fill !== 'rgb(1, 2, 3)');
-        return { tokens: names.size, leaked, paper: getComputedStyle(document.querySelector('.draw-host')).backgroundColor };
+        return { tokens: names.size, leaked, host: getComputedStyle(document.querySelector('.draw-host')).backgroundColor, paper: getComputedStyle(document.querySelector('.draw-paper')).backgroundImage };
       }, text);
       must(r.tokens >= 25, `test setup: found only ${r.tokens} ds tokens on :root`);
       must(r.leaked.length === 0, `${colorScheme}: ds tokens reach the document on the canvas: ${r.leaked.join(', ')}`);
-      must(r.paper === 'rgb(255, 255, 255)', `${colorScheme}: the canvas paper is ${r.paper}, not white`);
+      must(r.host === 'rgba(0, 0, 0, 0)', `${colorScheme}: the canvas host paints ${r.host}; the paper is the underlay's`);
+      must(/rgb\(238, 238, 238\)/.test(r.paper) && /rgb\(255, 255, 255\)/.test(r.paper), `${colorScheme}: the canvas paper is ${r.paper}, not the light checkerboard`);
+      papers[colorScheme] = r.paper;
       await page.evaluate((t) => window.drawTest.render(t), text);
       const canvas = await page.evaluate(readStyles, true);
       for (const k of Object.keys(alone)) must(canvas[k] === alone[k], `${colorScheme}: on the canvas the ${k} is ${canvas[k]}, but the file alone has ${alone[k]}`);
     }, { colorScheme });
   }
+  must(papers.light === papers.dark, `the canvas paper is ${papers.dark} in dark, not ${papers.light} as in light`);
 }
 
 // Runs in the page: the styles canvasIgnoresTheTheme compares, on the canvas or in the file alone.
@@ -607,9 +612,12 @@ function knownIn(browser, name, colorScheme) {
 }
 
 // Runs in the page: the file on the canvas, and beside it the file itself as an <img> where the
-// drawn root's own box is and at its size (the camera box), its root filling the <img>, with the
-// viewBox the renderer gave it, if any, on a copy of the canvas's underlay (the surround and the
-// checkerboard paper, where they are on the canvas).
+// drawn root's own box is and at its size (the camera box), its root filling the <img>, on a copy
+// of the canvas's underlay (the surround and the checkerboard paper, where they are on the canvas).
+// Chromium draws an SVG <img> at a whole-pixel size, so a box a fraction of a pixel tall would be
+// scaled by that fraction and every horizontal edge shaded differently: the <img> takes the box
+// rounded to whole pixels, and its root the viewBox (preserveAspectRatio none) that maps the file
+// exactly as the drawn root's own getScreenCTM does.
 async function showBoth(text) {
   window.drawTest.render(text);
   const host = document.querySelector('.draw-host');
@@ -634,9 +642,14 @@ async function showBoth(text) {
   const svg = doc.documentElement;
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '100%');
-  if (drawn?.hasAttribute('viewBox')) svg.setAttribute('viewBox', drawn.getAttribute('viewBox'));
+  const at = { left: Math.round(box.left), top: Math.round(box.top), width: Math.max(1, Math.round(box.width)), height: Math.max(1, Math.round(box.height)) };
+  const m = drawn?.getScreenCTM();
+  if (m && m.a > 0 && m.d > 0 && !m.b && !m.c) {
+    svg.setAttribute('viewBox', [(hb.left + at.left - m.e) / m.a, (hb.top + at.top - m.f) / m.d, at.width / m.a, at.height / m.d].join(' '));
+    svg.setAttribute('preserveAspectRatio', 'none');
+  } else if (drawn?.hasAttribute('viewBox')) svg.setAttribute('viewBox', drawn.getAttribute('viewBox'));
   const img = document.createElement('img');
-  img.style.cssText = `position:absolute;display:block;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px`;
+  img.style.cssText = `position:absolute;display:block;left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px`;
   img.src = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
   alone.replaceChildren(...parts, img);
   await document.fonts.ready;
@@ -2282,7 +2295,7 @@ async function colourTokensShowTheirSwatch(browser, origin) {
 
 // The theme follows the system's, and the code recolours the moment it changes (no reload). A theme
 // chosen in Files overrides the system's (data-theme on <html>), is kept on this device, and System
-// follows it again. The drawing stays on white paper throughout.
+// follows it again. The drawing stays on the same light checkerboard throughout.
 async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     await showCode(page);
@@ -2290,7 +2303,7 @@ async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
       number: getComputedStyle(document.querySelector('.draw-code .cv-number')).color,
       word: getComputedStyle(document.querySelector('.draw-code .cv-enum')).color,
       bg: getComputedStyle(document.body).backgroundColor,
-      paper: getComputedStyle(document.querySelector('.draw-host')).backgroundColor,
+      paper: getComputedStyle(document.querySelector('.draw-paper')).backgroundImage,
       theme: document.documentElement.dataset.theme ?? null,
     }));
     const light = await look();
@@ -2326,7 +2339,9 @@ async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
     await page.locator('.draw-theme button', { hasText: 'System' }).tap();
     const system = await look();
     must(system.theme === null && system.number === light.number && system.bg === light.bg, 'System does not follow the system again');
-    for (const l of [light, dark, chosenLight, chosenDark, system]) must(l.paper === 'rgb(255, 255, 255)', `the canvas paper is ${l.paper}, not white`);
+    for (const l of [light, dark, chosenLight, chosenDark, system]) {
+      must(l.paper === light.paper && /rgb\(238, 238, 238\)/.test(l.paper) && /rgb\(255, 255, 255\)/.test(l.paper), `the canvas paper is ${l.paper}, not the light checkerboard it is in light`);
+    }
     await closeModal(page);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });

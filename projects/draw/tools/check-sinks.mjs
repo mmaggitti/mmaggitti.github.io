@@ -21,18 +21,19 @@ const BANS = [
   ['eval', /\beval\s*\(|\bnew\s+Function\s*\(|setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`]/, []],
   // The script preview (P5) must stay an opaque origin.
   ['allow-same-origin', /allow-same-origin/, []],
-  // Document elements, attributes, markup and CSS are made only by the sink. The overlay draws the
-  // app's own handles (never document content), so it may make its own. Elsewhere (the renderer)
+  // Document elements, attributes, markup and CSS are made only by the sink. The overlay folder
+  // (src/canvas/overlay/: the marks, the tooltip, the paper and the grid) draws the app's own marks,
+  // never document content, so it may make its own. Elsewhere (the renderer)
   // code only inserts, moves and removes nodes the sink returned. A regex can't see a string passed
   // to append/before/replaceWith (which makes a text node), so that part is review, not this check.
   ['dom-write', new RegExp([
     /\b(createElementNS|createAttribute|createAttributeNS|createContextualFragment|setHTMLUnsafe|parseHTMLUnsafe|insertRule|replaceSync)\s*\(/,
     /\b(setAttribute|setAttributeNS|setAttributeNode|setAttributeNodeNS)\s*\(/, /\bDOMParser\b/, /\.cssText\s*=(?!=)/,
-  ].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts']],
+  ].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay/']],
   // Plain HTML elements and text: the sink, the overlay, and the code view, which shows the source
   // as text in its own spans (text is never markup).
   ['dom-text', /\b(createElement|createTextNode|createDocumentFragment)\s*\(|\.(textContent|nodeValue|innerText|outerText)\s*=(?!=)/,
-    ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay.ts', 'projects/draw/src/codeview/']],
+    ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay/', 'projects/draw/src/codeview/']],
   ['storage', /\b(localStorage|sessionStorage|indexedDB|caches)\b|navigator\.storage/, ['projects/draw/src/platform/']],
   // Files, the clipboard, the share sheet, Web Locks and the URL: read and written only in
   // platform/ (the picker's File is handed there; the importer takes bytes and text).

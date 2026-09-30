@@ -39,9 +39,16 @@ import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
 import { rootTransform } from '../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../engine/geometry/bounds.ts';
 import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
+import { EMPTY, gridModel, gridStep, paperRect, quadOf, type CameraBox, type OverlayModel } from './interact/overlay-model.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
+
+/** An element as the canvas measures it: its box in its own units, and those units → host px. */
+export interface Measured {
+  box: Rect;
+  toHost: Affine;
+}
 
 export interface CanvasPort {
   render(doc: Doc): void;
@@ -56,6 +63,8 @@ export interface CanvasPort {
   /** Whether the drawing moves, and whether reduced motion has it waiting for Play. */
   motion(): Motion;
   play(on: boolean): void;
+  /** Measure drawn elements (getBBox, and getScreenCTM less the host's offset); the rest are left out. */
+  measure(ids: readonly NodeId[]): Map<NodeId, Measured>;
 }
 export interface CodePort {
   set(blocks: readonly ViewBlock[]): void;
@@ -69,8 +78,8 @@ export interface CodePort {
   source(text: string, at: number): void;
 }
 export interface OverlayPort {
-  /** Measure and outline these elements (each outlineable and on the canvas). */
-  outline(ids: readonly NodeId[]): void;
+  /** Draw the overlay model: outlines, handles, guides, the tooltip, the paper and the grid. */
+  show(model: OverlayModel): void;
 }
 export interface EditorPorts {
   canvas: CanvasPort;
@@ -143,6 +152,8 @@ export class Editor {
   readonly canvasError: Store<string | null> = createStore<string | null>(null);
   /** Whether the drawing moves, and whether it waits for Play (reduced motion). */
   readonly motion: Store<Motion> = createStore<Motion>('still');
+  /** Whether the grid is shown (a device preference the canvas sets, never in the file). */
+  readonly grid: Store<boolean> = createStore(false);
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -155,6 +166,7 @@ export class Editor {
   #viewport: Size = { width: 1, height: 1 }; // the root's viewport at 100% (W0 × H0, CSS px)
   #M: Affine = IDENTITY; // the root's user units → its box px at 100%
   #view: View = { cx: 0, cy: 0, scale: 1 }; // in box px
+  #box: CameraBox | null = null; // the root's box in the host now, or null (no usable host)
   #fitScale = 1;
   #fitted = true; // true until the user zooms or pans: a resize then fits again
   #navStart: View | null = null;
@@ -164,6 +176,7 @@ export class Editor {
     this.#ports = ports;
     this.focus.subscribe(() => this.#markFocus());
     this.readOnly.subscribe(() => this.#ports.code.readOnly(this.readOnly.get()));
+    this.grid.subscribe(() => this.#show());
   }
 
   get doc(): Doc | null {
@@ -265,7 +278,7 @@ export class Editor {
     session.subscribe(() => {
       const kept = [...this.selection.get()].filter((id) => attached(session.doc, id));
       if (kept.length !== this.selection.get().size) this.selection.set(new Set(kept));
-      this.#outline();
+      this.#show();
     });
     // A drag's frames change no store: a scrub renders nothing in React until it ends.
     session.subscribe((_cs, why) => {
@@ -353,7 +366,7 @@ export class Editor {
       this.selection.set(next);
       this.#ports.code.select(next);
     }
-    this.#outline();
+    this.#show();
   }
 
   /** A tap on the canvas: `hit` is the drawn node under it (null: nothing drawn there). */
@@ -377,10 +390,34 @@ export class Editor {
     this.#ports.code.select(this.selection.get());
   }
 
-  #outline(): void {
+  // ── the overlay ────────────────────────────────────────────────────────────────────────────
+
+  /** The overlay model now: the paper and the grid, the selection's outlines, and the gesture's marks. */
+  overlayModel(): OverlayModel {
     const doc = this.#doc;
-    if (!doc) return this.#ports.overlay.outline([]);
-    this.#ports.overlay.outline([...this.selection.get()].filter((id) => attached(doc, id) && outlineable(doc, id)));
+    const box = this.#box;
+    if (!doc || !box) return EMPTY;
+    const vp = this.#viewport;
+    const paper = paperRect(box, vp, this.#M, this.#board);
+    const ids = [...this.selection.get()].filter((id) => attached(doc, id) && outlineable(doc, id));
+    const measured = this.#ports.canvas.measure(ids);
+    const outlines = ids.flatMap((id) => {
+      const m = measured.get(id);
+      return m ? [{ id, quad: quadOf(m.box, m.toHost) }] : [];
+    });
+    return { ...EMPTY, paper, grid: this.grid.get() ? gridModel(box, vp, this.#M, this.#size, paper, this.gridStep()) : null, outlines };
+  }
+
+  /** The grid's step in the root's user units: the smallest 1-2-5 step at least 12 px apart. */
+  gridStep(): number {
+    const box = this.#box;
+    if (!box) return 1;
+    const k = box.width / this.#viewport.width;
+    return gridStep(k * Math.min(Math.abs(this.#M[0]), Math.abs(this.#M[3])));
+  }
+
+  #show(): void {
+    this.#ports.overlay.show(this.overlayModel());
   }
 
   // ── history ────────────────────────────────────────────────────────────────────────────────
@@ -681,15 +718,16 @@ export class Editor {
     this.selection.set(new Set());
     this.#ports.canvas.clear();
     this.#ports.code.source(text, at);
-    this.#ports.overlay.outline([]);
+    this.#box = null;
+    this.#show();
     this.#bump();
   }
 
   // ── the view: zoom and pan (the rendered root's own box, never its viewBox or the file) ───────
 
-  /** The root's viewport at 100% (W0 × H0) and M, its user units → box px, as the view uses them. */
-  get rootBox(): { viewport: Size; M: Affine } {
-    return { viewport: { ...this.#viewport }, M: this.#M };
+  /** The root's viewport at 100% (W0 × H0), M (its user units → box px), and the camera box now. */
+  get rootBox(): { viewport: Size; M: Affine; box: CameraBox | null } {
+    return { viewport: { ...this.#viewport }, M: this.#M, box: this.#box && { ...this.#box } };
   }
 
   // The root's box at 100% and M, read against the host size the view last fitted (a document
@@ -727,8 +765,9 @@ export class Editor {
   #applyView(): void {
     const s = this.#size;
     const usable = s.width > 0 && s.height > 0;
-    this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);
-    this.#outline();
+    this.#box = usable ? cameraBox(this.#view, s, this.#viewport) : null;
+    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });
+    this.#show();
   }
 
   /** The canvas host changed size: fit again unless the user has moved the view. */

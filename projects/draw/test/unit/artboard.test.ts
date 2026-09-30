@@ -49,7 +49,7 @@ test('the camera box at fit: a root’s own box is placed and sized so its viewB
     [vb, [400, 300], [4, 0, 0, 4, 0, 50], [0, 0, 400, 300]], // a viewBox only: the box is the host, pixel for pixel P0's
     [`${vb} width="50" height="50"`, [50, 50], [0.5, 0, 0, 0.5, 0, 12.5], [0, -50, 400, 400]], // a size of another aspect
     [`${vb} preserveAspectRatio="xMinYMin meet"`, [400, 300], [4, 0, 0, 4, 0, 0], [0, 50, 400, 300]], // placed otherwise: the camera centres it
-    [`${vb} preserveAspectRatio="xMidYMid slice"`, [400, 300], [6, 0, 0, 6, -100, 0], [66.667, 50, 266.667, 200]],
+    [`${vb} preserveAspectRatio="xMidYMid slice"`, [400, 300], [6, 0, 0, 6, -100, 0], [67, 50, 266.667, 200]], // its offset on whole px
     [`${vb} preserveAspectRatio="none"`, [400, 300], [4, 0, 0, 6, 0, 0], [0, 0, 400, 300]],
     [`${vb} width="50%"`, [200, 300], [2, 0, 0, 2, 0, 100], [0, -150, 400, 600]], // % of the host's width
     [`${vb} width="2em" font-size="20"`, [40, 300], [0.4, 0, 0, 0.4, 0, 140], [0, -1350, 400, 3000]], // em of the root's own font size
@@ -70,7 +70,7 @@ test('the camera box at fit: a root’s own box is placed and sized so its viewB
       const onScreen = mapRect([f.box.width / f.viewport.width, 0, 0, f.box.height / f.viewport.height, f.box.left, f.box.top], mapRect(f.M, board));
       const k = Math.min(host.width / onScreen.width, host.height / onScreen.height);
       assert.ok(Math.abs(k - 1) < 1e-9, `${attrs}: fitted (meet)`);
-      assert.ok(Math.abs(onScreen.x * 2 + onScreen.width - host.width) < 1e-6 && Math.abs(onScreen.y * 2 + onScreen.height - host.height) < 1e-6, `${attrs}: centred`);
+      assert.ok(Math.abs(onScreen.x * 2 + onScreen.width - host.width) <= 1 && Math.abs(onScreen.y * 2 + onScreen.height - host.height) <= 1, `${attrs}: centred (the box's offset is on whole px)`);
     }
     assert.equal(attrValue(doc, el(doc, doc.root), null, 'viewBox'), attrs.includes('viewBox') ? '0 0 100 50' : null, 'the file’s own viewBox is untouched');
   }
@@ -102,7 +102,8 @@ test('every corpus file opens at its own viewBox, fitted and centred (meet) in t
     // The root's box keeps its own shape (W0:H0), and the artboard is fitted and centred in the host.
     assert.ok(Math.abs(f.box.width / f.box.height - f.viewport.width / f.viewport.height) < 1e-9, `${rel}: the box's aspect is W0:H0`);
     const shown = { x: f.box.left + inBox.x * (f.box.width / f.viewport.width), y: f.box.top + inBox.y * (f.box.height / f.viewport.height) };
-    assert.ok(Math.abs(shown.x - tl.x) < 1e-6 && Math.abs(shown.y - tl.y) < 1e-6, `${rel}: toScreen(M(artboard)) is where the box puts it`);
+    assert.ok(Math.abs(shown.x - tl.x) <= 0.5 && Math.abs(shown.y - tl.y) <= 0.5, `${rel}: toScreen(M(artboard)) is where the box puts it, to the half pixel its offset is rounded by`);
+    assert.ok(Number.isInteger(f.box.left) && Number.isInteger(f.box.top), `${rel}: the box's offset is on whole px`);
   }
   assert.ok(boxes > 200, `only ${boxes} corpus files have a viewBox`);
 });

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { attrValue, descendants, textContent, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { Editor } from '../../src/editor.ts';
 import type { ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
-import { corpus, fakePorts } from './fakes.ts';
+import { bind, corpus, fakePorts } from './fakes.ts';
 
 interface Rig {
   editor: Editor;
@@ -29,7 +29,7 @@ function open(name: string): Rig {
     },
     patch: (b) => void (listing.has(b.key) && listing.set(b.key, b)),
   };
-  const editor = new Editor(ports);
+  const editor = bind(ports, new Editor(ports));
   const file = corpus(name);
   const r = editor.open(file);
   assert.ok(r.ok, r.error);

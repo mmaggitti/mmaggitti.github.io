@@ -76,10 +76,16 @@ export function drawable(view: View, host: Size, viewport?: Size): boolean {
   return [b.left, b.top, b.width, b.height].every(Number.isFinite) && b.width <= MAX_BOX && b.height <= MAX_BOX;
 }
 
-/** Where the root's own box goes in the host for this view: its offset and its size (CSS px). */
+/**
+ * Where the root's own box goes in the host for this view: its offset (on whole CSS px) and its
+ * size. Browsers paint a replaced root at a pixel-snapped offset while its getScreenCTM keeps the
+ * fraction, so a fractional offset would put the drawing and every measurement of it (outlines,
+ * handles, the paper) a fraction of a pixel apart: the offset is rounded, and everything that maps
+ * the root's units to the screen maps through this box.
+ */
 export function cameraBox(view: View, host: Size, viewport: Size): { left: number; top: number; width: number; height: number } {
   const k = view.scale;
-  return { left: host.width / 2 - view.cx * k, top: host.height / 2 - view.cy * k, width: viewport.width * k, height: viewport.height * k };
+  return { left: Math.round(host.width / 2 - view.cx * k), top: Math.round(host.height / 2 - view.cy * k), width: viewport.width * k, height: viewport.height * k };
 }
 
 /** Zoom by `factor` about a screen point: the document point under it stays under it. */

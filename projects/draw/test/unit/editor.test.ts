@@ -14,6 +14,8 @@ import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-vi
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
+import type { OverlayModel } from '../../src/interact/overlay-model.ts';
+import { measureWith } from './fakes.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
 
@@ -30,6 +32,7 @@ interface Rig {
   order: string[];
   cameras: (Camera | null)[];
   outlines: NodeId[][];
+  models: OverlayModel[];
   selected: ReadonlySet<number>[];
   focused: (FocusMark | null)[];
 }
@@ -40,6 +43,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
   let order: string[] = [];
   const cameras: (Camera | null)[] = [];
   const outlines: NodeId[][] = [];
+  const models: OverlayModel[] = [];
   const selected: ReadonlySet<number>[] = [];
   const focused: (FocusMark | null)[] = [];
   const canvas: CanvasPort = {
@@ -52,10 +56,11 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
     clear: () => log.push('canvas clear'),
     motion: () => 'still',
     play: () => {},
+    measure: (ids) => measureWith(r.editor, ids),
     ...over,
   };
   const r: Rig = {
-    log, listing, cameras, outlines, selected, focused,
+    log, listing, cameras, outlines, models, selected, focused,
     get order() {
       return order;
     },
@@ -81,7 +86,13 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
           order = [];
         },
       },
-      overlay: { outline: (ids) => (log.push('overlay'), outlines.push([...ids])) },
+      overlay: {
+        show: (model) => {
+          log.push('overlay');
+          models.push(model);
+          outlines.push(model.outlines.map((o) => o.id));
+        },
+      },
       hostSize: () => size,
       sinkReady: () => true,
     }),
