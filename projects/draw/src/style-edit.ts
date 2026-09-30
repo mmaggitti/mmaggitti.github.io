@@ -59,6 +59,21 @@ export function checkStyle(prop: string, input: string): Checked {
   return { text };
 }
 
+/** A paint kind Inspect offers (S3 adds the gradients). */
+export type PaintKind = 'none' | 'color';
+
+/**
+ * The paint kinds Inspect's Fill or Stroke row offers for the selected elements (their local
+ * names), or null when it shows no row: a line has no Fill (SVG Lab's styleAttrs, L1104), and its
+ * stroke takes no none, which would make it vanish (L1885; the stroke sheet's chips agree,
+ * color-choices.ts styleSlot).
+ */
+export function paintKinds(prop: 'fill' | 'stroke', locals: readonly string[]): PaintKind[] | null {
+  const lines = locals.filter((l) => l === 'line').length;
+  if (prop === 'fill') return lines && lines === locals.length ? null : ['none', 'color'];
+  return lines ? ['color'] : ['none', 'color'];
+}
+
 /** The Dash presets on this artboard: none, then SVG Lab's three, each number × k. */
 export function dashPresets(k: number): string[] {
   return DASH_PRESETS.map((p) => (p === null ? 'none' : p.map((v) => fmt(v * k, 2)).join(' ')));

@@ -21,7 +21,7 @@ import { fmt } from '../../../../engine/values/number-format.ts';
 import { STYLE_PROPS } from '../../../../engine/style/props.ts';
 import type { Editor, Field, StyleRow } from '../editor.ts';
 import { INPUT_UI } from '../interact/shapes-tool.ts';
-import { dashPresets, widthRange } from '../style-edit.ts';
+import { dashPresets, paintKinds, widthRange, type PaintKind } from '../style-edit.ts';
 import { elementLabel } from './label.ts';
 import { useStore } from './store.ts';
 
@@ -32,12 +32,12 @@ export function Inspect({ editor }: { editor: Editor }) {
   const ids = doc ? [...selection].filter((id) => doc.nodes.get(id)?.kind === 'element') : [];
   if (!doc || !ids.length) return <p className="draw-empty ds-muted">Select something to see its attributes.</p>;
   const one = ids.length === 1 ? (doc.nodes.get(ids[0]) as ElementNode) : null;
-  const lines = ids.every((id) => (doc.nodes.get(id) as ElementNode).local === 'line');
+  const locals = ids.map((id) => (doc.nodes.get(id) as ElementNode).local);
   const gen = editor.generated();
   return (
     <div className="draw-inspect">
       {!one && <p className="draw-subhead">{ids.length} selected</p>}
-      <StyleSections editor={editor} lines={lines} />
+      <StyleSections editor={editor} locals={locals} />
       {gen && (
         <section className="draw-inspect-section" aria-label="Generator">
           <p className="draw-subhead">{gen.label}</p>
@@ -78,22 +78,23 @@ const ORDERS: [string, string][] = [['normal', 'Fill first'], ['stroke', 'Stroke
 const RENDERING: [string, string][] = [['auto', 'auto'], ['crispEdges', 'crispEdges'], ['geometricPrecision', 'geometricPrecision'], ['optimizeSpeed', 'optimizeSpeed']];
 const UNIT = { min: 0, max: 1, step: 0.01 };
 
-function StyleSections({ editor, lines }: { editor: Editor; lines: boolean }) {
+function StyleSections({ editor, locals }: { editor: Editor; locals: readonly string[] }) {
   const row = (prop: string) => editor.styleRow(prop)!;
   const ctx = editor.styleCtx;
   const join = row('stroke-linejoin');
   const jv = join.value.toLowerCase();
   const joins = !join.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv] as [string, string]] : JOINS;
   const miter = join.mixed || jv === 'miter' || jv === 'miter-clip';
+  const fillKinds = paintKinds('fill', locals);
   return (
     <>
-      {!lines && (
+      {fillKinds && (
         <Section title="Fill">
-          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds />
+          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} />
         </Section>
       )}
       <Section title="Stroke">
-        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds />
+        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds={paintKinds('stroke', locals)!} />
         <NumberRow editor={editor} prop="stroke-width" label="Width" row={row('stroke-width')} slider={widthRange(ctx)} />
       </Section>
       <Section title="Opacity">
@@ -148,8 +149,12 @@ function Row({ label, row, children }: { label: string; row: StyleRow; children:
   );
 }
 
-/** Fill, stroke and color: a swatch that opens the Colour sheet over the selection; fill and stroke add the kinds None and Colour. */
-function PaintRow({ editor, prop, label, row, kinds = false }: { editor: Editor; prop: string; label: string; row: StyleRow; kinds?: boolean }) {
+/**
+ * Fill, stroke and color: a swatch that opens the Colour sheet over the selection. Fill and stroke
+ * add their paint kinds (paintKinds: a line's stroke has no None): None writes none; Colour opens
+ * the sheet.
+ */
+function PaintRow({ editor, prop, label, row, kinds = [] }: { editor: Editor; prop: string; label: string; row: StyleRow; kinds?: readonly PaintKind[] }) {
   const v = row.value;
   const colour = !row.mixed && parseColor(v)?.kind === 'color';
   const text = row.mixed ? 'Mixed' : v || '?';
@@ -159,11 +164,13 @@ function PaintRow({ editor, prop, label, row, kinds = false }: { editor: Editor;
         <span className="draw-inspect-chip" style={colour ? { background: v } : undefined} />
         <span className="draw-inspect-text ds-mono">{text}</span>
       </button>
-      {kinds && (
+      {kinds.length > 0 && (
         <div className="ds-seg draw-inspect-seg" role="group" aria-label={`${prop} kind`}>
-          <button type="button" aria-pressed={!row.mixed && v.toLowerCase() === 'none'} disabled={!!row.disabled} onClick={() => editor.setStyle(prop, 'none')}>
-            None
-          </button>
+          {kinds.includes('none') && (
+            <button type="button" aria-pressed={!row.mixed && v.toLowerCase() === 'none'} disabled={!!row.disabled} onClick={() => editor.setStyle(prop, 'none')}>
+              None
+            </button>
+          )}
           <button type="button" aria-pressed={!row.mixed && !!parseColor(v)} disabled={!!row.disabled} onClick={() => editor.openStyleSheet(prop)}>
             Colour
           </button>
@@ -213,15 +220,22 @@ function SliderRow({ editor, prop, label, row, range }: { editor: Editor; prop: 
   );
 }
 
+// A press holds the slider's one entry until the pointer lifts anywhere: a mouse let go off the
+// slider sends the slider nothing, so the release is heard on the window, and the slider going
+// away (the selection changed) ends it too.
 function StyleSlider({ editor, prop, row, range }: { editor: Editor; prop: string; row: StyleRow; range: { min: number; max: number; step: number } }) {
-  const held = useRef(false);
+  const held = useRef<(() => void) | null>(null); // while pressed: takes the release listeners off
   const read = parseFloat(row.value);
   const value = Number.isFinite(read) ? read : Number(STYLE_PROPS[prop]?.initial ?? 0);
-  const end = () => {
-    if (!held.current) return;
-    held.current = false;
+  const end = useRef(() => {});
+  end.current = () => {
+    const off = held.current;
+    if (!off) return;
+    held.current = null;
+    off();
     editor.styleDragEnd();
   };
+  useEffect(() => () => end.current(), []);
   return (
     <input
       type="range"
@@ -233,17 +247,21 @@ function StyleSlider({ editor, prop, row, range }: { editor: Editor; prop: strin
       value={Math.min(range.max, Math.max(range.min, value))}
       disabled={!!row.disabled}
       onPointerDown={() => {
-        held.current = editor.styleDrag(prop);
+        if (held.current || !editor.styleDrag(prop)) return;
+        const up = () => end.current();
+        window.addEventListener('pointerup', up, true);
+        window.addEventListener('pointercancel', up, true);
+        held.current = () => {
+          window.removeEventListener('pointerup', up, true);
+          window.removeEventListener('pointercancel', up, true);
+        };
       }}
       onChange={(e) => {
         const t = fmt(Number(e.target.value), 10);
         if (held.current) editor.styleInput(t);
         else editor.setStyle(prop, t);
       }}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onLostPointerCapture={end}
-      onBlur={end}
+      onBlur={() => end.current()}
     />
   );
 }

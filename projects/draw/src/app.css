@@ -313,6 +313,9 @@
 .draw-inspect > .draw-subhead { margin-left: 0; }
 .draw-inspect .draw-attrs { margin: var(--space-2) 0 0; }
 .draw-inspect-section { display: flex; flex-direction: column; gap: var(--space-2); }
+/* Each style section under a hairline, its name bold, so it reads apart from the rows' names. */
+.draw-inspect-section + .draw-inspect-section { border-top: 1px solid var(--line); }
+.draw-inspect-section > .draw-subhead { margin: var(--space-3) 0 0; font-weight: 600; }
 .draw-inspect-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: max(var(--tap-min), var(--control-h-sm)); }
 .draw-inspect-name { flex: 1 1 6rem; min-width: 0; font-size: var(--text-md); }
 .draw-inspect-row .draw-stepper { flex: 0 1 auto; min-width: 0; }
