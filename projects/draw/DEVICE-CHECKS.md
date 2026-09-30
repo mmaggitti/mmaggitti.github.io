@@ -32,3 +32,21 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 | 20 | Theme choice | Files → Theme → Dark with the phone in light (then Light with it in dark): the whole app takes the choice; close the tab and reopen Draw: still your choice, with no flash of the other theme while it loads; Safari's toolbar tint still follows the phone (a known limit); System follows the phone again | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
+
+## P1 — Select and transform
+
+The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
+To take the house's group: tap the roof, then More → Select group.
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 21 | Drag feel | Drag a shape on the sample: it follows your finger in whole units, with no lag, and one Undo puts it back | ☐ |
+| 22 | Reaching handles | On [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8), with its group selected: grab a corner, the ring and the diamond with your thumb, each first try, at the fit and zoomed in to about 4× | ☐ |
+| 23 | The tooltip | Drag a shape: the tooltip sits above your thumb, never under it; drag one near the top edge and the tooltip sits below your thumb | ☐ |
+| 24 | Hold-drag marquee | Hold a finger on a shape for about half a second, then drag over other shapes: a marquee is drawn, the shape doesn't move, and lifting selects what it encloses | ☐ |
+| 25 | Rotate and scale feel | On the house's group: the ring clicks to 15° steps as you turn it, and the diamond steps the size by 0.05 | ☐ |
+| 26 | The checkerboard | Switch the phone between light and dark: the paper behind the drawing is the same light checkerboard in both, and the drawing's own colours don't change | ☐ |
+| 27 | Layers: hide and lock | Code panel → Layers: Hide a shape and it disappears, Show brings it back; Lock one and taps and marquees go past it to what's under it; Unlock it | ☐ |
+| 28 | iPad keys (optional) | With a keyboard on the iPad: ⌫ deletes the selection, Esc deselects, the arrows nudge it by 1 and ⇧ by 10, ⌘A selects all, and none of them act while you type in the code or a sheet | ☐ |
+
+Signed: ______  Date: ______  Device / iOS: ______

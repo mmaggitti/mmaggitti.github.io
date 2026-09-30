@@ -48,6 +48,12 @@ export interface ViewBlock {
   flow: Flow;
 }
 
+/** Blocks to put in the listing (a node placed or moved, with everything under it), before the block keyed `before` or at the end. */
+export interface Placement {
+  blocks: readonly ViewBlock[];
+  before: string | null;
+}
+
 /** A token by its block's key and its index among the block's tokens (which an edit keeps). */
 export interface FocusMark {
   key: string;
@@ -151,6 +157,86 @@ export class CodeView {
     this.blocks.set(b.key, { data: b, el });
     if (had !== undefined) el.querySelector<HTMLElement>(`.cv-tok[data-t="${had}"]`)?.focus({ preventScroll: true });
     if (this.focused?.key === b.key) this.markFocus();
+  }
+
+  /**
+   * Put each placement's blocks (a node inserted or moved, and everything under it) before the block
+   * keyed `before`, which may be one placed in the same call, or at the end: as placing them one at a
+   * time in this order would, but in one pass over the listing however many there are (a change
+   * that moves 2,000 nodes is one call). Every other block keeps its DOM node.
+   */
+  place(placements: readonly Placement[]): void {
+    const placed = new Set(placements.flatMap((p) => p.blocks.map((b) => b.key)));
+    if (this.raw || !placed.size) return;
+    this.drop([...placed]);
+    for (const p of placements) for (const b of p.blocks) this.blocks.set(b.key, { data: b, el: null });
+    // Each placement hangs before its block; one whose block isn't in the listing goes at the end.
+    const before = new Map<string, Placement[]>();
+    const atEnd: Placement[] = [];
+    for (const p of placements) {
+      if (!p.blocks.length) continue;
+      if (p.before === null || !this.blocks.has(p.before)) atEnd.push(p);
+      else {
+        const list = before.get(p.before);
+        if (list) list.push(p);
+        else before.set(p.before, [p]);
+      }
+    }
+    // The new order: every block, after what hangs before it (placements hanging on placed blocks
+    // too, so a stack, not recursion, however long the chain).
+    const order: string[] = [];
+    const put = (key: string) => {
+      const stack: [string, boolean][] = [[key, false]];
+      while (stack.length) {
+        const [k, ready] = stack.pop()!;
+        if (ready) {
+          order.push(k);
+          continue;
+        }
+        stack.push([k, true]);
+        const hung = before.get(k);
+        if (!hung) continue;
+        before.delete(k);
+        const keys = hung.flatMap((p) => p.blocks.map((b) => b.key));
+        for (let i = keys.length - 1; i >= 0; i--) stack.push([keys[i], false]);
+      }
+    };
+    for (const k of this.order) put(k);
+    for (const p of atEnd) for (const b of p.blocks) put(b.key);
+    this.order = order;
+    if (this.firstMoved()) return this.rebuild();
+    // Each placed block before the next block's element, from the end: every other element stays.
+    let next: HTMLElement | null = null;
+    for (let i = order.length - 1; i >= 0; i--) {
+      const entry = this.blocks.get(order[i])!;
+      if (placed.has(order[i])) {
+        entry.el = this.build(entry.data);
+        this.root.insertBefore(entry.el, next);
+      } else if (entry.el?.parentNode !== this.root) return this.rebuild();
+      next = entry.el;
+    }
+    this.markFocus();
+  }
+
+  /** Take these blocks away (a node removed); the rest stay. */
+  remove(keys: readonly string[]): void {
+    if (this.drop(keys) && this.firstMoved()) this.rebuild();
+  }
+
+  private drop(keys: readonly string[]): boolean {
+    const gone = new Set(keys.filter((k) => this.blocks.has(k)));
+    for (const k of gone) {
+      this.blocks.get(k)!.el?.remove();
+      this.blocks.delete(k);
+    }
+    if (gone.size) this.order = this.order.filter((k) => !gone.has(k));
+    return gone.size > 0;
+  }
+
+  // The tidy view lays out its first shown block apart (no line break before it): when another
+  // block becomes the first, the listing is laid out again.
+  private firstMoved(): boolean {
+    return this.tidyOn && (this.order.find((k) => this.blocks.get(k)!.data.flow !== 'hidden') ?? null) !== this.firstLine;
   }
 
   /** Mark the blocks of the selected nodes, and bring the first into view. */

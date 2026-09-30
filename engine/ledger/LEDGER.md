@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1331 rows: 1076 planned, 3 partial, 251 done, 1 superseded.
+Current phase: **P1**. 1332 rows: 1010 planned, 3 partial, 317 done, 2 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -10,21 +10,21 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| element | 188 | 161 | 1 | 26 | 0 |
-| attribute | 386 | 266 | 0 | 120 | 0 |
-| property | 48 | 34 | 0 | 14 | 0 |
-| value | 85 | 74 | 0 | 11 | 0 |
+| element | 188 | 159 | 1 | 28 | 0 |
+| attribute | 386 | 257 | 0 | 129 | 0 |
+| property | 48 | 33 | 0 | 15 | 0 |
+| value | 85 | 63 | 0 | 22 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
-| namespace | 20 | 11 | 2 | 7 | 0 |
-| capability | 480 | 450 | 0 | 29 | 1 |
-| feature | 101 | 80 | 0 | 21 | 0 |
+| namespace | 21 | 10 | 2 | 9 | 0 |
+| capability | 480 | 414 | 0 | 64 | 2 |
+| feature | 101 | 74 | 0 | 27 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 318 | 313 | 0 | 5 | 0 |
+| P1 | 319 | 247 | 0 | 71 | 1 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
@@ -39,7 +39,7 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 |---|---|---|---|
 | edit | 130 | 243 | 114 |
 | preserve | 3 | 20 | 39 |
-| preserve-hidden | 26 | 112 | 15 |
+| preserve-hidden | 26 | 112 | 16 |
 | active | 29 | 11 | 6 |
 | drop | 0 | 0 | 2 |
 
@@ -50,14 +50,14 @@ Each lesson's capabilities and the phases that deliver them.
 | Set | Lesson | Title | Phases | Capabilities | Done |
 |---|---|---|---|---|---|
 | 1 | Vector | Pixels vs vector | P1 | 11 | 2 |
-| 1 | Grid | The grid | P1 | 10 | 0 |
-| 1 | Shapes | Shapes | P1 | 13 | 0 |
+| 1 | Grid | The grid | P1 | 10 | 9 |
+| 1 | Shapes | Shapes | P1 | 13 | 3 |
 | 1 | Style | Fill and stroke | P1 | 12 | 1 |
 | 1 | Paths | Paths | P1 | 18 | 0 |
-| 1 | Transform | Groups and transforms | P1 | 11 | 0 |
+| 1 | Transform | Groups and transforms | P1 | 11 | 11 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P3, P4, P5 | 50 | 0 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 8 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 0 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |
@@ -87,6 +87,7 @@ Each lesson's capabilities and the phases that deliver them.
 
 ## Superseded rows
 
+- `capability:grid/tap-to-place` (P1) → capability:grid/center-handle
 - `capability:code/css-and-script-tokens` (P6) → capability:code/css-tokens, capability:code/script-tokens
 
 ## Re-phased rows

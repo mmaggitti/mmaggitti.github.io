@@ -11,6 +11,11 @@ import { NS, type Doc, type ElementNode, type NodeId } from './doc.ts';
 
 export type RefKind = 'url' | 'href' | 'aria' | 'smil';
 
+/** The ARIA attributes whose value is an id, or a list of ids (IDREF and IDREFS in WAI-ARIA 1.2). */
+export const ARIA_IDREFS: ReadonlySet<string> = new Set([
+  'aria-activedescendant', 'aria-controls', 'aria-describedby', 'aria-details', 'aria-errormessage', 'aria-flowto', 'aria-labelledby', 'aria-owns',
+]);
+
 export interface Ref {
   from: NodeId; // the element holding the reference
   attr: string; // qname of the attribute (or 'style' for url() inside a style declaration)
@@ -64,7 +69,7 @@ function visit(doc: Doc, n: ElementNode, ids: Map<string, NodeId[]>, add: (r: Re
       if (v.startsWith('#') && v.length > 1) add({ from: n.id, attr: a.qname, kind: 'href', id: decodeFragment(v.slice(1)) });
       continue;
     }
-    if (a.ns === null && (a.local === 'aria-labelledby' || a.local === 'aria-describedby')) {
+    if (a.ns === null && ARIA_IDREFS.has(a.local)) {
       for (const id of value.split(/\s+/).filter(Boolean)) add({ from: n.id, attr: a.qname, kind: 'aria', id });
       continue;
     }

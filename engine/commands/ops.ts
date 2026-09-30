@@ -27,14 +27,16 @@ export interface ChangeSet {
   attrs: Set<NodeId>; // start tags to re-render
   texts: Set<NodeId>; // text leaves to re-render
   structure: Set<NodeId>; // parents whose child list changed
+  moved: Set<NodeId>; // nodes whose place changed: inserted, removed or moved
 }
 
-export const emptyChangeSet = (): ChangeSet => ({ attrs: new Set(), texts: new Set(), structure: new Set() });
+export const emptyChangeSet = (): ChangeSet => ({ attrs: new Set(), texts: new Set(), structure: new Set(), moved: new Set() });
 
 export function noteChange(cs: ChangeSet, op: Op): void {
   if (op.kind === 'attr') cs.attrs.add(op.id);
   else if (op.kind === 'text') cs.texts.add(op.id);
   else {
+    cs.moved.add(op.id);
     if (op.before) cs.structure.add(op.before.parent);
     if (op.after) cs.structure.add(op.after.parent);
   }
@@ -79,8 +81,7 @@ export function opRemove(doc: Doc, id: NodeId): Op {
 /** Attach a detached node (a node from opRemove, or one built by the importer) under a parent. */
 export function opInsert(doc: Doc, id: NodeId, parent: NodeId, index: number): Op {
   if (isInside(doc, parent, id)) throw new Error('opInsert: a node cannot be inserted inside itself');
-  attachNode(doc, id, parent, index);
-  return { kind: 'place', id, before: null, after: { parent, index: el(doc, parent).children.indexOf(id) } };
+  return { kind: 'place', id, before: null, after: { parent, index: attachNode(doc, id, parent, index) } };
 }
 
 function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {
@@ -110,23 +111,81 @@ export function undoOp(doc: Doc, op: Op): void {
   else place(doc, op.id, op.before);
 }
 
+const samePlace = (a: Place | null, b: Place | null): boolean => a === b || (!!a && !!b && a.parent === b.parent && a.index === b.index);
+
 /**
- * Collapse a run of ops into the fewest that have the same effect: consecutive edits of one
- * attribute or text keep the first `before` and the last `after` (a drag of a hundred frames is
- * one change). Ops that end where they started are dropped.
+ * Collapse a run of ops into the fewest that have the same effect:
+ * - consecutive edits of one attribute or text keep the first `before` and the last `after` (a
+ *   drag of a hundred frames is one change), and one that ends where it started is dropped;
+ * - consecutive place ops of one node merge the same way (a remove and its re-insert are one
+ *   move), and a merged one that ends where it started is dropped when no other place op in the
+ *   batch touches that parent;
+ * - given the document the ops were applied to, place ops whose net effect is nothing (every
+ *   parent they touch has its children as before, a Forward and then a Back) are all dropped.
  */
-export function coalesce(ops: readonly Op[]): Op[] {
-  const out: Op[] = [];
-  const last = new Map<string, number>(); // key → index in out
+export function coalesce(ops: readonly Op[], doc?: Doc): Op[] {
+  let out: Op[] = [];
   for (const op of ops) {
-    const key = op.kind === 'attr' ? `a${op.id}|${op.ns ?? ''}|${op.local}` : op.kind === 'text' ? `t${op.id}` : null;
-    const i = key === null ? undefined : last.get(key);
-    if (key !== null && i !== undefined && i === out.length - 1) {
-      out[i] = { ...out[i], after: op.after } as Op;
+    const prev = out[out.length - 1];
+    if (prev && prev.kind === op.kind && prev.id === op.id && (op.kind !== 'attr' || (prev.kind === 'attr' && prev.ns === op.ns && prev.local === op.local))) {
+      out[out.length - 1] = { ...prev, after: op.after } as Op;
       continue;
     }
     out.push(op);
-    if (key !== null) last.set(key, out.length - 1);
   }
-  return out.filter((op) => !(op.kind !== 'place' && JSON.stringify(op.before) === JSON.stringify(op.after)));
+  const parentsOf = (op: Op) => (op.kind === 'place' ? [op.before?.parent, op.after?.parent].filter((p): p is NodeId => p !== undefined) : []);
+  out = out.filter((op, i) => {
+    if (op.kind !== 'place') return JSON.stringify(op.before) !== JSON.stringify(op.after);
+    if (!samePlace(op.before, op.after)) return true;
+    const mine = new Set(parentsOf(op));
+    return out.some((o, j) => j !== i && o.kind === 'place' && parentsOf(o).some((p) => mine.has(p)));
+  });
+  if (doc && out.some((op) => op.kind === 'place') && placesUnchanged(doc, out)) out = out.filter((op) => op.kind !== 'place');
+  return out;
+}
+
+// Undo the place ops on copies of the children lists they touch: if every list comes back as it
+// is now, the ops moved nothing in the end. A node that ends under another parent than it began
+// (or in or out of the tree) settles it at once, without the undo (a Duplicate, a Delete, a Group).
+function placesUnchanged(doc: Doc, ops: readonly Op[]): boolean {
+  const first = new Map<NodeId, Place | null>();
+  const last = new Map<NodeId, Place | null>();
+  for (const op of ops) {
+    if (op.kind !== 'place') continue;
+    if (!first.has(op.id)) first.set(op.id, op.before);
+    last.set(op.id, op.after);
+  }
+  for (const [id, b] of first) if ((b?.parent ?? null) !== (last.get(id)?.parent ?? null)) return false;
+  const lists = new Map<NodeId, NodeId[]>();
+  const list = (p: NodeId): NodeId[] => {
+    let l = lists.get(p);
+    if (!l) {
+      const n = doc.nodes.get(p);
+      if (!n || n.kind !== 'element') throw new Error('stale');
+      l = [...n.children];
+      lists.set(p, l);
+    }
+    return l;
+  };
+  try {
+    for (const op of ops) if (op.kind === 'place') for (const p of [op.before?.parent, op.after?.parent]) if (p !== undefined) list(p);
+    const now = new Map([...lists].map(([p, l]) => [p, [...l]]));
+    for (let i = ops.length - 1; i >= 0; i--) {
+      const op = ops[i];
+      if (op.kind !== 'place') continue;
+      if (op.after) {
+        const l = list(op.after.parent);
+        const at = l.indexOf(op.id);
+        if (at === -1) return false;
+        l.splice(at, 1);
+      }
+      if (op.before) list(op.before.parent).splice(op.before.index, 0, op.id);
+    }
+    return [...lists].every(([p, l]) => {
+      const n = now.get(p)!;
+      return l.length === n.length && l.every((id, i) => id === n[i]);
+    });
+  } catch {
+    return false;
+  }
 }

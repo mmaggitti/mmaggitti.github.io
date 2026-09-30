@@ -8,6 +8,8 @@
 // - The Pencil always draws, and fingers never reach the tool while it is down (palm rejection);
 //   two fingers still navigate.
 // - A quick two-finger tap that barely moves is undo.
+// - A drag that starts after the pointer was held still for HOLD_MS is `held` (the Select tool
+//   draws a marquee then, even over shapes and handles).
 
 export type PointerKind = 'touch' | 'pen' | 'mouse';
 
@@ -27,7 +29,7 @@ export interface Pt {
 
 export type GestureEvent =
   | { type: 'tool-down'; at: Pt; kind: PointerKind }
-  | { type: 'tool-drag-start'; from: Pt; at: Pt }
+  | { type: 'tool-drag-start'; from: Pt; at: Pt; held: boolean }
   | { type: 'tool-drag'; at: Pt }
   | { type: 'tool-drag-end'; at: Pt }
   | { type: 'tool-tap'; at: Pt; kind: PointerKind }
@@ -39,6 +41,7 @@ export type GestureEvent =
 
 export const SLOP = 5; // px: a tap moves less than this
 export const TWO_FINGER_TAP_MS = 300;
+export const HOLD_MS = 450; // a drag that starts this long after the press, still inside the slop, is held
 
 interface Track {
   id: number;
@@ -123,8 +126,9 @@ export class GestureMachine {
   private onMove(e: PointerInput, tr: Track, at: Pt, out: GestureEvent[]): void {
     if (this.tool && this.tool.id === e.id) {
       if (!this.tool.dragging && Math.hypot(at.x - tr.start.x, at.y - tr.start.y) >= SLOP) {
+        // Every move before this one stayed inside the slop, or the drag would have started then.
         this.tool.dragging = true;
-        out.push({ type: 'tool-drag-start', from: tr.start, at });
+        out.push({ type: 'tool-drag-start', from: tr.start, at, held: e.t - tr.t0 >= HOLD_MS });
       } else if (this.tool.dragging) out.push({ type: 'tool-drag', at });
       return;
     }

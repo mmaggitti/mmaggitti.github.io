@@ -518,6 +518,20 @@ test("a well-formed file over Draw's limits is refused as before: the report say
   assert.equal(ws.current.get()?.name, 'sunset');
 });
 
+test('Copy leaves out Draw\'s own state and is otherwise the file byte for byte', async () => {
+  const { ws, editor } = rig();
+  void ws.openSample();
+  editor.addGuide('v');
+  editor.setGridStep(10);
+  assert.match(editor.source(), /<draw:state version="1" guides="v 160" grid="10"\/>/, 'test setup: the working copy keeps the state');
+  const got: string[] = [];
+  assert.equal(await ws.copy(async (t) => (got.push(t), true)), true);
+  assert.deepEqual(got, [SAMPLE], 'the file, byte for byte, without the guide, the step or the namespace');
+  const asIs = new TextDecoder().decode(ws.exportFile('as-is')!.bytes);
+  assert.equal(asIs, SAMPLE, 'the as-is export likewise');
+  assert.equal(new TextDecoder().decode(ws.exportFile('working')!.bytes), editor.source(), 'Save to Files keeps it');
+});
+
 test('Copy puts the file on the clipboard exactly as it is (xmlns, viewBox and all) and says Copied; where the clipboard is blocked, the text waits in a sheet to select', async () => {
   const { ws, editor } = rig();
   void ws.openSample();
@@ -538,4 +552,17 @@ test('Copy puts the file on the clipboard exactly as it is (xmlns, viewBox and a
   await ws.openText(bad, '', 'paste');
   await ws.copy(async (t) => (got.push(t), true));
   assert.equal(got.at(-1), bad, 'a file open as source copies its text');
+});
+
+test('Convert rem to user units rewrites every rem number in attributes and style="" in one entry, against the file’s own root font size; the report then counts none', async () => {
+  const { ws, editor } = rig();
+  const text = '<svg xmlns="http://www.w3.org/2000/svg" font-size="20" viewBox="0 0 100 100">\n  <rect x="1rem" y="2" width="2.5rem" height="10" style="stroke-width: .1rem"/>\n</svg>';
+  assert.ok(await ws.openText(text, 'rem.svg', 'paste'));
+  assert.equal(ws.current.get()!.report.rem.count, 3);
+  ws.convertRem();
+  assert.equal(editor.source(), text.replace('x="1rem"', 'x="20"').replace('width="2.5rem"', 'width="50"').replace('stroke-width: .1rem', 'stroke-width: 2px'), 'attributes take the number; style="" keeps a unit (px)');
+  assert.equal(editor.history.get().undoLabel, 'Convert rem');
+  assert.equal(ws.current.get()!.report.rem.count, 0, 'the report counts none now');
+  editor.undo();
+  assert.equal(editor.source(), text, 'one undo');
 });

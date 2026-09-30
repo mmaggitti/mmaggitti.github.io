@@ -14,6 +14,7 @@
 
 import { el, findAttr, setAttrRaw, setLeafRaw, type Doc, type NodeId } from '../model/doc.ts';
 import { escape } from '../xml/entities.ts';
+import { NAME_PATTERN } from '../xml/lex.ts';
 import { fmt } from '../values/number-format.ts';
 import { parseColor } from '../values/color.ts';
 import { tokenizeAttrRaw, tokenizeLeafRaw, tokenizeText, type AttrRef, type NumberToken, type Token } from './tokens.ts';
@@ -27,7 +28,15 @@ const NUMBER = /^-?(?:\d+|\d*\.\d+)$/; // plain decimal: no exponent, no leading
 // A character outside XML 1.0's Char: no escape can write one (&#1; is refused too), so a browser
 // would refuse the whole file.
 const NOT_XML_CHAR = /[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
-const ID = /^[A-Za-z_À-￿][\w.\-·À-￿]*$/;
+/** An XML id, as the Text sheet and Rename take it: the lexer's name rule without a colon (Namespaces in XML). */
+export const ID = new RegExp(`^${NAME_PATTERN.replaceAll(':', '')}$`);
+
+/** Why `text` can't be an id, or null: a name the lexer reads, with no colon and no character XML can't hold (U+FFFE, a lone surrogate). */
+export function idError(text: string): string | null {
+  const bad = NOT_XML_CHAR.exec(text);
+  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
+  return ID.test(text) ? null : `${JSON.stringify(text)} is not an id`;
+}
 
 /** Why `text` can't replace this token, or null when it can. */
 export function tokenTextError(token: Token, text: string): string | null {
@@ -47,7 +56,7 @@ export function tokenTextError(token: Token, text: string): string | null {
     case 'enum':
       return token.options.includes(text) ? null : `${JSON.stringify(text)} is not one of ${token.options.join(', ')}`;
     case 'ref':
-      return ID.test(text) ? null : `${JSON.stringify(text)} is not an id`;
+      return idError(text);
     case 'text':
       return null;
   }
@@ -166,6 +175,58 @@ function sameShape(before: Token[], after: Token[], index: number, start: number
  */
 export function tokenEdit(doc: Doc, nodeId: NodeId, target: TokenTarget, token: Token, newText: string): string {
   return splice(doc, nodeId, target, token, newText).raw;
+}
+
+export interface NumberEdit {
+  start: number; // a number token's span in the raw text
+  end: number;
+  text: string; // the new number: a plain decimal (fmt's output)
+}
+
+// Numbers as the tokenizer reads them in lists, paths and transforms: the default re-reader.
+const SCAN = /[+-]?(?:\d*\.\d+|\d+)(?:[eE][+-]?\d+)?/g;
+const scanNumbers = (raw: string): Token[] =>
+  [...raw.matchAll(SCAN)].map((m) => ({ kind: 'number', prop: '', start: m.index, end: m.index + m[0].length, text: m[0], value: Number(m[0]), decimals: 0 }));
+
+/**
+ * Several number tokens of one raw attribute value rewritten at once, right to left: each span
+ * (from the attribute's number tokens) becomes its new text, and every other byte stays, so a
+ * multi-line transform list or a path keeps its separators, spacing and units. Where a new number
+ * would glue to its neighbour ("1-2" read as one, "1.5.5"), a space goes inside the replaced span,
+ * as tokenEdit does. The result must read as the same tokens in the same order (`retokenize`, the
+ * attribute's own grammar; plain number scanning by default), else TokenEditError.
+ */
+export function rewriteNumbers(raw: string, edits: readonly NumberEdit[], retokenize: (raw: string) => Token[] = scanNumbers): string {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  for (let i = 1; i < sorted.length; i++) if (sorted[i].end > sorted[i - 1].start) throw new TokenEditError('two number edits overlap');
+  for (const e of sorted) if (!NUMBER.test(e.text)) throw new TokenEditError(`${JSON.stringify(e.text)} is not a plain number`);
+  const before = retokenize(raw);
+  let out = raw;
+  const placed = new Map<number, { start: number; text: string }>(); // original start → where the new text landed (before the shift)
+  for (const e of sorted) {
+    const head = out.slice(0, e.start);
+    const tail = out.slice(e.end);
+    // A digit or point before glues to a number starting with a digit; a number without a point
+    // glues to a '.' after it (and any number to a digit or an exponent after it).
+    const lead = /[\d.]$/.test(head) && /^[\d.]/.test(e.text) ? ' ' : '';
+    const trail = /^\d/.test(tail) || /^[eE][+-]?\d/.test(tail) || (tail.startsWith('.') && !e.text.includes('.')) ? ' ' : '';
+    out = head + lead + e.text + trail + tail;
+    placed.set(e.start, { start: e.start + lead.length, text: e.text });
+    // Every span to the right moves by this edit's change in length.
+    const shift = lead.length + e.text.length + trail.length - (e.end - e.start);
+    for (const [k, p] of placed) if (k > e.start) p.start += shift;
+  }
+  const after = retokenize(out);
+  const edited = new Map(sorted.map((e) => [e.start, placed.get(e.start)!]));
+  const same = after.length === before.length && before.every((b, j) => {
+    const a = after[j];
+    if (a.kind !== b.kind) return false;
+    const p = edited.get(b.start);
+    if (p) return a.kind === 'number' && a.start === p.start && a.text === p.text;
+    return a.text === b.text;
+  });
+  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');
+  return out;
 }
 
 /**

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { parseDoc, serialize, descendants, el, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
-import { opInsert, opRemove, opSetAttr, opSetAttrRaw, opSetLeafRaw, opSetTextRaw, coalesce, type Op } from '../../commands/ops.ts';
+import { opInsert, opRemove, opSetAttr, opSetAttrRaw, opSetLeafRaw, opSetTextRaw, coalesce, type ChangeSet, type Op } from '../../commands/ops.ts';
 import { Session } from '../../commands/session.ts';
 import { mulberry32 } from '../values/rng.ts';
 
@@ -120,6 +120,72 @@ test('coalesce keeps the first before and the last after of consecutive edits', 
   const [one] = coalesce(ops);
   assert.equal(coalesce(ops).length, 1);
   assert.ok(one.kind === 'attr' && one.before?.attr.raw === '1' && one.after?.attr.raw === '7');
+});
+
+// ── P1-M1: moved nodes, and place ops that cancel out ─────────────────────────────────────────
+
+/** Move a node (and the whitespace before it) to just after `after`, as Forward does. */
+function forward(doc: Doc, id: NodeId, apply: (op: Op) => void): void {
+  const parent = el(doc, doc.nodes.get(id)!.parent!);
+  const i = parent.children.indexOf(id);
+  const ws = i > 0 && doc.nodes.get(parent.children[i - 1])!.kind === 'text' ? parent.children[i - 1] : null;
+  const next = parent.children.slice(i + 1).find((c) => doc.nodes.get(c)!.kind === 'element')!;
+  for (const n of ws === null ? [id] : [ws, id]) {
+    apply(opRemove(doc, n));
+    apply(opInsert(doc, n, parent.id, parent.children.indexOf(next) + 1 + (n === id && ws !== null ? 1 : 0)));
+  }
+}
+
+test('a ChangeSet names every node whose place changed: inserted, removed and reordered', () => {
+  const doc = load();
+  const s = new Session(doc);
+  let seen: ChangeSet | null = null;
+  s.subscribe((cs) => (seen = cs));
+  const rect = find(doc, 'rect');
+  const g = find(doc, 'g');
+  const circle = find(doc, 'circle');
+  s.dispatch('reorder', (apply) => forward(doc, rect.id, apply));
+  const ws = el(doc, doc.root).children[el(doc, doc.root).children.indexOf(rect.id) - 1];
+  assert.deepEqual([...seen!.moved].sort(), [rect.id, ws].sort(), 'the element and its whitespace');
+  assert.deepEqual([...seen!.structure], [doc.root]);
+  s.dispatch('remove', (apply) => apply(opRemove(doc, circle.id)));
+  assert.deepEqual([...seen!.moved], [circle.id]);
+  s.dispatch('insert', (apply) => apply(opInsert(doc, circle.id, g.id, 0)));
+  assert.deepEqual([...seen!.moved], [circle.id]);
+  assert.deepEqual([...seen!.attrs], []);
+});
+
+test('coalesce merges consecutive place ops of one node, and drops one that ends where it started', () => {
+  const doc = load();
+  const rect = find(doc, 'rect');
+  const root = el(doc, doc.root);
+  const at = root.children.indexOf(rect.id);
+  const ops: Op[] = [opRemove(doc, rect.id), opInsert(doc, rect.id, root.id, root.children.length)];
+  const [move] = coalesce(ops);
+  assert.equal(coalesce(ops).length, 1, 'a remove and its re-insert are one move');
+  assert.ok(move.kind === 'place' && move.before?.index === at && move.after?.index === root.children.length - 1);
+  const back: Op[] = [opRemove(doc, rect.id), opInsert(doc, rect.id, root.id, at)];
+  assert.equal(coalesce(back).length, 1, 'the way back alone is a move too');
+  assert.deepEqual(coalesce([...ops, ...back]), [], 'out and back where it was: nothing');
+  assert.equal(serialize(doc), SRC);
+});
+
+test('a Forward and then a Back in one transaction records nothing', () => {
+  const doc = load();
+  const s = new Session(doc);
+  const rect = find(doc, 'rect');
+  const g = find(doc, 'g');
+  s.dispatch('Forward then Back', (apply) => {
+    forward(doc, rect.id, apply); // rect after the g
+    forward(doc, g.id, apply); // the g after the rect again: the rect is back
+  });
+  assert.equal(serialize(doc), SRC, 'the file is as it was');
+  assert.equal(s.canUndo, false, 'and no history entry was made');
+  s.dispatch('Forward', (apply) => forward(doc, rect.id, apply));
+  assert.equal(s.canUndo, true, 'one Forward alone is an entry');
+  assert.notEqual(serialize(doc), SRC);
+  s.undo();
+  assert.equal(serialize(doc), SRC);
 });
 
 // ── the P0 exit property ───────────────────────────────────────────────────────────────────────

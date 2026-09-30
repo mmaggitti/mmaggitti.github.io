@@ -81,7 +81,7 @@ test('check-sinks fails the build on planted HTML sinks, eval, srcdoc, a same-or
 test('check-sinks passes DOM writes in the sink, the overlay and the code view, platform APIs in platform/, and rules named only in comments', () => {
   const r = sinks({
     'projects/draw/src/canvas/safe-sink.ts': "export const a = (d: Document, el: Element) => { el.setAttribute('fill', 'red'); return d.createElementNS('http://www.w3.org/2000/svg', 'rect'); };\n",
-    'projects/draw/src/canvas/overlay.ts': "export const b = (d: Document) => d.createElementNS('http://www.w3.org/2000/svg', 'path');\n",
+    'projects/draw/src/canvas/overlay/index.ts': "export const b = (d: Document) => d.createElementNS('http://www.w3.org/2000/svg', 'path');\n",
     'projects/draw/src/codeview/code-view.ts': "export const c = (d: Document) => { const s = d.createElement('span'); s.textContent = '<svg>'; return s; };\n",
     'projects/draw/src/platform/prefs.ts': "export const d = () => localStorage.getItem('draw:theme');\nexport const e = (t: string) => navigator.clipboard.writeText(t);\n",
     'projects/draw/src/panels/Note.tsx': '// Never innerHTML, eval or a srcdoc here: the sink is the one writer.\n/* not el.innerHTML = s either */\nexport const f = 1;\n',
@@ -90,4 +90,15 @@ test('check-sinks passes DOM writes in the sink, the overlay and the code view, 
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.findings, []);
   assert.match(r.out, /check-sinks: clean/);
+});
+
+test('check-sinks allows DOM writes in the overlay folder only: a file beside it or a model outside it is flagged', () => {
+  const make = "export const a = (d: Document) => d.createElementNS('http://www.w3.org/2000/svg', 'path');\n";
+  const r = sinks({
+    'projects/draw/src/canvas/overlay/marks.ts': make,
+    'projects/draw/src/canvas/overlayish.ts': make,
+    'projects/draw/src/interact/overlay-model.ts': make,
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, ['projects/draw/src/canvas/overlayish.ts:1 dom-write', 'projects/draw/src/interact/overlay-model.ts:1 dom-write']);
 });

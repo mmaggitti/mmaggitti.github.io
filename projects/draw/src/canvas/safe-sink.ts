@@ -17,6 +17,7 @@
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
 import { NS, findAttr, type Attr, type Doc, type ElementNode, type LeafNode, textContent } from '../../../../engine/model/doc.ts';
 import { decodeAttr } from '../../../../engine/xml/entities.ts';
+import { fmt } from '../../../../engine/values/number-format.ts';
 import {
   animatesAttribute, attrKey, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue,
   smilTargetAllowed,
@@ -196,11 +197,11 @@ export function sinkText(doc: Doc, node: LeafNode, parent: ElementNode): Text | 
 
 // The app's own rules for the canvas's shadow root, adopted by the renderer. As !important author
 // rules they outrank the document's normal CSS (its own !important inline styles can still win):
-// - the rendered root fills the host whatever the document sizes it to;
+// - the rendered root's size is the camera's (cameraSheet), never what the document sizes it to;
 // - reduced motion stops CSS animations and transitions, as ds.css does for the app (its rule
 //   can't cross the shadow boundary; the renderer pauses SMIL), until Play (draw-play); Pause
 //   (draw-held) holds them on their frame.
-const CANVAS_CSS = `:host > svg { width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important }
+const CANVAS_CSS = `:host > svg { min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important }
 @media (prefers-reduced-motion: reduce) { :host(:not(.draw-play):not(.draw-held)) *, :host(:not(.draw-play):not(.draw-held)) *::before, :host(:not(.draw-play):not(.draw-held)) *::after { animation: none !important; transition: none !important }
 :host(.draw-held) *, :host(.draw-held) *::before, :host(.draw-held) *::after { animation-play-state: paused !important; transition: none !important } }`;
 let canvas: CSSStyleSheet | null = null;
@@ -212,6 +213,39 @@ export function canvasSheet(): CSSStyleSheet {
     canvas.replaceSync(CANVAS_CSS);
   }
   return canvas;
+}
+
+/**
+ * The camera: where the rendered root's own box sits in the host and how big it is (CSS px). The
+ * view is the root's box, never its viewBox, so a % length inside the drawing keeps its size under
+ * zoom, and nothing wraps the root (its CSS background, `svg > …` selectors and SMIL's time
+ * container stay the file's own).
+ */
+export interface CameraBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** A stylesheet for one canvas's camera (a new one each call). */
+export function cameraSheet(): CSSStyleSheet {
+  const sheet = new CSSStyleSheet();
+  placeRoot(sheet, null);
+  return sheet;
+}
+
+/**
+ * Place the rendered root: exactly one rule, the box's offset and size (fmt throws on a number
+ * that isn't finite), or with no box the host filled. The rule is in a cascade layer: a layered
+ * !important outranks the file's own unlayered !important, however specific (#root { left: 100px
+ * !important } would move the drawing off its paper). A file's own @layer with !important can still
+ * win (the engine README's known limits).
+ */
+export function placeRoot(sheet: CSSStyleSheet, box: CameraBox | null): void {
+  const px = (n: number) => `${fmt(n, 3)}px`;
+  const [left, top, width, height] = box ? [px(box.left), px(box.top), px(box.width), px(box.height)] : ['0', '0', '100%', '100%'];
+  sheet.replaceSync(`@layer draw-camera { :host > svg { position: absolute !important; left: ${left} !important; top: ${top} !important; width: ${width} !important; height: ${height} !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: content-box !important; overflow: visible !important } }`);
 }
 
 /**

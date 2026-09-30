@@ -15,6 +15,9 @@ import { acceptDrag, clearFragment, dropped, fragment, pasted } from '../platfor
 import { writeClipboard } from '../platform/clipboard.ts';
 import { readPref, writePref } from '../platform/prefs.ts';
 import { Views } from './views.ts';
+import { hitPath } from '../canvas/stage.ts';
+import { installKeys } from '../keys.ts';
+import type { NodeId } from '../../../../engine/model/doc.ts';
 import { Canvas } from './Canvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { ContextBar } from './ContextBar.tsx';
@@ -30,9 +33,51 @@ declare global {
   interface Window {
     // The e2e test opens every corpus file with render(): the engine's parser, then the renderer
     // and the sink, as the importer does, but with no draft and no report (a document opened this
-    // way is never saved). It adds no other way in; source() and view() only read.
-    drawTest?: { render(text: string): OpenResult; source(): string; view(): View & { fitScale: number } };
+    // way is never saved). It adds no other way in; source(), view(), hitPath() and measureAll()
+    // only read. measureAll() gives each drawn element's document-order index and its getBBox
+    // through root.getScreenCTM()⁻¹ · el.getScreenCTM(), in the root's user units.
+    drawTest?: {
+      render(text: string): OpenResult;
+      source(): string;
+      view(): View & { fitScale: number };
+      hitPath(): 'elementsFromPoint' | 'elementFromPoint';
+      measureAll(): { index: number; box: [number, number, number, number] }[];
+    };
   }
+}
+
+/** Every drawn element's box in the root's user units, as the browser measures it (drawTest). */
+function measureAll(editor: Editor, views: Views): { index: number; box: [number, number, number, number] }[] {
+  const doc = editor.doc;
+  const r = views.renderer;
+  const root = doc && r?.nodeFor(doc.root);
+  const inv = root && root.nodeType === 1 ? (root as SVGSVGElement).getScreenCTM()?.inverse() : null;
+  if (!doc || !r || !inv) return [];
+  const out: { index: number; box: [number, number, number, number] }[] = [];
+  let index = 0;
+  const walk = (id: NodeId) => {
+    const n = doc.nodes.get(id);
+    if (n?.kind !== 'element') return;
+    const at = index++;
+    const el = r.nodeFor(id);
+    if (el && el.nodeType === 1 && 'getBBox' in el) {
+      try {
+        const b = (el as SVGGraphicsElement).getBBox();
+        const m = (el as SVGGraphicsElement).getScreenCTM();
+        if (m) {
+          const k = inv.multiply(m);
+          const pts = [[b.x, b.y], [b.x + b.width, b.y], [b.x + b.width, b.y + b.height], [b.x, b.y + b.height]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(k));
+          const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+          out.push({ index: at, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] });
+        }
+      } catch {
+        // no box (not rendered)
+      }
+    }
+    for (const c of n.children) walk(c);
+  };
+  walk(doc.root);
+  return out;
 }
 
 const SAVE_LABEL: Record<SaveState['kind'], string> = {
@@ -70,7 +115,13 @@ export function App() {
   useEffect(() => {
     void workspace.openSample();
     void workspace.boot(fragment(), clearFragment);
-    window.drawTest = { render: (text) => editor.open(text), source: () => editor.source(), view: () => ({ ...editor.view, fitScale: editor.fitScale }) };
+    window.drawTest = {
+      render: (text) => editor.open(text),
+      source: () => editor.source(),
+      view: () => ({ ...editor.view, fitScale: editor.fitScale }),
+      hitPath,
+      measureAll: () => measureAll(editor, views),
+    };
     const keys = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (!(e.metaKey || e.ctrlKey) || t?.closest?.('input, textarea, select')) return;
@@ -97,12 +148,15 @@ export function App() {
     // that opened this tab, so it opens only when Mark taps Open (the Open link sheet).
     const link = () => void workspace.offerLink(fragment(), clearFragment);
     window.addEventListener('keydown', keys);
+    // Delete, Escape, the arrows and ⌘A on the canvas selection (src/keys.ts).
+    const offKeys = installKeys(editor, window, () => document.querySelector('.draw-modal') !== null);
     window.addEventListener('paste', paste);
     window.addEventListener('pagehide', flush);
     window.addEventListener('hashchange', link);
     document.addEventListener('visibilitychange', hidden);
     return () => {
       window.removeEventListener('keydown', keys);
+      offKeys();
       window.removeEventListener('paste', paste);
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('hashchange', link);

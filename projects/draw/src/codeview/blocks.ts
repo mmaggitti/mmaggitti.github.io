@@ -15,10 +15,36 @@ import type { Flow, ViewBlock, ViewToken } from './code-view.ts';
 /** A block's key: stable across edits, one per node and part ('12:start', '12:end', '13:leaf'). */
 export const blockKey = (node: NodeId, part: Block['part']): string => `${node}:${part}`;
 
+// An element's end block exists unless it closes itself (serialize's rule: model/doc.ts).
+const hasEnd = (n: Node): boolean => n.kind === 'element' && !(n.selfClosing && n.children.length === 0);
+
+/** The keys of one node's blocks and everything under it, in order (no tokenizing: cheap). */
+export function subtreeKeys(doc: Doc, id: NodeId): string[] {
+  const out: string[] = [];
+  const walk = (x: NodeId) => {
+    const n = doc.nodes.get(x);
+    if (!n) return;
+    if (n.kind !== 'element') return void out.push(blockKey(x, 'leaf'));
+    out.push(blockKey(x, 'start'));
+    for (const c of n.children) walk(c);
+    if (hasEnd(n)) out.push(blockKey(x, 'end'));
+  };
+  walk(id);
+  return out;
+}
+
+/** Every block's key in document order, as codeBlocks lists them. */
+export function keyOrder(doc: Doc): string[] {
+  return [...doc.prolog, doc.root, ...doc.epilog].flatMap((id) => subtreeKeys(doc, id));
+}
+
 /** Which elements have mixed content, memoised over one listing. */
 export type MixedMemo = Map<NodeId, boolean>;
 
 const blank = (n: Node): boolean => n.kind === 'text' && /^[ \t\r\n]*$/.test(n.raw);
+
+/** A text or CDATA leaf that isn't only whitespace: its parent has mixed content. */
+export const mixes = (n: Node | undefined): boolean => !!n && (n.kind === 'text' || n.kind === 'cdata') && !blank(n);
 
 /** Mixed content: an element with a text or CDATA child that isn't only whitespace (<text>, <title>, <style>). */
 function mixed(doc: Doc, id: NodeId | null, memo?: MixedMemo): boolean {
@@ -26,10 +52,7 @@ function mixed(doc: Doc, id: NodeId | null, memo?: MixedMemo): boolean {
   const known = memo?.get(id);
   if (known !== undefined) return known;
   const n = doc.nodes.get(id);
-  const m = n?.kind === 'element' && n.children.some((c) => {
-    const k = doc.nodes.get(c);
-    return !!k && (k.kind === 'text' || k.kind === 'cdata') && !blank(k);
-  });
+  const m = n?.kind === 'element' && n.children.some((c) => mixes(doc.nodes.get(c)));
   memo?.set(id, m);
   return m;
 }

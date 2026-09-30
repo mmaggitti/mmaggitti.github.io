@@ -1,15 +1,16 @@
 // What the Export sheet writes: the file's bytes and its name, computed synchronously (the share
 // sheet must be asked for inside the tap that asked for it).
 //
-// - As-is: serialize(doc), every byte Draw didn't change kept, in the encoding the file came in
-//   (what decodeSvg found, byte order included), so an unedited file exports byte for byte. A .svgz
-//   exports as its plain .svg.
-// - Clean: without editor data (engine/export/clean.ts), with what it removed.
-// - Save to Files: the working copy. The plan gives it one <metadata> element for Draw's own state
-//   (guides, locks, generator inputs), and P0 has none to carry, so it is the as-is file for now.
+// - As-is: the file without Draw's own state (stripDrawState: guides, the grid step, locks), every
+//   other byte Draw didn't change kept, in the encoding the file came in (what decodeSvg found, byte
+//   order included), so an unedited file exports byte for byte. A .svgz exports as its plain .svg.
+// - Clean: without editor data (engine/export/clean.ts), Draw's own included, with what it removed.
+// - Save to Files: the working copy, serialize(doc): everything kept, Draw's own state too (one
+//   <draw:state> in the file's <metadata>, draw:* attributes), to open in Draw again.
 
 import { serialize, type Doc } from '../../../../engine/model/doc.ts';
 import { cleanExport } from '../../../../engine/export/clean.ts';
+import { stripDrawState } from '../../../../engine/model/draw-state.ts';
 import { encodeSvg } from '../platform/files.ts';
 
 export type ExportKind = 'as-is' | 'clean' | 'working';
@@ -37,7 +38,8 @@ export function fileNameFor(name: string, suffix = ''): string {
 /** `read`: the encoding the file's bytes came in (decodeSvg's), or undefined for text that came as text. */
 export function exportFile(doc: Doc, name: string, kind: ExportKind, read?: string): ExportFile {
   const clean = kind === 'clean' ? cleanExport(doc) : null;
-  const { bytes, encoding, relabeled } = encodeSvg(clean ? clean.text : serialize(doc), read);
+  const text = clean ? clean.text : kind === 'as-is' ? stripDrawState(doc) : serialize(doc);
+  const { bytes, encoding, relabeled } = encodeSvg(text, read);
   return {
     kind,
     fileName: fileNameFor(name, kind === 'clean' ? '-clean' : ''),

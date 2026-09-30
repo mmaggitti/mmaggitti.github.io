@@ -2,11 +2,13 @@
 // must equal a fresh render of the same model (the same DOM, the same stats, and a drawn copy of
 // exactly the same NodeIds, each inside the host). Moves, reorders and deletes; an id change that
 // retargets an animation; a subtree moved into a foreignObject. And a render that throws keeps the
-// previous drawing. P0-M3 adds the camera (the view as the root's viewBox), an attribute put back
+// previous drawing. P0-M3 adds the camera (in P1-M1 the root's own box, never its viewBox), an attribute put back
 // in the middle of the list (an undo), a value edit that must be exactly one attribute mutation
 // (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The P1-M0 review
-// adds attribute names the DOM refuses (dropped, never thrown on). The real Renderer is bundled
-// from source (test/harness/entry.ts) and driven directly.
+// adds attribute names the DOM refuses (dropped, never thrown on). P1-M1 adds nodes that move alone
+// (within a parent, to another, deleted with their whitespace, a whitespace leaf), routed as the
+// editor routes them. The real Renderer is bundled from source (test/harness/entry.ts) and driven
+// directly.
 //
 // Run by test/e2e.mjs on the /draw/ page (Chromium here, WebKit in CI), or alone, quickly:
 //   node test/renderer-patch.mjs
@@ -44,11 +46,11 @@ export default async function rendererPatch({ browser, origin }) {
 
 // Runs in the page.
 function cases(engine) {
-  const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, Renderer, sinkReady } = window.drawHarness;
+  const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, emptyChangeSet, noteChange, opInsert, opRemove, route, Renderer, sinkReady } = window.drawHarness;
   const SVG = 'http://www.w3.org/2000/svg';
   const host = () => {
     const div = document.createElement('div');
-    div.style.cssText = 'width:400px;height:300px';
+    div.style.cssText = 'position:relative;width:400px;height:300px'; // as .draw-host
     document.body.append(div);
     return div.attachShadow({ mode: 'open' });
   };
@@ -62,6 +64,9 @@ function cases(engine) {
     fresh.render(doc);
     const problems = [];
     if (root.innerHTML !== freshRoot.innerHTML) problems.push(`DOM differs:\n      patched ${root.innerHTML.slice(0, 300)}\n      fresh   ${freshRoot.innerHTML.slice(0, 300)}`);
+    // The camera sheet's rule is part of what is drawn: where the root's box is, and its size.
+    const sheets = (sr) => sr.adoptedStyleSheets.map((sheet) => [...sheet.cssRules].map((rule) => rule.cssText).join('\n')).join('\n---\n');
+    if (sheets(root) !== sheets(freshRoot)) problems.push(`the canvas sheets differ:\n      patched ${sheets(root).slice(-300)}\n      fresh   ${sheets(freshRoot).slice(-300)}`);
     const [a, b] = [JSON.stringify(r.stats()), JSON.stringify(fresh.stats())];
     if (a !== b) problems.push(`stats ${a}, fresh ${b}`);
     for (const id of doc.nodes.keys()) {
@@ -189,6 +194,48 @@ function cases(engine) {
     r.patchSubtree(id);
     check('an insert', r, root, doc);
   }
+  // P1-M1: a node whose place changed is patched alone, routed as the editor routes it (the engine's
+  // place ops, then src/routing.ts: each moved node, last first in document order). Each element
+  // carries its leading whitespace, as Forward, Back and Delete move it; a whitespace leaf can move
+  // alone. Every other drawn node keeps its DOM node.
+  const SPACED = `<svg xmlns="${SVG}" viewBox="0 0 100 100">\n  <g id="A">\n    <rect id="r1" width="5" height="5"/>\n    <circle id="c1" r="3"/>\n  </g>\n  <g id="B">\n    <text id="t">hi</text>\n  </g>\n</svg>`;
+  const alone = [
+    ['a node and its whitespace moved within its parent (Forward)', (doc) => {
+      const r1 = byId(doc, 'r1'), A = byId(doc, 'A');
+      const ws = A.children[A.children.indexOf(r1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, r1.id), opInsert(doc, ws, A.id, A.children.indexOf(byId(doc, 'c1').id) + 1), opInsert(doc, r1.id, A.id, A.children.indexOf(ws) + 1)];
+    }],
+    ['a node and its whitespace moved to another parent', (doc) => {
+      const r1 = byId(doc, 'r1'), A = byId(doc, 'A'), B = byId(doc, 'B');
+      const ws = A.children[A.children.indexOf(r1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, r1.id), opInsert(doc, ws, B.id, 1), opInsert(doc, r1.id, B.id, 2)];
+    }],
+    ['a node deleted with its whitespace', (doc) => {
+      const c1 = byId(doc, 'c1'), A = byId(doc, 'A');
+      const ws = A.children[A.children.indexOf(c1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, c1.id)];
+    }],
+    ['a whitespace leaf moved alone', (doc) => {
+      const A = byId(doc, 'A'), B = byId(doc, 'B');
+      const ws = A.children[0];
+      return [opRemove(doc, ws), opInsert(doc, ws, B.id, B.children.length)];
+    }],
+  ];
+  for (const [label, edit] of alone) {
+    const { r, root, doc } = setup(SPACED);
+    const kept = new Map([...doc.nodes.keys()].map((id) => [id, r.nodeFor(id)]).filter(([, d]) => d));
+    const cs = emptyChangeSet();
+    for (const op of edit(doc)) noteChange(cs, op);
+    const rt = route(doc, cs);
+    const problems = [];
+    if (rt.subtrees.length || rt.code.reset) problems.push(`routed ${JSON.stringify(rt.subtrees)} to be drawn again${rt.code.reset ? ', and the code rebuilt' : ''}`);
+    for (const id of rt.subtrees) r.patchSubtree(id);
+    for (const id of rt.moved) r.patchSubtree(id);
+    for (const id of rt.attrs) r.patchAttributes(id);
+    for (const [id, dom] of kept) if (!cs.moved.has(id) && r.nodeFor(id) !== dom) problems.push(`node ${id} (not moved) was drawn again`);
+    results.push({ label: `${label}: only what moved is drawn again`, problems });
+    check(label, r, root, doc);
+  }
   // Ids: an animation's href target follows them, so changing one re-judges it.
   const ANIM = `<svg xmlns="${SVG}" viewBox="0 0 100 100"><rect id="a" width="5" height="5"/><circle id="b" r="3"/><animate href="#a" attributeName="width" values="5;9" dur="1s"/></svg>`;
   {
@@ -214,19 +261,38 @@ function cases(engine) {
     r.patchSubtree(rect.id);
     check("an animation's target deleted", r, root, doc);
   }
-  // P0-M3: the camera is the root's viewBox, through the sink; the file's own comes back without it.
-  const CAM = { x: -10.5, y: 4, width: 40, height: 30 };
-  for (const [label, text] of [['a camera on a root with a viewBox', TEXT], ['a camera on a root with only a size', TEXT.replace('viewBox="0 0 100 100"', 'width="100" height="100"')]]) {
+  // P1-M1: the camera is the root's own box (the camera sheet), never its viewBox. A root with a
+  // viewBox keeps it byte for byte; a root with only a size is given 0 0 W H only while k ≠ 1.
+  const camera = (k) => ({ box: { left: 5.5, top: -7, width: 100 * k, height: 100 * k }, viewport: { width: 100, height: 100 } });
+  for (const [label, text, own] of [['a camera on a root with a viewBox', TEXT, '0 0 100 100'], ['a camera on a root with only a size', TEXT.replace('viewBox="0 0 100 100"', 'width="100" height="100"'), null]]) {
     const { r, root, doc } = setup(text);
-    r.setCamera(CAM);
-    check(label, r, root, doc, CAM);
     const svg = root.querySelector('svg');
-    if (svg.getAttribute('viewBox') !== '-10.5 4 40 30') results.push({ label: `${label}: the viewBox`, problems: [`is ${svg.getAttribute('viewBox')}`] });
+    const viewBox = (want, what) => {
+      if (svg.getAttribute('viewBox') !== want) results.push({ label: `${label}: ${what}`, problems: [`the viewBox is ${svg.getAttribute('viewBox')}, not ${want}`] });
+    };
+    // The drawn root's own box is where the camera puts it, at its size.
+    const placed = (c, what) => {
+      const [h, b] = [root.host.getBoundingClientRect(), svg.getBoundingClientRect()];
+      const got = [b.left - h.left, b.top - h.top, b.width, b.height];
+      const want = [c.box.left, c.box.top, c.box.width, c.box.height];
+      if (want.some((v, i) => Math.abs(v - got[i]) > 0.5)) results.push({ label: `${label}: the box ${what}`, problems: [`is ${got.join(' ')}, not ${want.join(' ')}`] });
+    };
+    r.setCamera(camera(2.5));
+    check(label, r, root, doc, camera(2.5));
+    viewBox(own ?? '0 0 100 100', 'zoomed');
+    placed(camera(2.5), 'zoomed');
+    r.setCamera(camera(1));
+    check(`${label} at scale 1`, r, root, doc, camera(1));
+    viewBox(own, 'at scale 1');
+    placed(camera(1), 'at scale 1');
+    r.setCamera(camera(2.5));
     setAttr(doc, doc.root, null, 'data-x', '1');
     r.patchAttributes(doc.root);
-    check(`${label}, then a root attribute edit`, r, root, doc, CAM);
+    check(`${label}, then a root attribute edit`, r, root, doc, camera(2.5));
+    viewBox(own ?? '0 0 100 100', 'after a root attribute edit');
     r.setCamera(null);
     check(`${label}, then no camera`, r, root, doc);
+    viewBox(own, 'with no camera');
   }
   {
     // An undo puts an attribute back where it was, in the middle: the canvas matches a fresh render.

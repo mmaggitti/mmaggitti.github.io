@@ -123,9 +123,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
   - `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
     `dangerouslySetInnerHTML`, `srcdoc`, `eval` and `new Function` anywhere;
-  - DOM writes outside the sink and the overlay: namespaced elements and attributes, markup
-    parsing and stylesheet writes (`dom-write`). Plain elements and text (`dom-text`) are also
-    allowed in `src/codeview/`, which shows the source as text and never as markup;
+  - DOM writes outside the sink and the overlay folder (`src/canvas/overlay/`): namespaced
+    elements and attributes, markup parsing and stylesheet writes (`dom-write`). Plain elements
+    and text (`dom-text`) are also allowed in `src/codeview/`, which shows the source as text and
+    never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
   - file, clipboard, drag-and-drop, share, Web Locks and history APIs outside `src/platform/`
     (`file-api`);
@@ -138,8 +139,9 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   attributes that differ, so a scrub frame is one mutation).
 - **The editor (`src/editor.ts`) is the one controller.** Every change is a Session transaction
   (a scrub, or a sheet open on one value, is one drag and one history entry), routed canvas → code
-  view → overlay → stores. Zoom and pan are the rendered root's viewBox, never the file. React
-  panels only read its stores; the canvas and the code view are framework-free.
+  view → overlay → stores. Zoom and pan are the rendered root's own box (its CSS size and offset),
+  never its viewBox or the file. React panels only read its stores; the canvas and the code view
+  are framework-free.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

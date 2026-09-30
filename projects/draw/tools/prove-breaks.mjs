@@ -7,12 +7,18 @@
 //   node tools/prove-breaks.mjs           every break (the e2e ones rebuild the site: slow)
 //   node tools/prove-breaks.mjs --quick   only the breaks caught without a site build
 //   node tools/prove-breaks.mjs B3 B5     just these
+//   node tools/prove-breaks.mjs --dry [--quick] [B3 …]
+//                                         check that each chosen break (default: every one) still
+//                                         applies, without running any: a stale anchor otherwise
+//                                         shows only when someone runs that break. Writes nothing.
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
 //
 // A break edits with String.prototype.replace, so `from` may be a RegExp (an anchor that survives
-// the row or line around it changing) and `to` a replacer function.
+// the row or line around it changing) and `to` a replacer function. A site e2e break may name the
+// e2e checks that catch it (`checks`): only those run (DRAW_E2E_ONLY), which saves the rest of the
+// suite's minutes; such a run is never evidence (test/e2e.mjs).
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,6 +43,11 @@ const drawTests = (file) => ['node', ['--test', '--test-reporter=spec', `test/un
 // The e2e evidence gate after the site e2e, as `npm run verify` and CI run it. The smoke test is
 // expected to fail for some of these breaks; the break is caught only if ledger-check then fails.
 const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/draw-e2e-evidence.jsonl';
+// A Draw e2e break that names its `checks`: Draw's bundle alone, rebuilt without its unit tests (one
+// may catch the same plant first; this proves the e2e check can) into the last built _site, then
+// just those checks. It needs a built _site; the run puts Draw's own bundle back afterwards.
+const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && node tools/library-index.mjs >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
+const DRAW_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && E2E=draw node scripts/smoke-test.mjs`], REPO];
 const SITE_E2E_EVIDENCE = ['sh', ['-c', `node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && { E2E=draw node scripts/smoke-test.mjs; ${E2E_EVIDENCE}; }`], REPO];
 
 const BREAKS = [
@@ -221,9 +232,10 @@ const BREAKS = [
     run: SITE_E2E, expect: /the policy refuses part of style|errors while rendering the corpus/,
   },
   {
-    id: 'B30', what: "the rendered root takes the size its own CSS gives it", slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: ':host > svg { width: 100% !important; height: 100% !important;', to: ':host > svg {',
-    run: SITE_E2E, expect: /doesn't fill the host|a root sized by its own CSS: the root is/,
+    id: 'B30', what: "the rendered root takes the size its own CSS gives it", slow: true, checks: ['phoneRules', 'moreEdges'],
+    // P1-M1: the size is the camera sheet's now; without !important the root's own inline size wins.
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: 'width: ${width} !important; height: ${height} !important;', to: 'width: ${width}; height: ${height};',
+    run: DRAW_E2E, expect: /doesn't fill the host|a root sized by its own CSS: the root is/,
   },
   {
     id: 'B31', what: "the canvas loses the containment that holds a document's CSS", slow: true,
@@ -360,9 +372,10 @@ const BREAKS = [
     run: SITE_E2E, expect: /ds tokens reach the document on the canvas: --accent/,
   },
   {
-    id: 'B57', what: 'the paper follows the theme', slow: true,
-    file: 'projects/draw/src/app.css', from: '  background: #fff;\n', to: '',
-    run: SITE_E2E, expect: /the canvas paper is/,
+    // P1-M1: the paper is the underlay's checkerboard now; a checker colour that follows the theme.
+    id: 'B57', what: 'the paper follows the theme', slow: true, checks: ['canvasIgnoresTheTheme', 'theThemeFollowsTheSystemOrTheChoice'],
+    file: 'projects/draw/src/app.css', from: 'repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%)', to: 'repeating-conic-gradient(#eeeeee 0 25%, var(--surface) 0 50%)',
+    run: DRAW_E2E, expect: /the canvas paper is/,
   },
   {
     id: 'B58', what: 'a root the canvas refuses reports success', slow: true,
@@ -423,9 +436,10 @@ const BREAKS = [
     run: PATCH_TESTS, expect: /a value edit is one attribute mutation/,
   },
   {
-    id: 'B69', what: 'the camera is not written to the drawn root',
-    file: 'projects/draw/src/canvas/renderer.ts', from: "if (this.#camera !== null) return [{ local: 'viewBox', value: this.#camera }];", to: '',
-    run: PATCH_TESTS, expect: /a camera on a root with a viewBox: the viewBox/,
+    // P1-M1: the camera is the root's own box (the camera sheet), no longer its viewBox.
+    id: 'B69', what: 'the camera box is not placed on the drawn root',
+    file: 'projects/draw/src/canvas/renderer.ts', from: '&& was.width === box.width && was.height === box.height))) placeRoot(this.#sheet, box);', to: '&& was.width === box.width && was.height === box.height))) void 0;',
+    run: PATCH_TESTS, expect: /a camera on a root with a viewBox: the box/,
   },
   {
     id: 'B70', what: "the canvas's hit test maps a stale node back to a NodeId",
@@ -433,13 +447,14 @@ const BREAKS = [
     run: PATCH_TESTS, expect: /a node taken off the canvas still maps to its NodeId/,
   },
   {
-    id: 'B71', what: "the editor's routing re-renders nested subtrees twice",
-    file: 'projects/draw/src/routing.ts', from: 'const subtrees = [...roots].filter((id) => !under(doc, id, roots, false));', to: 'const subtrees = [...roots];',
-    run: drawTests('routing.test.ts'), expect: /✖ structure: only the topmost subtrees/,
+    id: 'B71', what: 'a moved node re-renders its parent again (P1-M1: moved nodes are patched alone)',
+    file: 'projects/draw/src/routing.ts', from: '  const alone = [...cs.moved].filter((id) => !isStyle(doc, doc.nodes.get(id)?.parent));', to: '  const alone: NodeId[] = [];\n  for (const p of cs.structure) roots.add(p);',
+    run: drawTests('routing.test.ts'), expect: /✖ structure: a moved, inserted or removed node is patched alone/,
   },
   {
+    // P1-M1 fix (F5): re-anchored; the patches share one memo per change now.
     id: 'B72', what: 'the code view is not patched after an edit',
-    file: 'projects/draw/src/editor.ts', from: '      for (const id of r.code.blocks) this.#patchCode(id);\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '      for (const id of r.code.blocks) this.#patchCode(id, memo);\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
   },
   {
@@ -473,9 +488,10 @@ const BREAKS = [
     run: drawTests('editor.test.ts'), expect: /✖ a file placed otherwise/,
   },
   {
-    id: 'B79', what: 'a file with its own preserveAspectRatio is shown without the camera that fits it',
-    file: 'projects/draw/src/canvas/artboard.ts', from: 'if (p.align !== DEFAULT_PAR.align || p.meetOrSlice !== DEFAULT_PAR.meetOrSlice) return false;', to: '',
-    run: drawTests('artboard.test.ts'), expect: /✖ a file whose own root shows the fitted view/,
+    // P1-M1: fitsNatively went with the camera box; re-planted as the same fault in M.
+    id: 'B79', what: "the camera box ignores the root's own preserveAspectRatio (a file placed otherwise is shown as if centred)",
+    file: 'engine/geometry/ctm.ts', from: '  return viewportTransform(vb, parOf(doc, root), viewport.width, viewport.height);', to: '  return viewportTransform(vb, DEFAULT_PAR, viewport.width, viewport.height);',
+    run: drawTests('artboard.test.ts'), expect: /✖ the camera box at fit/,
   },
   {
     id: 'B80', what: 'the page zooms under a pinch on the canvas (touch-action removed from the canvas and the app)', slow: true,
@@ -493,14 +509,15 @@ const BREAKS = [
     run: SITE_E2E, expect: /after the wheel zoom the document point/,
   },
   {
-    id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true,
-    file: 'projects/draw/src/canvas/overlay.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
-    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+    id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true, checks: ['outlineOnTheElementAt400'],
+    file: 'projects/draw/src/canvas/overlay/index.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
+    run: DRAW_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
-    id: 'B84', what: 'the outline does not follow the zoom', slow: true,
-    file: 'projects/draw/src/editor.ts', from: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);\n    this.#outline();', to: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);',
-    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+    id: 'B84', what: 'the outline does not follow the zoom', slow: true, checks: ['outlineOnTheElementAt400'],
+    // P1-M1: re-planted on the camera box's #applyView.
+    file: 'projects/draw/src/editor.ts', from: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });\n    this.#show();', to: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });',
+    run: DRAW_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
     id: 'B85', what: 'a two-finger tap on the canvas no longer undoes', slow: true,
@@ -508,9 +525,9 @@ const BREAKS = [
     run: SITE_E2E, expect: /a two-finger tap on the canvas did not undo/,
   },
   {
-    id: 'B86', what: "the canvas's hit test finds nothing", slow: true,
-    file: 'projects/draw/src/canvas/stage.ts', from: 'ed.tapCanvas(this.#renderer.idFor(hit) ?? null);', to: 'ed.tapCanvas(null);',
-    run: SITE_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
+    id: 'B86', what: "the canvas's hit test finds nothing", slow: true, checks: ['outlineOnTheElementAt400', 'phoneRulesOnTheNewLayout'],
+    file: 'projects/draw/src/canvas/stage.ts', from: '      const id = this.#renderer.idFor(el);', to: '      const id = this.#renderer.idFor(null);',
+    run: DRAW_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
   },
   {
     id: 'B87', what: 'the canvas host is exposed to assistive tech', slow: true,
@@ -533,9 +550,10 @@ const BREAKS = [
     run: SITE_E2E, expect: /the scrubbed token doesn't flash/,
   },
   {
-    id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true,
-    file: 'projects/draw/test/e2e.mjs', from: 'must(bytes <= 250_000,', to: 'must(bytes <= 50_000,',
-    run: SITE_E2E, expect: /over the 250 KB budget/,
+    // P1-M1 fix: the budget is 1 MB (Mark, 2026-09-30); the same plant, on the new line, run alone.
+    id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true, checks: ['initialJsBudget'],
+    file: 'projects/draw/test/e2e.mjs', from: 'must(bytes <= 1_000_000,', to: 'must(bytes <= 50_000,',
+    run: DRAW_E2E, expect: /over the 1 MB budget/,
   },
   // P0-M3 review fixes.
   {
@@ -565,12 +583,12 @@ const BREAKS = [
   },
   {
     id: 'B97', what: 'a view whose camera overflows (a hostile viewBox) is applied anyway',
-    file: 'projects/draw/src/editor.ts', from: '    if (!drawable(next, this.#size)) return;\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '    if (!drawable(next, this.#size, this.#viewport)) return;\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ a hostile viewBox near the float limit/,
   },
   {
     id: 'B98', what: 'a token edit writes a character XML cannot hold (the Text sheet)',
-    file: 'engine/code/edit.ts', from: 'const bad = NOT_XML_CHAR.exec(text);', to: 'const bad = null as RegExpExecArray | null;',
+    file: 'engine/code/edit.ts', from: '(token: Token, text: string): string | null {\n  const bad = NOT_XML_CHAR.exec(text);', to: '(token: Token, text: string): string | null {\n  const bad = null as RegExpExecArray | null;',
     run: engineTests('code/edit.test.ts'), expect: /✖ no token takes a character XML 1\.0 cannot hold/,
   },
   {
@@ -634,9 +652,9 @@ const BREAKS = [
     run: drawTests('editor.test.ts'), expect: /✖ Edit source is offered for one element, never the root/,
   },
   {
-    id: 'B111', what: 'the ContextBar offers Edit source whatever is selected', slow: true,
+    id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true, checks: ['editSourceRoundTrip'],
     file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
-    run: SITE_E2E, expect: /Edit source is offered for the root <svg>/,
+    run: DRAW_E2E, expect: /Edit source is offered for the root <svg>/,
   },
   {
     id: 'B112', what: 'the page zooms under a pinch off the canvas (no touch-action on the app)', slow: true,
@@ -737,7 +755,7 @@ const BREAKS = [
   },
   {
     id: 'B131', what: 'the end of a scrub or a sheet is never saved',
-    file: 'projects/draw/src/editor.ts', from: '    this.#bump();\n    this.#changed();\n', to: '    this.#bump();\n',
+    file: 'projects/draw/src/editor.ts', from: '    else live.drag.cancel();\n    this.#bump();\n    this.#changed();\n', to: '    else live.drag.cancel();\n    this.#bump();\n',
     run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
   },
   {
@@ -757,7 +775,7 @@ const BREAKS = [
   },
   {
     id: 'B135', what: 'the as-is export normalizes line ends',
-    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: "encodeSvg((clean ? clean.text : serialize(doc)).replace(/\\r\\n/g, '\\n'), read)",
+    file: 'projects/draw/src/export/svg.ts', from: '  const { bytes, encoding, relabeled } = encodeSvg(text, read);', to: "  const { bytes, encoding, relabeled } = encodeSvg(text.replace(/\\r\\n/g, '\\n'), read);",
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {
@@ -970,7 +988,7 @@ const BREAKS = [
   },
   {
     id: 'B177', what: 'the as-is export writes the file as opened, not as edited',
-    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: 'encodeSvg(clean ? clean.text : doc.source, read)',
+    file: 'projects/draw/src/export/svg.ts', from: "  const text = clean ? clean.text : kind === 'as-is' ? stripDrawState(doc) : serialize(doc);", to: '  const text = clean ? clean.text : doc.source;',
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {
@@ -1020,7 +1038,7 @@ const BREAKS = [
   },
   {
     id: 'B187', what: 'Clean counts each removed element twice',
-    file: 'engine/export/clean.ts', from: '      removedElements++;', to: '      removedElements += 2;',
+    file: 'engine/export/clean.ts', from: '    removedElements++;', to: '    removedElements += 2;',
     run: engineTests('export/clean.test.ts'), expect: /✖ Inkscape and Illustrator files lose exactly their editor markup/,
   },
   {
@@ -1091,7 +1109,7 @@ const BREAKS = [
   },
   {
     id: 'B201', what: 'Copy puts the file as it was opened on the clipboard, not as it is now',
-    file: 'projects/draw/src/workspace.ts', from: '(this.#editor.doc ? this.#editor.source() : null)', to: '(this.#editor.doc ? this.#editor.doc.source : null)',
+    file: 'projects/draw/src/workspace.ts', from: '(doc ? stripDrawState(doc) : null)', to: '(doc ? doc.source : null)',
     run: drawTests('workspace.test.ts'), expect: /✖ Copy puts the file on the clipboard exactly as it is/,
   },
   {
@@ -1196,9 +1214,9 @@ const BREAKS = [
   },
   {
     // (A wider SLOP itself is caught first, by viewport.test.ts in the build: B275.)
-    id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true,
+    id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true, checks: ['aShortMoveOnTheCanvasIsATap'],
     file: 'projects/draw/src/canvas/stage.ts', from: 'x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp', to: 'x: (e.clientX - box.left) / 2, y: (e.clientY - box.top) / 2, t: e.timeStamp',
-    run: SITE_E2E, expect: /a touch that moved 8pt selected the circle/,
+    run: DRAW_E2E, expect: /a touch that moved 8pt did not move the circle/,
   },
   {
     id: 'B223', what: "the code bar's buttons fall under the tap floor", slow: true,
@@ -1675,12 +1693,521 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "      case 'text':\n        return this.#openSheet({ kind: 'text', ref, token: t });\n", to: "      case 'text':\n        return;\n",
     run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Write your own title" \(access\)/,
   },
+  // P1-M1 S1: engine geometry, the write policy, rewriteNumbers, moved/coalesce and ids.
+  {
+    id: 'B317', what: 'rewriteNumbers re-serializes the whole value (its tokens joined by single spaces)',
+    file: 'engine/code/edit.ts', from: "  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');\n  return out;", to: "  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');\n  return after.map((t) => t.text).join(' ');",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path move leaves relative commands byte for byte/,
+  },
+  {
+    id: 'B318', what: 'a rotate plan collapses the list into one matrix()',
+    file: 'engine/geometry/write.ts', from: '  const raw = end > 0 ? `${attr.raw.slice(0, end)} ${item}${attr.raw.slice(end)}` : item + attr.raw;', to: "  const raw = `matrix(${parseTransform(attr.raw)!.matrix.join(' ')})`;",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a transform list is never collapsed/,
+  },
+  {
+    id: 'B319', what: 'ownTransform ignores transform-origin',
+    file: 'engine/geometry/ctm.ts', from: '  return ox === 0 && oy === 0 ? t : multiply(multiply(translate(ox, oy), t), translate(-ox, -oy));', to: '  return t;',
+    run: engineTests('geometry/ctm.test.ts'), expect: /✖ transform-origin: keywords, lengths and % under view-box/,
+  },
+  {
+    id: 'B320', what: 'a path move moves relative commands too',
+    file: 'engine/geometry/write.ts', from: '    if (!abs) return null; // relative: its bytes stay\n', to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path move leaves relative commands byte for byte/,
+  },
+  {
+    id: 'B321', what: 'cssSets never reports a <style> rule',
+    file: 'engine/geometry/css.ts', from: "  if (sheet.rules.some((r) => r.decls.some((d) => names.includes(d)) && r.selectors.some((s) => mayMatch(s, doc, node)))) return 'sheet';\n", to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
+  },
+  {
+    id: 'B322', what: 'coalesce keeps a place op that ends where it started',
+    file: 'engine/commands/ops.ts', from: '    if (!samePlace(op.before, op.after)) return true;\n', to: '    return true;\n',
+    run: engineTests('commands/commands.test.ts'), expect: /✖ coalesce merges consecutive place ops of one node/,
+  },
+  {
+    id: 'B323', what: 'freshId returns the base even when it is taken',
+    file: 'engine/model/ids.ts', from: '  if (!used.has(base) && !taken.has(base)) return base;', to: '  return base;',
+    run: engineTests('ids.test.ts'), expect: /✖ freshId never reuses an id/,
+  },
+  {
+    id: 'B324', what: 'renameIdsIn skips url(#…) inside style=""',
+    file: 'engine/model/ids.ts', from: "  } else if (text.includes('url(')) {", to: "  } else if (text.includes('url(') && a.local !== 'style') {",
+    run: engineTests('ids.test.ts'), expect: /✖ renameIdsIn rewrites ids and references inside the subtree only/,
+  },
+  // P1-M1 S2: selection, move, the paper, the camera box, per-node routing.
+  {
+    // Leans on B275's anchor: two spaces keep valid TypeScript but take the text B275 edits away.
+    id: 'B325', what: "the dry run misses a stale anchor (it plants a second space in SLOP, B275's anchor)",
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'export const SLOP = 5;', to: 'export const SLOP =  5;',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +STALE/,
+  },
+  {
+    id: 'B326', what: "check-sinks' DOM-write allowlist widens from the overlay folder to the whole canvas folder",
+    file: 'projects/draw/tools/check-sinks.mjs', from: "].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay/']],", to: "].map((r) => r.source).join('|')), ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks allows DOM writes in the overlay folder only/,
+  },
+  {
+    id: 'B327', what: 'the tooltip never flips below the finger near the top of the canvas',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  return { text, finger, below: finger.y < TIP_FLIP };', to: '  return { text, finger, below: false };',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the tooltip sits 42 px above the finger/,
+  },
+  {
+    id: 'B328', what: 'the grid step ignores its 12 px floor (lines 1 px apart)',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  const want = GRID_MIN_PX / pxPerUnit;', to: '  const want = 1 / pxPerUnit;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the grid step is the smallest 1, 2 or 5/,
+  },
+  {
+    id: 'B329', what: '`held` ignores the time (a hold-drag reads as an ordinary drag)',
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'held: e.t - tr.t0 >= HOLD_MS', to: 'held: false',
+    run: drawTests('viewport.test.ts'), expect: /✖ a drag that starts after the pointer was held still for 450 ms is held/,
+  },
+  {
+    id: 'B330', what: 'a drag on an unselected shape only selects it (no move)',
+    file: 'projects/draw/src/editor.ts', from: '    if (!selected) this.select(g.add ? [...sel, g.target] : [g.target]);', to: "    if (!selected) {\n      this.select(g.add ? [...sel, g.target] : [g.target]);\n      g.mode = 'none';\n      return;\n    }",
+    run: drawTests('editor.test.ts'), expect: /✖ a drag on an unselected shape selects and moves it/,
+  },
+  // P1-M1 S2: per-node structure routing (B71 above is the route itself).
+  {
+    id: 'B331', what: 'a text leaf that moved draws its parent again instead of being placed alone',
+    file: 'projects/draw/src/canvas/renderer.ts', from: '    if (judgedWhole(doc, at)) return this.#patch(at);\n', to: '    return this.#patch(at);\n',
+    run: PATCH_TESTS, expect: /a whitespace leaf moved alone: only what moved is drawn again/,
+  },
+  {
+    id: 'B332', what: 'a moved node rebuilds the whole code listing',
+    file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
+    run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
+  },
+  {
+    id: 'B333', what: 'Bring forward moves one already last (it records an entry when nothing should move)',
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (past === null || moving.has(past)) continue;', to: '    if (moving.has(past!)) continue;',
+    run: drawTests('editor.test.ts'), expect: /✖ Bring forward and Send back swap each selected element/,
+  },
+  {
+    id: 'B334', what: 'a nudge (or Delete) acts while a field has focus',
+    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = '.draw-code';",
+    run: drawTests('keys.test.ts'), expect: /✖ no key acts in a field, in the code view, under a sheet/,
+  },
+  {
+    id: 'B335', what: 'every arrow repeat is its own history entry',
+    file: 'projects/draw/src/keys.ts', from: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n', to: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n      ed.nudgeEnd();\n',
+    run: drawTests('keys.test.ts'), expect: /✖ a held arrow with its repeats, and a second arrow while it is held, is one nudge/,
+  },
+  // P1-M1 S2, slow: the new e2e checks (each run alone, `checks`).
+  {
+    id: 'B336', what: 'a move rounds its delta to 2 units', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
+    file: 'projects/draw/src/editor.ts', from: '    const d = { x: toStep(rx, m.step), y: toStep(ry, m.step) };', to: '    const d = { x: toStep(rx, 2), y: toStep(ry, 2) };',
+    run: DRAW_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the drag did not move the circle by/,
+  },
+  {
+    id: 'B337', what: 'the tooltip is drawn under the finger', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
+    file: 'projects/draw/src/interact/overlay-model.ts', from: 'top: t.below ? t.finger.y + TIP_BELOW : t.finger.y - TIP_ABOVE - height', to: 'top: t.finger.y',
+    run: DRAW_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the tooltip's bottom edge is/,
+  },
+  {
+    id: 'B338', what: 'a marquee takes what it touches, not what it encloses', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
+    file: 'projects/draw/src/editor.ts', from: '      return b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.width <= r.x + r.width + 0.5 && b.y + b.height <= r.y + r.height + 0.5;', to: '      return b.x <= r.x + r.width && b.y <= r.y + r.height && b.x + b.width >= r.x && b.y + b.height >= r.y;',
+    run: DRAW_E2E, expect: /aMarqueeSelectsWhatItEncloses: a marquee around A, with B half inside it, selected AB/,
+  },
+  {
+    id: 'B339', what: 'a hold-drag on a shape moves it', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
+    file: 'projects/draw/src/editor.ts', from: '    if (held || g.target === null || g.onLocked) {', to: '    if (g.target === null || g.onLocked) {',
+    run: DRAW_E2E, expect: /aMarqueeSelectsWhatItEncloses: a hold-drag from B (drew no marquee|moved it)/,
+  },
+  {
+    id: 'B340', what: 'the code view rebuilds every block on a structure change', slow: true, checks: ['zOrderAndDeletePatchOnlyWhatMoved'],
+    file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
+    run: DRAW_E2E, expect: /zOrderAndDeletePatchOnlyWhatMoved: Bring forward: new code blocks/,
+  },
+  {
+    id: 'B341', what: 'the arrows nudge while a code token has focus', slow: true, checks: ['arrowsNudgeOnlyTheCanvasSelection'],
+    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = 'input, textarea, select';",
+    run: DRAW_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
+  },
+  {
+    id: 'B342', what: 'the grid draws past the paper', slow: true, checks: ['theGridToggleShowsTheGrid'],
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  const over = intersect(paper, { x: 0, y: 0, width: host.width, height: host.height });', to: '  const over = { x: 0, y: 0, width: host.width, height: host.height };',
+    run: DRAW_E2E, expect: /theGridToggleShowsTheGrid: .*runs past the paper/,
+  },
+  {
+    id: 'B343', what: "the engine's geometry ignores a nested svg's viewBox", slow: true, checks: ['geometryMatchesTheBrowser'],
+    file: 'engine/geometry/ctm.ts', from: '  const inner = vb ? viewportTransform(vb, parOf(doc, n), vp.width, vp.height) : IDENTITY;', to: '  const inner = IDENTITY;',
+    run: DRAW_E2E, expect: /geometryMatchesTheBrowser: \d+ element\(s\) whose box differs/,
+  },
+  {
+    id: 'B344', what: "the renderer supplies the camera as the root's viewBox again", slow: true, checks: ['percentLengthsKeepTheirSizeUnderZoom'],
+    file: 'projects/draw/src/canvas/renderer.ts', from: '    if (!doc || !c || hasOwnViewBox(doc)) return null;', to: '    if (!doc || !c) return null;',
+    run: DRAW_E2E, expect: /percentLengthsKeepTheirSizeUnderZoom: .*(viewBox is|the 100% rect measures)/,
+  },
+  // P1-M1 S3: handles, snapping and Draw's own state.
+  {
+    id: 'B345', what: 'the handle pick radius grows to 40 px',
+    file: 'projects/draw/src/interact/handles.ts', from: 'export const HANDLE_PICK_PX = 26;', to: 'export const HANDLE_PICK_PX = 40;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px/,
+  },
+  {
+    id: 'B346', what: 'a group resize prepends a new translate() scale() pair on every drag instead of editing the leading one',
+    file: 'engine/geometry/write.ts', from: "  if (a && t?.fn === 'translate' && t.args.length === 2 && k?.fn === 'scale') {", to: "  if (a && t?.fn === 'translate' && t.args.length === 2 && k?.fn === 'scale' && false) {",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a group resize keeps its fixed corner and edits a leading translate\(\) scale\(\) pair/,
+  },
+  {
+    id: 'B347', what: "the ring isn't magnetic",
+    file: 'projects/draw/src/interact/handles.ts', from: '  return (Math.abs(r - m) <= 4 ? m : r) + 0;', to: '  return r + 0;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px, the one drawn last on a tie; the ring is magnetic/,
+  },
+  {
+    id: 'B348', what: "the diamond isn't clamped",
+    file: 'projects/draw/src/interact/handles.ts', from: '  return Math.min(4, Math.max(0.2, Number(s.toFixed(2))));', to: '  return Number(s.toFixed(2));',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px, the one drawn last on a tie; the ring is magnetic/,
+  },
+  {
+    id: 'B349', what: 'the snap threshold doubles',
+    file: 'projects/draw/src/interact/snap.ts', from: 'export const SNAP_PX = 8;', to: 'export const SNAP_PX = 16;',
+    run: drawTests('editor.test.ts'), expect: /✖ a move snaps to a target within 8 px/,
+  },
+  {
+    id: 'B350', what: "the last guide's removal leaves xmlns:draw",
+    file: 'engine/model/draw-state.ts', from: '    undeclareIfUnused(doc, apply);\n    return;', to: '    return;',
+    run: engineTests('draw-state.test.ts'), expect: /✖ the first guide in a file with no <metadata>/,
+  },
+  {
+    id: 'B351', what: 'stripDrawState re-serializes a file with no Draw state',
+    file: 'engine/model/draw-state.ts', from: '  if (!hasDrawItems(doc) && boundPrefix(doc) === null) return serialize(doc);\n', to: '',
+    run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState of a file with no Draw state is the file itself/,
+  },
+  {
+    id: 'B352', what: 'stripNamespaces leaves an empty Draw-made <metadata>',
+    // P1-M1 fix (F1): re-anchored; what Draw made is judged by draw-ns.ts's one rule.
+    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
+    run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState gives every corpus file back byte for byte/,
+  },
+  {
+    id: 'B353', what: 'cleanExport loses DRAW_NS',
+    file: 'engine/export/clean.ts', from: '  DRAW_NS,\n]);', to: ']);',
+    run: engineTests('export/clean.test.ts'), expect: /✖ the editor namespaces are the ledger's "Editor data" rows/,
+  },
+  {
+    id: 'B354', what: 'the centre handle moves by half the drag (a lab goal)',
+    file: 'projects/draw/src/editor.ts', from: '      if (g.move) g.move.centre = true;', to: '      if (g.move) {\n        g.move.centre = true;\n        g.move.rootInv = g.move.rootInv.map((v) => v / 2) as unknown as Affine;\n      }',
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goals "Go to x 80, y 20"/,
+  },
+  // P1-M1 S3, slow.
+  {
+    id: 'B355', what: "the dragged handle isn't yellow", slow: true, checks: ['theNearestHandleWithin26ptWins'],
+    file: 'projects/draw/src/app.css', from: '.draw-hd.on { fill: #ffe600; }', to: '.draw-hd.on { }',
+    run: DRAW_E2E, expect: /theNearestHandleWithin26ptWins: the dragged handle is .* during the drag, not yellow/,
+  },
+  {
+    id: 'B356', what: "the top-left corner doesn't keep the bottom-right", slow: true, checks: ['rectCornerHandlesKeepTheOppositeCorner'],
+    file: 'engine/geometry/write.ts', from: '  const f = cornerOf(box, OPPOSITE[corner]);', to: "  const f = cornerOf(box, corner === 'tl' ? 'tr' : OPPOSITE[corner]);",
+    run: DRAW_E2E, expect: /rectCornerHandlesKeepTheOppositeCorner: the top-left corner to \(30, 30\)/,
+  },
+  {
+    id: 'B357', what: 'a rotation collapses the list to matrix()', slow: true, checks: ['rotateAndScaleHandlesEditTheLabHouse'],
+    file: 'engine/geometry/write.ts', from: '    if (rot.args[0].text === a) return { edits: [] };\n', to: "    if (rot.args[0].text === a) return { edits: [] };\n    return { edits: [{ id, ns: null, local: 'transform', raw: `matrix(${fmt(Math.cos((angle * Math.PI) / 180), 3)} ${fmt(Math.sin((angle * Math.PI) / 180), 3)} ${fmt(-Math.sin((angle * Math.PI) / 180), 3)} ${fmt(Math.cos((angle * Math.PI) / 180), 3)} 50 50)`, add: false }] };\n",
+    run: DRAW_E2E, expect: /rotateAndScaleHandlesEditTheLabHouse: the ring at 180° did not write rotate\(180\) alone/,
+  },
+  {
+    id: 'B358', what: 'snapping ignores guides', slow: true, checks: ['movesSnapToGuidesShapesAndTheGrid'],
+    file: 'projects/draw/src/editor.ts', from: "    if (prefs.guides) for (const g of readState(doc).guides) (g.axis === 'v' ? out.x : out.y).push({ at: g.at, kind: 'guide' });", to: '    void prefs.guides;',
+    run: DRAW_E2E, expect: /movesSnapToGuidesShapesAndTheGrid: the rect's left edge landed on 39, not the guide at 40/,
+  },
+  {
+    id: 'B359', what: "a guide's pill moves it by half the drag", slow: true, checks: ['movesSnapToGuidesShapesAndTheGrid'],
+    file: 'projects/draw/src/editor.ts', from: '    const [rx, ry] = applyM(inv, g.at.x, g.at.y);\n    const at = toStep(', to: '    const [rx, ry] = applyM(inv, (g.at.x + g.at0.x) / 2, (g.at.y + g.at0.y) / 2);\n    const at = toStep(',
+    run: DRAW_E2E, expect: /movesSnapToGuidesShapesAndTheGrid: the pill did not drag the guide to 45/,
+  },
+  // P1-M1 S4: structure, Layers, rem and Draw's own state.
+  {
+    id: 'B360', what: 'the copy keeps draw:locked',
+    file: 'projects/draw/src/interact/structure.ts', from: "      for (const n of descendants(doc, copy)) if (n.kind === 'element' && findAttr(n, DRAW_NS, 'locked')) apply(opSetAttr(doc, n.id, DRAW_NS, 'locked', null));\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Duplicate: the copy follows its original/,
+  },
+  {
+    id: 'B361', what: 'duplicate renames ids across the whole document (outside references move to the copy)',
+    file: 'projects/draw/src/interact/structure.ts', from: '      renameIdsIn(doc, copy, map, apply);\n', to: '      renameIdsIn(doc, copy, map, apply);\n      renameIdsIn(doc, doc.root, map, apply);\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Duplicate: the copy follows its original/,
+  },
+  {
+    id: 'B362', what: "ungroup doesn't refuse opacity",
+    file: 'projects/draw/src/interact/structure.ts', from: "(a.local === 'id' || a.local === 'transform')", to: "(a.local === 'id' || a.local === 'transform' || a.local === 'opacity')",
+    run: drawTests('editor.test.ts'), expect: /✖ Group puts the selection in a new <g>/,
+  },
+  {
+    id: 'B363', what: 'grouping across parents is allowed',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (ids.some((id) => doc.nodes.get(id)!.parent !== p)) return 'Group needs shapes with the same parent.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Group puts the selection in a new <g>/,
+  },
+  {
+    id: 'B364', what: 'Hide writes visibility instead',
+    file: 'projects/draw/src/editor.ts', from: "apply(opSetAttr(doc, id, null, 'display', hidden ? 'none' : null))", to: "apply(opSetAttr(doc, id, null, 'visibility', hidden ? 'hidden' : null))",
+    run: drawTests('editor.test.ts'), expect: /✖ Layers: Hide writes display="none"/,
+  },
+  {
+    id: 'B365', what: 'the rem report misses rem in style=""',
+    file: 'engine/report/import-report.ts', from: '      for (const a of n.attrs) attributes += countRem(a.raw);', to: "      for (const a of n.attrs) if (a.local !== 'style') attributes += countRem(a.raw);",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ rem lengths in attributes and style="" are counted/,
+  },
+  {
+    id: 'B366', what: 'distribute keeps unequal gaps',
+    file: 'projects/draw/src/interact/align.ts', from: '    const d = at - lo(boxes[i]);', to: '    const d = 0 * (at - lo(boxes[i]));',
+    run: drawTests('align.test.ts'), expect: /✖ align deltas: each box to the target/,
+  },
+  {
+    id: 'B367', what: 'Rename leaves a reference behind',
+    file: 'projects/draw/src/editor.ts', from: '      else renameIdsIn(doc, doc.root, new Map([[was, next]]), apply);', to: "      else apply(opSetAttr(doc, id, null, 'id', next));",
+    run: drawTests('editor.test.ts'), expect: /✖ Layers: Hide writes display="none"/,
+  },
+  {
+    id: 'B373', what: 'a marquee takes a shape visibility hides',
+    file: 'projects/draw/src/editor.ts', from: '      if (!m || m.hidden) return false;', to: '      if (!m) return false;',
+    run: drawTests('editor.test.ts'), expect: /✖ a marquee and Select all pass by a shape visibility hides/,
+  },
+  {
+    id: 'B374', what: "a move in the root's own units needs the root measured (a file with text: nothing moves)",
+    file: 'projects/draw/src/editor.ts', from: "      const m = p === doc.root ? root : measured.get(p)?.toHost; // the root's own units are the camera's, measured or not", to: '      const m = measured.get(p)?.toHost;',
+    run: drawTests('editor.test.ts'), expect: /✖ no raw items:/,
+  },
+  // P1-M1 S4, slow.
+  {
+    // P1-M1 fix (F5): re-anchored; Duplicate reads the ids in use once and hands them to freshId.
+    id: 'B368', what: "the copy keeps the original's ids", slow: true, checks: ['duplicateGetsFreshIdsAndItsOwnReferences'],
+    file: 'projects/draw/src/interact/structure.ts', from: '          const now = freshId(doc, was, taken, used);', to: '          const now = was;',
+    run: DRAW_E2E, expect: /duplicateGetsFreshIdsAndItsOwnReferences: the copy's ids are not fresh/,
+  },
+  {
+    id: 'B369', what: "ungroup drops the group's transform", slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!t || gValue === null || !gValue.trim()) continue;', to: '    continue;',
+    run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup did not push translate\(10 5\) rotate\(15\) into each child/,
+  },
+  {
+    id: 'B370', what: 'a locked shape takes taps', slow: true, checks: ['layersHideAndLockShapes'],
+    file: 'projects/draw/src/editor.ts', from: '    const target = targets.find((t) => !isLocked(doc, t)) ?? null;', to: '    const target = targets[0] ?? null;',
+    run: DRAW_E2E, expect: /layersHideAndLockShapes: a tap on the locked disc took <circle#disc>, not the sky under it/,
+  },
+  {
+    id: 'B371', what: 'As-is keeps <draw:state>', slow: true, checks: ['drawStateStaysOutOfAsIsAndClean'],
+    file: 'projects/draw/src/export/svg.ts', from: "  const text = clean ? clean.text : kind === 'as-is' ? stripDrawState(doc) : serialize(doc);", to: '  const text = clean ? clean.text : serialize(doc);',
+    run: DRAW_E2E, expect: /drawStateStaysOutOfAsIsAndClean: the As-is export holds draw:/,
+  },
+  {
+    id: 'B372', what: 'a ContextBar button shrinks under 44', slow: true, checks: ['phoneRulesOnTheSelectionTools'],
+    file: 'projects/draw/src/app.css', from: '.draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }', to: '.draw-ctx-btn { display: inline-grid; place-items: center; width: 2.5rem; min-width: 0; padding: 0; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheSelectionTools \(956\): 440×956:\n\s+one selected: Deselect is 30×44/,
+  },
+  // P1-M1 review fixes (F1–F17).
+  {
+    id: 'B375', what: 'F5: the CSS sheet cache is keyed on doc.version again (a move of k shapes reads every <style> k times)',
+    file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
+    run: drawTests('large-selection.test.ts'), expect: /✖ a command over a large selection takes linear time/,
+  },
+  {
+    id: 'B376', what: 'F5: a <style> that comes into the document is not noticed (a stale sheet)',
+    file: 'engine/model/doc.ts', from: '  if (inStyle(doc, parent) || holdsStyle(doc, id)) doc.styleVersion++;\n  return at;', to: '  return at;',
+    run: engineTests('geometry/css.test.ts'), expect: /✖ the sheets are read again whenever what a <style> says can change/,
+  },
+  {
+    id: 'B377', what: 'F5: the code view is told about each moved node on its own again',
+    file: 'projects/draw/src/editor.ts', from: '    if (placements.length) code.place(placements);', to: '    for (const one of placements) code.place([one]);',
+    run: drawTests('editor.test.ts'), expect: /✖ Bring forward and Send back swap each selected element/,
+  },
+  {
+    id: 'B379', what: 'F4: Group nests a shape past the depth the parser opens (a working copy that no longer opens)',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (depthOf(doc, p!) + 1 + ids.reduce((h, id) => Math.max(h, height(doc, id)), 0) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Group refuses to nest a shape past the depth the parser opens/,
+  },
+  {
+    id: 'B380', what: 'F7: an id may hold a character XML can’t (U+FFFE, a lone surrogate): Rename writes a file that no longer opens',
+    file: 'engine/code/edit.ts', from: "  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;\n  return ID.test(text)", to: '  return ID.test(text)',
+    run: drawTests('editor.test.ts'), expect: /✖ Rename refuses a name XML can’t hold as an id/,
+  },
+  {
+    id: 'B381', what: 'F16: Ungroup pushes the group’s transform onto every element child again (a clip beside its user is moved twice)',
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup gives the group’s transform only to the children drawn where they sit/,
+  },
+  {
+    id: 'B383', what: 'F16: Ungroup takes a group with a <title> (its name goes to the parent)',
+    file: 'projects/draw/src/interact/structure.ts', from: "    if (k.local === 'title') return 'Its title names the group; ungrouping would give it to the parent.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup gives the group’s transform only to the children drawn where they sit/,
+  },
+  {
+    id: 'B384', what: 'F1: any element marked draw:made counts as Draw’s own (a shape so marked leaves the As-is export)',
+    file: 'engine/model/draw-ns.ts', from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some(', to: '  return n.attrs.some(',
+    run: engineTests('draw-state.test.ts'), expect: /✖ only Draw’s own empty <metadata> is taken away/,
+  },
+  {
+    id: 'B385', what: 'F2: a draw:locked on the root locks the whole canvas again',
+    file: 'engine/model/draw-state.ts', from: "n && n.kind === 'element' && n.id !== doc.root;", to: "n && n.kind === 'element';",
+    run: drawTests('editor.test.ts'), expect: /✖ a lock on the root is not Draw’s/,
+  },
+  {
+    id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge', to: 'this.#gesture?.move || this.#nudge',
+    run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
+  },
+  {
+    id: 'B387', what: 'F6: a corner drag gathers its snap targets on every frame again',
+    file: 'projects/draw/src/editor.ts', from: '    const targets = hd.targets;\n', to: '    const targets = this.#snapTargets([hd.id]);\n',
+    run: drawTests('editor.test.ts'), expect: /✖ a corner drag gathers its snap targets once/,
+  },
+  {
+    id: 'B388', what: 'F8: every guide a file lists is read (a million make each overlay frame seconds long)',
+    file: 'engine/model/draw-state.ts', from: '  while (guides.length < MAX_GUIDES) {', to: '  while (guides.length < Infinity) {',
+    run: engineTests('draw-state.test.ts'), expect: /✖ a state with 10⁶ guides reads its first 100 in under 50 ms/,
+  },
+  {
+    id: 'B389', what: 'F9: the scale diamond drops the sign of scale() (a mirror flips the other axis and shrinks)',
+    file: 'projects/draw/src/interact/handles.ts', from: '  if (k < 0) return -scaleStep(-k);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element the scale diamond keeps the mirror/,
+  },
+  {
+    id: 'B390', what: 'F9: the ring takes its flip from the parent alone (on a mirrored list it turns against the finger)',
+    file: 'projects/draw/src/editor.ts', from: "      for (const it of list ? (r === -1 ? list.items : list.items.slice(0, r)) : []) before = multiply(before, itemMatrix(it));\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element the scale diamond keeps the mirror/,
+  },
+  {
+    id: 'B391', what: 'F11: each keystroke in the Grid step field is its own history entry again',
+    file: 'projects/draw/src/editor.ts', from: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n', to: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n    this.gridStepEnd();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ the Snap sheet’s Grid step field is one history entry/,
+  },
+  {
+    id: 'B394', what: 'F10: a move of an element whose transform flattens it is not refused',
+    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse('Its transform flattens it, so its geometry can’t move.');\n", to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
+  },
+  {
+    id: 'B395', what: 'F14: Convert rem writes a unitless length into style="" again',
+    file: 'engine/geometry/lengths.ts', from: "`${fmt(Number(n) * rootFont, 4)}${css ? 'px' : ''}`", to: 'fmt(Number(n) * rootFont, 4)',
+    run: engineTests('geometry/lengths.test.ts'), expect: /✖ in a style declaration a converted rem keeps a unit/,
+  },
+  {
+    id: 'B397', what: 'F12: Hide writes display="none" where CSS sets display (the refusal skipped)',
+    file: 'projects/draw/src/editor.ts', from: "    if (cssSets(doc, id, 'display') !== 'no') return void this.notice.set('Its display is set by CSS.');\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Hide and Show are refused, with the reason, when CSS sets display/,
+  },
+  {
+    id: 'B398', what: 'F12: the centre handle’s tooltip reads the shape’s old centre',
+    file: 'projects/draw/src/editor.ts', from: "    let text = `x ${fmt(cx, dec)}, y ${fmt(cy, dec)}`;", to: "    let text = `x ${fmt(cx - m.delta.x, dec)}, y ${fmt(cy - m.delta.y, dec)}`;",
+    run: drawTests('editor.test.ts'), expect: /✖ the centre handle moves the shape by whole units, with the tooltip/,
+  },
+  {
+    id: 'B399', what: 'F12: a dragged corner ignores the snap targets',
+    file: 'projects/draw/src/editor.ts', from: '    if (!toHost || !inv || !targets) return to;', to: '    if (!toHost || !inv || !targets || true) return to;',
+    run: drawTests('editor.test.ts'), expect: /✖ a dragged corner snaps to a guide within 8 px/,
+  },
+  {
+    id: 'B400', what: 'F12: the ring and the diamond lose the lab’s magenta stroke',
+    file: 'projects/draw/src/app.css', from: '.draw-hd.rot, .draw-hd.scale { stroke: #e6007e; }', to: '.draw-hd.rot, .draw-hd.scale { stroke: #00a3e0; }',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the seven handle styles are SVG Lab’s/,
+  },
+  {
+    id: 'B401', what: 'F12: a nested svg’s corner resize measures its content, not its own viewport',
+    file: 'engine/geometry/write.ts', from: '    const vp = nestedViewport(doc, n, opts.ctx);', to: '    const vp = localBounds(doc, id, opts.ctx);',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ corner resizes of a nested svg, an image and a foreignObject/,
+  },
+  // P1-M1 follow-ups.
+  {
+    id: 'B403', what: 'the overlay’s union box spreads every corner into Math.min again (a selection of 50,000 shapes throws)',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: 'export function unionBox(quads: readonly Quad[]): Rect | null {\n',
+    to: 'export function unionBox(quads: readonly Quad[]): Rect | null {\n  const pts = quads.flat();\n  if (!pts.length) return null;\n  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);\n  const x = Math.min(...xs), y = Math.min(...ys);\n  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };\n',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the union boxes take 200,000 boxes without throwing/,
+  },
+  {
+    id: 'B404', what: 'Align’s union box spreads every box into Math.min again (Align over 200,000 shapes throws)',
+    file: 'projects/draw/src/editor.ts', from: 'export const unionRect = (bs: readonly Rect[]): Rect => {\n',
+    to: 'export const unionRect = (bs: readonly Rect[]): Rect => {\n  const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));\n  return { x, y, width: Math.max(...bs.map((b) => b.x + b.width)) - x, height: Math.max(...bs.map((b) => b.y + b.height)) - y };\n',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the union boxes take 200,000 boxes without throwing/,
+  },
+  {
+    id: 'B405', what: 'Ungroup takes a group that holds an animation of itself (the animation retargets to the parent)',
+    file: 'projects/draw/src/interact/structure.ts', from: "    if (ANIMATIONS.has(k.local) && animatesGroup(doc, k, own)) return 'It holds an animation that targets the group; ungrouping would retarget it.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when the group holds an animation that animates it/,
+  },
+  {
+    id: 'B406', what: 'Ungroup pushes its transform onto a child something refers to (a use of it takes the transform twice)',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (attrValue(doc, n, null, 'transform')?.trim()) {\n    const pushed", to: '  if (false) {\n    const pushed',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when a use, an href or a url\(#…\) refers to a child/,
+  },
+  // P1-M1 review fixes, slow.
+  {
+    id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame over 2,000 shapes costs far more than 4× one over 500)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
+    file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
+    run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms \(the median\), [\d.]+× the \d+ ms over 500, not under 6×/,
+  },
+  {
+    id: 'B392', what: 'F11: each keystroke in the Grid step field is its own history entry again', slow: true, checks: ['theGridStepFieldIsOneEntry'],
+    file: 'projects/draw/src/editor.ts', from: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n', to: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n    this.gridStepEnd();\n',
+    run: DRAW_E2E, expect: /theGridStepFieldIsOneEntry: one undo did not give Auto back/,
+  },
+  {
+    id: 'B393', what: 'F13: the Snap sheet is rendered inside the canvas again (clipped by it, under its chrome and marks)', slow: true, checks: ['theSnapSheetIsReachableOnThePhone'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => setOpen(false)} />}',
+    run: DRAW_E2E, expect: /theSnapSheetIsReachableOnThePhone: (Done is at .* outside the|on top of (Done|the Grid step field) is)/,
+  },
+  {
+    id: 'B396', what: "F17: the camera's rule leaves its cascade layer (a file's #id rule with !important moves the drawing off its paper)", slow: true, checks: ['aFilesOwnCssCantMoveItsDrawing'],
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: /`@layer draw-camera \{ (:host > svg \{[^`]*\}) \}`/, to: '`$1`',
+    run: DRAW_E2E, expect: /aFilesOwnCssCantMoveItsDrawing: the file's #r \{ left, top !important \} moved the drawing/,
+  },
+  {
+    id: 'B402', what: 'F12: the Snap sheet’s toggles are not kept on the device (forgotten on a reload)', slow: true, checks: ['theGridToggleShowsTheGrid'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "    writePref('snap', SNAP_NAMES.filter(([n]) => !next[n]).map(([n]) => n).join(' ') || null);\n", to: '',
+    run: DRAW_E2E, expect: /theGridToggleShowsTheGrid: after a reload the Snap toggles are/,
+  },
+  {
+    id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
+    run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup gave the clip the group's transform/,
+  },
 ];
 
 const args = process.argv.slice(2);
 const quick = args.includes('--quick');
+const dry = args.includes('--dry');
 const only = args.filter((a) => /^B\d+$/.test(a));
 const chosen = BREAKS.filter((b) => (only.length ? only.includes(b.id) : !(quick && b.slow)));
+
+/** The broken file's text: the original with the break applied (the real run and the dry run share this). */
+function applyBreak(b, original) {
+  return b.append != null ? original + b.append : original.replace(b.from, b.to);
+}
+
+// ── the dry run: does every chosen break still apply? ─────────────────────────────────────────
+if (dry) {
+  const problems = [];
+  const ids = new Map();
+  for (const b of BREAKS) ids.set(b.id, (ids.get(b.id) ?? 0) + 1);
+  for (const b of chosen) {
+    const say = (kind, text) => problems.push(`${b.id.padEnd(5)} ${kind.padEnd(8)} ${text}`);
+    if (ids.get(b.id) > 1) say('DUP', 'the id is used by another break');
+    const missing = [];
+    if (!Array.isArray(b.run)) missing.push('run');
+    if (!(b.expect instanceof RegExp)) missing.push('an expect RegExp');
+    const edits = b.file && (b.append != null || (b.from != null && b.to != null));
+    const creates = b.create && b.content != null;
+    if (!edits && !creates) missing.push('file with from/to or append, or create with content');
+    if (missing.length) {
+      say('BAD', `no ${missing.join(', no ')}`);
+      continue;
+    }
+    if (b.create && existsSync(join(REPO, b.create))) say('TAKEN', `${b.create}: the path already exists`);
+    if (!b.file) continue;
+    const path = join(REPO, b.file);
+    if (!existsSync(path)) {
+      say('MISSING', `${b.file}: no such file`);
+      continue;
+    }
+    const original = readFileSync(path, 'utf8');
+    if (applyBreak(b, original) !== original) continue;
+    const found = b.from instanceof RegExp ? new RegExp(b.from.source, b.from.flags.replace(/[gy]/g, '')).test(original) : original.includes(b.from);
+    if (found) say('NOOP', `${b.file}: the anchor is there but replacing it changes nothing`);
+    else say('STALE', `${b.file}: the anchor is not in the file`);
+  }
+  for (const p of problems) console.log(p);
+  const bad = new Set(problems.map((p) => p.split(' ')[0])).size;
+  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
+  process.exit(bad ? 1 : 0);
+}
 
 let undetected = 0;
 for (const b of chosen) {
@@ -1694,7 +2221,7 @@ for (const b of chosen) {
   let caught = false;
   try {
     if (file) {
-      const next = b.append != null ? original + b.append : original.replace(b.from, b.to);
+      const next = applyBreak(b, original);
       if (next === original) throw new Error(`${b.id}: the break did not apply (anchor not found)`);
       writeFileSync(file, next);
     }
@@ -1704,7 +2231,8 @@ for (const b of chosen) {
     }
     const [cmd, cmdArgs, cwd] = b.run;
     try {
-      out = execFileSync(cmd, cmdArgs, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const env = b.checks ? { ...process.env, DRAW_E2E_ONLY: b.checks.join(',') } : process.env;
+      out = execFileSync(cmd, cmdArgs, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       out = `${e.stdout ?? ''}${e.stderr ?? ''}`;
       caught = b.expect.test(out);
@@ -1717,5 +2245,6 @@ for (const b of chosen) {
   if (!caught) undetected++;
   console.log(`${caught ? 'red ✓' : 'GREEN ✗'}  ${b.id}  ${b.what}${caught ? '' : `\n        expected ${b.expect} in:\n${out.split('\n').slice(-8).map((l) => '        ' + l).join('\n')}`}`);
 }
+if (chosen.some((b) => b.run === DRAW_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
 console.log(undetected ? `\n${undetected} break(s) went undetected.` : `\nAll ${chosen.length} break(s) went red.`);
 process.exitCode = undetected ? 1 : 0;

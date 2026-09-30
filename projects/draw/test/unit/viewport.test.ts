@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { camera, drawable, fit, pinch, toDoc, toScreen, zoomAbout, panBy, MAX_SCALE, type View } from '../../src/canvas/viewport.ts';
-import { GestureMachine, SLOP, type PointerInput } from '../../src/canvas/gestures.ts';
+import { GestureMachine, HOLD_MS, SLOP, type GestureEvent, type PointerInput } from '../../src/canvas/gestures.ts';
 import { mulberry32 } from '../../../../engine/test/values/rng.ts';
 
 const HOST = { width: 440, height: 552 };
@@ -128,4 +128,17 @@ test('a cancelled pointer cancels its gesture; the mouse is a tool pointer', () 
   assert.deepEqual(run([ev('down', 1, 10, 10, 0), ev('cancel', 1, 10, 10, 5)]), ['tool-down', 'tool-cancel']);
   assert.deepEqual(run([ev('down', 1, 10, 10, 0, 'mouse'), ev('move', 1, 50, 10, 5, 'mouse'), ev('up', 1, 50, 10, 9, 'mouse')]),
     ['tool-down', 'tool-drag-start', 'tool-drag-end']);
+});
+
+test('a drag that starts after the pointer was held still for 450 ms is held; a quick one, or one that moved first, is not', () => {
+  assert.equal(HOLD_MS, 450);
+  const start = (inputs: PointerInput[]) => {
+    const m = new GestureMachine();
+    return inputs.flatMap((i) => m.feed(i)).find((e): e is Extract<GestureEvent, { type: 'tool-drag-start' }> => e.type === 'tool-drag-start');
+  };
+  assert.equal(start([ev('down', 1, 10, 10, 0), ev('move', 1, 11, 10, 300), ev('move', 1, 30, 10, 460)])?.held, true, 'held still, then dragged');
+  assert.equal(start([ev('down', 1, 10, 10, 0), ev('move', 1, 30, 10, 449)])?.held, false, 'a drag at 449 ms');
+  assert.equal(start([ev('down', 1, 10, 10, 0), ev('move', 1, 30, 10, 100), ev('move', 1, 60, 10, 900)])?.held, false, 'moved past the slop at once: an ordinary drag, however long it lasts');
+  assert.equal(start([ev('down', 1, 10, 10, 0, 'mouse'), ev('move', 1, 30, 10, 600, 'mouse')])?.held, true, 'the mouse too');
+  assert.equal(start([ev('down', 9, 10, 10, 0, 'pen'), ev('move', 9, 30, 10, 500, 'pen')])?.held, true, 'and the Pencil');
 });

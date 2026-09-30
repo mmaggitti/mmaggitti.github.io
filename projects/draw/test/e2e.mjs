@@ -37,6 +37,19 @@
 // pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do. The
 // P1-M0 review adds: a data-* name the DOM refuses is dropped, never thrown on, in a file and in Edit
 // source; and six more parser probes (entity names, an entity declared twice, an unparsed entity).
+// P1-M1 adds selection and transform: a drag moves a shape by whole units (the tooltip and the
+// coordinate guides on it, two attribute mutations a frame), a marquee takes what it encloses,
+// Bring forward, Send back and Delete patch only what moved on the canvas and in the code, the
+// arrows nudge only the canvas selection, the grid, the engine's geometry against the browser's,
+// and % lengths keeping their size under zoom (the view is the root's own box, never its viewBox);
+// the handles (the nearest within 26 pt wins, a rect's corners keep the opposite corner, the ring and
+// the diamond on the lab's house) and snapping to guides, shapes, the artboard and the grid; then
+// Duplicate (fresh ids, its own references), Group and Ungroup keeping every shape in place, the
+// Layers tab (hide, lock, rename), Draw's own state kept out of As-is, Copy and Clean, and the phone
+// rules on the selection tools. The P1-M1 review adds: a drag of 2,000 selected shapes keeping up,
+// the Grid step field as one history entry, the Snap sheet reachable over the canvas on the phone,
+// Ungroup leaving a clip where it clips, the Snap toggles kept across a reload, and a file's own
+// !important CSS unable to move its drawing off the paper.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -50,8 +63,12 @@ import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
 import { detentHeights } from '../src/detents.ts';
 import { encodeImport } from '../src/platform/files.ts';
-import { parseDoc } from '../../../engine/model/doc.ts';
+import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
+import { parsePath } from '../../../engine/path/parse.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
+import { cleanExport } from '../../../engine/export/clean.ts';
+import { rootBounds } from '../../../engine/geometry/bounds.ts';
+import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 
@@ -82,6 +99,10 @@ const EVIDENCE = join(HERE, '../../../.smoke/draw-e2e-evidence.jsonl');
 // These two assert in their own modules (renderer-patch.mjs, probe-shadow.mjs), which throw on
 // every failure, rather than through must().
 const DELEGATES = new Set(['rendererPatchCases', 'shadowRootProbe']);
+// DRAW_E2E_ONLY=checkA,checkB runs just those checks: tools/prove-breaks.mjs proves a slow break
+// against the check it names (a break's `checks`). Such a run never writes the evidence file's last
+// line, so ledger-check --e2e-evidence never takes it for a complete run.
+const ONLY = process.env.DRAW_E2E_ONLY ? new Set(process.env.DRAW_E2E_ONLY.split(',')) : null;
 
 // Every check runs even after one fails, and the run fails with all their messages: WebKit runs
 // only in CI, so one run should show everything it disagrees with.
@@ -93,6 +114,7 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   mkdirSync(dirname(EVIDENCE), { recursive: true });
   writeFileSync(EVIDENCE, '');
   const check = async (fn, ...args) => {
+    if (ONLY && !ONLY.has(fn.name)) return;
     calls++;
     const before = asserted;
     try {
@@ -177,8 +199,30 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   // P1-M0: the engine's parser against the browser's.
   await check(corpusTreesMatchTheBrowsersParser);
   await check(theEngineRefusesWhatTheBrowserRefuses);
+  // P1-M1: selection and transform.
+  await check(aDragMovesTheShapeByWholeUnits);
+  await check(aMarqueeSelectsWhatItEncloses);
+  await check(zOrderAndDeletePatchOnlyWhatMoved);
+  await check(arrowsNudgeOnlyTheCanvasSelection);
+  await check(theGridToggleShowsTheGrid);
+  await check(geometryMatchesTheBrowser);
+  await check(percentLengthsKeepTheirSizeUnderZoom);
+  await check(theNearestHandleWithin26ptWins);
+  await check(rectCornerHandlesKeepTheOppositeCorner);
+  await check(rotateAndScaleHandlesEditTheLabHouse);
+  await check(movesSnapToGuidesShapesAndTheGrid);
+  await check(duplicateGetsFreshIdsAndItsOwnReferences);
+  await check(groupAndUngroupKeepEveryShapeInPlace);
+  await check(layersHideAndLockShapes);
+  await check(drawStateStaysOutOfAsIsAndClean);
+  for (const height of [956, 796]) await check(phoneRulesOnTheSelectionTools, height);
+  // The P1-M1 review adds these.
+  await check(aLargeSelectionDragsWithoutStalling);
+  await check(theGridStepFieldIsOneEntry);
+  await check(theSnapSheetIsReachableOnThePhone);
+  await check(aFilesOwnCssCantMoveItsDrawing);
   const proven = [...passed].filter((name) => !unproven.has(name));
-  const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), { complete: true, engine, calls }];
+  const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
   if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
@@ -268,9 +312,9 @@ async function phoneRules(browser, origin, height) {
 }
 
 // The built-in sample: every element and attribute in its source reaches the shadow root, and the
-// viewBox is fitted into the host (meet, centred), so its circle lands exactly where the geometry
-// says. Its paint comes through the sink too: inside the frame the sky gradient shows, and in the
-// frame's rounded corner, clipped away, the paper does.
+// viewBox is fitted into the drawn root's own box (meet, centred: the camera box, P1-M1), so its
+// circle lands exactly where the geometry says. Its paint comes through the sink too: inside the
+// frame the sky gradient shows, and in the frame's rounded corner, clipped away, the paper does.
 async function sampleRenders(browser, origin) {
   const [vw, vh] = /viewBox="0 0 (\d+) (\d+)"/.exec(SAMPLE).slice(1).map(Number);
   const [cx, cy, radius] = /<circle cx="(\d+)" cy="(\d+)" r="(\d+)"/.exec(SAMPLE).slice(1).map(Number);
@@ -287,7 +331,7 @@ async function sampleRenders(browser, origin) {
         mode: root.mode,
         root: `${svg.namespaceURI} ${svg.localName}`,
         names: [svg, ...svg.querySelectorAll('*')].map((e) => e.localName),
-        host: host.getBoundingClientRect().toJSON(),
+        host: svg.getBoundingClientRect().toJSON(), // the drawn root's own box
         circle: root.querySelector('circle').getBoundingClientRect().toJSON(),
         violations: window.__violations,
       };
@@ -480,9 +524,11 @@ async function moreEdges(browser, origin) {
 
 // The canvas draws a document as the document, not in the app's theme: currentColor, a font-less
 // <text> and a var() fallback compute as they do with the file opened on its own, in light and
-// dark; no ds token reaches the document; and the paper stays white.
+// dark; no ds token reaches the document; and the paper is the same light checkerboard in both
+// (decision 10), under a host that paints nothing of its own.
 async function canvasIgnoresTheTheme(browser, origin) {
   const text = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100"><path d="M0 0H10V10Z" fill="currentColor"/><text y="20">Hi</text><circle r="5" fill="var(--accent, black)"/></svg>`;
+  const papers = {};
   for (const colorScheme of ['light', 'dark']) {
     const context = await browser.newContext({ ...PHONE, viewport: { width: 440, height: 956 }, colorScheme });
     let alone;
@@ -509,16 +555,19 @@ async function canvasIgnoresTheTheme(browser, origin) {
         window.drawTest.render(`<svg xmlns="http://www.w3.org/2000/svg">${rects}</svg>`);
         const root = document.querySelector('.draw-host').shadowRoot;
         const leaked = [...names].filter((n) => getComputedStyle(root.getElementById(n.slice(2))).fill !== 'rgb(1, 2, 3)');
-        return { tokens: names.size, leaked, paper: getComputedStyle(document.querySelector('.draw-host')).backgroundColor };
+        return { tokens: names.size, leaked, host: getComputedStyle(document.querySelector('.draw-host')).backgroundColor, paper: getComputedStyle(document.querySelector('.draw-paper')).backgroundImage };
       }, text);
       must(r.tokens >= 25, `test setup: found only ${r.tokens} ds tokens on :root`);
       must(r.leaked.length === 0, `${colorScheme}: ds tokens reach the document on the canvas: ${r.leaked.join(', ')}`);
-      must(r.paper === 'rgb(255, 255, 255)', `${colorScheme}: the canvas paper is ${r.paper}, not white`);
+      must(r.host === 'rgba(0, 0, 0, 0)', `${colorScheme}: the canvas host paints ${r.host}; the paper is the underlay's`);
+      must(/rgb\(238, 238, 238\)/.test(r.paper) && /rgb\(255, 255, 255\)/.test(r.paper), `${colorScheme}: the canvas paper is ${r.paper}, not the light checkerboard`);
+      papers[colorScheme] = r.paper;
       await page.evaluate((t) => window.drawTest.render(t), text);
       const canvas = await page.evaluate(readStyles, true);
       for (const k of Object.keys(alone)) must(canvas[k] === alone[k], `${colorScheme}: on the canvas the ${k} is ${canvas[k]}, but the file alone has ${alone[k]}`);
     }, { colorScheme });
   }
+  must(papers.light === papers.dark, `the canvas paper is ${papers.dark} in dark, not ${papers.light} as in light`);
 }
 
 // Runs in the page: the styles canvasIgnoresTheTheme compares, on the canvas or in the file alone.
@@ -535,8 +584,9 @@ function readStyles(onCanvas) {
 
 // Every static corpus file (no SMIL, script, CSS animation or transition: their frame depends on
 // time) looks on the canvas as it does opened on its own. The canvas host takes the left half of
-// the canvas area and the browser's own rendering of the same file, an <img> on the same white
-// paper, the right half; one screenshot compares them pixel for pixel, in light and dark.
+// the canvas area and the browser's own rendering of the same file, an <img> on the same paper
+// (a copy of the canvas's underlay), the right half, placed where the drawn root's own box is and
+// at its size; one screenshot compares them pixel for pixel inside that box, in light and dark.
 // Differences the canvas makes on purpose are named.
 const LOOKS_DIFFERENT = new Map([
   ['lab/media.svg', 'its <video> is refused'],
@@ -563,11 +613,14 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
   await withPage(browser, origin, 320, async (page) => {
     const [a, b] = await page.evaluate(() => {
       for (const sel of ['.draw-sheet', '.draw-context', '.draw-rail']) document.querySelector(sel).style.display = 'none';
+      // The canvas's own buttons (Grid, Snap) sit over the drawing.
+      for (const el of document.querySelectorAll('.draw-canvas .draw-chrome')) el.style.display = 'none';
       const host = document.querySelector('.draw-host');
       const alone = document.createElement('div');
       alone.id = 'alone';
-      alone.style.cssText = 'width:50%;height:100%;background:#fff';
+      alone.style.cssText = 'position:relative;overflow:hidden;width:50%;height:100%;background:#fff';
       host.style.width = '50%';
+      host.style.overflow = 'hidden'; // what the left half draws past its box stays out of the right half
       host.after(alone);
       document.querySelector('.draw-canvas').style.display = 'flex';
       return [host, alone].map((e) => e.getBoundingClientRect().toJSON());
@@ -575,17 +628,21 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
     must(a.width === b.width && a.height === b.height && a.width > 150 && a.height > 240, `test setup: the halves are ${rect(a)} and ${rect(b)}`);
     const differ = [];
     for (const f of files) {
-      const decoded = await page.evaluate(showBoth, f.text);
+      const { decoded, box } = await page.evaluate(showBoth, f.text);
       const shot = decodePng(await page.screenshot({ clip: { x: a.x, y: a.y, width: b.x + b.width - a.x, height: a.height } }));
       const dx = Math.round(b.x - a.x);
+      // Inside the drawn root's box, clipped to the half: outside it the canvas shows what the file
+      // draws past its box on purpose (overflow: visible), where an <img> clips.
+      const [x0, x1] = [Math.max(0, Math.ceil(box.left)), Math.min(Math.floor(a.width), Math.floor(box.left + box.width))];
+      const [y0, y1] = [Math.max(0, Math.ceil(box.top)), Math.min(shot.height, Math.floor(box.top + box.height))];
       let n = 0;
-      for (let y = 0; y < shot.height; y++) {
-        for (let x = 0; x < a.width; x++) {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
           const [p, q] = [shot.rgb(x, y), shot.rgb(x + dx, y)];
           if (p.some((v, k) => Math.abs(v - q[k]) > PIXEL_TOLERANCE)) n++;
         }
       }
-      const share = n / (a.width * shot.height);
+      const share = n / Math.max(1, (x1 - x0) * (y1 - y0));
       if (!decoded) differ.push(`${f.name}: test setup: the file did not load as an <img>`);
       else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
     }
@@ -598,27 +655,53 @@ function knownIn(browser, name, colorScheme) {
   return !!known && (!known.scheme || known.scheme === colorScheme);
 }
 
-// Runs in the page: the file on the canvas, and beside it the file itself as an <img>, its root
-// sized as the renderer sizes it (to fill, with the viewBox the renderer gave it, if any).
+// Runs in the page: the file on the canvas, and beside it the file itself as an <img> where the
+// drawn root's own box is and at its size (the camera box), its root filling the <img>, on a copy
+// of the canvas's underlay (the surround and the checkerboard paper, where they are on the canvas).
+// Chromium draws an SVG <img> at a whole-pixel size, so a box a fraction of a pixel tall would be
+// scaled by that fraction and every horizontal edge shaded differently: the <img> takes the box
+// rounded to whole pixels, and its root the viewBox (preserveAspectRatio none) that maps the file
+// exactly as the drawn root's own getScreenCTM does.
 async function showBoth(text) {
   window.drawTest.render(text);
-  const drawn = document.querySelector('.draw-host').shadowRoot.firstElementChild;
+  const host = document.querySelector('.draw-host');
+  const drawn = host.shadowRoot.firstElementChild;
+  const hb = host.getBoundingClientRect();
+  const rb = drawn ? drawn.getBoundingClientRect() : hb;
+  const box = { left: rb.left - hb.left, top: rb.top - hb.top, width: rb.width, height: rb.height };
+  const alone = document.getElementById('alone');
+  const parts = [];
+  const under = document.querySelector('.draw-under');
+  const paper = document.querySelector('.draw-paper');
+  if (under && paper) {
+    alone.style.background = getComputedStyle(under).backgroundColor;
+    const pb = paper.getBoundingClientRect();
+    const copy = document.createElement('div');
+    copy.style.cssText = `position:absolute;left:${pb.left - hb.left}px;top:${pb.top - hb.top}px;width:${pb.width}px;height:${pb.height}px`;
+    copy.style.background = getComputedStyle(paper).background;
+    parts.push(copy);
+  }
   // A byte-order mark marks the encoding, not content; WebKit's DOMParser refuses one in a string.
   const doc = new DOMParser().parseFromString(text.replace(/^\uFEFF/, ''), 'image/svg+xml');
   const svg = doc.documentElement;
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '100%');
-  if (drawn?.hasAttribute('viewBox')) svg.setAttribute('viewBox', drawn.getAttribute('viewBox'));
+  const at = { left: Math.round(box.left), top: Math.round(box.top), width: Math.max(1, Math.round(box.width)), height: Math.max(1, Math.round(box.height)) };
+  const m = drawn?.getScreenCTM();
+  if (m && m.a > 0 && m.d > 0 && !m.b && !m.c) {
+    svg.setAttribute('viewBox', [(hb.left + at.left - m.e) / m.a, (hb.top + at.top - m.f) / m.d, at.width / m.a, at.height / m.d].join(' '));
+    svg.setAttribute('preserveAspectRatio', 'none');
+  } else if (drawn?.hasAttribute('viewBox')) svg.setAttribute('viewBox', drawn.getAttribute('viewBox'));
   const img = document.createElement('img');
-  img.style.cssText = 'display:block;width:100%;height:100%';
+  img.style.cssText = `position:absolute;display:block;left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px`;
   img.src = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
-  document.getElementById('alone').replaceChildren(img);
+  alone.replaceChildren(...parts, img);
   await document.fonts.ready;
   try {
     await img.decode();
-    return true;
+    return { decoded: true, box };
   } catch {
-    return false;
+    return { decoded: false, box };
   }
 }
 
@@ -733,6 +816,23 @@ async function showCode(page) {
   await page.locator('.draw-code .cv-block').first().waitFor();
 }
 
+// The Snap sheet with every target off: a move is whole units alone (checks of tap-vs-drag and of
+// rounding; movesSnapToGuidesShapesAndTheGrid checks snapping).
+async function snapOff(page) {
+  await page.locator('.draw-snap-btn').tap();
+  for (const name of ['Grid', 'Guides', 'Shapes', 'Artboard']) {
+    const b = page.locator('.draw-snap-toggles .ds-btn', { hasText: new RegExp(`^${name}$`) });
+    if ((await b.getAttribute('aria-pressed')) === 'true') await b.tap();
+  }
+  await page.locator('.draw-modal-done').tap();
+}
+
+// The ContextBar's More sheet (Edit source, Select all), for what is selected now.
+async function openMore(page) {
+  await page.locator('.draw-ctx-btn[aria-label="More"]').tap();
+  await page.locator('.draw-more').waitFor();
+}
+
 // Two frames: the page has laid out and delivered its ResizeObserver callbacks (the canvas's view
 // follows its new size there), which a forced layout alone does not wait for.
 const twoFrames = (page) => page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
@@ -822,7 +922,9 @@ async function phoneRulesOnTheNewLayout(browser, origin, height) {
     await page.locator('.draw-modal-done').tap();
     const c2 = await circleCentre(page); // the canvas fitted again when the sheet opened
     await page.touchscreen.tap(c2.x, c2.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await rules('the More sheet');
+    await page.locator('.draw-more .draw-action').tap();
     await page.locator('.draw-source').waitFor();
     await rules('Edit source');
     await page.locator('.draw-modal .ds-btn', { hasText: 'Cancel' }).tap();
@@ -866,8 +968,9 @@ async function zoomKeepsThePointUnderIt(browser, origin) {
 // (b) The page never zooms: a two-finger pinch on the canvas (real touch in Chromium) zooms the
 // drawing, and the page's visual viewport stays at scale 1. Safari's own pinch events are
 // cancelled on the canvas too. So is a pinch anywhere else in the app: on the TopBar, the sheet's
-// handle and tabs, the code, the ContextBar and the ToolRail the page stays at scale 1 and Safari's
-// gesture events are cancelled (the pinch is real touch, so Chromium only; WebKit can't make it).
+// handle and tabs, the code, the ContextBar and its selection buttons, the ToolRail and the canvas's
+// Grid button the page stays at scale 1 and Safari's gesture events are cancelled (the pinch is
+// real touch, so Chromium only; WebKit can't make it).
 async function pageNeverZooms(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const gesturesCancelledOn = (sel) => page.evaluate((sel) => ['gesturestart', 'gesturechange'].map((type) => {
@@ -875,6 +978,8 @@ async function pageNeverZooms(browser, origin) {
       document.querySelector(sel).dispatchEvent(e);
       return e.defaultPrevented;
     }), sel);
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y); // a selection, so the ContextBar shows its buttons
     const before = await page.evaluate(() => window.drawTest.view().scale);
     await twoFingers(browser, page, { x: 180, y: 400 }, { x: 260, y: 400 }, { x: 60, y: 400 }, { x: 380, y: 400 }, 16);
     await page.waitForTimeout(300);
@@ -890,9 +995,10 @@ async function pageNeverZooms(browser, origin) {
     must(r.view > before * 2, `test setup: the pinch did not reach the canvas (view scale ${before} → ${r.view})`);
     must(r.prevented.every(Boolean), `Safari's gesture events are not cancelled on the canvas (${r.prevented})`);
     await showCode(page);
-    for (const sel of ['.draw-bar', '.draw-handle', '.draw-tabs', '.draw-code', '.draw-context', '.draw-rail']) {
+    must(await page.locator('.draw-ctx-btn').count() === 6, 'test setup: the ContextBar shows no selection buttons');
+    for (const sel of ['.draw-bar', '.draw-handle', '.draw-tabs', '.draw-code', '.draw-context', '.draw-rail', '.draw-ctx-btn', '.draw-grid-btn']) {
       if (chromium(browser)) {
-        const b = await page.locator(sel).boundingBox();
+        const b = await page.locator(sel).first().boundingBox();
         const m = { x: b.x + b.width / 2, y: b.y + Math.min(b.height / 2, 60) };
         await twoFingers(browser, page, { x: m.x - 20, y: m.y }, { x: m.x + 20, y: m.y }, { x: m.x - 120, y: m.y }, { x: m.x + 120, y: m.y }, 16);
         await page.waitForTimeout(300);
@@ -1084,10 +1190,14 @@ async function editSourceRoundTrip(browser, origin) {
     await root.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await root.tap();
     must(await page.locator('.draw-label').textContent() === '<svg>', "test setup: a tap on the root's code did not select it");
-    must(await page.locator('.draw-action').count() === 0, 'Edit source is offered for the root <svg>, which it cannot replace');
+    await openMore(page);
+    must(await page.locator('.draw-more .draw-action').count() === 0, 'Edit source is offered for the root <svg>, which it cannot replace');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-more').waitFor({ state: 'detached' });
     const c = await circleCentre(page);
     await page.touchscreen.tap(c.x, c.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await page.locator('.draw-more .draw-action').tap();
     const area = page.locator('.draw-source');
     const text = await area.inputValue();
     must(text === '<circle cx="212" cy="134" r="42" fill="#ffd166"/>', `Edit source shows ${JSON.stringify(text)}`);
@@ -1114,7 +1224,8 @@ async function editSourceRoundTrip(browser, origin) {
     // A name the DOM refuses to create (data-😀: the data-* pattern admits it) is kept in the file and
     // left off the canvas, which goes on drawing: it must never blank mid-edit (P1-M0 review, F4).
     await page.touchscreen.tap(c.x, c.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await page.locator('.draw-more .draw-action').tap();
     await area.fill('<circle cx="212" cy="134" r="42" fill="#ffd166" data-\u{1F600}="1"/>');
     await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
     await page.locator('.draw-modal').waitFor({ state: 'detached' });
@@ -1361,7 +1472,9 @@ async function theOutlineStaysAboveTheDrawing(browser, origin) {
       await page.touchscreen.tap(c.x, c.y);
       const top = await page.evaluate(() => {
         const outline = document.querySelector('.draw-outline');
-        const [[x0, y0], [x1, y1]] = outline.getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+        // The left edge's middle: the rotation ring's guide (P1-M1) runs up through the top edge's.
+        const pts = outline.getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+        const [[x0, y0], [x1, y1]] = [pts[0], pts[3]];
         const o = document.querySelector('.draw-overlay').getBoundingClientRect();
         for (const el of [document.querySelector('.draw-marks'), document.querySelector('.draw-overlay')]) el.style.pointerEvents = 'auto';
         outline.style.pointerEvents = 'stroke';
@@ -1374,13 +1487,14 @@ async function theOutlineStaysAboveTheDrawing(browser, origin) {
   }
 }
 
-// (i) The initial JS (the entry module and what it preloads) is at most 250 KB gzipped.
+// (i) The initial JS (the entry module and what it preloads) is at most 1 MB gzipped (Mark, 2026-09-30,
+// raised from 250 KB).
 async function initialJsBudget() {
   const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
   const urls = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
   must(urls.length >= 1, 'test setup: no script in the built index.html');
   const bytes = urls.reduce((n, u) => n + gzipSync(readFileSync(join(SITE_DRAW, u.replace(/^\/draw\//, '')))).length, 0);
-  must(bytes <= 250_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 250 KB budget`);
+  must(bytes <= 1_000_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 1 MB budget`);
   console.log(`     draw: initial JS ${(bytes / 1000).toFixed(1)} KB gzipped (${urls.length} file${urls.length === 1 ? '' : 's'})`);
 }
 
@@ -2256,7 +2370,7 @@ async function colourTokensShowTheirSwatch(browser, origin) {
 
 // The theme follows the system's, and the code recolours the moment it changes (no reload). A theme
 // chosen in Files overrides the system's (data-theme on <html>), is kept on this device, and System
-// follows it again. The drawing stays on white paper throughout.
+// follows it again. The drawing stays on the same light checkerboard throughout.
 async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     await showCode(page);
@@ -2264,7 +2378,7 @@ async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
       number: getComputedStyle(document.querySelector('.draw-code .cv-number')).color,
       word: getComputedStyle(document.querySelector('.draw-code .cv-enum')).color,
       bg: getComputedStyle(document.body).backgroundColor,
-      paper: getComputedStyle(document.querySelector('.draw-host')).backgroundColor,
+      paper: getComputedStyle(document.querySelector('.draw-paper')).backgroundImage,
       theme: document.documentElement.dataset.theme ?? null,
     }));
     const light = await look();
@@ -2300,7 +2414,9 @@ async function theThemeFollowsTheSystemOrTheChoice(browser, origin) {
     await page.locator('.draw-theme button', { hasText: 'System' }).tap();
     const system = await look();
     must(system.theme === null && system.number === light.number && system.bg === light.bg, 'System does not follow the system again');
-    for (const l of [light, dark, chosenLight, chosenDark, system]) must(l.paper === 'rgb(255, 255, 255)', `the canvas paper is ${l.paper}, not white`);
+    for (const l of [light, dark, chosenLight, chosenDark, system]) {
+      must(l.paper === light.paper && /rgb\(238, 238, 238\)/.test(l.paper) && /rgb\(255, 255, 255\)/.test(l.paper), `the canvas paper is ${l.paper}, not the light checkerboard it is in light`);
+    }
     await closeModal(page);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
@@ -2807,16 +2923,31 @@ async function oneFinger(browser, page, at, dx) {
   await page.waitForTimeout(50);
 }
 
-// On the canvas, a touch that moves less than 5pt is a tap, which selects what is under it; one
-// that moves further is a drag, which (with P0's Select tool) selects nothing.
+// On the canvas, a touch that moves less than 5pt is a tap, which selects what is under it and
+// changes nothing. One that moves further is a drag (P1-M1): on a shape it selects the shape and
+// moves it by whole units (the snap step at fit: the drawn root's getScreenCTM().a px a unit); on
+// empty canvas it draws a marquee, here too thin to take anything.
 async function aShortMoveOnTheCanvasIsATap(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
-    const c = await circleCentre(page);
+    const at = await circleCentre(page);
+    const c = { x: Math.round(at.x), y: Math.round(at.y) }; // whole points: the 8pt stays 8pt
     const selected = () => page.locator('.draw-sel').textContent();
-    await oneFinger(browser, page, c, 8);
-    must(await selected() === 'nothing selected', 'a touch that moved 8pt selected the circle: it was taken for a tap');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    await snapOff(page); // tap against drag, and whole units: nothing to snap to
+    must(await page.locator('.draw-sel').textContent() === 'nothing selected', 'a tap in the Snap sheet reached the drawing under it');
+    const e = await page.evaluate(screenPoint, { x: 6, y: 6 }); // inside the viewBox, outside the frame: nothing drawn
+    await oneFinger(browser, page, { x: Math.round(e.x), y: Math.round(e.y) }, 8);
+    must(await selected() === 'nothing selected', 'a touch that moved 8pt on empty canvas selected something');
+    must(await source() === SAMPLE, 'a touch that moved 8pt on empty canvas changed the file');
     await oneFinger(browser, page, c, 4);
     must(await selected() === '<circle>', 'a touch that moved 4pt did not select the circle: it was taken for a drag');
+    must(await source() === SAMPLE, 'a touch that moved 4pt changed the file');
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    const units = Math.round(8 / k);
+    await oneFinger(browser, page, c, 8);
+    must(await source() === SAMPLE.replace('cx="212"', `cx="${212 + units}"`), `a touch that moved 8pt did not move the circle by ${units} whole unit(s) (${k.toFixed(3)} px a unit): it was taken for a tap`);
+    must(await selected() === '<circle>', 'a touch that moved 8pt on the circle did not select it');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
@@ -3060,6 +3191,1496 @@ async function renderEach({ files, tables }) {
     await new Promise((ok) => setTimeout(ok, 16));
   }
   return { checked, rendered, failed: failures.length, failures: failures.slice(0, 25) };
+}
+
+// ── P1-M1: selection and transform ─────────────────────────────────────────────────────────────
+
+// What makes a corpus file's frame depend on time (as corpusLooksAsItDoesAlone filters them).
+const ANIMATES = /<(animate|set|animateTransform|animateMotion|animateColor|script)\b|@keyframes|transition/;
+
+// Runs in the page: record the canvas's mutations (the drawing's shadow root) from now on.
+function watchCanvas() {
+  window.__mo?.disconnect();
+  window.__muts = [];
+  window.__mo = new MutationObserver((ms) => window.__muts.push(...ms));
+  window.__mo.observe(document.querySelector('.draw-host').shadowRoot, { subtree: true, attributes: true, childList: true, characterData: true });
+}
+// Runs in the page: the canvas's mutations since the last call, counted by type.
+function canvasMutations() {
+  const ms = window.__muts.splice(0).concat(window.__mo.takeRecords());
+  const n = (type) => ms.filter((m) => m.type === type).length;
+  return { childList: n('childList'), attributes: n('attributes'), characterData: n('characterData') };
+}
+// Runs in the page: record where the canvas's pointer events land from now on (the numbers the Stage
+// reads), so a check computes what the canvas saw even where an engine rounds a pointer's position.
+function watchPointer() {
+  window.__pts = [];
+  if (window.__ptsOn) return;
+  window.__ptsOn = true;
+  const area = document.querySelector('.draw-canvas');
+  for (const type of ['pointerdown', 'pointermove']) area.addEventListener(type, (e) => window.__pts.push([e.clientX, e.clientY]), true);
+}
+// Runs in the page: a drawn element's centre in client px.
+function drawnCentre(sel) {
+  const b = document.querySelector('.draw-host').shadowRoot.querySelector(sel).getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+}
+
+// One pointer on the canvas from `from` by `d` in `steps` moves: the mouse, or (Chromium) a CDP
+// touch. `each(i)` runs after each move, before the release.
+async function dragOnCanvas(page, way, from, d, steps, each = async () => {}) {
+  const at = (i) => ({ x: from.x + (d.x * i) / steps, y: from.y + (d.y * i) / steps });
+  if (way === 'touch') {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [at(i)] });
+      await each(i);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    return;
+  }
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(at(i).x, at(i).y);
+    await each(i);
+  }
+  await page.mouse.up();
+}
+
+// The whole user units the canvas moved by: the pointer's travel since it went down (watchPointer),
+// through the drawn root's scale, rounded (the snap step at fit is 1).
+async function wholeUnits(page) {
+  const { pts, a, d } = await page.evaluate(() => {
+    const m = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM();
+    return { pts: window.__pts, a: m.a, d: m.d };
+  });
+  const [p, q] = [pts[0], pts[pts.length - 1]];
+  return { x: Math.round((q[0] - p[0]) / a), y: Math.round((q[1] - p[1]) / d) };
+}
+
+// A drag moves the shape under it by whole user units (the snap step at fit), with the mouse and
+// (Chromium) a finger: only its cx and cy change in the file, it is selected, the move is one
+// history entry, and undo restores the bytes. While it moves, the tooltip reads where its centre is,
+// its bottom edge 42 px above the pointer; the two coordinate guides end at that centre; and each
+// frame is at most two attribute mutations on the canvas, never a node made or taken away. Then a
+// group selected from its code block moves by its leading translate() alone (the rest of its
+// multi-line transform keeps its bytes), and lab/grid.svg's circle moves by whole units.
+async function aDragMovesTheShapeByWholeUnits(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    console.log(`     draw: the canvas's hit test is ${await page.evaluate(() => window.drawTest.hitPath())} (${browser.browserType().name()})`);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await snapOff(page); // whole units alone (snapping: movesSnapToGuidesShapesAndTheGrid)
+    for (const way of chromium(browser) ? ['mouse', 'touch'] : ['mouse']) {
+      const c = await circleCentre(page);
+      await page.evaluate(watchPointer);
+      await page.evaluate(watchCanvas);
+      const frames = [];
+      let during = null;
+      await dragOnCanvas(page, way, c, { x: 37.3, y: -21.6 }, 8, async (i) => {
+        frames.push(await page.evaluate(canvasMutations));
+        if (i < 8) return;
+        during = await page.evaluate(() => {
+          const tip = document.querySelector('.draw-tip');
+          const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+          const ends = [...document.querySelectorAll('.draw-coord')].filter((l) => l.style.display !== 'none').map((l) => ({ x: o.left + Number(l.getAttribute('x2')), y: o.top + Number(l.getAttribute('y2')) }));
+          const b = document.querySelector('.draw-host').shadowRoot.querySelector('circle').getBoundingClientRect();
+          const [x, y] = window.__pts[window.__pts.length - 1];
+          return { text: tip && !tip.hidden ? tip.textContent : null, bottom: tip ? tip.getBoundingClientRect().bottom : null, pointer: { x, y }, ends, centre: { x: b.x + b.width / 2, y: b.y + b.height / 2 } };
+        });
+      });
+      const u = await wholeUnits(page);
+      const [cx, cy] = [212 + u.x, 134 + u.y];
+      must(await source() === SAMPLE.replace('cx="212" cy="134"', `cx="${cx}" cy="${cy}"`), `${way}: the drag did not move the circle by (${u.x}, ${u.y}) whole units, and nothing else:\n${await source()}`);
+      must(await page.locator('.draw-sel').textContent() === '<circle>', `${way}: the dragged circle is not selected`);
+      must(await undo.getAttribute('aria-label') === 'Undo Move', `${way}: the history's last entry is "${await undo.getAttribute('aria-label')}", not "Undo Move"`);
+      must(during?.text === `x ${cx}, y ${cy}`, `${way}: during the drag the tooltip read ${JSON.stringify(during?.text)}, not "x ${cx}, y ${cy}"`);
+      must(Math.abs(during.pointer.y - during.bottom - 42) <= 2, `${way}: the tooltip's bottom edge is ${(during.pointer.y - during.bottom).toFixed(1)} px above the pointer, not 42`);
+      must(during.ends.length === 2 && during.ends.every((p) => Math.hypot(p.x - during.centre.x, p.y - during.centre.y) <= 1), `${way}: the coordinate guides end at ${JSON.stringify(during.ends)}, not at the circle's centre ${JSON.stringify(during.centre)}`);
+      must(frames.some((f) => f.attributes > 0), `${way}: test setup: no drag frame moved the circle`);
+      must(frames.every((f) => f.childList === 0 && f.characterData === 0 && f.attributes <= 2), `${way}: a drag frame did more than two attribute mutations on the canvas: ${JSON.stringify(frames)}`);
+      await undo.tap();
+      must(await source() === SAMPLE, `${way}: one undo did not restore the file byte for byte`);
+      must(await undo.isDisabled(), `${way}: the drag was more than one history entry`);
+      await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    }
+    // A group selected from its code block: a drag on a shape inside it moves the group, by its
+    // leading translate() only; the rest of its three-line transform keeps its bytes.
+    const T = readFileSync(join(CORPUS, 'lab/transform.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: lab/transform.svg did not open');
+    await showCode(page);
+    await twoFrames(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    must(await page.locator('.draw-sel').textContent() === '<g>', "test setup: a tap on the group's end tag did not select it");
+    await page.evaluate(watchPointer);
+    await dragOnCanvas(page, 'mouse', await page.evaluate(drawnCentre, 'rect'), { x: 29.6, y: 17.2 }, 8);
+    const g = await wholeUnits(page);
+    must(g.x !== 0 && await source() === T.replace('translate(50 50)', `translate(${50 + g.x} ${50 + g.y})`), `the group's drag changed more than its translate(50 50) by (${g.x}, ${g.y}):\n${await source()}`);
+    // lab/grid.svg: its circle moves by whole units.
+    const G = readFileSync(join(CORPUS, 'lab/grid.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: lab/grid.svg did not open');
+    await page.evaluate(watchPointer);
+    await dragOnCanvas(page, 'mouse', await page.evaluate(drawnCentre, 'circle'), { x: -23.7, y: 31.1 }, 8);
+    const q = await wholeUnits(page);
+    must(q.x !== 0 && await source() === G.replace('cx="30" cy="60"', `cx="${30 + q.x}" cy="${60 + q.y}"`), `lab/grid.svg's circle did not move by (${q.x}, ${q.y}) whole units:\n${await source()}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const THREE_RECTS = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <rect id="A" x="10" y="10" width="15" height="15" fill="#e76f51"/>
+  <rect id="B" x="40" y="10" width="15" height="15" fill="#2a9d8f"/>
+  <rect id="C" x="70" y="70" width="15" height="15" fill="#264653"/>
+</svg>
+`;
+
+// A drag from empty canvas draws a marquee in the overlay, from where the pointer went down to
+// where it is, and selects what it wholly encloses: A inside it, not B half inside nor C outside. A
+// hold-drag (down on B, a 500 ms wait, then a drag) draws a marquee instead of moving B and takes
+// what it encloses; with Select more on, a second marquee adds; one under 5 px takes nothing. (Each
+// starts clear of the Grid button at the canvas's top-left, which takes its own presses.)
+async function aMarqueeSelectsWhatItEncloses(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), THREE_RECTS)).ok, 'test setup: the three rects did not open');
+    await showCode(page);
+    await twoFrames(page); // the canvas has fitted its new size
+    const source = () => page.evaluate(() => window.drawTest.source());
+    // What the code view marks as selected, by id.
+    const chosen = () => page.evaluate(() => [...document.querySelectorAll('.cv-block.cv-selected')].map((b) => /id="(\w)"/.exec(b.textContent)?.[1]).filter(Boolean).sort().join(''));
+    const marquee = async (from, to, hold = false) => {
+      const [a, b] = await Promise.all([page.evaluate(screenPoint, from), page.evaluate(screenPoint, to)]);
+      let drawn = null;
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      if (hold) await page.waitForTimeout(500);
+      for (let i = 1; i <= 8; i++) {
+        await page.mouse.move(a.x + ((b.x - a.x) * i) / 8, a.y + ((b.y - a.y) * i) / 8);
+        if (i === 8) drawn = await page.evaluate(() => [...document.querySelectorAll('.draw-marquee')].find((m) => m.style.display !== 'none')?.getBoundingClientRect().toJSON() ?? null);
+      }
+      await page.mouse.up();
+      const want = { left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), right: Math.max(a.x, b.x), bottom: Math.max(a.y, b.y) };
+      return { drawn, want };
+    };
+    const m1 = await marquee({ x: 47, y: 32 }, { x: 5, y: 5 });
+    must(m1.drawn && ['left', 'top', 'right', 'bottom'].every((k) => Math.abs(m1.drawn[k] - m1.want[k]) <= 1.5), `the marquee is drawn at ${JSON.stringify(m1.drawn)}, not from where the pointer went down to where it is (${JSON.stringify(m1.want)})`);
+    must(await chosen() === 'A', `a marquee around A, with B half inside it, selected ${(await chosen()) || 'nothing'}`);
+    const m2 = await marquee({ x: 47.5, y: 17.5 }, { x: 90, y: 90 }, true);
+    must(m2.drawn !== null, 'a hold-drag from B drew no marquee');
+    must(await source() === THREE_RECTS, 'a hold-drag from B moved it');
+    must(await chosen() === 'C', `a hold-drag from B around C selected ${(await chosen()) || 'nothing'}`);
+    await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+    await marquee({ x: 32, y: 32 }, { x: 5, y: 5 });
+    must(await chosen() === 'AC', `with Select more on, a second marquee around A left ${(await chosen()) || 'nothing'} selected, not A and C`);
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const e = await page.evaluate(screenPoint, { x: 5, y: 40 });
+    await dragOnCanvas(page, 'mouse', e, { x: 60, y: 3 }, 8);
+    must(await chosen() === '' && await page.locator('.draw-sel').textContent() === 'nothing selected', `a marquee 3 px tall selected ${await chosen()}`);
+    must(await source() === THREE_RECTS, 'marquees changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Bring forward, Send back and Delete on a 2,000-node drawing (built like scrubFrameIsOneMutation)
+// patch only what moved: at most 4 childList records on the canvas (the element and its
+// whitespace, out and in) and no attribute record; every other drawn node, and every other block
+// of the code view, is the same DOM node as before; and the file changes only by that element and
+// its whitespace. Each undo likewise.
+async function zOrderAndDeletePatchOnlyWhatMoved(browser, origin) {
+  const rects = Array.from({ length: 1999 }, (_, i) => `<rect${i === 1000 ? ' id="m"' : ''} x="${(i % 50) * 40}" y="${Math.floor(i / 50) * 40}" width="30" height="30" fill="#2a9d8f"/>`);
+  const svg = (list) => `<svg xmlns="${SVG_NS}" viewBox="0 0 2000 1600">\n${list.join('\n')}\n</svg>\n`;
+  const swapped = (i) => svg(rects.map((r, j) => (j === i ? rects[i + 1] : j === i + 1 ? rects[i] : r)));
+  const BIG = svg(rects);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const stats = await page.evaluate((t) => window.drawTest.render(t), BIG);
+    must(stats.ok && stats.rendered === 2000, `test setup: the 2,000-node drawing rendered ${stats.rendered} elements`);
+    const m = await page.evaluate(drawnCentre, '#m');
+    await page.touchscreen.tap(m.x, m.y);
+    must(await page.locator('.draw-label').textContent() === '<rect#m>', 'test setup: a tap on the rect did not select it');
+    await showCode(page);
+    // Keep every drawn node and every code block now, then see what is new after one step.
+    const keep = () => page.evaluate(() => {
+      const nodes = (root) => {
+        const out = [];
+        const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) out.push(n);
+        return out;
+      };
+      window.__nodes = nodes;
+      window.__kept = new WeakSet([...nodes(document.querySelector('.draw-host').shadowRoot), ...document.querySelectorAll('.draw-code .cv-block')]);
+    });
+    const fresh = () => page.evaluate(() => {
+      const drawn = window.__nodes(document.querySelector('.draw-host').shadowRoot).filter((n) => !window.__kept.has(n));
+      const blocks = [...document.querySelectorAll('.draw-code .cv-block')].filter((b) => !window.__kept.has(b));
+      const name = (n) => (n.nodeType === 1 ? `<${n.localName}${n.id ? `#${n.id}` : ''}>` : JSON.stringify(n.data));
+      return { drawn: drawn.map(name).sort(), blocks: blocks.map((b) => (/^\s+$/.test(b.textContent) ? 'whitespace' : /id="m"/.test(b.textContent) ? '<rect#m>' : b.textContent.slice(0, 40))).sort() };
+    });
+    const MOVED = { drawn: ['"\\n"', '<rect#m>'], blocks: ['<rect#m>', 'whitespace'] };
+    const step = async (label, act, file, made) => {
+      await keep();
+      await page.evaluate(watchCanvas);
+      await act();
+      const ms = await page.evaluate(canvasMutations);
+      const now = await fresh();
+      must(ms.childList > 0 && ms.childList <= 4 && ms.attributes === 0 && ms.characterData === 0, `${label}: the canvas saw ${JSON.stringify(ms)}, not at most 4 childList records and nothing else`);
+      must(JSON.stringify(now.drawn) === JSON.stringify(made.drawn), `${label}: new drawn nodes ${JSON.stringify(now.drawn)}, not ${JSON.stringify(made.drawn)} (every other node must stay the same DOM node)`);
+      must(JSON.stringify(now.blocks) === JSON.stringify(made.blocks), `${label}: new code blocks ${JSON.stringify(now.blocks)}, not ${JSON.stringify(made.blocks)}`);
+      must(await page.evaluate(() => window.drawTest.source()) === file, `${label}: the file changed by more than the element and its whitespace`);
+    };
+    const tap = (name) => () => page.locator(`.draw-ctx-btn[aria-label="${name}"]`).tap();
+    const undo = () => page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    await step('Bring forward', tap('Bring forward'), swapped(1000), MOVED);
+    await step('its undo', undo, BIG, MOVED);
+    await step('Send back', tap('Send back'), swapped(999), MOVED);
+    await step('its undo', undo, BIG, MOVED);
+    await step('Delete', tap('Delete'), svg(rects.filter((_, i) => i !== 1000)), { drawn: [], blocks: [] });
+    await step('its undo', undo, BIG, MOVED);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A large selection keeps up (the P1-M1 review, F5): a drag of every rect (⌘A) costs a frame in
+// proportion to what is selected. In one page, the median of seven frames over 2,000 selected shapes
+// is under 6× the median over 500 (linear is 4×; the quadratic code, which read the whole document's
+// stylesheets again for each element, was far past it: 1.9 s against about 150 ms) and under
+// 1,000 ms. A ratio, so a slower runner (CI's WebKit) slows both sides alike. Each drag is one Move
+// (the code at peek, as the review measured). With the code open, Delete of the 2,000, and its undo,
+// leave the code listing the file exactly.
+async function aLargeSelectionDragsWithoutStalling(browser, origin) {
+  const grid = (n) => {
+    const side = Math.ceil(Math.sqrt(n));
+    const cell = 1000 / side;
+    const at = (v) => (v * cell).toFixed(2);
+    return { cell, text: `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n${Array.from({ length: n }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n')}\n</svg>\n` };
+  };
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const selectAll = () => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+    // Opens n rects, selects them all and drags them by seven timed frames, then undoes the Move:
+    // the frames' median, in ms.
+    const median = async (n) => {
+      const { cell, text } = grid(n);
+      const stats = await page.evaluate((t) => window.drawTest.render(t), text);
+      must(stats.ok && stats.rendered === n + 1, `test setup: the drawing rendered ${stats.rendered} elements, not ${n + 1}`);
+      await selectAll();
+      must(await page.locator('.draw-label').textContent() === `${n} selected`, `test setup: Select all took "${await page.locator('.draw-label').textContent()}"`);
+      const frames = await page.evaluate((c) => {
+        const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+        const p = new DOMPoint(c * 0.3, c * 0.3).matrixTransform(svg.getScreenCTM());
+        const area = document.querySelector('.draw-canvas');
+        const fire = (type, x, y) => area.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        fire('pointerdown', p.x, p.y);
+        fire('pointermove', p.x + 8, p.y + 3); // past the slop: the move starts
+        const ms = [];
+        for (let i = 2; i <= 8; i++) {
+          const t = performance.now();
+          fire('pointermove', p.x + 8 * i, p.y + 3 * i);
+          ms.push(performance.now() - t);
+        }
+        fire('pointerup', p.x + 64, p.y + 24);
+        return ms;
+      }, cell);
+      must(await page.locator('.draw-tool', { hasText: 'Undo' }).getAttribute('aria-label') === 'Undo Move', `the drag of ${n} was not one Move`);
+      must(await page.evaluate((t) => window.drawTest.source() !== t, text), `the drag of ${n} moved nothing`);
+      await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+      must(await page.evaluate((t) => window.drawTest.source() === t, text), `the Move of ${n} did not undo to the file`);
+      return [...frames].sort((a, b) => a - b)[3];
+    };
+    await median(500); // once first, not counted: the engine warms up
+    const small = await median(500);
+    const big = await median(2000);
+    const times = `${(big / small).toFixed(1)}×`;
+    must(big < 6 * small, `a drag frame over 2000 selected shapes took ${big.toFixed(0)} ms (the median), ${times} the ${small.toFixed(0)} ms over 500, not under 6×`);
+    must(big < 1000, `a drag frame over 2000 selected shapes took ${big.toFixed(0)} ms (the median), not under 1,000`);
+    const BIG = grid(2000).text;
+    const listing = () => page.evaluate(() => [...document.querySelectorAll('.draw-code .cv-block')].map((b) => b.textContent).join('') === window.drawTest.source());
+    await showCode(page);
+    await selectAll();
+    await page.locator('.draw-ctx-btn[aria-label="Delete"]').tap();
+    must(await page.evaluate(() => window.drawTest.source()) === `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n</svg>\n`, 'Delete of them all left more than the root');
+    must(await listing(), 'after Delete of them all, the code listing is not the file');
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Delete did not undo to the file');
+    must(await listing(), 'after the undo of Delete, the code listing is not the file');
+    console.log(`     draw: a drag frame over 500 selected shapes: ${small.toFixed(0)} ms, over 2,000: ${big.toFixed(0)} ms (medians, ${times})`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Snap sheet's Grid step field is one history entry however it is typed (the P1-M1 review,
+// F11): 25, ⌫ and 0.5 (20.5), then Done, write grid="20.5", and one undo gives Auto back (the file as
+// it was); so does 25 closed with the dim while the field still has focus.
+async function theGridStepFieldIsOneEntry(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const state = async () => /<draw:state[^>]*>/.exec(await source())?.[0] ?? null;
+    const start = await source();
+    const field = page.locator('.draw-snap-step input');
+    await page.locator('.draw-snap-btn').tap();
+    await field.tap();
+    await page.keyboard.type('25');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('0.5');
+    await page.locator('.draw-modal-done').tap();
+    must(await state() === '<draw:state version="1" grid="20.5"/>', `typing 25, ⌫, 0.5 then Done wrote ${await state()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set grid step', `the last entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source() === start, `one undo did not give Auto back (${await state()}): the typing was more than one entry`);
+    must(await undo.isDisabled(), 'the typing left more than one entry');
+    await page.locator('.draw-snap-btn').tap();
+    await field.tap();
+    await page.keyboard.type('25');
+    await page.waitForTimeout(400); // past the dim's guard against the tap that opened the sheet (Sheets.tsx)
+    await page.locator('.draw-scrim').tap({ position: { x: 10, y: 10 } });
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await state() === '<draw:state version="1" grid="25"/>', `typing 25 then the dim wrote ${await state()}`);
+    await undo.tap();
+    must(await source() === start && await undo.isDisabled(), 'closed with the dim, the typing was more than one entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Snap sheet on the phone (the P1-M1 review, F13): at 440×796 (a Safari tab) with the code at
+// half and six guides, the sheet sits in the viewport over everything the canvas draws: Done lies
+// inside the viewport; on top at Done's centre and at the Grid step field's are those controls, with
+// the overlay's marks made hittable too (the chrome buttons, guides and pills painted over the sheet
+// when it lived in the canvas); and Done closes it.
+async function theSnapSheetIsReachableOnThePhone(browser, origin) {
+  const SIX = `<svg xmlns="${SVG_NS}" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <metadata draw:made="true"><draw:state version="1" guides="v 10 v 30 v 50 h 20 h 40 h 60"/></metadata>
+  <rect x="10" y="10" width="30" height="30" fill="#2a9d8f"/>
+</svg>
+`;
+  await withPage(browser, origin, 796, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), SIX)).ok, 'test setup: the file did not open');
+    await page.locator('.draw-handle').tap();
+    must(await page.locator('.draw-sheet--half').count() === 1, 'test setup: the code panel is not at half');
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap-step input').waitFor();
+    await twoFrames(page);
+    must(await page.locator('.draw-guide-row').count() === 6, `test setup: the sheet lists ${await page.locator('.draw-guide-row').count()} guides, not 6`);
+    const r = await page.evaluate(() => {
+      const marks = [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-marks *')];
+      for (const m of marks) m.style.pointerEvents = 'auto';
+      const on = (el) => {
+        const b = el.getBoundingClientRect();
+        const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom, top: top === el || el.contains(top) ? 'it' : top ? `${top.tagName} ${top.getAttribute('class')}` : 'nothing' };
+      };
+      const out = { done: on(document.querySelector('.draw-modal-done')), field: on(document.querySelector('.draw-snap-step input')), w: innerWidth, h: innerHeight };
+      for (const m of marks) m.style.pointerEvents = '';
+      return out;
+    });
+    const d = r.done;
+    must(d.x >= 0 && d.y >= 0 && d.right <= r.w && d.bottom <= r.h, `Done is at ${Math.round(d.x)},${Math.round(d.y)}..${Math.round(d.right)},${Math.round(d.bottom)}, outside the ${r.w}×${r.h} viewport`);
+    must(d.top === 'it', `on top of Done is ${d.top}`);
+    must(r.field.top === 'it', `on top of the Grid step field is ${r.field.top}`);
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 5000 });
+    must(await page.locator('.draw-modal').count() === 0, 'Done did not close the Snap sheet');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A file's own CSS can't move its drawing off the paper (the P1-M1 review, F17): with
+// #r { left: 100px !important; top: 50px !important } on its root (an id outranks :host > svg), the
+// rect that fills its viewBox still lies exactly on the paper, because the camera's rule is in a
+// cascade layer. (A file's own @layer with !important still wins: the engine README's known limits.)
+async function aFilesOwnCssCantMoveItsDrawing(browser, origin) {
+  const T = `<svg id="r" xmlns="${SVG_NS}" viewBox="0 0 100 100"><style>#r { left: 100px !important; top: 50px !important }</style><rect id="fill" width="100" height="100" fill="#2a9d8f"/></svg>`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const r = await page.evaluate(() => ({
+      drawing: document.querySelector('.draw-host').shadowRoot.getElementById('fill').getBoundingClientRect().toJSON(),
+      paper: document.querySelector('.draw-paper').getBoundingClientRect().toJSON(),
+    }));
+    must(boxNear(r.drawing, r.paper, 1), `the file's #r { left, top !important } moved the drawing to ${rect(r.drawing)}, off its paper at ${rect(r.paper)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The arrows nudge the canvas selection: → moves the circle's cx by 1, ⇧→ by 10, and → held with 5
+// auto-repeats is one history entry. With a code token focused the arrows are the token's: ↑ steps
+// a number (P0), → and ↓ on a colour do nothing, and neither nudges. In the Number sheet's field
+// they move the caret, and nothing else.
+async function arrowsNudgeOnlyTheCanvasSelection(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    must(await page.locator('.draw-sel').textContent() === '<circle>', 'test setup: tapping the circle did not select it');
+    const at = (cx, r = 42) => SAMPLE.replace('cx="212"', `cx="${cx}"`).replace('r="42"', `r="${r}"`);
+    await page.keyboard.press('ArrowRight');
+    must(await source() === at(213), '→ did not move the circle by 1');
+    await page.keyboard.press('Shift+ArrowRight');
+    must(await source() === at(223), '⇧→ did not move the circle by 10');
+    await page.keyboard.down('ArrowRight');
+    for (let i = 0; i < 5; i++) await page.keyboard.down('ArrowRight'); // auto-repeats
+    await page.keyboard.up('ArrowRight');
+    must(await source() === at(229), `a held → with 5 auto-repeats did not move the circle by 6:\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Nudge', `the history's last entry is "${await undo.getAttribute('aria-label')}", not "Undo Nudge"`);
+    await undo.tap();
+    must(await source() === at(223), 'one undo did not take the whole held → back: it was more than one entry');
+    // A code token with the focus has the arrows.
+    await showCode(page);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    const r = circle.locator('.cv-number').nth(2);
+    await r.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await r.focus();
+    await page.keyboard.press('ArrowUp');
+    must(await source() === at(223, 43), `↑ on the focused r did not step it, or nudged the circle:\n${await source()}`);
+    await circle.locator('.cv-color').first().focus();
+    for (const k of ['ArrowRight', 'ArrowDown', 'ArrowLeft']) await page.keyboard.press(k);
+    must(await source() === at(223, 43), 'the arrows on a focused colour token nudged the circle');
+    // The Number sheet's field: the caret moves, nothing else.
+    await tapToken(r);
+    await page.locator('.draw-strip-value').tap();
+    const field = page.locator('.draw-modal input').first();
+    await field.focus();
+    await field.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length));
+    const end = await field.evaluate((el) => el.selectionStart);
+    await page.keyboard.press('ArrowLeft');
+    must(await field.evaluate((el) => el.selectionStart) === end - 1, 'ArrowLeft in the Number sheet did not move the caret');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowDown');
+    must(await source() === at(223, 43), 'the arrows in the Number sheet changed the file');
+    await page.locator('.draw-modal-done').tap();
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Runs in the page: the grid as drawn (client px), the paper's rectangle, and each line's place in
+// the root's user units (through the drawn root's getScreenCTM).
+function gridNow() {
+  const svg = document.querySelector('.draw-grid');
+  const o = svg.getBoundingClientRect();
+  const inv = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().inverse();
+  const paper = document.querySelector('.draw-paper').getBoundingClientRect().toJSON();
+  const lines = [...svg.querySelectorAll('line')].filter((l) => l.style.display !== 'none').map((l) => {
+    const [x1, y1, x2, y2] = ['x1', 'y1', 'x2', 'y2'].map((a) => Number(l.getAttribute(a)));
+    const v = x1 === x2;
+    const p = new DOMPoint(o.left + x1, o.top + y1).matrixTransform(inv);
+    return { v, at: v ? o.left + x1 : o.top + y1, from: v ? o.top + y1 : o.left + x1, to: v ? o.top + y2 : o.left + x2, unit: v ? p.x : p.y, major: l.classList.contains('major') };
+  });
+  return { step: Number(svg.dataset.step), paper, lines };
+}
+
+// The Grid button (44 pt at least) is off at first, and no line is drawn. On, the grid's lines are
+// drawn over the paper only, at least 12 px apart, at multiples of a 1, 2 or 5 × 10ⁿ step in the
+// root's user units (read back through its getScreenCTM), every fifth major; zoomed ×4 the step is
+// finer. The file never changes, and the choice survives a reload; so do the Snap sheet's toggles
+// (device preferences too: Guides turned off stays off, the rest on).
+async function theGridToggleShowsTheGrid(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const btn = page.locator('.draw-grid-btn');
+    const b = await btn.boundingBox();
+    must(b && b.width >= TAP_MIN && b.height >= TAP_MIN, `the Grid button is ${b ? `${b.width}×${b.height}` : 'missing'}, under ${TAP_MIN}pt`);
+    must(await btn.getAttribute('aria-pressed') === 'false', 'the grid is on at first');
+    must((await page.evaluate(gridNow)).lines.length === 0, 'grid lines are drawn while the grid is off');
+    await btn.tap();
+    must(await btn.getAttribute('aria-pressed') === 'true', 'the Grid button did not turn on');
+    const problems = [];
+    const judge = (g, when) => {
+      const e = 10 ** Math.floor(Math.log10(g.step));
+      if (!(g.step > 0) || ![1, 2, 5, 10].some((m) => Math.abs(g.step - m * e) < 1e-9 * g.step)) problems.push(`${when}: the step ${g.step} is not 1, 2 or 5 × 10ⁿ`);
+      if (g.lines.length < 4) problems.push(`${when}: only ${g.lines.length} grid line(s)`);
+      const p = g.paper;
+      for (const [v, name] of [[true, 'vertical'], [false, 'horizontal']]) {
+        const ls = g.lines.filter((l) => l.v === v).sort((a, b) => a.at - b.at);
+        const [lo, hi, from, to] = v ? [p.left, p.right, p.top, p.bottom] : [p.top, p.bottom, p.left, p.right];
+        for (const l of ls) {
+          const k = l.unit / g.step;
+          if (Math.abs(k - Math.round(k)) > 1e-3) problems.push(`${when}: a ${name} line at ${l.unit} user units is not a multiple of ${g.step}`);
+          else if (l.major !== (Math.round(k) % 5 === 0)) problems.push(`${when}: the ${name} line at ${l.unit} is ${l.major ? '' : 'not '}major`);
+          if (l.at < lo - 0.5 || l.at > hi + 0.5 || l.from < from - 0.5 || l.to > to + 0.5) problems.push(`${when}: a ${name} line at ${l.at.toFixed(1)} px runs past the paper (${JSON.stringify(p)})`);
+        }
+        for (let i = 1; i < ls.length; i++) if (ls[i].at - ls[i - 1].at < 12 - 0.01) problems.push(`${when}: ${name} lines ${(ls[i].at - ls[i - 1].at).toFixed(2)} px apart, under 12`);
+      }
+    };
+    const fit = await page.evaluate(gridNow);
+    judge(fit, 'at fit');
+    const c = await circleCentre(page);
+    for (let i = 0; i < 2; i++) await ctrlWheel(page, Math.round(c.x), Math.round(c.y), -100);
+    const zoomed = await page.evaluate(gridNow);
+    judge(zoomed, 'zoomed ×4');
+    must(zoomed.step < fit.step, `zoomed ×4 the step is ${zoomed.step}, not finer than ${fit.step} at fit`);
+    must(problems.length === 0, problems.slice(0, 12).join('\n'));
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'the grid changed the file');
+    const snapToggles = async () => {
+      await page.locator('.draw-snap-btn').tap();
+      const on = {};
+      for (const name of ['Grid', 'Guides', 'Shapes', 'Artboard']) on[name] = await page.locator('.draw-snap-toggles .ds-btn', { hasText: new RegExp(`^${name}$`) }).getAttribute('aria-pressed');
+      return on;
+    };
+    must(JSON.stringify(await snapToggles()) === JSON.stringify({ Grid: 'true', Guides: 'true', Shapes: 'true', Artboard: 'true' }), 'test setup: not everything snaps at first');
+    await page.locator('.draw-snap-toggles .ds-btn', { hasText: /^Guides$/ }).tap();
+    await page.locator('.draw-modal-done').tap();
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'a Snap toggle changed the file');
+    await page.reload({ waitUntil: 'networkidle' });
+    await twoFrames(page);
+    must(await btn.getAttribute('aria-pressed') === 'true', 'the grid did not stay on across a reload');
+    must((await page.evaluate(gridNow)).lines.length > 0, 'after a reload the grid draws nothing');
+    const kept = await snapToggles();
+    must(JSON.stringify(kept) === JSON.stringify({ Grid: 'true', Guides: 'false', Shapes: 'true', Artboard: 'true' }), `after a reload the Snap toggles are ${JSON.stringify(kept)}, not Guides off and the rest on`);
+    await page.locator('.draw-modal-done').tap();
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Synthetic probes for geometryMatchesTheBrowser, beside the corpus: transform-origin with keywords
+// and percentages on the view box and the fill box, nested viewports with each preserveAspectRatio,
+// and em, ex, rem and % lengths.
+const GEOMETRY_PROBES = [
+  ['transform-origin on the view box', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100">
+  <rect x="10" y="10" width="40" height="20" transform="rotate(30)" transform-origin="left top"/>
+  <rect x="60" y="10" width="40" height="20" transform="rotate(30)" transform-origin="50% 50%"/>
+  <rect x="110" y="10" width="40" height="20" transform="scale(1.5)" transform-origin="right bottom"/>
+  <rect x="10" y="50" width="40" height="20" transform="rotate(-20)" style="transform-origin: 25% 75%"/>
+  <rect x="60" y="50" width="40" height="20" transform="skewX(20)" transform-origin="center"/>
+</svg>`],
+  ['transform-origin on the fill box', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100">
+  <rect x="10" y="10" width="40" height="20" transform="rotate(45)" style="transform-box: fill-box; transform-origin: center"/>
+  <rect x="60" y="10" width="40" height="20" transform="rotate(45)" style="transform-box: fill-box; transform-origin: 0 100%"/>
+  <rect x="110" y="10" width="40" height="20" transform="scale(0.5 2)" style="transform-box: fill-box; transform-origin: right top"/>
+  <circle cx="40" cy="70" r="12" transform="scale(1.5)" style="transform-box: fill-box; transform-origin: 25% 25%"/>
+  <g transform="rotate(10)" style="transform-box: fill-box; transform-origin: center"><rect x="120" y="50" width="30" height="30"/><rect x="160" y="60" width="20" height="10"/></g>
+</svg>`],
+  ['nested viewports, each preserveAspectRatio', `<svg xmlns="${SVG_NS}" viewBox="0 0 300 100" width="300" height="100">
+  ${['xMinYMin meet', 'xMidYMid meet', 'xMaxYMax meet', 'xMinYMin slice', 'xMidYMid slice', 'xMaxYMax slice', 'none'].map((par, i) => `<svg x="${(i % 4) * 70 + 5}" y="${Math.floor(i / 4) * 50 + 5}" width="60" height="30" viewBox="0 0 10 20" preserveAspectRatio="${par}"><rect x="1" y="2" width="8" height="16"/><circle cx="5" cy="5" r="3"/></svg>`).join('\n  ')}
+  <svg x="220" y="60" width="50%" height="30%" viewBox="-5 -5 20 20"><rect width="10" height="10"/></svg>
+</svg>`],
+  ['curves, arcs and polylines', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 120" width="200" height="120">
+  <path d="M10 60 C 20 0, 60 0, 70 60 S 120 120, 130 60"/>
+  <path d="M10 100 Q 40 60 70 100 T 130 100"/>
+  <path d="M150 20 A 30 15 30 0 1 190 60"/>
+  <path d="M150 70 A 30 15 -45 1 0 190 100 Z"/>
+  <path d="m20 20 h30 v10 l-10 10 z m40 0 c10 -10 20 10 30 0"/>
+  <polyline points="100,10 120,40 110,5 140,30"/>
+  <polygon points="160,110 180,80 195,115"/>
+  <line x1="5" y1="115" x2="60" y2="112"/>
+  <ellipse cx="100" cy="90" rx="15" ry="6" transform="rotate(35 100 90)"/>
+  <g transform="translate(5 3) rotate(-10) scale(1.2 0.8)"><path d="M60 20 C 70 10, 80 30, 90 20"/><rect x="60" y="25" width="10" height="5" transform="skewY(15)"/></g>
+</svg>`],
+  ['em, ex, rem and % lengths', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100" style="font-size: 10px">
+  <rect x="1em" y="2em" width="3rem" height="10%" style="font-size: 20px"/>
+  <rect x="50%" y="5ex" width="2ex" height="1rem"/>
+  <circle cx="25%" cy="50%" r="5%"/>
+  <ellipse cx="3em" cy="70" rx="2rem" ry="1em" font-size="8"/>
+  <line x1="10%" y1="90%" x2="2em" y2="3rem" stroke="#000"/>
+  <svg x="120" y="10" width="4em" height="4em" viewBox="0 0 10 10"><rect width="100%" height="50%"/></svg>
+</svg>`],
+];
+
+// The engine's geometry against the browser's: the box of every drawn element, from the file in
+// node (engine/geometry's rootBounds, with the page's rem) and from the page (drawTest.measureAll:
+// each element's getBBox through root.getScreenCTM()⁻¹ · el.getScreenCTM(), in the root's user
+// units), within 0.5 user units wherever both give one. Over every static corpus file and the
+// synthetic probes above: at least 1,000 elements in 150 files (the static corpus holds about 1,250
+// boxes the browser measures, a fifth of them text, which the engine can't). Known, and left out: a
+// path with an error in its data, which the engine reads up to where every browser stops
+// (engine/path/parse.ts) while Blink and WebKit draw on past a comma before a command.
+async function geometryMatchesTheBrowser(browser, origin) {
+  const files = [...corpusFiles().filter((f) => !ANIMATES.test(f.text)), ...GEOMETRY_PROBES.map(([name, text]) => ({ name: `probe: ${name}`, text }))];
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const remPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+    const host = await page.evaluate(() => {
+      const b = document.querySelector('.draw-host').getBoundingClientRect();
+      return { width: b.width, height: b.height };
+    });
+    let compared = 0, inFiles = 0, known = 0;
+    const differ = [];
+    const box = (b) => `(${b.map((v) => Math.round(v * 100) / 100).join(', ')})`;
+    for (const f of files) {
+      const parsed = parseDoc(f.text);
+      if (!parsed.ok || !(await page.evaluate((t) => window.drawTest.render(t), f.text)).ok) continue;
+      const theirs = new Map((await page.evaluate(() => window.drawTest.measureAll())).map((m) => [m.index, m.box]));
+      const doc = parsed.doc;
+      const ctx = { viewport: rootViewport(doc, host), remPx };
+      const order = [];
+      const walk = (id, path) => {
+        const n = doc.nodes.get(id);
+        if (n?.kind !== 'element') return;
+        order.push({ id, path });
+        n.children.filter((k) => doc.nodes.get(k)?.kind === 'element').forEach((k, i) => walk(k, `${path} > ${doc.nodes.get(k).qname}:${i + 1}`));
+      };
+      walk(doc.root, 'svg');
+      let here = 0;
+      order.forEach(({ id, path }, index) => {
+        const b = theirs.get(index);
+        const r = b && rootBounds(doc, id, ctx);
+        if (!b || !r) return;
+        const n = doc.nodes.get(id);
+        if (n.local === 'path' && parsePath(attrValue(doc, n, null, 'd') ?? '').error) return void known++;
+        here++;
+        const mine = [r.x, r.y, r.x + r.width, r.y + r.height];
+        if (mine.some((v, i) => Math.abs(v - b[i]) > 0.5)) differ.push(`${f.name} ${path}: engine ${box(mine)}, browser ${box(b)}`);
+      });
+      compared += here;
+      if (here) inFiles++;
+    }
+    console.log(`     draw: the engine's geometry matched the browser's on ${compared - differ.length} of ${compared} element(s) in ${inFiles} file(s) (${known} known difference(s) left out)`);
+    must(compared >= 1000 && inFiles >= 150, `compared ${compared} elements in ${inFiles} files (at least 1,000 in 150 needed)`);
+    must(differ.length === 0, `${differ.length} element(s) whose box differs by more than 0.5 user units; the first ${Math.min(10, differ.length)}:\n${differ.slice(0, 10).join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// tools/drawio-flowchart-decision.svg's <rect width="100%" height="100%"> measures (0, 0, 161, 261)
+// in the root's user units at fit, after a ×8 ctrl-wheel zoom, a pan and a pinch, while its screen
+// size follows the zoom: the view is the root's own box, never its viewBox, which stays
+// "-0.5 -0.5 161 261". At ×8 the half-unit strip between the box's left edge and the rect (user x
+// −0.5 to 0), which only the root's own CSS background covers, is white where the checkerboard alone
+// would show #eeeeee squares. The file never changes.
+async function percentLengthsKeepTheirSizeUnderZoom(browser, origin) {
+  const F = readFileSync(join(CORPUS, 'tools/drawio-flowchart-decision.svg'), 'utf8');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the draw.io flowchart did not open');
+    const read = () => page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+      const rect = root.querySelector(':scope > rect');
+      const k = root.getScreenCTM().inverse().multiply(rect.getScreenCTM());
+      const b = rect.getBBox();
+      const [p, q] = [new DOMPoint(b.x, b.y).matrixTransform(k), new DOMPoint(b.x + b.width, b.y + b.height).matrixTransform(k)];
+      const s = rect.getBoundingClientRect();
+      return { box: [p.x, p.y, q.x - p.x, q.y - p.y], screen: [s.width, s.height], scale: root.getScreenCTM().a, viewBox: root.getAttribute('viewBox') };
+    });
+    const problems = [];
+    const judge = (r, when) => {
+      if (r.box.some((v, i) => Math.abs(v - [0, 0, 161, 261][i]) > 0.01)) problems.push(`${when}: the 100% rect measures (${r.box.map((v) => v.toFixed(3)).join(', ')}), not (0, 0, 161, 261)`);
+      if (Math.abs(r.screen[0] - 161 * r.scale) > 0.5 || Math.abs(r.screen[1] - 261 * r.scale) > 0.5) problems.push(`${when}: on screen it is ${r.screen.map((v) => v.toFixed(1)).join('×')}, not 161×261 at ${r.scale.toFixed(3)} px a unit`);
+      if (r.viewBox !== '-0.5 -0.5 161 261') problems.push(`${when}: the drawn root's viewBox is ${JSON.stringify(r.viewBox)}`);
+    };
+    const fit = await read();
+    judge(fit, 'at fit');
+    // ×8 about the drawing's left edge, halfway down.
+    const edge = await page.evaluate(screenPoint, { x: 0, y: 130 });
+    for (let i = 0; i < 3; i++) await ctrlWheel(page, Math.round(edge.x), Math.round(edge.y), -100);
+    const zoomed = await read();
+    judge(zoomed, 'zoomed ×8');
+    if (Math.abs(zoomed.scale / fit.scale - 8) > 1e-3) problems.push(`the ctrl-wheel zoomed ×${(zoomed.scale / fit.scale).toFixed(4)}, not ×8`);
+    // The strip from user x −0.5 to 0, inside (away from its anti-aliased edges), over 40 px of height.
+    const [a, b] = await Promise.all([page.evaluate(screenPoint, { x: -0.5, y: 130 }), page.evaluate(screenPoint, { x: 0, y: 130 })]);
+    const [x0, x1] = [Math.ceil(a.x) + 1, Math.floor(b.x) - 1];
+    if (x1 - x0 < 4) problems.push(`the half-unit strip is only ${x1 - x0} px wide at ×8`);
+    else {
+      const top = Math.round(a.y) - 20;
+      const shot = decodePng(await page.screenshot({ clip: { x: x0, y: top, width: x1 - x0, height: 40 } }));
+      let grey = 0;
+      for (let y = 0; y < shot.height; y++) for (let x = 0; x < shot.width; x++) if (shot.rgb(x, y).some((v) => v < 254)) grey++;
+      if (grey) problems.push(`${grey} of ${shot.width * shot.height} px of the strip between the root's box and the 100% rect are not white: the root's own background does not cover its box`);
+    }
+    // A pan (the wheel) and a pinch: the rect keeps its size in user units.
+    await page.evaluate(([x, y]) => document.querySelector('.draw-canvas').dispatchEvent(new WheelEvent('wheel', { clientX: x, clientY: y, deltaX: 40, deltaY: 60, bubbles: true, cancelable: true })), [200, 300]);
+    judge(await read(), 'after a pan');
+    await twoFingers(browser, page, { x: 180, y: 300 }, { x: 260, y: 300 }, { x: 150, y: 300 }, { x: 290, y: 300 }, 8);
+    judge(await read(), 'after a pinch');
+    must(problems.length === 0, problems.join('\n'));
+    must(await page.evaluate(() => window.drawTest.source()) === F, 'zooming changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M1 S3: handles and snapping ─────────────────────────────────────────────────────────────
+
+// Runs in the page: the overlay's handles, each with its id, kind, client centre and fill.
+function handlesNow() {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll('.draw-hd[data-handle]')].filter((h) => h.style.display !== 'none').map((h) => {
+    const b = h.getBoundingClientRect();
+    return { id: h.getAttribute('data-handle'), kind: h.getAttribute('class'), x: b.x + b.width / 2, y: b.y + b.height / 2, fill: getComputedStyle(h).fill, o: o.x };
+  });
+}
+// Runs in the page: a point in a drawn element's own units, on screen (its getScreenCTM).
+function elementPoint({ sel, x, y }) {
+  const el = document.querySelector('.draw-host').shadowRoot.querySelector(sel);
+  const p = new DOMPoint(x, y).matrixTransform(el.getScreenCTM());
+  return { x: p.x, y: p.y };
+}
+const SHAPES_SVG = () => readFileSync(join(CORPUS, 'lab/shapes.svg'), 'utf8');
+const openAndSelect = async (page, text, sel) => {
+  must((await page.evaluate((t) => window.drawTest.render(t), text)).ok, 'test setup: the file did not open');
+  await twoFrames(page);
+  const c = await page.evaluate(drawnCentre, sel);
+  await page.touchscreen.tap(c.x, c.y);
+  await page.waitForTimeout(50);
+};
+
+// On lab/shapes.svg's selected rect, a press takes the nearest handle within 26 pt: 20 pt from the
+// top-left corner (and further from every other) it drags that corner; 27 pt from every handle it
+// moves the rect instead; with two handles 10 and 20 pt away, the nearer wins. The dragged handle
+// is yellow while it moves and white after. A guide's pill is picked anywhere in 44 × 44.
+async function theNearestHandleWithin26ptWins(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const F = SHAPES_SVG();
+    await openAndSelect(page, F, 'rect');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const hs = await page.evaluate(handlesNow);
+    const tl = hs.find((h) => h.id === 'tl');
+    must(tl && hs.some((h) => h.id === 'center') && hs.some((h) => h.id === 'rot'), `test setup: the rect's handles are ${hs.map((h) => h.id)}`);
+    // 20 pt up and left of the top-left corner: that corner, dragged 30 pt further out.
+    const p = { x: tl.x - 14.14, y: tl.y - 14.14 };
+    let during = null;
+    await dragOnCanvas(page, 'mouse', p, { x: -30, y: -30 }, 6, async (i) => {
+      if (i === 6) during = (await page.evaluate(handlesNow)).find((h) => h.id === 'tl')?.fill;
+    });
+    const after = (await page.evaluate(handlesNow)).find((h) => h.id === 'tl')?.fill;
+    const moved = await source();
+    must(/<rect x="\d+" y="\d+" width="\d+" height="\d+"/.test(moved) && moved !== F && !moved.includes('x="20" y="25"'), `a press 20 pt from the top-left corner did not drag it:\n${moved}`);
+    const [x, y, w, h] = /x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/.exec(moved).slice(1).map(Number);
+    must(x + w === 80 && y + h === 75, `the corner drag moved the bottom-right corner (${x + w}, ${y + h})`);
+    must(during === 'rgb(255, 230, 0)', `the dragged handle is ${during} during the drag, not yellow`);
+    must(after === 'rgb(255, 255, 255)', `the handle is ${after} after the drag, not white`);
+    await undo.tap();
+    // 27 pt from every handle, on the rect: a move.
+    const now = await page.evaluate(handlesNow);
+    const q = { x: now.find((h) => h.id === 'tl').x + 40, y: now.find((h) => h.id === 'tl').y + 27 };
+    must(now.every((hd) => Math.hypot(hd.x - q.x, hd.y - q.y) >= 27), 'test setup: the point is within 27 pt of a handle');
+    await dragOnCanvas(page, 'mouse', q, { x: 21, y: 13 }, 6);
+    const m = await source();
+    must(/width="60" height="50"/.test(m) && !m.includes('x="20" y="25"'), `a press 27 pt from every handle did not move the rect:\n${m}`);
+    await undo.tap();
+    // Zoomed out, two handles 10 and 20 pt from one point: the top-left corner and the centre.
+    const c = await page.evaluate(drawnCentre, 'rect');
+    for (let i = 0; i < 2; i++) await ctrlWheel(page, Math.round(c.x), Math.round(c.y), 110);
+    const small = await page.evaluate(handlesNow);
+    const [a, b] = [small.find((h) => h.id === 'tl'), small.find((h) => h.id === 'center')];
+    must(a && b, `test setup: zoomed out the handles are ${small.map((h) => h.id)}`);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const r = { x: a.x + ((b.x - a.x) * 10) / len, y: a.y + ((b.y - a.y) * 10) / len };
+    must(len > 25 && len < 40, `test setup: the corner and the centre are ${len.toFixed(1)} pt apart`);
+    await dragOnCanvas(page, 'mouse', r, { x: -12, y: -12 }, 6);
+    const z = await source();
+    must(!z.includes('width="60" height="50"') && /x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/.test(z), `the nearer handle (the corner, 10 pt away) did not win over the centre (${(len - 10).toFixed(1)} pt):\n${z}`);
+    await undo.tap();
+    // A guide's pill, picked 21 pt off its centre both ways.
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Add vertical guide' }).tap();
+    await page.locator('.draw-modal-done').tap();
+    const pill = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0] ?? null);
+    must(pill, 'the guide has no pill');
+    const pc = { x: pill.x + pill.width / 2 + 21, y: pill.y + pill.height / 2 + 21 };
+    await dragOnCanvas(page, 'mouse', pc, { x: 40, y: 0 }, 6);
+    must(!(await source()).includes('guides="v 50"') && /guides="v \d+"/.test(await source()), 'a press 21 pt off the pill in both directions did not take it');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/shapes.svg's rect (x 20, y 25, 60 × 50): its top-left corner dragged to (30, 30) writes x 30,
+// y 30, width 50, height 45, the bottom-right staying at (80, 75); dragged past the bottom-right it
+// stops at 1 × 1; the bottom-right dragged to (90, 80) writes 70 × 55, the tooltip reading
+// "70 × 55"; each one history entry. A rect turned 30° resizes along its own sides (the corner
+// lands under the pointer). A group's corner doubles its width by a leading translate() scale()
+// pair (its top-left stays put, the tooltip reads its new size); a second drag rewrites that pair,
+// and a move then edits its translate.
+async function rectCornerHandlesKeepTheOppositeCorner(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const F = SHAPES_SVG();
+    await openAndSelect(page, F, 'rect');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const handle = async (id) => (await page.evaluate(handlesNow)).find((h) => h.id === id);
+    const to = (x, y) => page.evaluate(screenPoint, { x, y });
+    const dragTo = async (id, target) => {
+      const h = await handle(id);
+      must(h, `test setup: no ${id} handle`);
+      let tipText = null;
+      await dragOnCanvas(page, 'mouse', h, { x: target.x - h.x, y: target.y - h.y }, 8, async (i) => {
+        if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+      });
+      return tipText;
+    };
+    await dragTo('tl', await to(30, 30));
+    must(await source() === F.replace('x="20" y="25" width="60" height="50"', 'x="30" y="30" width="50" height="45"'), `the top-left corner to (30, 30):\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Resize', 'the resize is not one "Resize" entry');
+    await undo.tap();
+    must(await source() === F, 'one undo did not restore the rect');
+    await dragTo('tl', await to(95, 95));
+    must(await source() === F.replace('x="20" y="25" width="60" height="50"', 'x="79" y="74" width="1" height="1"'), `dragged past the bottom-right, not 1 × 1:\n${await source()}`);
+    await undo.tap();
+    const tipText = await dragTo('br', await to(90, 80));
+    must(await source() === F.replace('width="60" height="50"', 'width="70" height="55"'), `the bottom-right to (90, 80):\n${await source()}`);
+    must(tipText === '70 × 55', `the tooltip read ${JSON.stringify(tipText)}, not "70 × 55"`);
+    await undo.tap();
+    // Turned 30°: the corner lands under the pointer.
+    const R = F.replace('rx="0"', 'rx="0" transform="rotate(30 50 50)"');
+    await openAndSelect(page, R, 'rect');
+    const want = await page.evaluate(elementPoint, { sel: 'rect', x: 80, y: 70 }); // clear of every snap target
+    await dragTo('br', want);
+    must(await source() === R.replace('width="60" height="50"', 'width="60" height="45"'), `the turned rect's corner to its own (80, 70):\n${await source()}`);
+    const got = await page.evaluate(elementPoint, { sel: 'rect', x: 80, y: 70 });
+    must(Math.hypot(got.x - want.x, got.y - want.y) <= 1, `the turned rect's corner landed at ${JSON.stringify(got)}, not under the pointer ${JSON.stringify(want)}`);
+    must((await source()).includes('transform="rotate(30 50 50)"') && (await source()).includes('x="20" y="25"'), 'the turned rect moved its top-left or its transform');
+    // A group of two shapes: its corner scales it, by one leading pair.
+    const G = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <g id="g"><rect x="10" y="12" width="20" height="10" fill="#2a9d8f"/><circle cx="36" cy="24" r="4" fill="#e76f51"/></g>\n</svg>\n`;
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: the group did not open');
+    await showCode(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    await twoFrames(page);
+    const tl0 = await handle('tl');
+    const br0 = await handle('br');
+    const target = { x: tl0.x + 2 * (br0.x - tl0.x), y: tl0.y + 2 * (br0.y - tl0.y) };
+    const gTip = await dragTo('br', target);
+    const g1 = await source();
+    const pair = /<g id="g" transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)">/.exec(g1);
+    must(pair && Number(pair[3]) === 2, `doubling the group did not write a leading translate() scale(2) pair:\n${g1}`);
+    const tl1 = await handle('tl');
+    must(Math.hypot(tl1.x - tl0.x, tl1.y - tl0.y) <= 0.5, `the group's top-left moved from ${JSON.stringify(tl0)} to ${JSON.stringify(tl1)}`);
+    must(gTip === '60 × 32', `the group's tooltip read ${JSON.stringify(gTip)}, not "60 × 32"`);
+    const br1 = await handle('br');
+    await dragTo('br', { x: tl1.x + 1.5 * (br1.x - tl1.x), y: tl1.y + 1.5 * (br1.y - tl1.y) });
+    const g2 = await source();
+    must(/<g id="g" transform="translate\([-\d.]+ [-\d.]+\) scale\(3\)">/.test(g2), `a second corner drag did not rewrite the same pair:\n${g2}`);
+    const c = await handle('center');
+    await dragOnCanvas(page, 'mouse', { x: c.x - 3, y: c.y - 3 }, { x: 0, y: 17 }, 6);
+    const g3 = await source();
+    must(/<g id="g" transform="translate\([-\d.]+ [-\d.]+\) scale\(3\)">/.test(g3) && g3 !== g2, `a move did not edit the leading translate:\n${g3}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move', 'the move is not one entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/transform.svg with its <g> selected from the code: the ring dragged to 180° turns rotate(0)
+// into rotate(180) and changes no other byte (the list keeps its three lines); a drag ending at 47°
+// writes 45 (magnetic); the diamond doubles scale(1) to scale(2), and stops at 0.2 and 4; the centre
+// handle moves translate(50 50) by whole units, the tooltip reading "translate(X Y)"; and a line of
+// its local grid passes through the screen point of local (10, 0).
+async function rotateAndScaleHandlesEditTheLabHouse(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const T = readFileSync(join(CORPUS, 'lab/transform.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: lab/transform.svg did not open');
+    await showCode(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    await twoFrames(page);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const handle = async (id) => (await page.evaluate(handlesNow)).find((h) => h.id === id);
+    const pivot = await page.evaluate(screenPoint, { x: 50, y: 50 });
+    const turnTo = async (deg) => {
+      const ring = await handle('rot');
+      must(ring, 'test setup: no ring');
+      const d = Math.hypot(ring.x - pivot.x, ring.y - pivot.y);
+      const a = ((deg - 90) * Math.PI) / 180; // the ring starts straight above the pivot
+      await dragOnCanvas(page, 'mouse', ring, { x: pivot.x + d * Math.cos(a) - ring.x, y: pivot.y + d * Math.sin(a) - ring.y }, 8);
+    };
+    await turnTo(180);
+    must(await source() === T.replace('rotate(0)', 'rotate(180)'), `the ring at 180° did not write rotate(180) alone:\n${await source()}`);
+    await undo.tap();
+    await turnTo(47);
+    must(await source() === T.replace('rotate(0)', 'rotate(45)'), `a turn to 47° did not write 45:\n${await source()}`);
+    await undo.tap();
+    const scaleTo = async (k) => {
+      const d = await handle('scale');
+      must(d, 'test setup: no diamond');
+      await dragOnCanvas(page, 'mouse', d, { x: (k - 1) * (d.x - pivot.x), y: (k - 1) * (d.y - pivot.y) }, 8);
+    };
+    await scaleTo(2);
+    must(await source() === T.replace('scale(1)', 'scale(2)'), `the diamond at twice the distance did not write scale(2):\n${await source()}`);
+    await undo.tap();
+    await scaleTo(0.05);
+    must((await source()).includes('scale(0.2)'), 'the diamond went under 0.2');
+    await undo.tap();
+    await scaleTo(6);
+    must((await source()).includes('scale(4)'), 'the diamond went over 4');
+    await undo.tap();
+    const c = await handle('center');
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    let tipText = null;
+    await dragOnCanvas(page, 'mouse', c, { x: 12.3 * k, y: -7.8 * k }, 8, async (i) => {
+      if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    const m = /translate\((\d+) (\d+)\)/.exec(await source());
+    must(m && await source() === T.replace('translate(50 50)', `translate(${m[1]} ${m[2]})`) && m[1] !== '50', `the centre handle did not move translate(50 50) by whole units:\n${await source()}`);
+    must(tipText === `translate(${m[1]} ${m[2]})`, `the tooltip read ${JSON.stringify(tipText)}, not "translate(${m[1]} ${m[2]})"`);
+    await undo.tap();
+    const p = await page.evaluate(elementPoint, { sel: 'g', x: 10, y: 0 });
+    const lines = await page.evaluate(() => {
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      return [...document.querySelectorAll('.draw-local-grid')].filter((l) => l.style.display !== 'none').map((l) => ['x1', 'y1', 'x2', 'y2'].map((a, i) => Number(l.getAttribute(a)) + (i % 2 ? o.y : o.x)));
+    });
+    const through = lines.some(([x1, y1, x2, y2]) => Math.abs((x2 - x1) * (y1 - p.y) - (x1 - p.x) * (y2 - y1)) / Math.hypot(x2 - x1, y2 - y1) <= 1);
+    must(lines.length > 4 && through, `no local-grid line (of ${lines.length}) passes through local (10, 0) at ${JSON.stringify(p)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const SNAP_DOC = `<svg xmlns="${SVG_NS}" viewBox="0 0 80 60">
+  <rect id="a" x="8" y="6" width="10" height="10" fill="#2a9d8f"/>
+  <circle id="c" cx="62" cy="44" r="5" fill="#e76f51"/>
+</svg>
+`;
+
+// A vertical guide added at x 40 (the Snap sheet, at the artboard's centre) is kept as
+// <draw:state version="1" guides="v 40"/> in a Draw-made <metadata>. A rect dragged so its left
+// edge comes within 8 pt of the guide lands on 40, with a snap line; with Guides off it doesn't;
+// another shape's centre within 8 pt aligns the centres; with the grid shown at step 10, edges land
+// on multiples of 10; the artboard's edge snaps; beyond 8 pt of everything the move is in whole
+// units. The guide's pill drags it (tooltip "x = N"), and dragged off the canvas it is removed, and
+// with it <draw:state>, the Draw-made <metadata> and xmlns:draw: the file comes back byte for byte.
+async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), SNAP_DOC)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    // A drag on the shape itself (its edges and centre snap), never on the centre handle of a
+    // selection (only the centre snaps there): nothing is selected before each.
+    const drag = async (...args) => {
+      const x = page.locator('.draw-ctx-btn[aria-label="Deselect"]');
+      if (await x.count()) await x.tap();
+      return dragOnCanvas(page, ...args);
+    };
+    const sheet = async (...labels) => {
+      await page.locator('.draw-snap-btn').tap();
+      for (const l of labels) await page.locator('.draw-snap .ds-btn', { hasText: l }).first().tap();
+      await page.locator('.draw-modal-done').tap();
+    };
+    await sheet('Add vertical guide');
+    const withGuide = SNAP_DOC.replace('viewBox="0 0 80 60">\n', 'viewBox="0 0 80 60" xmlns:draw="https://mmaggitti.github.io/draw/ns">\n  <metadata draw:made="true"><draw:state version="1" guides="v 40"/></metadata>\n');
+    must(await source() === withGuide, `the guide is not kept as <draw:state version="1" guides="v 40"/> in a Draw-made <metadata>:\n${await source()}`);
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    const rectX = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('x')));
+    const rectY = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('y')));
+    // Left edge from 8 to 40 − 5 pt: within 8 pt of the guide (the artboard's centre, also at 40,
+    // is off here, so the guide alone takes it).
+    await sheet('Artboard');
+    const a = await page.evaluate(drawnCentre, '#a');
+    let lines = 0;
+    await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8, async (i) => {
+      if (i === 8) lines = await page.evaluate(() => [...document.querySelectorAll('.draw-snap-line')].filter((l) => l.style.display !== 'none').length);
+    });
+    must(await rectX() === 40, `the rect's left edge landed on ${await rectX()}, not the guide at 40`);
+    must(lines >= 1, 'no snap line while snapped');
+    await undo.tap();
+    await sheet('Guides');
+    await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8);
+    must(await rectX() === 39, `with Guides off the rect went to ${await rectX()}, not 39 (whole units)`);
+    await undo.tap();
+    await sheet('Guides', 'Artboard');
+    // The circle's centre is at y 44: the rect's centre (y 11) dragged to within 8 pt aligns.
+    await drag('mouse', a, { x: 5.4 * k, y: 33 * k - 6 }, 8);
+    must(await rectY() + 5 === 44, `the rect's centre went to y ${await rectY() + 5}, not the circle's 44`);
+    await undo.tap();
+    // The grid at step 10: edges on multiples of 10.
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Grid shown' }).tap();
+    await page.locator('.draw-snap-step input').fill('10');
+    await page.locator('.draw-modal-done').tap();
+    must((await source()).includes('grid="10"'), 'the grid step is not kept in <draw:state>');
+    await drag('mouse', a, { x: 13.3 * k, y: 7.4 * k }, 8);
+    must((await rectX()) % 10 === 0 || (await rectX() + 10) % 10 === 0, `on the grid, the rect's x is ${await rectX()}`);
+    await undo.tap();
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Grid shown' }).tap();
+    await page.locator('.draw-snap-step input').fill('');
+    await page.locator('.draw-modal-done').tap();
+    // The artboard's top edge (y 0): the rect's top edge from 6 to within 8 pt of it.
+    await drag('mouse', a, { x: 11.3 * k, y: -6 * k + 4 }, 8);
+    must(await rectY() === 0, `the rect's top landed on ${await rectY()}, not the artboard's edge`);
+    await undo.tap();
+    // Beyond 8 pt of everything: whole units.
+    await drag('mouse', a, { x: 11.3 * k, y: 10.3 * k }, 8);
+    const [x, y] = [await rectX(), await rectY()];
+    must(x === 19 && y === 16, `beyond every target the rect went to (${x}, ${y}), not (19, 16)`);
+    await undo.tap();
+    // The pill drags the guide in whole units; off the canvas it is removed, and the file is back.
+    const pill = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0]);
+    const pc = { x: pill.x + pill.width / 2, y: pill.y + pill.height / 2 };
+    let tipText = null;
+    await dragOnCanvas(page, 'mouse', pc, { x: 5.4 * k, y: 30 }, 8, async (i) => {
+      if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    must((await source()).includes('guides="v 45"'), `the pill did not drag the guide to 45:\n${await source()}`);
+    must(tipText === 'x = 45', `the pill's tooltip read ${JSON.stringify(tipText)}`);
+    const host = await page.locator('.draw-host').boundingBox();
+    const p2 = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0]);
+    await dragOnCanvas(page, 'mouse', { x: p2.x + p2.width / 2, y: p2.y + p2.height / 2 }, { x: host.x + host.width + 30 - (p2.x + p2.width / 2), y: 0 }, 8);
+    must(await source() === SNAP_DOC, `a guide dragged off the canvas did not give the file back:\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Remove guide', `the last entry is ${await undo.getAttribute('aria-label')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── S4: structure, Layers and Draw state ───────────────────────────────────────────────────────
+
+const DRAW_NS_URI = 'https://mmaggitti.github.io/draw/ns';
+
+// A More sheet command, by its exact name; the sheet closes on it.
+async function moreCommand(page, name) {
+  await openMore(page);
+  await page.locator('.draw-more .ds-btn', { hasText: new RegExp(`^${name}$`) }).tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+// Runs in the page: drawn elements' client boxes, by id.
+function drawnBoxes(ids) {
+  const root = document.querySelector('.draw-host').shadowRoot;
+  return Object.fromEntries(ids.map((id) => [id, root.getElementById(id)?.getBoundingClientRect().toJSON() ?? null]));
+}
+// Runs in the page: the ids of the drawn elements under a client point, topmost first, as the Stage
+// asks (elementsFromPoint, else elementFromPoint).
+function hitIds({ x, y }) {
+  const root = document.querySelector('.draw-host').shadowRoot;
+  const els = typeof root.elementsFromPoint === 'function' ? root.elementsFromPoint(x, y) : [root.elementFromPoint(x, y)];
+  return els.filter((el) => el && el.id).map((el) => el.id);
+}
+const boxNear = (a, b, tol = 0.5) => !!a && !!b && ['x', 'y', 'width', 'height'].every((k) => Math.abs(a[k] - b[k]) <= tol);
+// The ContextBar's label (null when nothing is selected: it shows a hint instead).
+const label = (page) => page.locator('.draw-label').textContent({ timeout: 2000 }).catch(() => null);
+const toast = (page) => page.locator('.draw-toast').textContent({ timeout: 2000 }).catch(() => null);
+
+const BADGE = `<svg xmlns="${SVG_NS}" xmlns:draw="${DRAW_NS_URI}" viewBox="0 0 100 100">
+  <defs><linearGradient id="grad"><stop offset="0" stop-color="#e76f51"/><stop offset="1" stop-color="#264653"/></linearGradient></defs>
+  <g id="badge">
+    <clipPath id="clip"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face" x="10" y="10" width="20" height="20" clip-path="url(#clip)" style="fill:url(#grad)" draw:locked="true"/>
+  </g>
+</svg>
+`;
+const BADGE_COPY = `
+  <g id="badge-2" transform="translate(5 5)">
+    <clipPath id="clip-2"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face-2" x="10" y="10" width="20" height="20" clip-path="url(#clip-2)" style="fill:url(#grad)"/>
+  </g>`;
+
+// Duplicate on a group holding a clip and a locked shape that uses it (and a gradient outside the
+// group): the copy follows the original with its leading whitespace, with fresh ids (badge-2,
+// clip-2, face-2), its clip-path on its own clip, url(#grad) still on the original gradient, no
+// draw:locked, and a translate(5 5); the original keeps every byte. On the canvas the copy is drawn
+// 5 units right and down, clipped by its own clip. It is selected, one history entry; one undo gives
+// the file back byte for byte.
+async function duplicateGetsFreshIdsAndItsOwnReferences(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), BADGE)).ok, 'test setup: the badge did not open');
+    await showCode(page);
+    await twoFrames(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    must(await label(page) === '<g#badge>', `test setup: a tap on the group's end tag selected ${await label(page)}`);
+    const before = await page.evaluate(drawnBoxes, ['face']);
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    await moreCommand(page, 'Duplicate');
+    const got = await source(page);
+    const copy = got.slice(got.indexOf('\n  <g id="badge-2"'), got.lastIndexOf('</g>') + 4);
+    must(/id="badge-2"/.test(got) && /id="clip-2"/.test(got) && /id="face-2"/.test(got), `the copy's ids are not fresh (badge-2, clip-2, face-2):\n${got}`);
+    must(copy.includes('clip-path="url(#clip-2)"') && copy.includes('style="fill:url(#grad)"'), `the copy's references are not its own clip and the original gradient:\n${copy}`);
+    must(!copy.includes('draw:locked'), 'the copy kept draw:locked');
+    must(got === BADGE.replace('\n  </g>\n', `\n  </g>${BADGE_COPY}\n`), `the copy is not the original, renamed and moved by translate(5 5), right after it with its whitespace (or the original changed):\n${got}`);
+    must(await label(page) === '<g#badge-2>', `the copy is not selected (${await label(page)})`);
+    await twoFrames(page);
+    const after = await page.evaluate(drawnBoxes, ['face', 'face-2']);
+    const want = { ...before.face, x: before.face.x + 5 * k, y: before.face.y + 5 * k };
+    must(boxNear(after.face, before.face), `the original moved on the canvas: ${rect(before.face)} → ${after.face && rect(after.face)}`);
+    must(boxNear(after['face-2'], want), `the copy is drawn at ${after['face-2'] && rect(after['face-2'])}, not 5 units right and down of the original (${rect(want)})`);
+    const own = await page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot;
+      return { ref: root.getElementById('face-2')?.getAttribute('clip-path'), inCopy: !!root.getElementById('clip-2')?.closest('#badge-2') };
+    });
+    must(own.ref === 'url(#clip-2)' && own.inCopy, `the drawn copy's clip is ${own.ref}, ${own.inCopy ? 'inside' : 'not inside'} the copy`);
+    // Clipped: inside its circle it is the topmost hit; at its rect's corner, outside the circle, it isn't there.
+    const [inside, corner] = await Promise.all([page.evaluate(screenPoint, { x: 25, y: 25 }), page.evaluate(screenPoint, { x: 34, y: 34 })]);
+    const [atInside, atCorner] = [await page.evaluate(hitIds, inside), await page.evaluate(hitIds, corner)];
+    must(atInside[0] === 'face-2', `inside its clip the copy is not the topmost hit: ${atInside.join(', ')}`);
+    must(!atCorner.includes('face-2'), `the copy is not clipped by its own clip: it is hit at its corner (${atCorner.join(', ')})`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    must(await undo.getAttribute('aria-label') === 'Undo Duplicate', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === BADGE, 'one undo did not give the file back byte for byte');
+    must(await undo.isDisabled(), 'Duplicate was more than one history entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const THREE_LINES = THREE_RECTS.split('\n').slice(1, 4).map((l) => l.trim());
+const GROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <g>\n  ${THREE_LINES.join('\n  ')}\n  </g>\n</svg>\n`;
+const NESTED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g id="G"><rect id="P" x="10" y="10" width="20" height="20" fill="#2a9d8f"/></g>
+  <rect id="Q" x="60" y="60" width="20" height="20" fill="#e76f51"/>
+</svg>
+`;
+const TURNED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g transform="translate(10 5) rotate(15)">
+    <rect id="u1" x="20" y="10" width="30" height="20" fill="#2a9d8f"/>
+    <circle id="u2" cx="20" cy="30" r="6" fill="#e76f51" transform="scale(2)"/>
+  </g>
+</svg>
+`;
+// A group holding a clip and the rect it clips (the P1-M1 review, F16): the clip is used in the
+// rect's user space, so on Ungroup only the rect takes the group's transform.
+const CLIPPED_GROUP = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g transform="translate(30 20)">
+    <clipPath id="clip"><circle cx="20" cy="20" r="15"/></clipPath>
+    <rect id="cr" x="0" y="0" width="40" height="40" fill="#e76f51" clip-path="url(#clip)"/>
+  </g>
+</svg>
+`;
+const CLIPPED_UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+    <clipPath id="clip"><circle cx="20" cy="20" r="15"/></clipPath>
+    <rect id="cr" x="0" y="0" width="40" height="40" fill="#e76f51" clip-path="url(#clip)" transform="translate(30 20)"/>
+  \n</svg>
+`;
+const UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+    <rect id="u1" x="20" y="10" width="30" height="20" fill="#2a9d8f" transform="translate(10 5) rotate(15)"/>
+    <circle id="u2" cx="20" cy="30" r="6" fill="#e76f51" transform="translate(10 5) rotate(15) scale(2)"/>
+  \n</svg>
+`;
+
+// Group: three sibling shapes go into one <g> at the last one's place, in their order, and every
+// screen box stays where it was (± 0.5 px); the group is selected; one entry. Select group climbs
+// from a shape to its group. Shapes with different parents refuse to group. Ungroup pushes a
+// translate(10 5) rotate(15) into each child (before a child's own transform) and every screen box
+// stays; one entry. A group holding a clip and the rect it clips (the P1-M1 review, F16): only the
+// rect takes the transform, its screen box stays, and the clip still covers the clip's centre and
+// not the rect's corner. A group with opacity refuses to ungroup, and says why.
+async function groupAndUngroupKeepEveryShapeInPlace(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const open = async (text) => {
+      must((await page.evaluate((t) => window.drawTest.render(t), text)).ok, 'test setup: the file did not open');
+      await twoFrames(page);
+    };
+    const tapOn = async (sel) => {
+      const c = await page.evaluate(drawnCentre, sel);
+      await page.touchscreen.tap(c.x, c.y);
+    };
+    await open(THREE_RECTS);
+    const three = await page.evaluate(drawnBoxes, ['A', 'B', 'C']);
+    await tapOn('#A');
+    await moreCommand(page, 'Select all');
+    must(await label(page) === '3 selected', `test setup: Select all selected ${await label(page)}`);
+    await moreCommand(page, 'Group');
+    must(await source(page) === GROUPED, `Group did not put the three in one <g> at the last one's place, in order:\n${await source(page)}`);
+    must(await label(page) === '<g>', `the new group is not selected (${await label(page)})`);
+    must(await undo.getAttribute('aria-label') === 'Undo Group', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await twoFrames(page);
+    const grouped = await page.evaluate(drawnBoxes, ['A', 'B', 'C']);
+    for (const id of ['A', 'B', 'C']) must(boxNear(grouped[id], three[id]), `grouping moved ${id}: ${rect(three[id])} → ${grouped[id] && rect(grouped[id])}`);
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    await tapOn('#B');
+    must(await label(page) === '<rect#B>', `test setup: a tap on B selected ${await label(page)}`);
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `Select group did not climb from B to its group (${await label(page)})`);
+    await undo.tap();
+    must(await source(page) === THREE_RECTS && await undo.isDisabled(), 'one undo did not take the group back: Group was more than one entry');
+    // Different parents: refused.
+    await open(NESTED);
+    await tapOn('#P');
+    await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+    await tapOn('#Q');
+    must(await label(page) === '2 selected', `test setup: P and Q are not both selected (${await label(page)})`);
+    await moreCommand(page, 'Group');
+    must(await toast(page) === 'Group needs shapes with the same parent.', `shapes with different parents grouped, or said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === NESTED && await undo.isDisabled(), 'a refused Group changed the file or the history');
+    // Ungroup: the group's transform pushed down to each child; every screen box stays.
+    await open(TURNED);
+    const turned = await page.evaluate(drawnBoxes, ['u1', 'u2']);
+    await tapOn('#u1');
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `test setup: Select group from u1 selected ${await label(page)}`);
+    await moreCommand(page, 'Ungroup');
+    must(await source(page) === UNGROUPED, `Ungroup did not push translate(10 5) rotate(15) into each child, keeping their bytes:\n${await source(page)}`);
+    must(await label(page) === '2 selected', `the former children are not selected (${await label(page)})`);
+    must(await undo.getAttribute('aria-label') === 'Undo Ungroup', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await twoFrames(page);
+    const flat = await page.evaluate(drawnBoxes, ['u1', 'u2']);
+    for (const id of ['u1', 'u2']) must(boxNear(flat[id], turned[id]), `ungrouping moved ${id}: ${rect(turned[id])} → ${flat[id] && rect(flat[id])}`);
+    await undo.tap();
+    must(await source(page) === TURNED && await undo.isDisabled(), 'one undo did not give the group back: Ungroup was more than one entry');
+    // A clip and its user: the drawing doesn't change.
+    await open(CLIPPED_GROUP);
+    const at = (x, y) => page.evaluate(([ux, uy]) => {
+      const p = new DOMPoint(ux, uy).matrixTransform(document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM());
+      return { x: p.x, y: p.y };
+    }, [x, y]);
+    const clipHits = async () => ({ centre: (await page.evaluate(hitIds, await at(50, 40))).includes('cr'), corner: (await page.evaluate(hitIds, await at(32, 22))).includes('cr') });
+    const clippedBox = (await page.evaluate(drawnBoxes, ['cr'])).cr;
+    const before = await clipHits();
+    must(before.centre && !before.corner, `test setup: the clip covers its centre ${before.centre}, the rect's corner ${before.corner}`);
+    await page.touchscreen.tap((await at(50, 40)).x, (await at(50, 40)).y);
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `test setup: Select group from the clipped rect selected ${await label(page)}`);
+    await moreCommand(page, 'Ungroup');
+    must(await source(page) === CLIPPED_UNGROUPED, `Ungroup gave the clip the group's transform, or changed more than the rect:\n${await source(page)}`);
+    await twoFrames(page);
+    must(boxNear((await page.evaluate(drawnBoxes, ['cr'])).cr, clippedBox), 'ungrouping moved the clipped rect');
+    const after = await clipHits();
+    must(after.centre && !after.corner, `after Ungroup the clip covers its centre ${after.centre}, the rect's corner ${after.corner}: the clip moved`);
+    await undo.tap();
+    must(await source(page) === CLIPPED_GROUP, 'one undo did not give the clipped group back');
+    // A group with opacity: refused, with the reason.
+    const FADED = TURNED.replace('<g transform', '<g opacity="0.5" transform');
+    await open(FADED);
+    await tapOn('#u1');
+    await moreCommand(page, 'Select group');
+    await moreCommand(page, 'Ungroup');
+    must(await toast(page) === 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.', `a group with opacity ungrouped, or said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === FADED && await undo.isDisabled(), 'a refused Ungroup changed the file or the history');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const LAYERS = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="c"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#e76f51"/></radialGradient>
+    <radialGradient id="glow" href="#c" r="0.3"/>
+  </defs>
+  <rect id="sky" x="10" y="10" width="50" height="50" fill="#264653"/>
+  <circle id="disc" cx="35" cy="35" r="12" fill="url(#c)">
+  </circle>
+  <rect id="spot" x="70" y="70" width="15" height="15" fill="url(#glow)"/>
+</svg>
+`;
+const LAYER_ROWS = ['#spot', '#disc', '#sky', '<defs>', '#glow', '#c', '<stop>', '<stop>'];
+
+// The Layers tab lists every element topmost first; a row tap selects it (the canvas and the code
+// follow). Hide writes exactly display="none" and the shape stops drawing (a tap there takes the
+// shape under it); Show gives the file back byte for byte. Lock writes draw:locked="true" and the
+// root's xmlns:draw: a tap on the locked shape takes the one beneath, a marquee around it leaves it
+// out, a drag from it draws a marquee (the shape beneath stays), and moving it after selecting it
+// from its code is refused with the reason; Unlock gives the file back, and the same marquee then
+// takes it. Rename c → sun rewrites url(#c) and href="#c". Rows and buttons are at least 44 pt; no
+// sideways scroll.
+async function layersHideAndLockShapes(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const entry = () => undo.getAttribute('aria-label');
+    const tab = async (name) => {
+      await page.locator('.draw-tabs button', { hasText: name }).tap();
+      if (name === 'Layers') await page.locator('.draw-layer').first().waitFor();
+      await twoFrames(page);
+    };
+    const deselect = async () => {
+      const x = page.locator('.draw-ctx-btn[aria-label="Deselect"]');
+      if (await x.count()) await x.tap();
+    };
+    must((await page.evaluate((t) => window.drawTest.render(t), LAYERS)).ok, 'test setup: the file did not open');
+    await tab('Layers');
+    const names = await page.locator('.draw-layer-name').allTextContents();
+    must(JSON.stringify(names) === JSON.stringify(LAYER_ROWS), `the tree is ${JSON.stringify(names)}, not every element topmost first ${JSON.stringify(LAYER_ROWS)}`);
+    await page.locator('.draw-layer-name', { hasText: /^#disc$/ }).tap();
+    must(await label(page) === '<circle#disc>', `a tap on the #disc row selected ${await label(page)}`);
+    must(await page.evaluate(() => [...document.querySelectorAll('.cv-block.cv-selected')].some((b) => b.textContent.includes('id="disc"'))), "the code doesn't mark the row's element");
+    must((await page.evaluate(handlesNow)).length > 0, "the overlay shows no handles for the row's element");
+    const discAt = await page.evaluate(screenPoint, { x: 35, y: 35 });
+    // Hide and Show.
+    await page.locator('[aria-label="Hide #disc"]').tap();
+    const HIDDEN = LAYERS.replace('fill="url(#c)">', 'fill="url(#c)" display="none">');
+    must(await source(page) === HIDDEN, `Hide did not write exactly display="none":\n${await source(page)}`);
+    must(await entry() === 'Undo Hide', `the history's last entry is ${await entry()}`);
+    await deselect();
+    await page.touchscreen.tap(discAt.x, discAt.y);
+    must(await label(page) === '<rect#sky>', `a tap where the hidden disc was took ${await label(page)}, not the sky under it`);
+    await page.locator('[aria-label="Show #disc"]').tap();
+    must(await source(page) === LAYERS, 'Show did not give the file back byte for byte');
+    // Lock.
+    await page.locator('[aria-label="Lock #disc"]').tap();
+    const LOCKED_FILE = LAYERS.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100" xmlns:draw="${DRAW_NS_URI}">`).replace('fill="url(#c)">', 'fill="url(#c)" draw:locked="true">');
+    must(await source(page) === LOCKED_FILE, `Lock did not write draw:locked="true" and the root's xmlns:draw:\n${await source(page)}`);
+    must(await entry() === 'Undo Lock', `the history's last entry is ${await entry()}`);
+    await deselect();
+    await page.touchscreen.tap(discAt.x, discAt.y);
+    must(await label(page) === '<rect#sky>', `a tap on the locked disc took ${await label(page)}, not the sky under it`);
+    // A marquee from empty canvas (right of the sky) around the disc: nothing taken.
+    const marquee = async (from, to) => {
+      await deselect();
+      const [a, b] = await Promise.all([page.evaluate(screenPoint, from), page.evaluate(screenPoint, to)]);
+      let drawn = false;
+      await dragOnCanvas(page, 'mouse', a, { x: b.x - a.x, y: b.y - a.y }, 8, async (i) => {
+        if (i === 8) drawn = await page.evaluate(() => [...document.querySelectorAll('.draw-marquee')].some((m) => m.style.display !== 'none'));
+      });
+      return drawn;
+    };
+    must(await marquee({ x: 65, y: 50 }, { x: 20, y: 20 }), 'test setup: no marquee from empty canvas');
+    const took = await page.locator('.draw-sel').textContent();
+    must(took === 'nothing selected', `a marquee around the locked disc took ${took}`);
+    must(await marquee({ x: 35, y: 35 }, { x: 55, y: 58 }), 'a drag from the locked disc drew no marquee');
+    must(await source(page) === LOCKED_FILE, 'a drag from the locked disc moved something');
+    // Selected from its code, it can't be moved.
+    await tab('Code');
+    await page.locator('.cv-block', { hasText: '</circle>' }).tap();
+    must(await label(page) === '<circle#disc>', `test setup: a tap on the disc's end tag selected ${await label(page)}`);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('ArrowRight');
+    must(await toast(page) === 'It’s locked. Unlock it in Layers first.', `moving the locked disc said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === LOCKED_FILE, 'the locked disc moved');
+    await tab('Layers');
+    await page.locator('[aria-label="Unlock #disc"]').tap();
+    must(await source(page) === LAYERS, 'Unlock did not give the file back byte for byte');
+    await marquee({ x: 65, y: 50 }, { x: 20, y: 20 });
+    must(await label(page) === '<circle#disc>', `unlocked, the same marquee took ${await label(page)}, not the disc`);
+    // Rename c → sun: every reference follows.
+    await page.locator('[aria-label="Rename #c"]').tap();
+    const field = page.locator('.draw-modal input[aria-label="New id"]');
+    await field.fill('sun');
+    await page.locator('.draw-rename-go').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === LAYERS.replace('id="c"', 'id="sun"').replace('href="#c"', 'href="#sun"').replace('url(#c)', 'url(#sun)'), `Rename c → sun left a reference behind, or changed more:\n${await source(page)}`);
+    must(await entry() === 'Undo Rename', `the history's last entry is ${await entry()}`);
+    // The phone rules on the tab.
+    const r = await page.evaluate((min) => {
+      const small = [...document.querySelectorAll('.draw-layer, .draw-layer-name, .draw-layer-btn')].map((el) => ({ el, b: el.getBoundingClientRect() })).filter(({ el, b }) => b.height < min - 0.5 || (el.tagName === 'BUTTON' && b.width < min - 0.5)).map(({ el, b }) => `${el.className} ${el.getAttribute('aria-label') ?? el.textContent} ${Math.round(b.width)}×${Math.round(b.height)}`);
+      const de = document.documentElement;
+      return { small, rows: document.querySelectorAll('.draw-layer').length, sideways: de.scrollWidth - de.clientWidth };
+    }, TAP_MIN);
+    must(r.rows === LAYER_ROWS.length && r.small.length === 0, `Layers rows or buttons under ${TAP_MIN} pt: ${r.small.join(', ')}`);
+    must(r.sideways <= 0, `the Layers tab scrolls sideways by ${r.sideways}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Draw's own state stays out of As-is, Copy and Clean: after a guide and a lock, Save to Files holds
+// <draw:state, draw:locked and xmlns:draw; the As-is export's bytes and the Copy text hold no draw:
+// at all and are the file as opened; Clean holds no Draw namespace and no Draw-made <metadata>, and
+// is the Clean export of the file as opened. The working copy re-opens with its guide and its lock,
+// and its import report counts draw:state as kept, not unclassified.
+async function drawStateStaysOutOfAsIsAndClean(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+      window.__copied = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void window.__copied.push(t) } });
+    });
+    const exportAs = async (kind) => {
+      await page.locator('.draw-export').tap();
+      const go = page.locator(`.draw-export-go[data-kind="${kind}"]`);
+      await go.waitFor();
+      const [download] = await Promise.all([page.waitForEvent('download'), go.tap()]);
+      const bytes = readFileSync(await download.path());
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      return bytes.toString('utf8');
+    };
+    await pickFile(page, 'state.svg', Buffer.from(SNAP_DOC));
+    await closeModal(page);
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Add vertical guide' }).tap();
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    await page.locator('[aria-label="Lock #a"]').tap();
+    const edited = await source(page);
+    must(edited.includes('guides="v 40"') && edited.includes('draw:locked="true"'), `test setup: the guide or the lock is missing:\n${edited}`);
+    const working = await exportAs('working');
+    must(working === edited, 'Save to Files is not the working copy');
+    must(working.includes('<draw:state') && working.includes('draw:locked="true"') && working.includes(`xmlns:draw="${DRAW_NS_URI}"`), `Save to Files lacks <draw:state, draw:locked or xmlns:draw:\n${working}`);
+    const asIs = await exportAs('as-is');
+    must(!asIs.includes('draw:'), `the As-is export holds draw::\n${asIs}`);
+    must(asIs === SNAP_DOC, `the As-is export is not the file as opened:\n${asIs}`);
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await page.locator('.draw-copy').tap();
+    const copied = await until('Copy writes the clipboard', () => page.evaluate(() => window.__copied[0] ?? null));
+    must(!copied.includes('draw:') && copied === SNAP_DOC, `Copy holds Draw state, or isn't the file as opened:\n${copied}`);
+    const clean = await exportAs('clean');
+    must(!clean.includes(DRAW_NS_URI) && !clean.includes('draw:') && !/<metadata\b/.test(clean), `Clean holds the Draw namespace or a Draw-made <metadata>:\n${clean}`);
+    const opened = parseDoc(SNAP_DOC);
+    must(opened.ok && clean === cleanExport(opened.doc).text, `Clean is not the clean export of the file as opened:\n${clean}`);
+    // The working copy opens again with its guide and its lock; its report keeps draw:state.
+    await pickFile(page, 'state-working.svg', Buffer.from(working));
+    const kept = await page.locator('.draw-group[data-bucket="kept"] .draw-item').allTextContents();
+    must(kept.some((t) => t.startsWith('<draw:state>')) && kept.some((t) => t.startsWith('draw:locked')), `the import report doesn't list draw:state and draw:locked as kept: ${kept.join(', ')}`);
+    must((await bucketCounts(page)).unclassified === 0, `the import report counts Draw state as unclassified: ${JSON.stringify(await bucketCounts(page))}`);
+    await closeModal(page);
+    must(await source(page) === working, 'the working copy did not open as saved');
+    const pills = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').length);
+    must(pills === 1, `the working copy opened with ${pills} guide(s), not its one`);
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    must(await page.locator('[aria-label="Unlock #a"]').count() === 1, 'the working copy opened without its lock');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const MOVING = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <rect id="A" x="10" y="10" width="15" height="15" fill="#e76f51"><animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/></rect>
+  <rect id="B" x="40" y="10" width="15" height="15" fill="#2a9d8f"/>
+  <rect id="C" x="70" y="70" width="15" height="15" fill="#264653"/>
+</svg>
+`;
+const BAR_ORDER = ['Deselect', 'Select more', 'Bring forward', 'Send back', 'Delete', 'More'];
+const HANDLE_ENTRY = { tl: 'Resize', tr: 'Resize', br: 'Resize', bl: 'Resize', center: 'Move', rot: 'Rotate', scale: 'Scale' };
+
+// The phone rules on the selection tools (under reduced motion, so an animated drawing shows Play):
+// with one and with three shapes selected, the ContextBar is 48 pt high, its label on one line, and
+// its six buttons at least 44 × 44 in order; the More sheet, the Snap sheet and the Layers tab keep
+// every control at least 44 pt and fields at least 16 px, with no sideways or page scroll; Grid and
+// Snap stay clear of Play; and a press 22 pt from each handle takes that handle.
+async function phoneRulesOnTheSelectionTools(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const problems = [];
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+    };
+    const bar = async (state) => {
+      const b = await page.evaluate(() => {
+        const ctx = document.querySelector('.draw-context');
+        const l = ctx.querySelector('.draw-label');
+        return {
+          h: ctx.getBoundingClientRect().height,
+          buttons: [...ctx.querySelectorAll('.draw-ctx-btn')].map((el) => ({ name: el.getAttribute('aria-label'), ...el.getBoundingClientRect().toJSON() })),
+          label: l && { text: l.textContent, h: l.getBoundingClientRect().height, font: parseFloat(getComputedStyle(l).fontSize) },
+        };
+      });
+      const names = b.buttons.map((x) => x.name);
+      if (JSON.stringify(names) !== JSON.stringify(BAR_ORDER)) problems.push(`${state}: the ContextBar's buttons are ${JSON.stringify(names)}, not ${JSON.stringify(BAR_ORDER)}`);
+      for (const x of b.buttons) if (x.width < TAP_MIN - 0.5 || x.height < TAP_MIN - 0.5) problems.push(`${state}: ${x.name} is ${Math.round(x.width)}×${Math.round(x.height)}`);
+      if (b.buttons.some((x, i) => i > 0 && x.left < b.buttons[i - 1].right - 0.5)) problems.push(`${state}: the ContextBar's buttons overlap or are out of order`);
+      if (!b.label || b.label.h >= 2 * b.label.font) problems.push(`${state}: the label ${JSON.stringify(b.label?.text)} is not on one line`);
+      if (Math.abs(b.h - 48) > 0.5) problems.push(`${state}: the ContextBar is ${b.h} high, not 48`);
+    };
+    must((await page.evaluate((t) => window.drawTest.render(t), MOVING)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const chrome = await page.evaluate(() => Object.fromEntries(['grid', 'snap', 'play'].map((k) => [k, document.querySelector(`.draw-${k}-btn`)?.getBoundingClientRect().toJSON() ?? null])));
+    must(chrome.play, 'test setup: the animated drawing offers no Play under reduced motion');
+    const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const [x, y] of [['grid', 'play'], ['snap', 'play'], ['grid', 'snap']]) if (overlap(chrome[x], chrome[y])) problems.push(`${x} ${rect(chrome[x])} overlaps ${y} ${rect(chrome[y])}`);
+    // One selected: the bar, and a press 22 pt from each handle takes it.
+    const c = await page.evaluate(drawnCentre, '#C');
+    await page.touchscreen.tap(c.x, c.y);
+    must(await label(page) === '<rect#C>', `test setup: a tap on C selected ${await label(page)}`);
+    await bar('one selected');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const hs = await page.evaluate(handlesNow);
+    must(['tl', 'tr', 'br', 'bl', 'center', 'rot'].every((id) => hs.some((h) => h.id === id)), `test setup: C's handles are ${hs.map((h) => h.id)}`);
+    for (const h of hs) {
+      let best = null;
+      for (let i = 0; i < 16; i++) {
+        const a = (i * Math.PI) / 8;
+        const p = { x: h.x + 22 * Math.cos(a), y: h.y + 22 * Math.sin(a) };
+        const clear = Math.min(...hs.filter((o) => o !== h).map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+        if (!best || clear > best.clear) best = { p, a, clear };
+      }
+      must(best.clear > 23, `test setup: no point 22 pt from the ${h.id} handle is nearer it than any other`);
+      await dragOnCanvas(page, 'mouse', best.p, { x: 30 * Math.cos(best.a), y: 30 * Math.sin(best.a) }, 6);
+      const got = await undo.getAttribute('aria-label');
+      if (got !== `Undo ${HANDLE_ENTRY[h.id]}`) problems.push(`a press 22 pt from the ${h.id} handle made ${got ?? 'no entry'}, not ${HANDLE_ENTRY[h.id]}`);
+      if (!(await undo.isDisabled())) await undo.tap();
+      if (await label(page) !== '<rect#C>') await page.touchscreen.tap(c.x, c.y);
+    }
+    must(await source(page) === MOVING, 'test setup: the handle presses were not all undone');
+    // Three selected.
+    await moreCommand(page, 'Select all');
+    must(await label(page) === '3 selected', `test setup: Select all selected ${await label(page)}`);
+    await bar('three selected');
+    await openMore(page);
+    await rules('the More sheet');
+    await closeModal(page);
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap-step input').waitFor();
+    await rules('the Snap sheet');
+    await closeModal(page);
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    await page.locator('.draw-layer').first().waitFor();
+    await rules('the Layers tab at half');
+    await page.locator('.draw-handle').tap();
+    await rules('the Layers tab at full');
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { reducedMotion: 'reduce' });
 }
 
 function corpusFiles() {

@@ -8,11 +8,17 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { descendants, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { Editor, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
-import { camera, fit, toDoc, toScreen, type Rect } from '../../src/canvas/viewport.ts';
-import { artboard } from '../../src/canvas/artboard.ts';
+import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
+import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
+import type { Camera } from '../../src/canvas/renderer.ts';
+import type { OverlayModel } from '../../src/interact/overlay-model.ts';
+import { measureWith } from './fakes.ts';
+import { layerRows } from '../../src/panels/layer-rows.ts';
+import { rootTransform } from '../../../../engine/geometry/ctm.ts';
+import { mapRect } from '../../../../engine/geometry/bounds.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -25,8 +31,9 @@ interface Rig {
   log: string[];
   listing: Map<string, ViewBlock>;
   order: string[];
-  cameras: (Rect | null)[];
+  cameras: (Camera | null)[];
   outlines: NodeId[][];
+  models: OverlayModel[];
   selected: ReadonlySet<number>[];
   focused: (FocusMark | null)[];
 }
@@ -35,8 +42,9 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
-  const cameras: (Rect | null)[] = [];
+  const cameras: (Camera | null)[] = [];
   const outlines: NodeId[][] = [];
+  const models: OverlayModel[] = [];
   const selected: ReadonlySet<number>[] = [];
   const focused: (FocusMark | null)[] = [];
   const canvas: CanvasPort = {
@@ -49,10 +57,11 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
     clear: () => log.push('canvas clear'),
     motion: () => 'still',
     play: () => {},
+    measure: (ids) => measureWith(r.editor, ids, true), // as the browser does, defs content too
     ...over,
   };
   const r: Rig = {
-    log, listing, cameras, outlines, selected, focused,
+    log, listing, cameras, outlines, models, selected, focused,
     get order() {
       return order;
     },
@@ -69,6 +78,21 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
           log.push(`code patch ${b.key}`);
           if (listing.has(b.key)) listing.set(b.key, b);
         },
+        place: (placements) => {
+          log.push(`code place ${placements.flatMap((p) => p.blocks.map((b) => b.key)).join(' ')}`);
+          for (const { blocks, before } of placements) {
+            const keys = blocks.map((b) => b.key);
+            order = order.filter((k) => !keys.includes(k));
+            const at = before === null ? order.length : order.indexOf(before);
+            order.splice(at === -1 ? order.length : at, 0, ...keys);
+            for (const b of blocks) listing.set(b.key, b);
+          }
+        },
+        remove: (keys) => {
+          log.push(`code remove ${keys.join(' ')}`);
+          order = order.filter((k) => !keys.includes(k));
+          for (const k of keys) listing.delete(k);
+        },
         select: (nodes) => selected.push(new Set(nodes)),
         focus: (mark) => focused.push(mark),
         readOnly: (on) => log.push(`code read-only ${on}`),
@@ -78,7 +102,13 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
           order = [];
         },
       },
-      overlay: { outline: (ids) => (log.push('overlay'), outlines.push([...ids])) },
+      overlay: {
+        show: (model) => {
+          log.push('overlay');
+          models.push(model);
+          outlines.push(model.outlines.map((o) => o.id));
+        },
+      },
       hostSize: () => size,
       sinkReady: () => true,
     }),
@@ -109,6 +139,15 @@ function onlyBetween(before: string, after: string, start: number, end: number):
 
 const circleOf = (r: Rig) => element(doc(r), (n) => n.local === 'circle');
 
+/** The fitted view and its camera, composed from the pure pieces the editor uses. */
+function fitted(d: Doc, host = HOST) {
+  const viewport = rootViewport(d, host);
+  const M = rootTransform(d, viewport);
+  const board = artboard(d);
+  const view = fit(board ? mapRect(M, board) : { x: 0, y: 0, width: viewport.width, height: viewport.height }, host, 0);
+  return { view, camera: { box: cameraBox(view, host, viewport), viewport } };
+}
+
 // ── opening ────────────────────────────────────────────────────────────────────────────────────
 
 test('opening fits the artboard into the host and lists the whole source as code', () => {
@@ -117,11 +156,11 @@ test('opening fits the artboard into the host and lists the whole source as code
   assert.ok(res.ok, res.error);
   assert.equal(r.log.filter((l) => l === 'canvas render').length, 1);
   assert.equal(text(r), SAMPLE, 'the listing is the source, byte for byte');
-  // The sample's own viewBox already shows the fitted view: no camera until the view moves.
-  assert.equal(r.cameras.at(-1), null);
-  assert.deepEqual(r.editor.view, fit(artboard(doc(r))!, HOST, 0));
+  // The sample has a viewBox and no size: its own box is the host at fit, pixel for pixel as alone.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width, height: HOST.height }, viewport: HOST });
+  assert.deepEqual(r.editor.view, fitted(doc(r)).view);
   r.editor.zoomAt({ x: 10, y: 10 }, 1);
-  assert.deepEqual(r.cameras.at(-1), camera(fit(artboard(doc(r))!, HOST, 0), HOST), 'then the camera is the fitted view itself');
+  assert.deepEqual(r.cameras.at(-1), fitted(doc(r)).camera, 'the camera stays the fitted view itself');
   assert.equal(r.editor.source(), SAMPLE);
   assert.deepEqual(r.editor.history.get(), { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null });
   const bad = r.editor.open('<svg');
@@ -152,12 +191,18 @@ test('an edit reaches the canvas, then the code, then the overlay, then the stor
     assert.equal(text(r), r.editor.source(), `${step}: the code shows exactly the document`);
   }
 
-  // A structure change re-renders the parent's subtree and rebuilds the listing.
+  // A structure change (Edit source) takes the old element away and places the new one alone, on
+  // the canvas and then in the code: nothing else is drawn again or rebuilt, and the listing stays
+  // the source.
   r.editor.select([poly.id]);
   r.editor.openSource();
   r.log.length = 0;
   assert.equal(r.editor.applySource(poly.id, '<circle r="3"/>'), null);
-  assert.deepEqual(r.log.slice(0, 2), [`canvas subtree ${doc(r).root}`, 'code set']);
+  const made = element(doc(r), (n) => n.local === 'circle' && attr(n, 'r') === '3');
+  const parent = made.parent!;
+  assert.deepEqual(r.log.slice(0, 4), [`canvas subtree ${poly.id}`, `canvas subtree ${made.id}`, `code remove ${poly.id}:start`, `code place ${made.id}:start`]);
+  assert.deepEqual(r.log.slice(4).filter((l) => l.startsWith('canvas') || l.startsWith('code')), [`code patch ${parent}:start`, `code patch ${parent}:end`], 'then its parent’s tags are read again');
+  assert.ok(r.log.indexOf('overlay') > r.log.indexOf(`code place ${made.id}:start`), 'the overlay after the code');
   assert.equal(text(r), r.editor.source());
 });
 
@@ -539,7 +584,7 @@ test('zoom and pan move the camera about the point, never the file', () => {
   assert.ok(Math.abs(v.scale / r.editor.fitScale - 4) < 1e-9);
   const back = toScreen(v, HOST, under);
   assert.ok(Math.abs(back.x - at.x) < 1e-9 && Math.abs(back.y - at.y) < 1e-9, 'the zoom invariant');
-  assert.deepEqual(r.cameras.at(-1), camera(v, HOST));
+  assert.deepEqual(r.cameras.at(-1), { box: cameraBox(v, HOST, HOST), viewport: HOST }, 'the root’s box, scaled and moved');
   r.editor.navStart();
   const a0 = { x: 100, y: 100 }, b0 = { x: 200, y: 200 };
   r.editor.navigate(a0, b0, { x: 90, y: 90 }, { x: 210, y: 210 });
@@ -555,18 +600,20 @@ test('zoom and pan move the camera about the point, never the file', () => {
   assert.deepEqual(r.editor.view, kept);
   r.editor.fitToScreen();
   r.editor.resize({ width: 416, height: 528 });
-  assert.deepEqual(r.editor.view, fit(artboard(doc(r))!, { width: 416, height: 528 }, 0));
+  assert.deepEqual(r.editor.view, fitted(doc(r), { width: 416, height: 528 }).view);
 });
 
 test('a file placed otherwise (preserveAspectRatio) opens with the camera fitting it; a viewBox edit fits again', () => {
   const r = rig();
   r.editor.open('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 20" preserveAspectRatio="xMinYMin"><rect width="10" height="10"/></svg>');
-  assert.deepEqual(r.cameras.at(-1), camera(fit({ x: 0, y: 0, width: 10, height: 20 }, HOST, 0), HOST));
+  // Alone the artboard sits at the host's left (xMinYMin); the camera box moves the root's box right to centre it.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 76, top: 0, width: 416, height: 528 }, viewport: HOST });
+  assert.deepEqual(r.cameras.at(-1), fitted(doc(r)).camera);
   const root = doc(r).root;
   const { block, token } = tokenIn(r, root, 'number', 2); // viewBox width
   r.editor.tapToken(block, token);
   r.editor.stepFocus(10);
-  assert.deepEqual(r.cameras.at(-1), camera(fit({ x: 0, y: 0, width: 20, height: 20 }, HOST, 0), HOST), 'a fitted view follows the artboard');
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 56, width: 416, height: 528 }, viewport: HOST }, 'a fitted view follows the artboard');
   r.editor.zoomAt({ x: 0, y: 0 }, 2);
   const zoomed = r.cameras.at(-1);
   r.editor.stepFocus(-5);
@@ -574,26 +621,31 @@ test('a file placed otherwise (preserveAspectRatio) opens with the camera fittin
 });
 
 test('a hostile viewBox near the float limit: zoom, pinch and pan keep a view whose camera can be drawn', () => {
-  for (const vb of ['1.7e308 1.7e308 1.7e308 1.7e308', '0 0 1e308 1e308']) {
+  // A viewBox near the float limit, and a root so wide that zooming in would make its box too big
+  // to draw (over MAX_BOX CSS px a side): every camera the renderer is given can be placed.
+  for (const attrs of ['viewBox="1.7e308 1.7e308 1.7e308 1.7e308"', 'viewBox="0 0 1e308 1e308"', 'width="1e30" height="1e30"']) {
     const r = rig();
-    assert.ok(r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}"><rect width="10" height="10"/></svg>`).ok, vb);
+    assert.ok(r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}><rect width="10" height="10"/></svg>`).ok, attrs);
     r.editor.zoomAt({ x: 10, y: 10 }, 1 / 16);
     r.editor.zoomAt({ x: 10, y: 10 }, 2);
+    for (let i = 0; i < 60; i++) r.editor.zoomAt({ x: 10, y: 10 }, 4);
     r.editor.navStart();
     r.editor.navigate({ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 140, y: 100 }, { x: 160, y: 100 });
     r.editor.navEnd();
     r.editor.panBy(40, 40);
-    const overflowed = r.cameras.filter((c) => c !== null && ![c.x, c.y, c.width, c.height].every(Number.isFinite));
-    assert.deepEqual(overflowed, [], `${vb}: a camera the renderer can't write`);
+    const bad = r.cameras.filter((c) => c !== null && (![c.box.left, c.box.top, c.box.width, c.box.height].every(Number.isFinite) || c.box.width > MAX_BOX || c.box.height > MAX_BOX));
+    assert.deepEqual(bad, [], `${attrs}: a camera the renderer can't place`);
+    assert.ok(r.cameras.length > 3, `${attrs}: the view moved`);
   }
 });
 
 test('a document with no artboard draws as the browser draws it until the view moves', () => {
   const r = rig();
   r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>');
-  assert.equal(r.cameras.at(-1), null);
+  // At fit its box is the host at scale 1, so the renderer supplies no viewBox: as the browser draws it.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width, height: HOST.height }, viewport: HOST });
   r.editor.zoomAt({ x: 0, y: 0 }, 2);
-  assert.deepEqual(r.cameras.at(-1), { x: 0, y: 0, width: HOST.width / 2, height: HOST.height / 2 });
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width * 2, height: HOST.height * 2 }, viewport: HOST }, 'the scale leaves 1 only when the view moves');
 });
 
 // ── P0-M5: the keyboard, the source view, render errors ────────────────────────────────────────
@@ -708,4 +760,888 @@ test('a render error: the whole drawing is drawn again from the model; if that f
   assert.ok(r.log.includes('canvas render'), 'the next change draws the whole drawing again');
   assert.equal(r.editor.canvasError.get(), null, 'which works now, so the message goes');
   assert.ok(r.editor.source().includes('cx="213"'), 'undo carried on through it');
+});
+
+// ── P1-M1: the pointer (decision 7) ────────────────────────────────────────────────────────────
+
+const SHAPES = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="b" x="40" y="10" width="10" height="10"/>
+  <g id="g"><circle id="c" cx="70" cy="70" r="5"/></g>
+  <rect id="k" x="10" y="60" width="10" height="10" draw:locked="true"/>
+  <line id="l" x1="10" y1="90" x2="90" y2="90" stroke="#000"/>
+</svg>`;
+const NO_SNAP = { grid: false, guides: false, shapes: false, artboard: false };
+const idOf = (r: Rig, id: string): NodeId => element(doc(r), (n) => n.attrs.some((a) => a.local === 'id' && a.raw === id)).id;
+/** Host px of a point in the root's user units (the fakes' camera: the root's box, M). */
+function hostAt(r: Rig, x: number, y: number) {
+  const { box, viewport, M } = r.editor.rootBox;
+  const k = box!.width / viewport.width;
+  return { x: box!.left + k * (M[0] * x + M[4]), y: box!.top + k * (M[3] * y + M[5]) };
+}
+const pxPerUnit = (r: Rig) => (r.editor.rootBox.box!.width / r.editor.rootBox.viewport.width) * r.editor.rootBox.M[0];
+const sel = (r: Rig) => [...r.editor.selection.get()].sort();
+function tap(r: Rig, at: { x: number; y: number }, hits: NodeId[], add = false) {
+  r.editor.pointerDown(at, hits, { add });
+  r.editor.pointerUp(at);
+}
+function drag(r: Rig, from: { x: number; y: number }, to: { x: number; y: number }, hits: NodeId[], opts: { held?: boolean; add?: boolean; frames?: number } = {}) {
+  r.editor.pointerDown(from, hits, { add: !!opts.add });
+  const n = opts.frames ?? 4;
+  for (let i = 1; i <= n; i++) r.editor.pointerDrag({ x: from.x + ((to.x - from.x) * i) / n, y: from.y + ((to.y - from.y) * i) / n }, i === 1 && !!opts.held);
+  r.editor.pointerUp(to);
+}
+
+test('a tap selects the shape itself; Select more or ⇧ toggles it; empty canvas clears (and Select more turns off)', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b, c] = ['a', 'b', 'c'].map((id) => idOf(r, id));
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a]);
+  tap(r, hostAt(r, 70, 70), [c]);
+  assert.deepEqual(sel(r), [c], 'the circle itself, not its group (decision 7)');
+  tap(r, hostAt(r, 45, 15), [b], true);
+  assert.deepEqual(sel(r), [b, c].sort(), '⇧ adds');
+  tap(r, hostAt(r, 45, 15), [b], true);
+  assert.deepEqual(sel(r), [c], '⇧ again takes it out');
+  r.editor.selectMore.set(true);
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a, c].sort(), 'Select more adds');
+  tap(r, hostAt(r, 30, 45), []);
+  assert.deepEqual(sel(r), [a, c].sort(), 'with Select more an empty tap does nothing');
+  r.editor.selectMore.set(false);
+  tap(r, hostAt(r, 30, 45), []);
+  assert.deepEqual(sel(r), [], 'an empty tap clears');
+  assert.equal(r.editor.source(), SHAPES, 'taps change nothing in the file');
+  assert.equal(r.editor.history.get().canUndo, false);
+});
+
+test('a tap near a hairline takes it (22 px plus half its stroke); locked shapes are skipped', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const near = hostAt(r, 50, 90);
+  const reach = 22 + pxPerUnit(r) / 2; // 22 px and half its 1-unit stroke
+  tap(r, { x: near.x, y: near.y - reach + 0.5 }, []);
+  assert.deepEqual(sel(r), [idOf(r, 'l')], 'within 22 px and half its stroke of the line');
+  r.editor.deselect(); // its own handles would take a tap this near (S3)
+  tap(r, { x: near.x, y: near.y - reach - 0.5 }, []);
+  assert.deepEqual(sel(r), [], 'beyond it, nothing');
+  tap(r, hostAt(r, 15, 65), [idOf(r, 'k')]);
+  assert.deepEqual(sel(r), [], 'a locked shape takes no tap: the canvas under it is empty');
+});
+
+test('a drag on an unselected shape selects and moves it, as one history entry, by whole units', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  r.editor.snap.set(NO_SNAP); // whole units alone (snapping to targets has its own tests)
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  const k = pxPerUnit(r);
+  drag(r, from, { x: from.x + 7.4 * k, y: from.y - 3.6 * k }, [a]);
+  assert.deepEqual(sel(r), [a], 'it is selected');
+  assert.equal(r.editor.source(), SHAPES.replace('<rect id="a" x="10" y="10"', '<rect id="a" x="17" y="6"'), 'moved by the rounded delta, nothing else changed');
+  assert.deepEqual(r.editor.history.get().undoLabel, 'Move');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(r.editor.history.get().canUndo, false, 'one entry for the whole gesture');
+});
+
+test('a drag on a selected shape moves the whole selection; one inside a selected group moves the group', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b, g, c] = ['a', 'b', 'g', 'c'].map((id) => idOf(r, id));
+  r.editor.select([a, b]);
+  const from = hostAt(r, 45, 15);
+  const k = pxPerUnit(r);
+  drag(r, from, { x: from.x + 5 * k, y: from.y + 5 * k }, [b]);
+  assert.equal(r.editor.source(), SHAPES.replace('x="10" y="10"', 'x="15" y="15"').replace('x="40" y="10"', 'x="45" y="15"'));
+  assert.deepEqual(sel(r), [a, b].sort());
+  r.editor.select([g]);
+  const at = hostAt(r, 70, 70);
+  drag(r, at, { x: at.x + 2 * k, y: at.y }, [c]);
+  assert.deepEqual(sel(r), [g], 'the group stays selected');
+  assert.ok(r.editor.source().includes('<g id="g" transform="translate(2 0)">'), 'a group moves by translate');
+});
+
+test('an empty-canvas drag and a hold-drag draw a marquee that takes only what it wholly encloses', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), []);
+  assert.deepEqual(sel(r), [a], 'A inside');
+  drag(r, hostAt(r, 5, 5), hostAt(r, 45, 25), []);
+  assert.deepEqual(sel(r), [a], 'B half inside is not taken');
+  r.editor.select([]);
+  drag(r, hostAt(r, 42, 12), hostAt(r, 55, 25), [b], { held: true });
+  assert.deepEqual(sel(r), [], 'a hold-drag from B draws a marquee (B is not wholly inside it)');
+  assert.equal(r.editor.source(), SHAPES, 'and moves nothing');
+  drag(r, hostAt(r, 35, 5), hostAt(r, 55, 25), [b], { held: true });
+  assert.deepEqual(sel(r), [b], 'one around B takes it');
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), [], { add: true });
+  assert.deepEqual(sel(r), [a, b].sort(), 'with ⇧ a second marquee adds');
+  drag(r, hostAt(r, 5, 55), hostAt(r, 25, 75), []);
+  assert.deepEqual(sel(r), [], 'a locked shape is not taken');
+  const at = hostAt(r, 30, 45);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerDrag({ x: at.x + 20, y: at.y + 3 });
+  r.editor.pointerUp({ x: at.x + 20, y: at.y + 3 });
+  assert.deepEqual(sel(r), [], 'a marquee under 5 px in either direction takes nothing');
+  assert.equal(r.editor.history.get().canUndo, false, 'marquees are never history');
+});
+
+test('a cancelled move restores the file byte for byte and records nothing; a locked shape drags a marquee', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 30, y: from.y });
+  r.editor.pointerDrag({ x: from.x + 60, y: from.y });
+  assert.notEqual(r.editor.source(), SHAPES, 'test setup: it moved live');
+  r.editor.pointerCancel();
+  assert.equal(r.editor.source(), SHAPES);
+  assert.equal(r.editor.history.get().canUndo, false);
+  drag(r, hostAt(r, 15, 65), hostAt(r, 30, 80), [idOf(r, 'k')]);
+  assert.equal(r.editor.source(), SHAPES, 'the locked shape did not move');
+  drag(r, hostAt(r, 15, 65), hostAt(r, 30, 80), [idOf(r, 'k'), idOf(r, 'a')]);
+  assert.equal(r.editor.source(), SHAPES, 'a drag from a locked shape is a marquee, even with a shape under it: that one did not move either');
+  assert.deepEqual(sel(r), [], 'and the marquee took what it enclosed: nothing');
+  r.editor.select([idOf(r, 'k')]);
+  const k = hostAt(r, 15, 65);
+  drag(r, k, { x: k.x + 30, y: k.y }, [idOf(r, 'k')]);
+  assert.equal(r.editor.source(), SHAPES, 'selected from the code, it still refuses a move on the canvas');
+});
+
+// ── structure: Bring forward, Send back, Delete ────────────────────────────────────────────────
+
+/** The ids of the root's element children, in order. */
+const stack = (r: Rig) => (doc(r).nodes.get(doc(r).root) as ElementNode).children.map((c) => doc(r).nodes.get(c)!).filter((n): n is ElementNode => n.kind === 'element').map((n) => attr(n, 'id'));
+const spaceBefore = (r: Rig, id: NodeId): NodeId => {
+  const kids = (doc(r).nodes.get(doc(r).nodes.get(id)!.parent!) as ElementNode).children;
+  return kids[kids.indexOf(id) - 1];
+};
+
+test('Bring forward and Send back swap each selected element, with its leading whitespace, past its next or previous element sibling; one entry each, patching only what moved', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  const ws = spaceBefore(r, a);
+  r.editor.select([a]);
+  r.log.length = 0;
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['b', 'a', 'g', 'k', 'l']);
+  assert.equal(r.editor.source(), SHAPES.replace('  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <rect id="b" x="40" y="10" width="10" height="10"/>', '  <rect id="b" x="40" y="10" width="10" height="10"/>\n  <rect id="a" x="10" y="10" width="10" height="10"/>'), 'its indentation moves with it');
+  assert.equal(r.editor.history.get().undoLabel, 'Bring forward');
+  assert.deepEqual(r.log.filter((l) => l.startsWith('canvas')), [`canvas subtree ${a}`, `canvas subtree ${ws}`], 'the canvas patches the element and its whitespace, last first');
+  const places = r.log.filter((l) => l.startsWith('code place'));
+  assert.ok(!r.log.includes('code set') && places.length === 1 && places[0].split(' ').includes(`${a}:start`), 'the code places its blocks, in one call; the listing is not rebuilt');
+  assert.equal(r.log.filter((l) => l.startsWith('code remove')).length, 1, 'and takes the old ones away in one call');
+  assert.equal(text(r), r.editor.source(), 'the code shows exactly the document');
+  assert.deepEqual(sel(r), [a], 'it stays selected');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(text(r), SHAPES);
+
+  // Several keep their order among themselves; one already last (first) stays.
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['g', 'a', 'b', 'k', 'l']);
+  r.editor.forward();
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['g', 'k', 'l', 'a', 'b']);
+  const entries = () => r.editor.history.get().undoLabel;
+  const before = r.editor.source();
+  r.editor.undo();
+  r.editor.redo();
+  r.editor.forward();
+  assert.equal(r.editor.source(), before, 'already last: nothing moves');
+  r.editor.undo();
+  assert.deepEqual(stack(r), ['g', 'k', 'a', 'b', 'l'], 'and nothing was recorded (undo goes back one real move)');
+  r.editor.redo();
+  r.editor.back();
+  assert.deepEqual(stack(r), ['g', 'k', 'a', 'b', 'l']);
+  assert.equal(entries(), 'Send back');
+  assert.equal(text(r), r.editor.source());
+
+  // Back: before the previous element and its whitespace. At the front, nothing to do.
+  const r2 = rig();
+  r2.editor.open(SHAPES);
+  r2.editor.select([idOf(r2, 'b')]);
+  r2.editor.back();
+  assert.equal(r2.editor.source(), SHAPES.replace('  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <rect id="b" x="40" y="10" width="10" height="10"/>', '  <rect id="b" x="40" y="10" width="10" height="10"/>\n  <rect id="a" x="10" y="10" width="10" height="10"/>'));
+  r2.editor.back();
+  assert.deepEqual(stack(r2), ['b', 'a', 'g', 'k', 'l']);
+  r2.editor.undo();
+  assert.equal(r2.editor.source(), SHAPES, 'the second Back recorded nothing');
+  assert.equal(r2.editor.history.get().canUndo, false);
+  assert.equal(text(r2), SHAPES);
+
+  // Inside a group: past its siblings only. The root, and a locked element, are refused.
+  r2.editor.select([doc(r2).root]);
+  r2.editor.forward();
+  r2.editor.back();
+  assert.equal(r2.editor.source(), SHAPES, 'the root has no siblings to pass');
+  r2.editor.select([idOf(r2, 'k')]);
+  r2.editor.forward();
+  assert.equal(r2.editor.notice.get(), LOCKED);
+  assert.equal(r2.editor.source(), SHAPES);
+  assert.equal(r2.editor.history.get().canUndo, false);
+});
+
+test('Delete takes the selection away with its leading whitespace, in one entry; the root and locked elements are refused', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, g, c] = ['a', 'g', 'c'].map((id) => idOf(r, id));
+  const ws = spaceBefore(r, a);
+  r.editor.select([a, c]);
+  r.log.length = 0;
+  r.editor.delete();
+  assert.equal(r.editor.source(), SHAPES.replace('\n  <rect id="a" x="10" y="10" width="10" height="10"/>', '').replace('<circle id="c" cx="70" cy="70" r="5"/>', ''));
+  assert.deepEqual(stack(r), ['b', 'g', 'k', 'l']);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+  assert.deepEqual(sel(r), [], 'nothing is selected');
+  assert.deepEqual(r.log.filter((l) => l.startsWith('canvas')).sort(), [`canvas subtree ${a}`, `canvas subtree ${c}`, `canvas subtree ${ws}`].sort(), 'the canvas takes away only what was deleted');
+  assert.ok(!r.log.includes('code set'), 'the listing is not rebuilt');
+  assert.equal(text(r), r.editor.source());
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(text(r), SHAPES);
+
+  // A group and something inside it: the group goes, with everything in it.
+  r.editor.select([g, c]);
+  r.editor.delete();
+  assert.deepEqual(stack(r), ['a', 'b', 'k', 'l']);
+  r.editor.undo();
+
+  // The root, and a locked element, are refused and say why; nothing changes.
+  r.editor.select([doc(r).root]);
+  r.editor.delete();
+  assert.equal(r.editor.notice.get(), 'The root <svg> can’t be deleted.');
+  r.editor.select([idOf(r, 'b'), idOf(r, 'k')]);
+  r.editor.delete();
+  assert.equal(r.editor.notice.get(), LOCKED);
+  assert.equal(r.editor.source(), SHAPES);
+  assert.equal(r.editor.history.get().canUndo, false, 'the refusals recorded nothing');
+  assert.equal(r.editor.history.get().redoLabel, 'Delete', 'and left the undone Delete to redo');
+});
+
+test('a move snaps to a target within 8 px of the moving box’s edges or centre, and not beyond; a snap line marks it', () => {
+  const r = rig();
+  r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect id="a" x="10" y="10" width="10" height="10"/><rect id="b" x="60" y="70" width="10" height="10"/></svg>`);
+  r.editor.snap.set({ grid: false, guides: false, shapes: true, artboard: false });
+  const k = pxPerUnit(r);
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  const src = () => r.editor.source();
+  // A's left edge (10) toward B's (60): 50 units less 7 px lands on 60; less 9 px, whole units.
+  drag(r, from, { x: from.x + 50 * k - 7, y: from.y }, [a]);
+  assert.ok(src().includes('<rect id="a" x="60" y="10"'), `7 px away it snaps: ${src()}`);
+  r.editor.undo();
+  r.editor.select([]);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 50 * k - 9, y: from.y });
+  assert.equal(r.models.at(-1)?.snapLines.length, 0, 'no snap line 9 px away');
+  r.editor.pointerUp({ x: from.x + 50 * k - 9, y: from.y });
+  assert.ok(src().includes(`<rect id="a" x="${10 + Math.round(50 - 9 / k)}" y="10"`), `9 px away it moves by whole units: ${src()}`);
+  r.editor.undo();
+  r.editor.select([]);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 50 * k - 7, y: from.y });
+  assert.equal(r.models.at(-1)?.snapLines.length, 1, 'a snap line while snapped');
+  r.editor.pointerCancel();
+});
+
+// ── S4: Duplicate, Group, Ungroup, Select group ────────────────────────────────────────────────
+
+const BADGE = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <defs><linearGradient id="grad"><stop offset="0" stop-color="#000"/></linearGradient></defs>
+  <g id="badge">
+    <clipPath id="clip"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face" x="10" y="10" width="20" height="20" clip-path="url(#clip)" style="fill:url(#grad)" draw:locked="true"/>
+  </g>
+</svg>`;
+
+test('Duplicate: the copy follows its original with its whitespace, fresh ids and its own references, no lock, 5 units right and down; one entry', () => {
+  const r = rig();
+  r.editor.open(BADGE);
+  const badge = idOf(r, 'badge');
+  r.editor.select([badge]);
+  r.editor.duplicate();
+  const src = r.editor.source();
+  const copy = `\n  <g id="badge-2" transform="translate(5 5)">
+    <clipPath id="clip-2"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face-2" x="10" y="10" width="20" height="20" clip-path="url(#clip-2)" style="fill:url(#grad)"/>
+  </g>`;
+  assert.equal(src, BADGE.replace('\n  </g>\n', `\n  </g>${copy}\n`), 'the original’s bytes unchanged, the copy after it');
+  assert.deepEqual(sel(r), [idOf(r, 'badge-2')], 'the copy is selected');
+  assert.equal(r.editor.history.get().undoLabel, 'Duplicate');
+  assert.equal(text(r), src, 'the code shows exactly the document');
+  r.editor.undo();
+  assert.equal(r.editor.source(), BADGE, 'one undo gives the file back');
+  assert.equal(text(r), BADGE);
+});
+
+test('Group puts the selection in a new <g> where the last one was; Ungroup pushes the group’s transform down and refuses what would change the drawing; Select group climbs one level', () => {
+  const r = rig();
+  const THREE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="b" x="40" y="10" width="10" height="10"/>
+  <circle id="c" cx="70" cy="70" r="5"/>
+</svg>`;
+  r.editor.open(THREE);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'c')]);
+  r.editor.group();
+  assert.equal(r.editor.source(), THREE.replace('\n  <rect id="a" x="10" y="10" width="10" height="10"/>', '').replace('<circle id="c" cx="70" cy="70" r="5"/>', '<g>\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <circle id="c" cx="70" cy="70" r="5"/>\n  </g>'));
+  assert.equal(r.editor.history.get().undoLabel, 'Group');
+  const g = [...r.editor.selection.get()][0];
+  assert.equal((doc(r).nodes.get(g) as ElementNode).local, 'g', 'the group is selected');
+  assert.equal(text(r), r.editor.source());
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.selectGroup();
+  assert.deepEqual(sel(r), [g], 'Select group climbs to the group');
+  r.editor.undo();
+  assert.equal(r.editor.source(), THREE);
+  // Across parents: refused.
+  const r2 = rig();
+  r2.editor.open(SHAPES);
+  r2.editor.select([idOf(r2, 'a'), idOf(r2, 'c')]);
+  r2.editor.group();
+  assert.equal(r2.editor.notice.get(), 'Group needs shapes with the same parent.');
+  assert.equal(r2.editor.source(), SHAPES);
+  // Ungroup: the transform goes down to each child.
+  const G = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g transform="translate(10 5) rotate(15)">
+    <rect x="1" y="2" width="3" height="4"/>
+    <circle cx="5" cy="5" r="2" transform="scale(2)"/>
+  </g>
+</svg>`;
+  const r3 = rig();
+  r3.editor.open(G);
+  const grp = element(doc(r3), (n) => n.local === 'g');
+  r3.editor.select([grp.id]);
+  r3.editor.ungroup();
+  assert.equal(r3.editor.source(), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect x="1" y="2" width="3" height="4" transform="translate(10 5) rotate(15)"/>
+    <circle cx="5" cy="5" r="2" transform="translate(10 5) rotate(15) scale(2)"/>
+  \n</svg>`, 'the children keep their bytes and whitespace (the group’s last line break stays); the group and its own whitespace go');
+  assert.equal(r3.editor.history.get().undoLabel, 'Ungroup');
+  assert.equal(r3.editor.selection.get().size, 2, 'the former children are selected');
+  r3.editor.undo();
+  assert.equal(r3.editor.source(), G);
+  const r4 = rig();
+  r4.editor.open(G.replace('<g transform', '<g opacity="0.5" transform'));
+  r4.editor.select([element(doc(r4), (n) => n.local === 'g').id]);
+  r4.editor.ungroup();
+  assert.equal(r4.editor.notice.get(), 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.');
+  assert.equal(r4.editor.history.get().canUndo, false);
+});
+
+test('Group refuses to nest a shape past the depth the parser opens, and every file it writes re-parses; Duplicate and Ungroup never nest deeper', () => {
+  const reparses = (r: Rig, why: string) => {
+    const back = parseDoc(r.editor.source());
+    assert.ok(back.ok, `${why}: the file no longer parses (${back.ok ? '' : back.error.message})`);
+  };
+  const DEEP = (leaf: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${'<g>'.repeat(254)}${leaf}${'</g>'.repeat(254)}</svg>`;
+  // A shape with an end tag at depth 256, the most the parser opens: one Group more is refused.
+  const r = rig();
+  const deep = DEEP('<rect id="d" x="10" y="10" width="10" height="10"></rect>');
+  assert.ok(r.editor.open(deep).ok);
+  r.editor.select([idOf(r, 'd')]);
+  r.editor.group();
+  assert.equal(r.editor.notice.get(), 'Grouping would nest it deeper than 256 levels.');
+  assert.equal(r.editor.source(), deep, 'nothing was written');
+  assert.equal(r.editor.history.get().canUndo, false);
+  // Duplicate puts the copy beside it, at its own depth; Ungroup lifts children a level.
+  r.editor.duplicate();
+  assert.equal(r.editor.history.get().undoLabel, 'Duplicate');
+  reparses(r, 'Duplicate at the limit');
+  r.editor.undo();
+  r.editor.select([doc(r).nodes.get(idOf(r, 'd'))!.parent!]);
+  r.editor.ungroup();
+  assert.equal(r.editor.history.get().undoLabel, 'Ungroup');
+  reparses(r, 'Ungroup at the limit');
+  // A shape that closes itself takes no level of its own: the group may go at 256.
+  const r2 = rig();
+  assert.ok(r2.editor.open(DEEP('<rect id="d" x="10" y="10" width="10" height="10"/>')).ok);
+  r2.editor.select([idOf(r2, 'd')]);
+  r2.editor.group();
+  assert.equal(r2.editor.history.get().undoLabel, 'Group', `${r2.editor.notice.get()}`);
+  reparses(r2, 'a group at 256 around a <rect/>');
+  // Group after Group (each new group is selected, so the next wraps it) until it is refused.
+  const r3 = rig();
+  r3.editor.open(SHAPES);
+  r3.editor.select([idOf(r3, 'a')]);
+  let groups = 0;
+  for (; groups < 300; groups++) {
+    const before = r3.editor.source();
+    r3.editor.group();
+    if (r3.editor.source() === before) break;
+    reparses(r3, `Group ${groups + 1}`);
+  }
+  assert.equal(r3.editor.notice.get(), 'Grouping would nest it deeper than 256 levels.', `refused after ${groups} groups`);
+  assert.equal(groups, 255, 'the rect closes itself: 255 groups around it (the last at depth 256), then a refusal');
+});
+
+test('Ungroup gives the group’s transform only to the children drawn where they sit: a clip, defs and a gradient move out as they are (what uses them carries it); a group with a <title> or <desc> is refused', () => {
+  const CLIPPED = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g id="g" transform="translate(30 20)">
+    <clipPath id="c"><circle cx="20" cy="20" r="15"/></clipPath>
+    <defs><linearGradient id="lg"><stop offset="0" stop-color="#e76f51"/></linearGradient></defs>
+    <rect id="r" width="40" height="40" fill="url(#lg)" clip-path="url(#c)"/>
+    <circle id="d" cx="5" cy="5" r="2" transform="scale(2)"/>
+  </g>
+</svg>`;
+  const r = rig();
+  r.editor.open(CLIPPED);
+  r.editor.select([idOf(r, 'g')]);
+  r.editor.ungroup();
+  assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${r.editor.notice.get()}`);
+  assert.equal(r.editor.source(), CLIPPED
+    .replace('\n  <g id="g" transform="translate(30 20)">', '')
+    .replace('\n  </g>', '\n  ')
+    .replace('clip-path="url(#c)"/>', 'clip-path="url(#c)" transform="translate(30 20)"/>')
+    .replace('transform="scale(2)"', 'transform="translate(30 20) scale(2)"'), 'the shapes take the transform; the clip, defs and gradient keep their bytes');
+  r.editor.undo();
+  assert.equal(r.editor.source(), CLIPPED);
+  for (const [child, why] of [['<title>The sun</title>', 'Its title names the group; ungrouping would give it to the parent.'], ['<desc>A setting sun</desc>', 'Its desc describes the group; ungrouping would give it to the parent.']]) {
+    const named = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="g" transform="translate(1 2)">${child}<rect width="5" height="5"/></g></svg>`;
+    const n = rig();
+    n.editor.open(named);
+    n.editor.select([idOf(n, 'g')]);
+    n.editor.ungroup();
+    assert.equal(n.editor.notice.get(), why);
+    assert.equal(n.editor.source(), named, 'nothing was written');
+    assert.equal(n.editor.history.get().canUndo, false);
+  }
+});
+
+test('Ungroup is refused, with the reason, when the group holds an animation that animates it (one with no href, which animates its parent, or one whose href names the group); one naming another element moves out as it is', () => {
+  const WHY = 'It holds an animation that targets the group; ungrouping would retarget it.';
+  for (const anim of [
+    '<animate attributeName="opacity" to="0" dur="1s"/>',
+    '<set attributeName="opacity" to="0" begin="1s"/>',
+    '<animateTransform attributeName="transform" type="rotate" to="30" dur="1s"/>',
+    '<animateMotion path="M0 0h10" dur="1s"/>',
+    '<discard begin="2s"/>',
+    '<animate href="#g" attributeName="opacity" to="0" dur="1s"/>',
+    '<animate xlink:href="#g" attributeName="opacity" to="0" dur="1s"/>',
+  ]) {
+    const file = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"><g id="g" transform="translate(1 2)"><rect width="5" height="5"/>${anim}</g></svg>`;
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), WHY, anim);
+    assert.equal(r.editor.source(), file, `${anim}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, anim);
+  }
+  // An animation whose href names another element animates it wherever it sits: it moves out as it is.
+  const other = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect id="k" width="5" height="5"/><g id="g" transform="translate(1 2)"><circle r="2"/><animate href="#k" attributeName="x" to="9" dur="1s"/></g></svg>';
+  const o = rig();
+  o.editor.open(other);
+  o.editor.select([idOf(o, 'g')]);
+  o.editor.ungroup();
+  assert.equal(o.editor.history.get().undoLabel, 'Ungroup', `${o.editor.notice.get()}`);
+  assert.equal(o.editor.source(), other.replace('<g id="g" transform="translate(1 2)">', '').replace('</g>', '').replace('<circle r="2"/>', '<circle r="2" transform="translate(1 2)"/>'));
+});
+
+test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform, or to anything inside one; not when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
+  const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
+  const refused: [string, string][] = [
+    [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), 'k'], // a use elsewhere
+    [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/><use xlink:href="#k" x="20"/></g>'), 'k'], // a use beside it, by xlink:href
+    [svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // inside a child
+    [svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), 'lg'], // a url(#…) into a child
+  ];
+  for (const [file, id] of refused) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), `Something refers to a shape inside it (#${id}); ungrouping would move that reference’s copy too.`, file);
+    assert.equal(r.editor.source(), file, `${file}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, file);
+  }
+  for (const file of [
+    svg('<g id="g"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), // no transform: nothing is pushed
+    svg('<g id="g" transform="translate(5 5)"><clipPath id="c"><circle r="3"/></clipPath><rect width="5" height="5" clip-path="url(#c)"/></g>'), // the clip moves out as it is
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><text aria-labelledby="k">x</text>'), // an ARIA reference draws nothing
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${file}: ${r.editor.notice.get()}`);
+  }
+});
+
+test('Layers: Hide writes display="none" and Show gives the bytes back; Lock writes draw:locked with the declaration and Unlock gives the bytes back; Rename rewrites every reference, and refuses a bad or taken id', () => {
+  const F = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <circle id="c" cx="20" cy="20" r="5"/>\n  <use href="#c" x="10"/>\n  <rect id="r" x="1" y="1" width="5" height="5" fill="url(#c)"/>\n</svg>`;
+  const r = rig();
+  r.editor.open(F);
+  const [c, rect] = [idOf(r, 'c'), idOf(r, 'r')];
+  r.editor.setHidden(c, true);
+  assert.equal(r.editor.source(), F.replace('r="5"/>', 'r="5" display="none"/>'), 'Hide: exactly display="none"');
+  assert.equal(r.editor.history.get().undoLabel, 'Hide');
+  r.editor.setHidden(c, false);
+  assert.equal(r.editor.source(), F, 'Show: the file back');
+  r.editor.setLocked(rect, true);
+  assert.equal(r.editor.source(), F.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns">').replace('fill="url(#c)"/>', 'fill="url(#c)" draw:locked="true"/>'));
+  assert.equal(r.editor.history.get().undoLabel, 'Lock');
+  r.editor.setLocked(rect, false);
+  assert.equal(r.editor.source(), F, 'Unlock: the file back, the declaration gone with the last Draw item');
+  assert.equal(r.editor.rename(c, 'sun'), null);
+  assert.equal(r.editor.source(), F.replace('id="c"', 'id="sun"').replace('href="#c"', 'href="#sun"').replace('url(#c)', 'url(#sun)'), 'every reference follows');
+  assert.equal(r.editor.history.get().undoLabel, 'Rename');
+  assert.equal(r.editor.rename(rect, '1bad'), '"1bad" is not an id');
+  assert.equal(r.editor.rename(rect, 'sun'), 'Another element already has the id "sun".');
+  assert.equal(r.editor.history.get().undoLabel, 'Rename', 'the refusals recorded nothing');
+});
+
+test('Rename refuses a name XML can’t hold as an id, an id two elements share and an id a <style> rule names; every ARIA id reference follows it, and every file it writes re-parses', () => {
+  const S = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
+  const renamed = (text: string, to: string, nth = 0) => {
+    const r = rig();
+    assert.ok(r.editor.open(text).ok);
+    const e = [...descendants(doc(r), doc(r).root)].filter((n) => n.kind === 'element' && n.attrs.some((a) => a.local === 'id' && a.raw === 'c'))[nth];
+    const why = r.editor.rename(e.id, to);
+    const back = parseDoc(r.editor.source());
+    assert.ok(back.ok, `rename to ${JSON.stringify(to)}: the file no longer parses (${back.ok ? '' : back.error.message})`);
+    return { why, source: r.editor.source(), entries: r.editor.history.get().canUndo };
+  };
+  const one = S('<rect id="c" width="5" height="5"/>');
+  // Characters XML can't hold anywhere (U+FFFE, U+FFFF, lone surrogates): refused, nothing written.
+  for (const [to, code] of [['a\uFFFE', 'FFFE'], ['a\uFFFF', 'FFFF'], ['a\uD800', 'D800'], ['b\uDFFF', 'DFFF']]) {
+    const r = renamed(one, to);
+    assert.equal(r.why, `XML can't hold the character U+${code}`, JSON.stringify(to));
+    assert.equal(r.source, one);
+    assert.equal(r.entries, false);
+  }
+  // Names the lexer reads are fine, astral ones included; a colon or a leading digit is not a name.
+  for (const to of ['é', 'a·b', '\u{1F600}', 'a\uFDD0']) assert.equal(renamed(one, to).why, null, JSON.stringify(to));
+  for (const to of ['x:y', '1abc', 'a b', '']) assert.equal(renamed(one, to).why, `${JSON.stringify(to)} is not an id`);
+  // Two elements share the id: which one a reference means is the file's to settle.
+  const twice = S('<rect id="c" width="5" height="5"/><circle id="c" r="3"/><use href="#c"/>');
+  for (const nth of [0, 1]) {
+    const r = renamed(twice, 'sun', nth);
+    assert.equal(r.why, 'Another element has this id; fix the duplicate in the code first.');
+    assert.equal(r.source, twice);
+  }
+  // A <style> rule names it (by #c, escaped, or url(#c)): renaming would change how it looks.
+  for (const css of ['#c { fill: red }', '.x { fill: url(#c) }', '#\\63 { fill: red }', 'rect#c, g { fill: red }']) {
+    const text = S(`<style>${css}</style><rect id="c" width="5" height="5"/>`);
+    const r = renamed(text, 'sun');
+    assert.equal(r.why, 'A <style> rule uses #c; rename it in the code.', css);
+    assert.equal(r.source, text);
+  }
+  assert.equal(renamed(S('<style>#cc { fill: red } /* #c */</style><rect id="c" width="5" height="5"/>'), 'sun').why, null, 'another id, and a comment, are not a rule for #c');
+  // Every ARIA attribute that holds ids follows; a reference into another file doesn't.
+  const aria = ['aria-activedescendant', 'aria-controls', 'aria-describedby', 'aria-details', 'aria-errormessage', 'aria-flowto', 'aria-labelledby', 'aria-owns'];
+  const r = renamed(S(`<rect id="c" width="5" height="5"/><g ${aria.map((a) => `${a}="c t"`).join(' ')}/><use href="other.svg#c"/>`), 'sun');
+  assert.equal(r.why, null);
+  assert.equal(r.source, S(`<rect id="sun" width="5" height="5"/><g ${aria.map((a) => `${a}="sun t"`).join(' ')}/><use href="other.svg#c"/>`));
+});
+
+test('a lock on the root is not Draw’s: its shapes can still be tapped, dragged and taken by a marquee; a shape in a locked group reads locked in Layers, naming the group', () => {
+  const ROOT_LOCKED = SHAPES.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" draw:locked="true">');
+  const r = rig();
+  r.editor.open(ROOT_LOCKED);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a], 'a tap takes the shape');
+  drag(r, hostAt(r, 15, 15), hostAt(r, 18, 15), [a]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', `a drag moves it (${r.editor.notice.get()})`);
+  r.editor.undo();
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), []);
+  assert.deepEqual(sel(r), [a], 'a marquee takes it');
+  // A locked group: the shapes in it are locked by it, and Layers says so.
+  const GROUP_LOCKED = SHAPES.replace('<g id="g">', '<g id="g" draw:locked="true">');
+  const g = rig();
+  g.editor.open(GROUP_LOCKED);
+  const rows = new Map(layerRows(doc(g)).map((row) => [row.name, row]));
+  assert.deepEqual([rows.get('#g')!.locked, rows.get('#g')!.lockedBy], [true, null], 'the group holds its own lock');
+  assert.deepEqual([rows.get('#c')!.locked, rows.get('#c')!.lockedBy], [false, '#g'], 'the circle in it reads locked, by the group');
+  assert.deepEqual([rows.get('#a')!.locked, rows.get('#a')!.lockedBy], [false, null], 'a shape outside it is free');
+  assert.deepEqual([rows.get('#k')!.locked, rows.get('#k')!.lockedBy], [true, null]);
+  tap(g, hostAt(g, 70, 70), [idOf(g, 'c')]);
+  assert.deepEqual(sel(g), [], 'and a tap passes it by');
+  assert.deepEqual(layerRows(doc(r)).map((row) => row.lockedBy).filter(Boolean), [], 'the root’s lock locks no row');
+});
+
+test('an edit from a panel during a handle or guide drag is refused quietly, and the drag carries on to one entry', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  r.editor.select([a]);
+  const corner = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  r.editor.pointerDown(corner.at, [a], { add: false });
+  r.editor.pointerDrag({ x: corner.at.x + 20, y: corner.at.y + 20 });
+  const panel = () => {
+    r.editor.setHidden(b, true);
+    r.editor.setLocked(b, true);
+    r.editor.addGuide('v');
+    r.editor.setGridStep(5);
+  };
+  assert.doesNotThrow(panel, 'Hide, Lock, a guide and the grid step during a handle drag');
+  r.editor.pointerUp({ x: corner.at.x + 20, y: corner.at.y + 20 });
+  assert.equal(r.editor.history.get().undoLabel, 'Resize');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'the resize was the only entry; nothing else was written');
+  // A guide's pill drag likewise.
+  r.editor.addGuide('v');
+  const withGuide = r.editor.source();
+  const pill = r.editor.overlayModel().guides[0].pill;
+  r.editor.pointerDown(pill, [], { add: false });
+  r.editor.pointerDrag({ x: pill.x + 30, y: pill.y + 5 });
+  assert.doesNotThrow(panel, 'the same during a guide drag');
+  r.editor.pointerUp({ x: pill.x + 30, y: pill.y + 5 });
+  assert.equal(r.editor.history.get().undoLabel, 'Move guide');
+  r.editor.undo();
+  assert.equal(r.editor.source(), withGuide);
+});
+
+test('a corner drag gathers its snap targets once, when it starts, not on every frame', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  r.editor.select([a]);
+  const corner = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  measured.length = 0;
+  r.editor.pointerDown(corner.at, [a], { add: false });
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: corner.at.x + 3 * i, y: corner.at.y + 2 * i });
+  r.editor.pointerUp({ x: corner.at.x + 18, y: corner.at.y + 12 });
+  assert.equal(r.editor.history.get().undoLabel, 'Resize');
+  // Only the snap targets measure the other shapes (the overlay measures the selection).
+  const gathers = measured.filter((ids) => ids.includes(b)).length;
+  assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
+});
+
+test('on a mirrored element the scale diamond keeps the mirror, and the ring turns the shape the way the finger turns', () => {
+  const open = (t: string) => {
+    const r = rig();
+    r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <g id="g" transform="${t}"><rect x="30" y="30" width="40" height="20"/></g>\n</svg>`);
+    r.editor.snap.set(NO_SNAP);
+    r.editor.select([idOf(r, 'g')]);
+    return r;
+  };
+  const transformOf = (r: Rig) => /transform="([^"]*)"/.exec(r.editor.source())![1];
+  // The diamond, 1.5× as far from the scale's pivot (the root's origin here): the mirror stays.
+  for (const [t, want] of [['scale(-1 1)', 'scale(-1.5 1.5)'], ['scale(-1)', 'scale(-1.5)'], ['scale(1 -1)', 'scale(1.5 -1.5)']]) {
+    const r = open(t);
+    const diamond = r.editor.overlayModel().handles.find((h) => h.kind === 'scale')!;
+    const o = hostAt(r, 0, 0);
+    drag(r, diamond.at, { x: o.x + 1.5 * (diamond.at.x - o.x), y: o.y + 1.5 * (diamond.at.y - o.y) }, [], { frames: 6 });
+    assert.equal(transformOf(r), want, `the diamond on ${t}`);
+  }
+  // The ring, turned +30° by the finger about its pivot: the shape turns +30° on screen.
+  const screenAngle = (r: Rig) => {
+    const q = r.editor.overlayModel().outlines[0].quad;
+    return (Math.atan2(q[1].y - q[0].y, q[1].x - q[0].x) * 180) / Math.PI;
+  };
+  for (const t of ['rotate(0)', 'scale(-1 1) rotate(0)', 'translate(100 0) scale(-1 1)', 'matrix(-1 0 0 1 100 0)']) {
+    const r = open(t);
+    const before = screenAngle(r);
+    const model = r.editor.overlayModel();
+    const ring = model.handles.find((h) => h.kind === 'rot')!;
+    const pivot = model.rotGuide!.from;
+    const radius = Math.hypot(ring.at.x - pivot.x, ring.at.y - pivot.y);
+    const a0 = Math.atan2(ring.at.y - pivot.y, ring.at.x - pivot.x);
+    const at = (deg: number) => ({ x: pivot.x + radius * Math.cos(a0 + (deg * Math.PI) / 180), y: pivot.y + radius * Math.sin(a0 + (deg * Math.PI) / 180) });
+    r.editor.pointerDown(ring.at, [], { add: false });
+    for (let d = 5; d <= 30; d += 5) r.editor.pointerDrag(at(d));
+    r.editor.pointerUp(at(30));
+    const turned = ((screenAngle(r) - before + 540) % 360) - 180;
+    assert.ok(Math.abs(turned - 30) < 1, `the ring on ${t} turned the shape ${turned.toFixed(1)}° for the finger's 30° (${transformOf(r)})`);
+  }
+});
+
+test('the Snap sheet’s Grid step field is one history entry while it is typed in: one undo after typing 25 gives Auto back', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  // "2", "25": each written live, as the grid follows; one entry when the field lets go.
+  r.editor.gridStepStart();
+  for (const v of [2, 25]) {
+    r.editor.gridStepInput(v);
+    assert.equal(r.editor.drawState.grid, v, 'the grid follows the field as it is typed');
+  }
+  r.editor.gridStepEnd();
+  assert.match(r.editor.source(), /<draw:state version="1" grid="25"\/>/);
+  assert.equal(r.editor.history.get().undoLabel, 'Set grid step');
+  r.editor.undo();
+  assert.equal(r.editor.drawState.grid, null, 'one undo: Auto again');
+  assert.equal(r.editor.source(), SHAPES, 'and the file as it was');
+  assert.equal(r.editor.history.get().canUndo, false, 'typing 25 was one entry');
+  // "25", ⌫, "0.5" (20.5), a value that isn't a step (left out), then the field emptied: Auto, one entry, nothing written.
+  r.editor.redo();
+  r.editor.gridStepStart();
+  for (const v of [2, 20, 20.5, 0, null]) r.editor.gridStepInput(v);
+  r.editor.gridStepEnd();
+  assert.equal(r.editor.drawState.grid, null);
+  r.editor.undo();
+  assert.equal(r.editor.drawState.grid, 25, 'one undo gives the step before the field was typed in');
+  // Nothing else writes while the field holds its entry.
+  r.editor.gridStepStart();
+  r.editor.gridStepInput(5);
+  r.editor.addGuide('v');
+  r.editor.gridStepEnd();
+  assert.deepEqual(r.editor.drawState.guides, [], 'no guide was added into the middle of the entry');
+  assert.equal(r.editor.drawState.grid, 5);
+});
+
+test('Hide and Show are refused, with the reason, when CSS sets display (a <style> rule, or the element’s own style=""), and nothing is written', () => {
+  const T = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>#a { display: inline }</style>
+  <rect id="a" width="10" height="10"/><rect id="b" style="display: inline" x="20" width="10" height="10"/><rect id="c" x="40" width="10" height="10" display="none"/>
+</svg>`;
+  const r = rig();
+  r.editor.open(T);
+  for (const [name, hide] of [['a', true], ['b', true]] as const) {
+    r.editor.notice.set(null);
+    r.editor.setHidden(idOf(r, name), hide);
+    assert.equal(r.editor.notice.get(), 'Its display is set by CSS.', name);
+  }
+  assert.equal(r.editor.source(), T, 'nothing was written');
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.setHidden(idOf(r, 'c'), false);
+  assert.equal(r.editor.history.get().undoLabel, 'Show', 'a display the attribute sets is Draw’s to change');
+});
+
+test('a drag moves a rect, an image, a use, a foreignObject and a nested svg by their own x and y', () => {
+  const XY = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><circle id="dot" r="4"/></defs>
+  <rect id="r" x="10" y="10" width="10" height="10"/>
+  <image id="i" x="30" y="10" width="10" height="10" href="data:image/png;base64,iVBORw0KGgo="/>
+  <use id="u" href="#dot" x="55" y="15"/>
+  <foreignObject id="f" x="70" y="10" width="10" height="10"/>
+  <svg id="s" x="10" y="40" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>
+</svg>`;
+  const moved: Record<string, [string, string]> = {
+    r: ['<rect id="r" x="10" y="10"', '<rect id="r" x="13" y="12"'],
+    i: ['<image id="i" x="30" y="10"', '<image id="i" x="33" y="12"'],
+    u: ['<use id="u" href="#dot" x="55" y="15"', '<use id="u" href="#dot" x="58" y="17"'],
+    f: ['<foreignObject id="f" x="70" y="10"', '<foreignObject id="f" x="73" y="12"'],
+    s: ['<svg id="s" x="10" y="40"', '<svg id="s" x="13" y="42"'],
+  };
+  for (const [name, [from, to]] of Object.entries(moved)) {
+    const r = rig();
+    r.editor.open(XY);
+    r.editor.snap.set(NO_SNAP);
+    const k = pxPerUnit(r);
+    const at = hostAt(r, 50, 50);
+    drag(r, at, { x: at.x + 3 * k, y: at.y + 2 * k }, [idOf(r, name)]);
+    assert.equal(r.editor.source(), XY.replace(from, to), `${name}: moved by its x and y, nothing else`);
+    assert.equal(r.editor.history.get().undoLabel, 'Move');
+  }
+});
+
+test('the centre handle moves the shape by whole units, with the tooltip "x N, y N" at the shape’s new centre', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const centre = r.editor.overlayModel().handles.find((h) => h.kind === 'center')!;
+  const k = pxPerUnit(r);
+  const to = { x: centre.at.x + 7.4 * k, y: centre.at.y + 3.2 * k };
+  r.editor.pointerDown(centre.at, [a], { add: false });
+  r.editor.pointerDrag({ x: (centre.at.x + to.x) / 2, y: (centre.at.y + to.y) / 2 });
+  r.editor.pointerDrag(to);
+  const tip = r.editor.overlayModel().tip;
+  r.editor.pointerUp(to);
+  assert.equal(tip?.text, 'x 22, y 18', 'the centre (15, 15) moved by (7, 3)');
+  assert.equal(r.editor.source(), SHAPES.replace('<rect id="a" x="10" y="10"', '<rect id="a" x="17" y="13"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Move');
+});
+
+test('a dragged corner snaps to a guide within 8 px, with a snap line on it, and not from further away', () => {
+  const corner = (r: Rig, x: number) => {
+    const a = idOf(r, 'a');
+    r.editor.select([a]);
+    const br = r.editor.overlayModel().handles.find((h) => h.id === 'br')!;
+    const to = hostAt(r, x, 20);
+    r.editor.pointerDown(br.at, [a], { add: false });
+    r.editor.pointerDrag({ x: (br.at.x + to.x) / 2, y: to.y });
+    r.editor.pointerDrag(to);
+    const lines = r.editor.overlayModel().snapLines;
+    r.editor.pointerUp(to);
+    return lines;
+  };
+  const r = rig();
+  r.editor.open(SHAPES);
+  r.editor.addGuide('v'); // at x 50, the artboard's centre
+  const withGuide = r.editor.source();
+  const k = pxPerUnit(r);
+  const lines = corner(r, 49.1); // 0.9 units short: 3.7 px on screen
+  assert.ok(0.9 * k < 8, 'test setup: within 8 px');
+  assert.match(r.editor.source(), /<rect id="a" x="10" y="10" width="40" height="10"\/>/, 'the corner landed on the guide');
+  const guideX = hostAt(r, 50, 0).x;
+  assert.ok(lines.some((l) => Math.abs(l.from.x - guideX) < 0.01 && Math.abs(l.to.x - guideX) < 0.01), 'a snap line along the guide');
+  r.editor.undo();
+  assert.equal(r.editor.source(), withGuide);
+  corner(r, 47.6); // 2.4 units short: 10 px
+  assert.ok(2.4 * k > 8, 'test setup: beyond 8 px');
+  assert.match(r.editor.source(), /<rect id="a" x="10" y="10" width="38" height="10"\/>/, 'beyond 8 px: whole units, no snap');
+});
+
+test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
+  const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="h" x="30" y="10" width="10" height="10" visibility="hidden"/>
+  <g visibility="hidden"><rect id="gh" x="50" y="10" width="10" height="10"/><rect id="gv" x="70" y="10" width="10" height="10" style="visibility: visible"/></g>
+</svg>`;
+  const r = rig();
+  r.editor.open(V);
+  r.editor.snap.set(NO_SNAP);
+  drag(r, hostAt(r, 5, 5), hostAt(r, 95, 30), []);
+  assert.deepEqual(sel(r), [idOf(r, 'a'), idOf(r, 'gv')].sort(), 'the marquee takes what draws: not h, nor gh under its hidden group');
+  r.editor.selectAll();
+  assert.deepEqual(sel(r), [idOf(r, 'a'), idOf(r, 'gv')].sort(), 'Select all likewise');
+  r.editor.setHidden(idOf(r, 'a'), true);
+  assert.equal(r.editor.source(), V.replace('<rect id="a" x="10" y="10" width="10" height="10"/>', '<rect id="a" x="10" y="10" width="10" height="10" display="none"/>'), 'Hide writes display, never visibility');
+});
+
+test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (text by a translate), one entry each', () => {
+  const RAW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><circle id="dot" r="4"/></defs>
+  <use id="u" href="#dot" x="10" y="10"/>
+  <image id="i" x="20" y="20" width="10" height="10" href="data:image/png;base64,iVBORw0KGgo="/>
+  <foreignObject id="f" x="40" y="40" width="20" height="10"><div xmlns="http://www.w3.org/1999/xhtml">hi</div></foreignObject>
+  <text id="t" x="60" y="80">Hi</text>
+</svg>`;
+  const nudged: Record<string, [string, string]> = {
+    u: ['<use id="u" href="#dot" x="10" y="10"/>', '<use id="u" href="#dot" x="11" y="10"/>'],
+    i: ['<image id="i" x="20"', '<image id="i" x="21"'],
+    f: ['<foreignObject id="f" x="40"', '<foreignObject id="f" x="41"'],
+    t: ['<text id="t" x="60" y="80">', '<text id="t" x="60" y="80" transform="translate(1 0)">'],
+  };
+  const copied: Record<string, string> = {
+    u: '<use id="u-2" href="#dot" x="15" y="15"/>',
+    i: '<image id="i-2" x="25" y="25"',
+    f: '<foreignObject id="f-2" x="45" y="45"',
+    t: '<text id="t-2" x="60" y="80" transform="translate(5 5)">',
+  };
+  for (const name of ['u', 'i', 'f', 't']) {
+    const r = rig();
+    r.editor.open(RAW);
+    const id = idOf(r, name);
+    tap(r, hostAt(r, 50, 50), [id]);
+    assert.deepEqual(sel(r), [id], `${name}: a tap on it selects it`);
+    const step = (label: string, act: () => void, ok: (src: string) => boolean) => {
+      act();
+      const src = r.editor.source();
+      assert.equal(r.editor.history.get().undoLabel, label, `${name}: ${label} is one entry (${r.editor.notice.get()})`);
+      assert.ok(ok(src), `${name}: ${label}:\n${src}`);
+      r.editor.undo();
+      assert.equal(r.editor.source(), RAW, `${name}: ${label} undone`);
+      r.editor.select([id]);
+    };
+    step('Duplicate', () => r.editor.duplicate(), (s) => s.includes(copied[name]));
+    step('Send back', () => r.editor.back(), (s) => s !== RAW && s.replace(/\s/g, '').length === RAW.replace(/\s/g, '').length);
+    step('Delete', () => r.editor.delete(), (s) => !s.includes(`id="${name}"`));
+    step('Nudge', () => {
+      r.editor.nudge(1, 0);
+      r.editor.nudgeEnd();
+    }, (s) => s === RAW.replace(nudged[name][0], nudged[name][1]));
+  }
 });

@@ -162,3 +162,20 @@ test('duplicate ids are kept as written, and the report names them: browsers use
   assert.ok(importReport(one.doc).notes.includes('1 id is used more than once (a); browsers use the first.'));
   assert.ok(!importReport(load('tools/figma-card-drop-shadow.svg')).notes.some((n) => /more than once/.test(n)), 'a file without any says nothing');
 });
+
+test('rem lengths in attributes and style="" are counted with a note (the canvas measures rem against the app’s root); rem in <style> text is left; a <style> rule on the root’s font size makes them unconvertible', () => {
+  const doc = (text: string) => {
+    const r = parseDoc(text);
+    assert.ok(r.ok);
+    return r.doc;
+  };
+  const text = '<svg xmlns="http://www.w3.org/2000/svg" font-size="20"><rect x="1rem" width="2.5rem" height="10" style="stroke-width: .1rem"/><circle r="4"/><style>circle { r: 1rem }</style></svg>';
+  const r = importReport(doc(text));
+  assert.deepEqual(r.rem, { count: 3, convertible: true, why: null });
+  assert.ok(r.notes.some((n) => n.startsWith('3 rem lengths: the canvas measures rem against the app’s 12 px root, not this file’s own 20 px')), r.notes.join('\n'));
+  assert.ok(r.notes.includes('1 rem length inside <style> text is left as written.'));
+  assert.deepEqual(importReport(doc('<svg xmlns="http://www.w3.org/2000/svg"><rect x="1"/></svg>')).rem, { count: 0, convertible: true, why: null });
+  const ruled = importReport(doc('<svg xmlns="http://www.w3.org/2000/svg"><style>svg { font-size: 10px }</style><rect x="1rem"/></svg>'));
+  assert.equal(ruled.rem.convertible, false);
+  assert.match(ruled.rem.why!, /^The root’s font size is set by a <style> rule/);
+});

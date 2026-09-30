@@ -13,6 +13,9 @@ import { buildRefIndex, duplicateIds } from '../model/refs.ts';
 import { classifyAttribute, classifyElement, type Classified } from '../policy/classify.ts';
 import { elementRenders } from '../policy/render-policy.ts';
 import type { LedgerClass } from '../policy/tables.ts';
+import { cssSets } from '../geometry/css.ts';
+import { rootFontSize } from '../geometry/lengths.ts';
+import { fmt } from '../values/number-format.ts';
 
 export type Bucket = 'editable' | 'kept' | 'preview' | 'unclassified';
 
@@ -28,7 +31,27 @@ export interface ImportReport {
   totals: Record<Bucket, number>;
   items: ReportItem[]; // grouped by bucket, kind and name; most frequent first within a bucket
   notes: string[];
+  /** rem lengths in attributes and style="" (decision 13): Convert rem rewrites them in user units, unless a <style> rule may set the root's font size. */
+  rem: { count: number; convertible: boolean; why: string | null };
 }
+
+export const REM_UNCONVERTIBLE = 'The root’s font size is set by a <style> rule, so Draw can’t tell what 1rem is.';
+
+/** The rem lengths in a document's attributes (style="" included), and in its <style> text. */
+export function remLengths(doc: Doc): { attributes: number; styleText: number } {
+  let attributes = 0;
+  let styleText = 0;
+  for (const n of descendants(doc, doc.root)) {
+    if (n.kind === 'element') {
+      for (const a of n.attrs) attributes += countRem(a.raw);
+    } else if ((n.kind === 'text' || n.kind === 'cdata') && n.parent !== null) {
+      const p = doc.nodes.get(n.parent);
+      if (p?.kind === 'element' && p.local === 'style') styleText += countRem(n.raw);
+    }
+  }
+  return { attributes, styleText };
+}
+const countRem = (raw: string): number => (raw.match(/(?<![\w.-])[+-]?(?:\d*\.\d+|\d+)(?:[eE][+-]?\d+)?rem\b/gi) ?? []).length;
 
 export const BUCKETS: readonly Bucket[] = ['editable', 'kept', 'preview', 'unclassified'];
 
@@ -84,7 +107,13 @@ export function importReport(doc: Doc): ImportReport {
   if (hidden.length) notes.push(`Safari draws ${names(hidden)}; Chrome, Firefox and Draw's canvas do not.`);
   if (totals.preview) notes.push('Scripts, handlers and media are kept in the file but never run in the editor.');
   if (totals.unclassified) notes.push('Unclassified content is kept byte for byte and never drawn.');
-  return { totals, items, notes };
+  const rems = remLengths(doc);
+  const convertible = cssSets(doc, doc.root, 'font-size') !== 'sheet';
+  if (rems.attributes) {
+    notes.push(`${rems.attributes} rem length${rems.attributes > 1 ? 's' : ''}: the canvas measures rem against the app’s 12 px root, not this file’s own ${fmt(rootFontSize(doc), 2)} px, so ${rems.attributes > 1 ? 'they draw' : 'it draws'} smaller here. Convert ${rems.attributes > 1 ? 'them' : 'it'} to user units to fix it.${convertible ? '' : ` ${REM_UNCONVERTIBLE}`}`);
+  }
+  if (rems.styleText) notes.push(`${rems.styleText} rem length${rems.styleText > 1 ? 's' : ''} inside <style> text ${rems.styleText > 1 ? 'are' : 'is'} left as written.`);
+  return { totals, items, notes, rem: { count: rems.attributes, convertible, why: convertible ? null : REM_UNCONVERTIBLE } };
 }
 
 function displayName(ns: string | null, qname: string, local: string): string {

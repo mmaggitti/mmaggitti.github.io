@@ -1,8 +1,9 @@
 // The viewer's own choices, kept in this browser (localStorage, keys prefixed "draw:"): the code's
-// tidy view and the theme. Conveniences only: storage can be missing or refuse (a private window,
-// cleared site data), and then every read is the default and every write a quiet no-op.
+// tidy view, the theme, whether the canvas shows its grid, and what moves snap to. Never in the
+// file. Conveniences only: storage can be missing or refuse (a private window, cleared site data),
+// and then every read is the default and every write a quiet no-op.
 
-export type Pref = 'tidy' | 'theme';
+export type Pref = 'tidy' | 'theme' | 'grid' | 'snap';
 
 export function readPref(name: Pref): string | null {
   try {

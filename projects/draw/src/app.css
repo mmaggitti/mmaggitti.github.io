@@ -95,16 +95,25 @@
   user-select: none;
   -webkit-touch-callout: none;
 }
+/* The underlay: the surround in the theme's surface, and the paper under the artboard, a light
+   checkerboard the same in both themes (decision 10; both colours are lighter than #e9e9e9).
+   overlay/paper.ts places the paper and draws the grid over it (the lab's .g1/.g2 blue). */
+.draw-under { position: absolute; inset: 0; background: var(--surface); pointer-events: none; }
+.draw-paper { position: absolute; background: repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%) 0 0 / 1.25rem 1.25rem; }
+.draw-grid { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.draw-grid-line { stroke: #a4dded; stroke-width: 1; opacity: 0.6; }
+.draw-grid-line.major { opacity: 1; }
 /* The document draws as it would on its own, not in the app's theme: nothing the app sets inherits
    into it (color and so currentColor, fonts, color-scheme; the ds tokens, which `all` leaves
-   alone, so a var() fallback in the document stays its own), and it sits on white paper in
-   light and dark alike. */
+   alone, so a var() fallback in the document stays its own), and it sits on the checkerboard
+   underlay in light and dark alike. Its root is placed in it by the camera (a box of its own). */
 .draw-host {
   all: initial;
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
-  background: #fff;
+  background: transparent;
   touch-action: none;
   --ui-scale: initial; --text-sm: initial; --text-md: initial; --text-lg: initial; --text-xl: initial;
   --text-display: initial; --leading: initial; --leading-tight: initial; --font-ui: initial;
@@ -121,6 +130,91 @@
 .draw-marks { position: absolute; inset: 0; z-index: 2147483647; pointer-events: none; }
 .draw-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .draw-outline { fill: none; stroke: #0a84ff; stroke-width: 2; stroke-linejoin: round; }
+/* SVG Lab's marks (its .selbox, .gd, .gt, .hd and .tip), in screen px. */
+.draw-marquee { fill: rgb(0 163 224 / 0.08); stroke: #00a3e0; stroke-width: 1; stroke-dasharray: 4 3; }
+.draw-coord, .draw-rot-guide { fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.draw-mark-label {
+  fill: #006f99;
+  font: 700 var(--text-sm) / 1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+.draw-snap-line { stroke: #e6007e; stroke-width: 1; }
+.draw-guide { stroke: #00a3e0; stroke-width: 1; opacity: 0.8; }
+.draw-pill { fill: #00a3e0; stroke: #fff; stroke-width: 1.5; }
+.draw-pill.on { fill: #ffe600; stroke: #00a3e0; }
+.draw-local-grid { stroke: #e6007e; stroke-width: 1; opacity: 0.22; }
+.draw-local-axis { stroke: #e6007e; stroke-width: 1.5; }
+.draw-hd { fill: #fff; stroke: #00a3e0; stroke-width: 2; }
+.draw-hd.start { fill: #00a3e0; stroke: #fff; stroke-width: 1.5; }
+.draw-hd.ctrl { fill: #e6007e; stroke: #fff; stroke-width: 1.5; }
+.draw-hd.bend { fill: #fff; stroke: #00a3e0; stroke-width: 1.5; opacity: 0.8; }
+.draw-hd.rot, .draw-hd.scale { stroke: #e6007e; }
+.draw-hd.on { fill: #ffe600; }
+.draw-hd-dot { fill: #00a3e0; }
+.draw-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: #231f20;
+  color: #fff;
+  font: 600 var(--text-sm) / 1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  padding: 0.4375rem 0.625rem;
+  border-radius: 0.5rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The Grid button: the canvas's top-left (Play keeps the top-right). */
+.draw-grid-btn {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}
+.draw-grid-btn svg, .draw-snap-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-grid-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* The Snap button, beside Grid. */
+.draw-snap-btn {
+  position: absolute;
+  top: var(--space-2);
+  left: calc(var(--space-2) + var(--tap-min) + var(--space-2));
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}
+/* The Snap sheet: rows of at least 44 pt. Its title and Done stay put while its body scrolls. */
+.draw-modal:has(> .draw-snap) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-snap { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.draw-snap-row { flex: 1 1 auto; min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-snap-row[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-snap-row[aria-pressed="false"] { opacity: 0.85; }
+.draw-snap-toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.draw-snap-step { display: flex; align-items: center; gap: var(--space-3); }
+.draw-guides { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-guide-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.draw-guide-row .draw-snap-row { flex: 0 0 auto; }
 .draw-error {
   position: absolute;
   inset: auto var(--space-4) var(--space-4);
@@ -355,6 +449,16 @@
 }
 .draw-strip-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-weight: 500; }
 .draw-done, .draw-action { font-size: var(--text-sm); }
+/* The selection's icon buttons: exactly 44 pt wide, so six and the label fit at 440 pt. */
+.draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }
+.draw-ctx-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-ctx-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-ctx-btn:disabled { color: var(--text-muted); opacity: 0.5; }
+/* The More sheet: one full-width row per command, at least 44 pt tall. */
+.draw-more { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-more .ds-btn { flex: 0 0 auto; width: 100%; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; }
+.draw-more-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.draw-more .draw-subhead { margin: var(--space-2) 0 0; }
 .draw-toast {
   position: absolute;
   left: var(--space-3);
@@ -608,3 +712,41 @@
   box-shadow: none;
 }
 .draw-sheet--dock .draw-sheet-head { padding-top: var(--space-2); }
+
+/* ── The Layers tab ─────────────────────────────────────────────────────────── */
+
+.draw-layers { padding: var(--space-2) var(--space-3) var(--space-4); }
+.draw-layer-list { margin: 0; padding: 0; list-style: none; }
+.draw-layer { display: flex; align-items: center; gap: var(--space-1); min-height: var(--tap-min); border-bottom: 1px solid var(--line); }
+.draw-layer.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.draw-layer-name {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+}
+.draw-layer-btn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  touch-action: manipulation;
+}
+.draw-layer-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-layer-btn[aria-pressed="true"] { color: var(--accent); }
+.draw-layers-more { width: 100%; margin-top: var(--space-2); }
+.draw-layers-empty { padding: var(--space-3); }

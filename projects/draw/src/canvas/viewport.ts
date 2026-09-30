@@ -1,7 +1,8 @@
 // The camera over the document: which part of the drawing the canvas shows, and at what zoom.
-// Pure math, no DOM, so it is unit-tested in node. The renderer applies it by setting the rendered
-// root's viewBox (the file itself is never changed), which keeps vectors crisp at every zoom and
-// keeps getScreenCTM exact for the overlay.
+// Pure math, no DOM, so it is unit-tested in node. The view's space is the root's own box at 100%
+// (box px: its viewport W0 × H0, which M maps the root's user units into), and the renderer
+// applies it as that box's CSS size and offset (cameraBox): the root's viewBox and the file are
+// never changed, vectors stay crisp at every zoom, and getScreenCTM stays exact for the overlay.
 //
 // The zoom invariant: zooming about a screen point keeps the document point under it fixed, so a
 // pinch zooms where the fingers are, never towards a corner.
@@ -60,10 +61,31 @@ export function clampScale(scale: number, fitScale: number): number {
   return Math.min(Math.max(MAX_SCALE, fitScale * MAX_SCALE_FACTOR), Math.max(fitScale * MIN_SCALE_FACTOR, scale));
 }
 
-/** Can this view be drawn? Near the float limit (a hostile viewBox) its camera overflows to Infinity. */
-export function drawable(view: View, host: Size): boolean {
+/** The largest side a camera box may have, in CSS px: past it browsers stop drawing a box whole. */
+export const MAX_BOX = 2 ** 24;
+
+/**
+ * Can this view be drawn? Near the float limit (a hostile viewBox) its camera overflows to
+ * Infinity, and a box over MAX_BOX a side (or at an offset that isn't finite) can't be placed.
+ */
+export function drawable(view: View, host: Size, viewport?: Size): boolean {
   const c = camera(view, host);
-  return [c.x, c.y, c.width, c.height].every(Number.isFinite);
+  if (![c.x, c.y, c.width, c.height].every(Number.isFinite)) return false;
+  if (!viewport) return true;
+  const b = cameraBox(view, host, viewport);
+  return [b.left, b.top, b.width, b.height].every(Number.isFinite) && b.width <= MAX_BOX && b.height <= MAX_BOX;
+}
+
+/**
+ * Where the root's own box goes in the host for this view: its offset (on whole CSS px) and its
+ * size. Browsers paint a replaced root at a pixel-snapped offset while its getScreenCTM keeps the
+ * fraction, so a fractional offset would put the drawing and every measurement of it (outlines,
+ * handles, the paper) a fraction of a pixel apart: the offset is rounded, and everything that maps
+ * the root's units to the screen maps through this box.
+ */
+export function cameraBox(view: View, host: Size, viewport: Size): { left: number; top: number; width: number; height: number } {
+  const k = view.scale;
+  return { left: Math.round(host.width / 2 - view.cx * k), top: Math.round(host.height / 2 - view.cy * k), width: viewport.width * k, height: viewport.height * k };
 }
 
 /** Zoom by `factor` about a screen point: the document point under it stays under it. */
