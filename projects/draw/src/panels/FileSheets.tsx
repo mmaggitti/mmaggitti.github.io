@@ -222,10 +222,10 @@ const EXPORTS: { kind: ExportKind; label: string; say: (removed: string, gzip: b
   {
     kind: 'as-is',
     label: 'As-is SVG',
-    say: (_removed, gzip) => (gzip ? 'The file as it is now, uncompressed: every byte Draw didn’t change is kept.' : 'The file exactly as it is now: every byte Draw didn’t change is kept.'),
+    say: (_removed, gzip) => (gzip ? 'The file as it is now, uncompressed, without Draw’s own state (guides, locks): every other byte Draw didn’t change is kept.' : 'The file exactly as it is now, without Draw’s own state (guides, locks): every other byte Draw didn’t change is kept.'),
   },
-  { kind: 'clean', label: 'Clean SVG', say: (removed) => `Without editor data (Inkscape, Illustrator, Sketch…): ${removed}.` },
-  { kind: 'working', label: 'Save to Files', say: () => 'Your working copy, to open in Draw again. For now it is the as-is file.' },
+  { kind: 'clean', label: 'Clean SVG', say: (removed) => `Without editor data (Inkscape, Illustrator, Sketch, Draw’s own…): ${removed}.` },
+  { kind: 'working', label: 'Save to Files', say: () => 'Your working copy, with Draw’s own state (guides, locks), to open in Draw again.' },
 ];
 
 function ExportBody({ workspace }: { workspace: Workspace }) {

@@ -986,7 +986,7 @@ const BREAKS = [
   },
   {
     id: 'B177', what: 'the as-is export writes the file as opened, not as edited',
-    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: 'encodeSvg(clean ? clean.text : doc.source, read)',
+    file: 'projects/draw/src/export/svg.ts', from: "  const text = clean ? clean.text : kind === 'as-is' ? stripDrawState(doc) : serialize(doc);", to: '  const text = clean ? clean.text : doc.source;',
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {

@@ -768,6 +768,7 @@ const SHAPES = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmag
   <rect id="k" x="10" y="60" width="10" height="10" draw:locked="true"/>
   <line id="l" x1="10" y1="90" x2="90" y2="90" stroke="#000"/>
 </svg>`;
+const NO_SNAP = { grid: false, guides: false, shapes: false, artboard: false };
 const idOf = (r: Rig, id: string): NodeId => element(doc(r), (n) => n.attrs.some((a) => a.local === 'id' && a.raw === id)).id;
 /** Host px of a point in the root's user units (the fakes' camera: the root's box, M). */
 function hostAt(r: Rig, x: number, y: number) {
@@ -819,6 +820,7 @@ test('a tap near a hairline takes it (22 px plus half its stroke); locked shapes
   const reach = 22 + pxPerUnit(r) / 2; // 22 px and half its 1-unit stroke
   tap(r, { x: near.x, y: near.y - reach + 0.5 }, []);
   assert.deepEqual(sel(r), [idOf(r, 'l')], 'within 22 px and half its stroke of the line');
+  r.editor.deselect(); // its own handles would take a tap this near (S3)
   tap(r, { x: near.x, y: near.y - reach - 0.5 }, []);
   assert.deepEqual(sel(r), [], 'beyond it, nothing');
   tap(r, hostAt(r, 15, 65), [idOf(r, 'k')]);
@@ -828,6 +830,7 @@ test('a tap near a hairline takes it (22 px plus half its stroke); locked shapes
 test('a drag on an unselected shape selects and moves it, as one history entry, by whole units', () => {
   const r = rig();
   r.editor.open(SHAPES);
+  r.editor.snap.set(NO_SNAP); // whole units alone (snapping to targets has its own tests)
   const a = idOf(r, 'a');
   const from = hostAt(r, 15, 15);
   const k = pxPerUnit(r);

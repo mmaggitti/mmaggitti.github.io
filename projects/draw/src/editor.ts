@@ -20,7 +20,7 @@
 // - Every token takes the keyboard: Enter or Space does what a tap does (a number opens its sheet),
 //   and the arrow keys step a number, one history entry each.
 
-import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type NodeId } from '../../../engine/model/doc.ts';
+import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, type ChangeSet } from '../../../engine/commands/ops.ts';
@@ -36,19 +36,20 @@ import type { FocusMark, TokenKey, ViewBlock, ViewToken } from './codeview/code-
 import { artboard, rootViewport } from './canvas/artboard.ts';
 import { cameraBox, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
 import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
-import { rootTransform } from '../../../engine/geometry/ctm.ts';
+import { rootTransform, transformOrigin } from '../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../engine/geometry/bounds.ts';
 import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
-import { EMPTY, coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type OverlayModel, type Quad } from './interact/overlay-model.ts';
-import { snapStep, stepDecimals, toStep } from './interact/snap.ts';
-import { applyPlan, movesBy, planMove, ROOT_MOVE, type Plan } from '../../../engine/geometry/write.ts';
+import { EMPTY, coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type Handle, type Line, type OverlayModel, type Quad } from './interact/overlay-model.ts';
+import { SNAP_ALL, SNAP_PX, boxTargets, snapAxis, snapStep, stepDecimals, toStep, type SnapPrefs, type SnapTargets } from './interact/snap.ts';
+import { applyPlan, movesBy, planMove, planResize, planRotate, planScale, rotationOf, scaleOf, ROOT_MOVE, type Corner, type Plan } from '../../../engine/geometry/write.ts';
+import { handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from './interact/handles.ts';
 import { documentOrder, isThin, thinHit } from '../../../engine/geometry/hit.ts';
 import { remove, restack, ROOT_DELETE } from './interact/structure.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
-import { isLocked } from '../../../engine/model/draw-state.ts';
-import { apply as applyM, invert, multiply } from '../../../engine/values/affine.ts';
-import { parseTransform } from '../../../engine/values/transform.ts';
+import { NO_STATE, isLocked, moveGuide, readState, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
+import { itemMatrix, parseTransform } from '../../../engine/values/transform.ts';
 import { fmt } from '../../../engine/values/number-format.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 
@@ -172,6 +173,8 @@ export class Editor {
   readonly grid: Store<boolean> = createStore(false);
   /** Select more: taps and marquees add to the selection (a ContextBar toggle). */
   readonly selectMore: Store<boolean> = createStore(false);
+  /** What moves and handles snap to (the Snap sheet's toggles, a device preference). */
+  readonly snap: Store<SnapPrefs> = createStore<SnapPrefs>(SNAP_ALL);
   #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
 
   #ports: EditorPorts;
@@ -490,12 +493,18 @@ export class Editor {
       return m ? [{ id, quad: quadOf(m.box, m.toHost) }] : [];
     });
     const model: OverlayModel = { ...EMPTY, paper, grid: this.grid.get() ? gridModel(box, vp, this.#M, this.#size, paper, this.gridStep()) : null, outlines };
+    const hs = this.#handleSet(ids, measured, outlines.map((o) => o.quad));
+    model.handles = hs.handles;
+    model.rotGuide = hs.rotGuide;
+    model.guides = this.#guideMarks();
     this.#gestureMarks(model, paper);
     return model;
   }
 
-  /** The grid's step in the root's user units: the smallest 1-2-5 step at least 12 px apart. */
+  /** The grid's step in the root's user units: the Snap sheet's, else the smallest 1-2-5 step at least 12 px apart. */
   gridStep(): number {
+    const chosen = this.#doc ? readState(this.#doc).grid : null;
+    if (chosen) return chosen; // the Snap sheet's step, kept in the file
     const box = this.#box;
     if (!box) return 1;
     const k = box.width / this.#viewport.width;
@@ -529,7 +538,11 @@ export class Editor {
     if (!doc || this.#live || this.#gesture || this.#nudge) return;
     const all = this.#withThin(at, hits);
     const target = all.map((id) => selectionTarget(doc, id)).find((t): t is NodeId => t !== null && !isLocked(doc, t)) ?? null;
-    this.#gesture = { at0: at, at, target, add: mods.add || this.selectMore.get(), mode: 'pending', move: null };
+    // A guide's pill, then a handle within 26 px, take the press before any shape does.
+    const model = this.overlayModel();
+    const pill = pickPill(model.guides, at);
+    const handle = pill === null ? pickHandle(model.handles, at)?.id ?? null : null;
+    this.#gesture = { at0: at, at, target, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle, hd: null, snapLines: [], guide: pill, gd: null };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -539,6 +552,8 @@ export class Editor {
     g.at = at;
     if (g.mode === 'pending') this.#startDrag(g, held);
     if (g.mode === 'move') this.#moveFrame(g);
+    else if (g.mode === 'handle') this.#handleFrame(g);
+    else if (g.mode === 'guide') this.#guideFrame(g);
     else this.#show();
   }
 
@@ -548,8 +563,11 @@ export class Editor {
     if (!g) return;
     g.at = at;
     this.#gesture = null;
-    if (g.mode === 'pending') this.#tap(g.target, g.add);
-    else if (g.mode === 'move') this.#endMove(g, true);
+    if (g.mode === 'pending') {
+      if (g.handle === null && g.guide === null) this.#tap(g.target, g.add); // a tap on a handle or a pill does nothing in M1
+    } else if (g.mode === 'move') this.#endMove(g, true);
+    else if (g.mode === 'handle') this.#endHandle(g, true);
+    else if (g.mode === 'guide') this.#endGuide(g, true);
     else if (g.mode === 'marquee') this.#endMarquee(g);
     this.#show();
   }
@@ -560,12 +578,14 @@ export class Editor {
     if (!g) return;
     this.#gesture = null;
     if (g.mode === 'move') this.#endMove(g, false);
+    else if (g.mode === 'handle') this.#endHandle(g, false);
+    else if (g.mode === 'guide') this.#endGuide(g, false);
     this.#show();
   }
 
   /** Is a pointer gesture, a scrub or a nudge under way (Escape cancels one)? */
   get busy(): boolean {
-    return !!this.#live || !!this.#gesture?.move || !!this.#nudge;
+    return !!this.#live || !!this.#gesture?.move || !!this.#gesture?.hd || !!this.#gesture?.gd || !!this.#nudge;
   }
 
   /** Escape: cancel a live drag if one is running, else deselect. */
@@ -681,6 +701,8 @@ export class Editor {
 
   #startDrag(g: Gesture, held: boolean): void {
     const doc = this.#doc!;
+    if (!held && g.guide !== null) return this.#startGuide(g);
+    if (!held && g.handle !== null) return this.#startHandle(g);
     if (held || g.target === null) {
       g.mode = 'marquee';
       return;
@@ -733,7 +755,16 @@ export class Editor {
       toParent.set(p, m ? multiply(invert(linear(m)) ?? [0, 0, 0, 0, 0, 0], linear(root)) : null);
     }
     const px = Math.sqrt(Math.abs(root[0] * root[3] - root[1] * root[2]));
-    return { drag: this.#session.drag(label), ids, toParent, rootInv, step: step ?? snapStep(px), delta: null, refused: null };
+    // What snaps (a pointer's move, not a nudge): the moving box, in root units, and the targets.
+    let box: Rect | null = null;
+    if (step === undefined) {
+      const quads = [...this.#ports.canvas.measure(ids).values()].map((m) => quadOf(m.box, m.toHost));
+      const u = unionBox(quads);
+      const inv = invert(root);
+      if (u && inv) box = rectInRoot(inv, u);
+    }
+    const targets = step === undefined ? this.#snapTargets(ids) : null;
+    return { drag: this.#session.drag(label), ids, toParent, rootInv, step: step ?? snapStep(px), delta: null, refused: null, box, centre: false, targets, px };
   }
 
   // The delta from where the pointer went down (so the slop's first 5 px count), in root units,
@@ -741,7 +772,9 @@ export class Editor {
   #moveFrame(g: Gesture): void {
     const m = g.move!;
     const [rx, ry] = applyM(m.rootInv, g.at.x - g.at0.x, g.at.y - g.at0.y);
-    this.#applyMove(m, { x: toStep(rx, m.step), y: toStep(ry, m.step) });
+    const s = this.#snapDelta(m, rx, ry);
+    g.snapLines = s.lines;
+    this.#applyMove(m, s.d);
   }
 
   // Every frame re-plans from the document as it was before the drag (the drag rolls the last
@@ -775,6 +808,331 @@ export class Editor {
   #finishMove(m: MoveState, commit: boolean): void {
     if (commit) m.drag.commit();
     else m.drag.cancel();
+    this.#bump();
+    this.#changed();
+  }
+
+  // ── handles (src/interact/handles.ts) and snapping (src/interact/snap.ts) ──────────────────
+
+  // The selection's handles: one element's set (not the root, not locked), or a centre for
+  // several; none during a marquee.
+  #handleSet(ids: readonly NodeId[], measured: Map<NodeId, Measured>, quads: readonly Quad[]): { handles: Handle[]; rotGuide: Line | null } {
+    const doc = this.#doc!;
+    const g = this.#gesture;
+    const none = { handles: [], rotGuide: null };
+    if (g?.mode === 'marquee' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
+    const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
+    if (ids.length > 1) {
+      const u = unionBox(quads);
+      return u ? { handles: handlesForMany(u, active), rotGuide: null } : none;
+    }
+    const m = measured.get(ids[0]);
+    if (!m) return none;
+    const n = doc.nodes.get(ids[0]) as ElementNode;
+    const p = this.#pivots(ids[0], m);
+    return handlesFor({ quad: quadOf(m.box, m.toHost), corners: RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
+  }
+
+  // The rotation pivot (an existing rotate()'s own centre, through the list's items before it;
+  // else the box's centre) and the scale pivot (where the items before scale() send the origin),
+  // in host px.
+  #pivots(id: NodeId, m: Measured): { rot: Point; scale: Point | null } {
+    const doc = this.#doc!;
+    const [cx, cy] = applyM(m.toHost, m.box.x + m.box.width / 2, m.box.y + m.box.height / 2);
+    const centre = { x: cx, y: cy };
+    const raw = attrValueOf(doc, id, 'transform');
+    const list = raw === null ? null : parseTransform(raw);
+    const parent = doc.nodes.get(id)!.parent!;
+    const toHost = this.#ports.canvas.measure([parent]).get(parent)?.toHost;
+    if (!list || !toHost) return { rot: centre, scale: null };
+    const origin = transformOrigin(doc, id, this.geo, () => m.box);
+    const o = 'at' in origin ? origin.at : [0, 0];
+    const through = (i: number, x: number, y: number): Point => {
+      let t = multiply(toHost, shift(o[0], o[1]));
+      for (let k = 0; k < i; k++) t = multiply(t, itemMatrix(list.items[k]));
+      const [hx, hy] = applyM(t, x, y);
+      return { x: hx, y: hy };
+    };
+    const r = list.items.findIndex((it) => it.fn === 'rotate');
+    const s = list.items.findIndex((it) => it.fn === 'scale');
+    return {
+      rot: r === -1 ? centre : through(r, list.items[r].args[1] ?? 0, list.items[r].args[2] ?? 0),
+      scale: s === -1 || scaleOf(doc, id) === null ? null : through(s, 0, 0),
+    };
+  }
+
+  // A drag on a handle: the centre moves the selection; a corner resizes, the ring turns and the
+  // diamond scales the one selected element, each one drag.
+  #startHandle(g: Gesture): void {
+    const doc = this.#doc!;
+    const sel = [...this.selection.get()];
+    if (g.handle === 'center') {
+      this.#startMove(g, sel, 'Move');
+      if (g.move) g.move.centre = true;
+      return;
+    }
+    g.mode = 'none';
+    const id = sel[0];
+    if (sel.length !== 1 || !this.#session || !this.#writable()) return;
+    if (isLocked(doc, id)) return void this.notice.set(LOCKED);
+    const n = doc.nodes.get(id) as ElementNode;
+    const parent = n.parent!;
+    const measured = this.#ports.canvas.measure([id, parent]);
+    const m = measured.get(id);
+    const pm = measured.get(parent);
+    if (!m || !pm) return;
+    const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : 'Resize';
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null };
+    if (kind === 'Resize') {
+      hd.corner = g.handle as Corner;
+      hd.uniform = movesBy(doc, id) === 'translate' || n.local === 'use';
+      const toParent = invert(pm.toHost);
+      if (!toParent) return;
+      if (hd.uniform) {
+        hd.toUnits = toParent;
+        hd.box = rectInRoot(toParent, unionBox([quadOf(m.box, m.toHost)])!);
+      } else hd.toUnits = n.local === 'svg' ? toParent : invert(m.toHost);
+      if (!hd.toUnits) return;
+      const [a, b, c, d] = hd.toUnits;
+      hd.step = snapStep(1 / Math.sqrt(Math.abs(a * d - b * c)));
+    } else {
+      const p = this.#pivots(id, m);
+      if (kind === 'Scale' && !p.scale) return;
+      hd.pivot = kind === 'Rotate' ? p.rot : p.scale!;
+      hd.a0 = kind === 'Rotate' ? rotationOf(doc, id) : scaleOf(doc, id)!;
+      hd.flip = pm.toHost[0] * pm.toHost[3] - pm.toHost[1] * pm.toHost[2] < 0 ? -1 : 1;
+    }
+    hd.drag = this.#session.drag(kind);
+    g.hd = hd;
+    g.mode = 'handle';
+  }
+
+  // One frame of a handle drag, re-planned from the document as it was before the drag.
+  #handleFrame(g: Gesture): void {
+    const hd = g.hd!;
+    const doc = this.#doc!;
+    const opts = { ctx: this.geo, decimals: stepDecimals(hd.step) };
+    let plan: () => Plan;
+    if (hd.corner) {
+      const to = this.#cornerPoint(g, hd);
+      plan = () => planResize(doc, hd.id, { corner: hd.corner!, to, box: hd.box ?? undefined }, opts);
+    } else if (hd.handle === 'rot') {
+      const turn = (Math.atan2(g.at.y - hd.pivot.y, g.at.x - hd.pivot.x) - Math.atan2(g.at0.y - hd.pivot.y, g.at0.x - hd.pivot.x)) * (180 / Math.PI);
+      const a = magneticAngle(hd.a0 + hd.flip * turn);
+      hd.tip = `rotate(${fmt(a, 0)})`;
+      plan = () => planRotate(doc, hd.id, a, { ctx: this.geo, box: hd.local });
+    } else {
+      const from = Math.hypot(g.at0.x - hd.pivot.x, g.at0.y - hd.pivot.y);
+      const k = scaleStep(from > 0 ? (hd.a0 * Math.hypot(g.at.x - hd.pivot.x, g.at.y - hd.pivot.y)) / from : hd.a0);
+      hd.tip = `scale(${fmt(k, 2)})`;
+      plan = () => planScale(doc, hd.id, k, opts);
+    }
+    hd.drag.update((apply) => {
+      const p = plan();
+      if ('refused' in p) hd.refused ??= p.refused;
+      else applyPlan(doc, p, apply);
+    });
+    if (hd.corner) hd.tip = this.#sizeTip(hd);
+    if (hd.refused && this.notice.get() !== hd.refused) this.notice.set(hd.refused);
+    this.#show();
+  }
+
+  // Where a dragged corner goes, in the units it is written in: a target within 8 px takes it (in
+  // root units), else it is rounded to the snap step there.
+  #cornerPoint(g: Gesture, hd: HandleDrag): Point {
+    const [ux, uy] = applyM(hd.toUnits!, g.at.x, g.at.y);
+    let to = { x: toStep(ux, hd.step), y: toStep(uy, hd.step) };
+    g.snapLines = [];
+    const box = this.#box;
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = toHost && invert(toHost);
+    const targets = this.#snapTargets([hd.id]);
+    if (!toHost || !inv) return to;
+    const [rx, ry] = applyM(inv, g.at.x, g.at.y);
+    const tol = SNAP_PX / Math.sqrt(Math.abs(toHost[0] * toHost[3]));
+    const sx = snapAxis([rx], 0, targets.x, targets.grid, tol);
+    const sy = snapAxis([ry], 0, targets.y, targets.grid, tol);
+    if (!sx && !sy) return to;
+    const [hx, hy] = applyM(toHost, sx ? sx.at : rx, sy ? sy.at : ry);
+    const [sxu, syu] = applyM(hd.toUnits!, hx, hy);
+    to = { x: sx ? sxu : to.x, y: sy ? syu : to.y };
+    g.snapLines = this.#snapLines(sx?.at ?? null, sy?.at ?? null);
+    return to;
+  }
+
+  // "W × H": a corner's new size, in the element's own units (its parent's for a uniform scale).
+  #sizeTip(hd: HandleDrag): string | null {
+    const doc = this.#doc!;
+    const n = doc.nodes.get(hd.id)!;
+    const parent = n.parent!;
+    const measured = this.#ports.canvas.measure([hd.id, parent]);
+    const m = measured.get(hd.id);
+    if (!m) return null;
+    let b: Rect = m.box;
+    if (hd.uniform) {
+      const inv = measured.get(parent) && invert(measured.get(parent)!.toHost);
+      if (!inv) return null;
+      b = rectInRoot(inv, unionBox([quadOf(m.box, m.toHost)])!);
+    }
+    const d = stepDecimals(hd.step);
+    return `${fmt(b.width, d)} × ${fmt(b.height, d)}`;
+  }
+
+  #endHandle(g: Gesture, commit: boolean): void {
+    const hd = g.hd;
+    if (!hd) return;
+    g.hd = null;
+    if (commit) hd.drag.commit();
+    else hd.drag.cancel();
+    this.#bump();
+    this.#changed();
+  }
+
+  // What a pointer's move snaps to, in root units: guides, the other shapes' edges and centres (at
+  // most the 500 nearest the view), the artboard's edges and centre, and the grid's lines while it
+  // is shown; each as the Snap sheet allows.
+  #snapTargets(moving: readonly NodeId[]): SnapTargets {
+    const doc = this.#doc!;
+    const prefs = this.snap.get();
+    const out: SnapTargets = { x: [], y: [], grid: prefs.grid && this.grid.get() ? this.gridStep() : null };
+    if (prefs.guides) for (const g of readState(doc).guides) (g.axis === 'v' ? out.x : out.y).push({ at: g.at, kind: 'guide' });
+    const box = this.#box;
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = toHost && invert(toHost);
+    if (prefs.shapes && inv) {
+      const skip = (id: NodeId) => moving.some((m) => m === id || isInside(doc, id, m) || isInside(doc, m, id));
+      const ids = this.#leaves(null).filter((id) => !skip(id));
+      const measured = this.#ports.canvas.measure(ids);
+      const c = { x: this.#size.width / 2, y: this.#size.height / 2 };
+      const boxes = [...measured.values()].map((m) => unionBox([quadOf(m.box, m.toHost)])!).sort((a, b) => Math.hypot(a.x + a.width / 2 - c.x, a.y + a.height / 2 - c.y) - Math.hypot(b.x + b.width / 2 - c.x, b.y + b.height / 2 - c.y)).slice(0, 500);
+      const t = boxTargets(boxes.map((b) => rectInRoot(inv, b)), 'shape');
+      out.x.push(...t.x);
+      out.y.push(...t.y);
+    }
+    if (prefs.artboard && this.#board) {
+      const t = boxTargets([this.#board], 'artboard');
+      out.x.push(...t.x);
+      out.y.push(...t.y);
+    }
+    return out;
+  }
+
+  // A move's delta: each axis on its own, snapped to the nearest target within 8 px (the box's low
+  // edge, centre and high edge, or the centre alone for the centre handle), else rounded to the step.
+  #snapDelta(m: MoveState, rx: number, ry: number): { d: Point; lines: Line[] } {
+    const d = { x: toStep(rx, m.step), y: toStep(ry, m.step) };
+    const t = m.targets;
+    const b = m.box;
+    if (!t || !b) return { d, lines: [] };
+    const tol = SNAP_PX / m.px;
+    const xs = m.centre ? [b.x + b.width / 2] : [b.x, b.x + b.width / 2, b.x + b.width];
+    const ys = m.centre ? [b.y + b.height / 2] : [b.y, b.y + b.height / 2, b.y + b.height];
+    const sx = snapAxis(xs, rx, t.x, t.grid, tol);
+    const sy = snapAxis(ys, ry, t.y, t.grid, tol);
+    return { d: { x: sx ? sx.d : d.x, y: sy ? sy.d : d.y }, lines: this.#snapLines(sx?.at ?? null, sy?.at ?? null) };
+  }
+
+  // A snap line across the canvas at a root x (vertical) and a root y (horizontal), in host px.
+  #snapLines(x: number | null, y: number | null): Line[] {
+    const box = this.#box;
+    if (!box) return [];
+    const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
+    const out: Line[] = [];
+    if (x !== null) {
+      const [hx] = applyM(toHost, x, 0);
+      out.push({ from: { x: hx, y: 0 }, to: { x: hx, y: this.#size.height } });
+    }
+    if (y !== null) {
+      const [, hy] = applyM(toHost, 0, y);
+      out.push({ from: { x: 0, y: hy }, to: { x: this.#size.width, y: hy } });
+    }
+    return out;
+  }
+
+  // ── Draw's own state: guides and the grid step (engine/model/draw-state.ts) ──────────────────
+
+  /** The guides and the grid step the file keeps. */
+  get drawState(): DrawState {
+    return this.#doc ? readState(this.#doc) : NO_STATE;
+  }
+
+  /** Add a guide through the artboard's centre (v: at its centre x; h: at its centre y). */
+  addGuide(axis: 'v' | 'h'): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const b = this.#board ?? { x: 0, y: 0, width: 0, height: 0 };
+    const at = Number(fmt(axis === 'v' ? b.x + b.width / 2 : b.y + b.height / 2, 4));
+    const s = readState(doc);
+    this.#dispatch('Add guide', (apply) => writeState(doc, { ...s, guides: [...s.guides, { axis, at }] }, apply));
+  }
+
+  /** Remove one guide (by its place in the list), or every guide. */
+  removeGuide(index: number | 'all'): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const s = readState(doc);
+    const guides = index === 'all' ? [] : s.guides.filter((_, i) => i !== index);
+    if (guides.length === s.guides.length) return;
+    this.#dispatch(index === 'all' ? 'Remove all guides' : 'Remove guide', (apply) => writeState(doc, { ...s, guides }, apply));
+  }
+
+  /** The grid's step in root user units, kept in the file; null: automatic (1-2-5). */
+  setGridStep(step: number | null): void {
+    const doc = this.#doc;
+    if (!doc || (step !== null && !(step > 0 && Number.isFinite(step)))) return;
+    const s = readState(doc);
+    if (s.grid === step) return;
+    this.#dispatch('Set grid step', (apply) => writeState(doc, { ...s, grid: step }, apply));
+    this.#show();
+  }
+
+  // The guides, in host px, each with its pill at the canvas's top edge (vertical) or left edge.
+  #guideMarks(): OverlayModel['guides'] {
+    const doc = this.#doc;
+    const box = this.#box;
+    if (!doc || !box) return [];
+    const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
+    const g = this.#gesture;
+    return readState(doc).guides.map((gd, i) => {
+      const [hx, hy] = applyM(toHost, gd.at, gd.at);
+      const at = gd.axis === 'v' ? hx : hy;
+      return { axis: gd.axis, at, pill: gd.axis === 'v' ? { x: at, y: PILL_LONG / 2 } : { x: PILL_LONG / 2, y: at }, active: g?.guide === i && g.mode === 'guide' };
+    });
+  }
+
+  #startGuide(g: Gesture): void {
+    g.mode = 'none';
+    if (!this.#session || !this.#writable()) return;
+    const box = this.#box;
+    if (!box) return;
+    const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
+    g.gd = { drag: this.#session.drag('Move guide'), step: snapStep(Math.abs(toHost[0])), tip: null };
+    g.mode = 'guide';
+  }
+
+  // A pill drag: the guide follows the pointer in whole units (the snap step).
+  #guideFrame(g: Gesture): void {
+    const doc = this.#doc!;
+    const gd = g.gd!;
+    const inv = invert(rootToHostMatrix(this.#box!, this.#viewport, this.#M));
+    const guide = readState(doc).guides[g.guide!];
+    if (!inv || !guide) return;
+    const [rx, ry] = applyM(inv, g.at.x, g.at.y);
+    const at = toStep(guide.axis === 'v' ? rx : ry, gd.step);
+    gd.drag.update((apply) => moveGuide(doc, g.guide!, at, stepDecimals(gd.step), apply));
+    gd.tip = `${guide.axis === 'v' ? 'x' : 'y'} = ${fmt(at, stepDecimals(gd.step))}`;
+    this.#show();
+  }
+
+  // The end of a pill drag: one "Move guide", or, dropped off the canvas, one "Remove guide".
+  #endGuide(g: Gesture, commit: boolean): void {
+    const gd = g.gd;
+    if (!gd) return;
+    g.gd = null;
+    const off = g.at.x < 0 || g.at.y < 0 || g.at.x > this.#size.width || g.at.y > this.#size.height;
+    if (commit && !off) gd.drag.commit();
+    else gd.drag.cancel();
+    if (commit && off) this.removeGuide(g.guide!);
     this.#bump();
     this.#changed();
   }
@@ -850,6 +1208,9 @@ export class Editor {
       model.marquee = rectOf(g.at0, g.at);
       return;
     }
+    model.snapLines = g.snapLines;
+    if (g.mode === 'handle' && g.hd?.tip) model.tip = tip(g.hd.tip, g.at);
+    if (g.mode === 'guide' && g.gd?.tip) model.tip = tip(g.gd.tip, g.at);
     const m = g.move;
     if (g.mode !== 'move' || !m || !m.delta) return;
     const measured = this.#ports.canvas.measure(m.ids);
@@ -1294,17 +1655,63 @@ interface MoveState {
   step: number;
   delta: Point | null; // the snapped delta the last frame wrote
   refused: string | null;
+  box: Rect | null; // the moving box at the start, root units (what snaps: its edges and centre)
+  centre: boolean; // the centre handle's move: only the centre snaps
+  targets: SnapTargets | null; // null: no snapping (a nudge)
+  px: number; // screen px per root unit
 }
 interface Gesture {
   at0: Point; // host px where the pointer went down
   at: Point;
   target: NodeId | null; // what a tap selects: the topmost hit's selectable element that isn't locked
   add: boolean; // Select more, or ⇧/⌘ on the press
-  mode: 'pending' | 'move' | 'marquee' | 'none';
+  mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'none';
   move: MoveState | null;
+  handle: string | null; // the handle the press took (handles.ts), if any
+  hd: HandleDrag | null; // a resize, rotate or scale drag
+  guide: number | null; // the guide whose pill the press took, by index
+  gd: { drag: Drag; step: number; tip: string | null } | null; // a guide's drag
+  snapLines: Line[]; // host px: the targets the last frame snapped to
+}
+// A handle drag: a corner (resize), the ring (rotate) or the diamond (scale), on one element.
+interface HandleDrag {
+  handle: string;
+  id: NodeId;
+  drag: Drag;
+  corner: Corner | null;
+  toUnits: Affine | null; // host px → the units a corner is written in (its own, or its parent's for a uniform scale)
+  box: Rect | null; // a uniform scale's box, in the parent's units
+  uniform: boolean;
+  step: number; // the snap step in those units
+  pivot: Point; // host px (rotate, scale)
+  a0: number; // the angle, or the scale, when the drag began
+  flip: number; // −1 where the parent mirrors, so an angle reads the other way on screen
+  local: Rect | null; // the element's own box at the start (rotate's pivot for text and use)
+  tip: string | null;
+  refused: string | null;
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
+const PILL_LONG = 44; // px: a guide's pill, 44 along its guide and 20 across, picked over 44 × 44
+/** The guide whose pill a press at `at` takes: within its 44 × 44 pick area, the nearest. */
+function pickPill(guides: OverlayModel['guides'], at: Point): number | null {
+  let best: number | null = null;
+  let bestD = Infinity;
+  guides.forEach((g, i) => {
+    const d = Math.max(Math.abs(at.x - g.pill.x), Math.abs(at.y - g.pill.y));
+    if (d <= PILL_LONG / 2 && d < bestD) [best, bestD] = [i, d];
+  });
+  return best;
+}
+// Elements a corner resizes (§5.3's table): geometry, nested svg, and g, use and text by a uniform scale.
+const RESIZABLE = new Set(['rect', 'image', 'foreignObject', 'svg', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'g', 'use', 'text', 'a', 'switch']);
+/** The box around a host-px rectangle's corners through `inv` (host px → some units). */
+function rectInRoot(inv: Affine, r: Rect): Rect {
+  const pts = [[r.x, r.y], [r.x + r.width, r.y], [r.x + r.width, r.y + r.height], [r.x, r.y + r.height]].map(([x, y]) => applyM(inv, x, y));
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
 const rectOf = (a: Point, b: Point): Rect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) });
 
 function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {

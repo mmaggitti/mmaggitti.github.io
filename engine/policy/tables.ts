@@ -1147,4 +1147,5 @@ export const NAMESPACE_CLASS: ReadonlyMap<string, LedgerClass> = new Map<string,
   ['http://www.w3.org/2000/svg', 'edit'],
   ['http://www.w3.org/2001/xml-events', 'active'],
   ['http://www.w3.org/XML/1998/namespace', 'edit'],
+  ['https://mmaggitti.github.io/draw/ns', 'preserve-hidden'],
 ]);

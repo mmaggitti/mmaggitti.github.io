@@ -21,6 +21,7 @@
 //   clipboard); where the clipboard is blocked, a read-only sheet holds the text to select.
 
 import { serialize, type Doc } from '../../../engine/model/doc.ts';
+import { stripDrawState } from '../../../engine/model/draw-state.ts';
 import type { ImportReport } from '../../../engine/report/import-report.ts';
 import type { Editor } from './editor.ts';
 import { importSvg, why, type ImportFailure, type ImportInput, type Via } from './import.ts';
@@ -343,13 +344,14 @@ export class Workspace {
   // ── copy ───────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Copy: the file as it is now (every byte, as the as-is export has it; the tidy view never changes
-   * it), or the source open read-only. `write` puts text on the clipboard (platform/clipboard.ts),
+   * Copy: the file as it is now, as the as-is export has it (without Draw's own state, every other
+   * byte; the tidy view never changes it), or the source open read-only. `write` puts text on the clipboard (platform/clipboard.ts),
    * called before anything is awaited, so it keeps the tap's user activation. "Copied", or, where
    * the clipboard is blocked, a read-only sheet with the text to select.
    */
   async copy(write: (text: string) => Promise<boolean>): Promise<boolean> {
-    const text = this.unparsed.get()?.source.text ?? (this.#editor.doc ? this.#editor.source() : null);
+    const doc = this.#editor.doc;
+    const text = this.unparsed.get()?.source.text ?? (doc ? stripDrawState(doc) : null);
     if (text === null) return false;
     if (await write(text)) {
       this.#editor.notice.set('Copied');

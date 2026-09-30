@@ -1,9 +1,10 @@
 // The overlay model (src/interact/overlay-model.ts): where the paper, the grid, the tooltip and the
-// coordinate guides go, as plain numbers in host px.
+// coordinate guides go, as plain numbers in host px; and the handles (src/interact/handles.ts).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX } from '../../src/interact/overlay-model.ts';
+import { coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
+import { DIAMOND_PX, HANDLE_PICK_PX, RING_PX, handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from '../../src/interact/handles.ts';
 
 const HOST = { width: 400, height: 300 };
 
@@ -71,4 +72,40 @@ test('quads come from a local box through its matrix, and a union box holds them
   assert.deepEqual(q, [{ x: 100, y: 50 }, { x: 100, y: 60 }, { x: 80, y: 60 }, { x: 80, y: 50 }]);
   assert.deepEqual(unionBox([q, quadOf({ x: 0, y: 0, width: 1, height: 1 }, [1, 0, 0, 1, 0, 0])]), { x: 0, y: 0, width: 100, height: 60 });
   assert.equal(unionBox([]), null);
+});
+
+// ── handles (src/interact/handles.ts) ─────────────────────────────────────────────────────────
+
+test('handles: corners on the quad (hidden under 32 px a side), the centre, the ring 40 px beyond the top edge along the element’s own −y, the diamond 20 px beyond the bottom-right from the scale pivot', () => {
+  const quad = quadOf({ x: 0, y: 0, width: 100, height: 60 }, [1, 0, 0, 1, 50, 100]);
+  const { handles, rotGuide } = handlesFor({ quad, corners: true, rotPivot: { x: 100, y: 130 }, scalePivot: { x: 50, y: 100 } }, 'tr');
+  assert.deepEqual(handles.map((h) => [h.id, h.kind]), [['tl', 'anchor'], ['tr', 'anchor'], ['br', 'anchor'], ['bl', 'anchor'], ['center', 'center'], ['rot', 'rot'], ['scale', 'scale']], 'drawing order: corners, centre, ring, diamond');
+  const at = (id: string) => handles.find((h) => h.id === id)!.at;
+  assert.deepEqual([at('tl'), at('br'), at('center')], [{ x: 50, y: 100 }, { x: 150, y: 160 }, { x: 100, y: 130 }]);
+  assert.deepEqual(at('rot'), { x: 100, y: 100 - RING_PX }, 'above the top edge’s middle');
+  const d = at('scale');
+  assert.ok(Math.abs(Math.hypot(d.x - 150, d.y - 160) - DIAMOND_PX) < 1e-9 && Math.abs((d.y - 100) / (d.x - 50) - 60 / 100) < 1e-9, 'on the ray from the pivot through the corner, 20 px beyond');
+  assert.deepEqual(rotGuide, { from: { x: 100, y: 130 }, to: at('rot') }, 'the guide from the pivot to the ring');
+  assert.deepEqual(handles.filter((h) => h.active).map((h) => h.id), ['tr'], 'the dragged one is active');
+  // Turned 90°: the ring follows the element's own −y.
+  const turned = handlesFor({ quad: quadOf({ x: 0, y: 0, width: 100, height: 60 }, [0, 1, -1, 0, 200, 0]), corners: true, rotPivot: { x: 0, y: 0 }, scalePivot: null }, null);
+  assert.deepEqual(turned.handles.find((h) => h.id === 'rot')!.at, { x: 200 + RING_PX, y: 50 });
+  assert.ok(!turned.handles.some((h) => h.kind === 'scale'), 'no scale(): no diamond');
+  const small = handlesFor({ quad: quadOf({ x: 0, y: 0, width: 31, height: 60 }, [1, 0, 0, 1, 0, 0]), corners: true, rotPivot: null, scalePivot: null }, null);
+  assert.deepEqual(small.handles.map((h) => h.id), ['center'], 'a side under 32 px: no corners; no pivot: no ring');
+  assert.deepEqual(handlesForMany({ x: 10, y: 20, width: 100, height: 40 }, null).map((h) => [h.id, h.at]), [['center', { x: 60, y: 40 }]], 'several: a centre only');
+  // Every style the lab draws exists, M3's among them.
+  const kinds: HandleKind[] = ['center', 'anchor', 'start', 'ctrl', 'bend', 'rot', 'scale'];
+  assert.equal(new Set(kinds).size, 7);
+});
+
+test('a press takes the nearest handle within 26 px, the one drawn last on a tie; the ring is magnetic to 15°, the diamond steps 0.05 from 0.2 to 4', () => {
+  const hs = [{ id: 'a', at: { x: 0, y: 0 } }, { id: 'b', at: { x: 30, y: 0 } }, { id: 'c', at: { x: 30, y: 0 } }];
+  assert.equal(pickHandle(hs, { x: 10, y: 0 })?.id, 'a', 'the nearest');
+  assert.equal(pickHandle(hs, { x: 20, y: 0 })?.id, 'c', 'a tie: the one drawn last');
+  assert.equal(pickHandle(hs, { x: 0, y: 26 })?.id, 'a', '26 px is within');
+  assert.equal(pickHandle(hs, { x: 0, y: -26.5 }), null, 'beyond 26 px, none');
+  assert.equal(HANDLE_PICK_PX, 26);
+  assert.deepEqual([47, 49, 41, 40, 181.4, -2, 7, 8].map(magneticAngle), [45, 45, 45, 40, 180, 0, 7, 8]);
+  assert.deepEqual([2, 2.02, 2.03, 0.1, 5, 1.234].map(scaleStep), [2, 2, 2.05, 0.2, 4, 1.25]);
 });

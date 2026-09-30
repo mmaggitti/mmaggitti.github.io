@@ -518,6 +518,20 @@ test("a well-formed file over Draw's limits is refused as before: the report say
   assert.equal(ws.current.get()?.name, 'sunset');
 });
 
+test('Copy leaves out Draw\'s own state and is otherwise the file byte for byte', async () => {
+  const { ws, editor } = rig();
+  void ws.openSample();
+  editor.addGuide('v');
+  editor.setGridStep(10);
+  assert.match(editor.source(), /<draw:state version="1" guides="v 160" grid="10"\/>/, 'test setup: the working copy keeps the state');
+  const got: string[] = [];
+  assert.equal(await ws.copy(async (t) => (got.push(t), true)), true);
+  assert.deepEqual(got, [SAMPLE], 'the file, byte for byte, without the guide, the step or the namespace');
+  const asIs = new TextDecoder().decode(ws.exportFile('as-is')!.bytes);
+  assert.equal(asIs, SAMPLE, 'the as-is export likewise');
+  assert.equal(new TextDecoder().decode(ws.exportFile('working')!.bytes), editor.source(), 'Save to Files keeps it');
+});
+
 test('Copy puts the file on the clipboard exactly as it is (xmlns, viewBox and all) and says Copied; where the clipboard is blocked, the text waits in a sheet to select', async () => {
   const { ws, editor } = rig();
   void ws.openSample();
