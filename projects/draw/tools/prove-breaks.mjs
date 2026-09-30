@@ -773,7 +773,7 @@ const BREAKS = [
   },
   {
     id: 'B135', what: 'the as-is export normalizes line ends',
-    file: 'projects/draw/src/export/svg.ts', from: 'encodeSvg(clean ? clean.text : serialize(doc), read)', to: "encodeSvg((clean ? clean.text : serialize(doc)).replace(/\\r\\n/g, '\\n'), read)",
+    file: 'projects/draw/src/export/svg.ts', from: '  const { bytes, encoding, relabeled } = encodeSvg(text, read);', to: "  const { bytes, encoding, relabeled } = encodeSvg(text.replace(/\\r\\n/g, '\\n'), read);",
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {
@@ -1036,7 +1036,7 @@ const BREAKS = [
   },
   {
     id: 'B187', what: 'Clean counts each removed element twice',
-    file: 'engine/export/clean.ts', from: '      removedElements++;', to: '      removedElements += 2;',
+    file: 'engine/export/clean.ts', from: '    removedElements++;', to: '    removedElements += 2;',
     run: engineTests('export/clean.test.ts'), expect: /✖ Inkscape and Illustrator files lose exactly their editor markup/,
   },
   {
@@ -1107,7 +1107,7 @@ const BREAKS = [
   },
   {
     id: 'B201', what: 'Copy puts the file as it was opened on the clipboard, not as it is now',
-    file: 'projects/draw/src/workspace.ts', from: '(this.#editor.doc ? this.#editor.source() : null)', to: '(this.#editor.doc ? this.#editor.doc.source : null)',
+    file: 'projects/draw/src/workspace.ts', from: '(doc ? stripDrawState(doc) : null)', to: '(doc ? doc.source : null)',
     run: drawTests('workspace.test.ts'), expect: /✖ Copy puts the file on the clipboard exactly as it is/,
   },
   {
@@ -1793,7 +1793,7 @@ const BREAKS = [
   // P1-M1 S2, slow: the new e2e checks (each run alone, `checks`).
   {
     id: 'B336', what: 'a move rounds its delta to 2 units', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
-    file: 'projects/draw/src/editor.ts', from: '    this.#applyMove(m, { x: toStep(rx, m.step), y: toStep(ry, m.step) });', to: '    this.#applyMove(m, { x: toStep(rx, 2), y: toStep(ry, 2) });',
+    file: 'projects/draw/src/editor.ts', from: '    const d = { x: toStep(rx, m.step), y: toStep(ry, m.step) };', to: '    const d = { x: toStep(rx, 2), y: toStep(ry, 2) };',
     run: DRAW_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the drag did not move the circle by/,
   },
   {
@@ -1835,6 +1835,83 @@ const BREAKS = [
     id: 'B344', what: "the renderer supplies the camera as the root's viewBox again", slow: true, checks: ['percentLengthsKeepTheirSizeUnderZoom'],
     file: 'projects/draw/src/canvas/renderer.ts', from: '    if (!doc || !c || hasOwnViewBox(doc)) return null;', to: '    if (!doc || !c) return null;',
     run: DRAW_E2E, expect: /percentLengthsKeepTheirSizeUnderZoom: .*(viewBox is|the 100% rect measures)/,
+  },
+  // P1-M1 S3: handles, snapping and Draw's own state.
+  {
+    id: 'B345', what: 'the handle pick radius grows to 40 px',
+    file: 'projects/draw/src/interact/handles.ts', from: 'export const HANDLE_PICK_PX = 26;', to: 'export const HANDLE_PICK_PX = 40;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px/,
+  },
+  {
+    id: 'B346', what: 'a group resize prepends a new translate() scale() pair on every drag instead of editing the leading one',
+    file: 'engine/geometry/write.ts', from: "  if (a && t?.fn === 'translate' && t.args.length === 2 && k?.fn === 'scale') {", to: "  if (a && t?.fn === 'translate' && t.args.length === 2 && k?.fn === 'scale' && false) {",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a group resize keeps its fixed corner and edits a leading translate\(\) scale\(\) pair/,
+  },
+  {
+    id: 'B347', what: "the ring isn't magnetic",
+    file: 'projects/draw/src/interact/handles.ts', from: '  return (Math.abs(r - m) <= 4 ? m : r) + 0;', to: '  return r + 0;',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px, the one drawn last on a tie; the ring is magnetic/,
+  },
+  {
+    id: 'B348', what: "the diamond isn't clamped",
+    file: 'projects/draw/src/interact/handles.ts', from: '  return Math.min(4, Math.max(0.2, Number(s.toFixed(2))));', to: '  return Number(s.toFixed(2));',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ a press takes the nearest handle within 26 px, the one drawn last on a tie; the ring is magnetic/,
+  },
+  {
+    id: 'B349', what: 'the snap threshold doubles',
+    file: 'projects/draw/src/interact/snap.ts', from: 'export const SNAP_PX = 8;', to: 'export const SNAP_PX = 16;',
+    run: drawTests('editor.test.ts'), expect: /✖ a move snaps to a target within 8 px/,
+  },
+  {
+    id: 'B350', what: "the last guide's removal leaves xmlns:draw",
+    file: 'engine/model/draw-state.ts', from: '    undeclareIfUnused(doc, apply);\n    return;', to: '    return;',
+    run: engineTests('draw-state.test.ts'), expect: /✖ the first guide in a file with no <metadata>/,
+  },
+  {
+    id: 'B351', what: 'stripDrawState re-serializes a file with no Draw state',
+    file: 'engine/model/draw-state.ts', from: '  if (!hasDrawItems(doc) && boundPrefix(doc) === null) return serialize(doc);\n', to: '',
+    run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState of a file with no Draw state is the file itself/,
+  },
+  {
+    id: 'B352', what: 'stripNamespaces leaves an empty Draw-made <metadata>',
+    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && !m.children.some((c) => copy.nodes.get(c)?.kind === \'element\')) drop(m);', to: '    void m;',
+    run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState gives every corpus file back byte for byte/,
+  },
+  {
+    id: 'B353', what: 'cleanExport loses DRAW_NS',
+    file: 'engine/export/clean.ts', from: '  DRAW_NS,\n]);', to: ']);',
+    run: engineTests('export/clean.test.ts'), expect: /✖ the editor namespaces are the ledger's "Editor data" rows/,
+  },
+  {
+    id: 'B354', what: 'the centre handle moves by half the drag (a lab goal)',
+    file: 'projects/draw/src/editor.ts', from: '      if (g.move) g.move.centre = true;', to: '      if (g.move) {\n        g.move.centre = true;\n        g.move.rootInv = g.move.rootInv.map((v) => v / 2) as unknown as Affine;\n      }',
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goals "Go to x 80, y 20"/,
+  },
+  // P1-M1 S3, slow.
+  {
+    id: 'B355', what: "the dragged handle isn't yellow", slow: true, checks: ['theNearestHandleWithin26ptWins'],
+    file: 'projects/draw/src/app.css', from: '.draw-hd.on { fill: #ffe600; }', to: '.draw-hd.on { }',
+    run: DRAW_E2E, expect: /theNearestHandleWithin26ptWins: the dragged handle is .* during the drag, not yellow/,
+  },
+  {
+    id: 'B356', what: "the top-left corner doesn't keep the bottom-right", slow: true, checks: ['rectCornerHandlesKeepTheOppositeCorner'],
+    file: 'engine/geometry/write.ts', from: '  const f = cornerOf(box, OPPOSITE[corner]);', to: "  const f = cornerOf(box, corner === 'tl' ? 'tr' : OPPOSITE[corner]);",
+    run: DRAW_E2E, expect: /rectCornerHandlesKeepTheOppositeCorner: the top-left corner to \(30, 30\)/,
+  },
+  {
+    id: 'B357', what: 'a rotation collapses the list to matrix()', slow: true, checks: ['rotateAndScaleHandlesEditTheLabHouse'],
+    file: 'engine/geometry/write.ts', from: '    if (rot.args[0].text === a) return { edits: [] };\n', to: "    if (rot.args[0].text === a) return { edits: [] };\n    return { edits: [{ id, ns: null, local: 'transform', raw: `matrix(${fmt(Math.cos((angle * Math.PI) / 180), 3)} ${fmt(Math.sin((angle * Math.PI) / 180), 3)} ${fmt(-Math.sin((angle * Math.PI) / 180), 3)} ${fmt(Math.cos((angle * Math.PI) / 180), 3)} 50 50)`, add: false }] };\n",
+    run: DRAW_E2E, expect: /rotateAndScaleHandlesEditTheLabHouse: the ring at 180° did not write rotate\(180\) alone/,
+  },
+  {
+    id: 'B358', what: 'snapping ignores guides', slow: true, checks: ['movesSnapToGuidesShapesAndTheGrid'],
+    file: 'projects/draw/src/editor.ts', from: "    if (prefs.guides) for (const g of readState(doc).guides) (g.axis === 'v' ? out.x : out.y).push({ at: g.at, kind: 'guide' });", to: '    void prefs.guides;',
+    run: DRAW_E2E, expect: /movesSnapToGuidesShapesAndTheGrid: the rect's left edge landed on 39, not the guide at 40/,
+  },
+  {
+    id: 'B359', what: "a guide's pill moves it by half the drag", slow: true, checks: ['movesSnapToGuidesShapesAndTheGrid'],
+    file: 'projects/draw/src/editor.ts', from: '    const [rx, ry] = applyM(inv, g.at.x, g.at.y);\n    const at = toStep(', to: '    const [rx, ry] = applyM(inv, (g.at.x + g.at0.x) / 2, (g.at.y + g.at0.y) / 2);\n    const at = toStep(',
+    run: DRAW_E2E, expect: /movesSnapToGuidesShapesAndTheGrid: the pill did not drag the guide to 45/,
   },
 ];
 

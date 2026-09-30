@@ -1016,3 +1016,29 @@ test('Delete takes the selection away with its leading whitespace, in one entry;
   assert.equal(r.editor.history.get().canUndo, false, 'the refusals recorded nothing');
   assert.equal(r.editor.history.get().redoLabel, 'Delete', 'and left the undone Delete to redo');
 });
+
+test('a move snaps to a target within 8 px of the moving box’s edges or centre, and not beyond; a snap line marks it', () => {
+  const r = rig();
+  r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect id="a" x="10" y="10" width="10" height="10"/><rect id="b" x="60" y="70" width="10" height="10"/></svg>`);
+  r.editor.snap.set({ grid: false, guides: false, shapes: true, artboard: false });
+  const k = pxPerUnit(r);
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  const src = () => r.editor.source();
+  // A's left edge (10) toward B's (60): 50 units less 7 px lands on 60; less 9 px, whole units.
+  drag(r, from, { x: from.x + 50 * k - 7, y: from.y }, [a]);
+  assert.ok(src().includes('<rect id="a" x="60" y="10"'), `7 px away it snaps: ${src()}`);
+  r.editor.undo();
+  r.editor.select([]);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 50 * k - 9, y: from.y });
+  assert.equal(r.models.at(-1)?.snapLines.length, 0, 'no snap line 9 px away');
+  r.editor.pointerUp({ x: from.x + 50 * k - 9, y: from.y });
+  assert.ok(src().includes(`<rect id="a" x="${10 + Math.round(50 - 9 / k)}" y="10"`), `9 px away it moves by whole units: ${src()}`);
+  r.editor.undo();
+  r.editor.select([]);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 50 * k - 7, y: from.y });
+  assert.equal(r.models.at(-1)?.snapLines.length, 1, 'a snap line while snapped');
+  r.editor.pointerCancel();
+});

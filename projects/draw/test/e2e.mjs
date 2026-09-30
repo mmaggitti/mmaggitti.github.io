@@ -3950,7 +3950,9 @@ async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
     const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
     const rectX = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('x')));
     const rectY = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('y')));
-    // Left edge from 8 to 40 − 5 pt: within 8 pt of the guide.
+    // Left edge from 8 to 40 − 5 pt: within 8 pt of the guide (the artboard's centre, also at 40,
+    // is off here, so the guide alone takes it).
+    await sheet('Artboard');
     const a = await page.evaluate(drawnCentre, '#a');
     let lines = 0;
     await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8, async (i) => {
@@ -3959,7 +3961,7 @@ async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
     must(await rectX() === 40, `the rect's left edge landed on ${await rectX()}, not the guide at 40`);
     must(lines >= 1, 'no snap line while snapped');
     await undo.tap();
-    await sheet('Guides', 'Artboard'); // the artboard's centre is at 40 too
+    await sheet('Guides');
     await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8);
     must(await rectX() === 39, `with Guides off the rect went to ${await rectX()}, not 39 (whole units)`);
     await undo.tap();

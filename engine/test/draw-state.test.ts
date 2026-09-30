@@ -8,6 +8,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDoc, serialize, type Doc } from '../model/doc.ts';
+import { DEFAULT_LIMITS } from '../xml/cst.ts';
 import { Session } from '../commands/session.ts';
 import { DRAW_NS, moveGuide, readState, stripDrawState, writeState, type DrawState } from '../model/draw-state.ts';
 import { cleanExport } from '../export/clean.ts';
@@ -107,4 +108,11 @@ test('cleanExport of a file with Draw state has no Draw namespace, no Draw-made 
     assert.ok(!after.includes(DRAW_NS) && !after.includes('draw:made') && !after.includes('xmlns:draw'), f.name);
     assert.equal(after, before, `${f.name}: otherwise the clean export it was`);
   }
+});
+
+test('stripDrawState of a file with no Draw state is the file itself: it never parses it again (a document read past the default limits still copies)', () => {
+  const deep = `<svg xmlns="http://www.w3.org/2000/svg">${'<g>'.repeat(300)}${'</g>'.repeat(300)}</svg>`;
+  const r = parseDoc(deep, { ...DEFAULT_LIMITS, maxDepth: 400 });
+  assert.ok(r.ok, 'test setup: read with a deeper limit');
+  assert.equal(stripDrawState(r.doc), deep);
 });
