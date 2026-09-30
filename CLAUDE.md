@@ -142,6 +142,9 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   view → overlay → stores. Zoom and pan are the rendered root's own box (its CSS size and offset),
   never its viewBox or the file. React panels only read its stores; the canvas and the code view
   are framework-free.
+- **Generated shapes** (polygon, star, spiral) keep their inputs in `draw:*` attributes; the Session's
+  `finish` hook regenerates a shape whose inputs changed and detaches one whose geometry was edited by
+  hand, in the same transaction.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
