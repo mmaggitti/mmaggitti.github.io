@@ -232,10 +232,10 @@ const BREAKS = [
     run: SITE_E2E, expect: /the policy refuses part of style|errors while rendering the corpus/,
   },
   {
-    id: 'B30', what: "the rendered root takes the size its own CSS gives it", slow: true,
+    id: 'B30', what: "the rendered root takes the size its own CSS gives it", slow: true, checks: ['phoneRules', 'moreEdges'],
     // P1-M1: the size is the camera sheet's now; without !important the root's own inline size wins.
     file: 'projects/draw/src/canvas/safe-sink.ts', from: 'width: ${width} !important; height: ${height} !important;', to: 'width: ${width}; height: ${height};',
-    run: SITE_E2E, expect: /doesn't fill the host|a root sized by its own CSS: the root is/,
+    run: DRAW_E2E, expect: /doesn't fill the host|a root sized by its own CSS: the root is/,
   },
   {
     id: 'B31', what: "the canvas loses the containment that holds a document's CSS", slow: true,
@@ -373,9 +373,9 @@ const BREAKS = [
   },
   {
     // P1-M1: the paper is the underlay's checkerboard now; a checker colour that follows the theme.
-    id: 'B57', what: 'the paper follows the theme', slow: true,
+    id: 'B57', what: 'the paper follows the theme', slow: true, checks: ['canvasIgnoresTheTheme', 'theThemeFollowsTheSystemOrTheChoice'],
     file: 'projects/draw/src/app.css', from: 'repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%)', to: 'repeating-conic-gradient(#eeeeee 0 25%, var(--surface) 0 50%)',
-    run: SITE_E2E, expect: /the canvas paper is/,
+    run: DRAW_E2E, expect: /the canvas paper is/,
   },
   {
     id: 'B58', what: 'a root the canvas refuses reports success', slow: true,
@@ -508,15 +508,15 @@ const BREAKS = [
     run: SITE_E2E, expect: /after the wheel zoom the document point/,
   },
   {
-    id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true,
+    id: 'B83', what: 'the outline is measured from the page, not the overlay', slow: true, checks: ['outlineOnTheElementAt400'],
     file: 'projects/draw/src/canvas/overlay/index.ts', from: 'const origin = this.svg.getBoundingClientRect();', to: 'const origin = new DOMRect(0, 0, 0, 0);',
-    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+    run: DRAW_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
-    id: 'B84', what: 'the outline does not follow the zoom', slow: true,
+    id: 'B84', what: 'the outline does not follow the zoom', slow: true, checks: ['outlineOnTheElementAt400'],
     // P1-M1: re-planted on the camera box's #applyView.
     file: 'projects/draw/src/editor.ts', from: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });\n    this.#show();', to: '    this.#ports.canvas.setCamera(this.#box && { box: this.#box, viewport: this.#viewport });',
-    run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
+    run: DRAW_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
     id: 'B85', what: 'a two-finger tap on the canvas no longer undoes', slow: true,
@@ -524,9 +524,9 @@ const BREAKS = [
     run: SITE_E2E, expect: /a two-finger tap on the canvas did not undo/,
   },
   {
-    id: 'B86', what: "the canvas's hit test finds nothing", slow: true,
+    id: 'B86', what: "the canvas's hit test finds nothing", slow: true, checks: ['outlineOnTheElementAt400', 'phoneRulesOnTheNewLayout'],
     file: 'projects/draw/src/canvas/stage.ts', from: '      const id = this.#renderer.idFor(el);', to: '      const id = this.#renderer.idFor(null);',
-    run: SITE_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
+    run: DRAW_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
   },
   {
     id: 'B87', what: 'the canvas host is exposed to assistive tech', slow: true,
@@ -650,9 +650,9 @@ const BREAKS = [
     run: drawTests('editor.test.ts'), expect: /✖ Edit source is offered for one element, never the root/,
   },
   {
-    id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true,
+    id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true, checks: ['editSourceRoundTrip'],
     file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
-    run: SITE_E2E, expect: /Edit source is offered for the root <svg>/,
+    run: DRAW_E2E, expect: /Edit source is offered for the root <svg>/,
   },
   {
     id: 'B112', what: 'the page zooms under a pinch off the canvas (no touch-action on the app)', slow: true,
@@ -1212,9 +1212,9 @@ const BREAKS = [
   },
   {
     // (A wider SLOP itself is caught first, by viewport.test.ts in the build: B275.)
-    id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true,
+    id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true, checks: ['aShortMoveOnTheCanvasIsATap'],
     file: 'projects/draw/src/canvas/stage.ts', from: 'x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp', to: 'x: (e.clientX - box.left) / 2, y: (e.clientY - box.top) / 2, t: e.timeStamp',
-    run: SITE_E2E, expect: /a touch that moved 8pt did not move the circle/,
+    run: DRAW_E2E, expect: /a touch that moved 8pt did not move the circle/,
   },
   {
     id: 'B223', what: "the code bar's buttons fall under the tap floor", slow: true,
