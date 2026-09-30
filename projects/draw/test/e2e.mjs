@@ -4100,7 +4100,7 @@ async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
     const a = await page.evaluate(drawnCentre, '#a');
     let lines = 0;
     await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8, async (i) => {
-      if (i === 8) lines = await page.evaluate(() => [...document.querySelectorAll('.draw-snap')].filter((l) => l.style.display !== 'none').length);
+      if (i === 8) lines = await page.evaluate(() => [...document.querySelectorAll('.draw-snap-line')].filter((l) => l.style.display !== 'none').length);
     });
     must(await rectX() === 40, `the rect's left edge landed on ${await rectX()}, not the guide at 40`);
     must(lines >= 1, 'no snap line while snapped');

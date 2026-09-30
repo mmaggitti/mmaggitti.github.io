@@ -142,7 +142,7 @@
   stroke-width: 3;
   stroke-linejoin: round;
 }
-.draw-snap { stroke: #e6007e; stroke-width: 1; }
+.draw-snap-line { stroke: #e6007e; stroke-width: 1; }
 .draw-guide { stroke: #00a3e0; stroke-width: 1; opacity: 0.8; }
 .draw-pill { fill: #00a3e0; stroke: #fff; stroke-width: 1.5; }
 .draw-pill.on { fill: #ffe600; stroke: #00a3e0; }

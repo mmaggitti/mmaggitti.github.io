@@ -146,13 +146,16 @@ test('CSS-controlled geometry and transforms are refused with their reasons; tra
   const doc = load(svg(`<style>.k { cx: 4px } .t { transform: none } .o { transform-origin: 1px 1px } .f { font-size: 9px }</style>
     <rect id="inline" style="x: 3px" width="4" height="4"/><circle id="sheet" class="k" r="3"/><g id="t" class="t"/><rect id="css" style="transform: rotate(1deg)" width="1" height="1"/>
     <rect id="o" class="o" width="10" height="10"/><rect id="em" class="f" x="1em"/>
-    <rect id="origin" x="10" y="10" width="20" height="10" transform-origin="5 5"/>`));
+    <rect id="origin" x="10" y="10" width="20" height="10" transform-origin="5 5"/>
+    <rect id="flat" x="1" y="1" width="4" height="4" transform="matrix(1 1 1 1 0 0)"/><rect id="zero" x="1" y="1" width="4" height="4" transform="scale(0)"/>`));
   assert.equal(refusal(planMove(doc, byId(doc, 'inline'), 1, 1, OPTS)), 'Its x is set by CSS (its style attribute), which wins over the attribute.');
   assert.equal(refusal(planMove(doc, byId(doc, 'sheet'), 1, 1, OPTS)), 'Its cx is set by CSS (a <style> rule), which wins over the attribute.');
   assert.equal(refusal(planMove(doc, byId(doc, 't'), 1, 1, OPTS)), 'Its transform is set by CSS, which Draw doesn’t edit yet.');
   assert.equal(refusal(planRotate(doc, byId(doc, 'css'), 30, OPTS)), 'Its transform is set by CSS, which Draw doesn’t edit yet.');
   assert.equal(refusal(planRotate(doc, byId(doc, 'o'), 30, OPTS)), 'Its transform origin is set by a <style> rule.');
   assert.equal(refusal(planMove(doc, byId(doc, 'em'), 1, 0, OPTS)), 'Its size is in em, and a <style> rule sets its font size, so Draw can’t tell what 1em is.');
+  // A transform that flattens it (no inverse): its geometry can't be moved to land where it should.
+  for (const id of ['flat', 'zero']) assert.equal(refusal(planMove(doc, byId(doc, id), 1, 1, OPTS)), 'Its transform flattens it, so its geometry can’t move.', id);
   // The box's centre is (20, 15); with the origin at (5, 5) the rotate item's own centre is (15, 10).
   const out = run(doc, planRotate(doc, byId(doc, 'origin'), 30, OPTS));
   assert.match(out, /transform-origin="5 5" transform="rotate\(30 15 10\)"/);

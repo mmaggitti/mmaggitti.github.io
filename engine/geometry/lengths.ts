@@ -58,9 +58,13 @@ export function hasRem(raw: string): boolean {
   return REM.test(raw);
 }
 
-/** Every `<n>rem` in a value as user units (`fmt(n · rootFont, 4)`); every other byte kept. */
-export function remToUserUnits(raw: string, rootFont: number): string {
-  return raw.replace(REM, (_, n: string) => fmt(Number(n) * rootFont, 4));
+/**
+ * Every `<n>rem` in a value as user units (`fmt(n · rootFont, 4)`); every other byte kept. In CSS (a
+ * style="" value, `css`) each is written in px, as CSS wants a unit on most lengths (width: 32 is
+ * dropped by WebKit); an attribute takes the plain number.
+ */
+export function remToUserUnits(raw: string, rootFont: number, css = false): string {
+  return raw.replace(REM, (_, n: string) => `${fmt(Number(n) * rootFont, 4)}${css ? 'px' : ''}`);
 }
 
 /** A font-size value in user units, given the parent's font size; null when unknown. */

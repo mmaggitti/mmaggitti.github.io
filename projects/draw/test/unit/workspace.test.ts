@@ -560,7 +560,7 @@ test('Convert rem to user units rewrites every rem number in attributes and styl
   assert.ok(await ws.openText(text, 'rem.svg', 'paste'));
   assert.equal(ws.current.get()!.report.rem.count, 3);
   ws.convertRem();
-  assert.equal(editor.source(), text.replace('x="1rem"', 'x="20"').replace('width="2.5rem"', 'width="50"').replace('stroke-width: .1rem', 'stroke-width: 2'));
+  assert.equal(editor.source(), text.replace('x="1rem"', 'x="20"').replace('width="2.5rem"', 'width="50"').replace('stroke-width: .1rem', 'stroke-width: 2px'), 'attributes take the number; style="" keeps a unit (px)');
   assert.equal(editor.history.get().undoLabel, 'Convert rem');
   assert.equal(ws.current.get()!.report.rem.count, 0, 'the report counts none now');
   editor.undo();

@@ -1215,7 +1215,7 @@ export class Editor {
     const edits: { id: NodeId; ns: string | null; local: string; raw: string }[] = [];
     for (const id of this.#elements()) {
       const n = doc.nodes.get(id) as ElementNode;
-      for (const a of n.attrs) if (hasRem(a.raw)) edits.push({ id, ns: a.ns, local: a.local, raw: remToUserUnits(a.raw, font) });
+      for (const a of n.attrs) if (hasRem(a.raw)) edits.push({ id, ns: a.ns, local: a.local, raw: remToUserUnits(a.raw, font, a.ns === null && a.local === 'style') });
     }
     if (!edits.length) return null;
     const ok = this.#dispatch('Convert rem', (apply) => {

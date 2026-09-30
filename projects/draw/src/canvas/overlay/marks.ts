@@ -80,7 +80,7 @@ export class Marks {
     this.#localGrid = new Pool(r, 'line', 'draw-local-grid');
     this.#localAxes = new Pool(r, 'line', 'draw-local-axis');
     this.#coords = new Pool(r, 'line', 'draw-coord');
-    this.#snap = new Pool(r, 'line', 'draw-snap');
+    this.#snap = new Pool(r, 'line', 'draw-snap-line');
     this.#guides = new Pool(r, 'line', 'draw-guide');
     this.#marquee = new Pool(r, 'rect', 'draw-marquee');
     this.#rotGuide = new Pool(r, 'line', 'draw-rot-guide');

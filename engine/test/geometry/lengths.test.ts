@@ -60,6 +60,12 @@ test('hasRem finds rem lengths, and remToUserUnits rewrites only the rem numbers
   assert.equal(remToUserUnits('1rem', 13.3333), '13.3333', 'four places');
 });
 
+test('in a style declaration a converted rem keeps a unit, px (CSS drops most unitless lengths); in an attribute it is a plain number', () => {
+  assert.equal(remToUserUnits('width: 2rem; font-size: 2rem; r: 1rem', 16, true), 'width: 32px; font-size: 32px; r: 16px');
+  assert.equal(remToUserUnits('calc(1rem + 2px)', 10, true), 'calc(10px + 2px)', 'inside calc() too');
+  assert.equal(remToUserUnits('2rem', 16), '32', 'an attribute: user units, no unit');
+});
+
 test('rootFontSize: the root’s font-size (the style declaration wins), relative ones against 16, else 16', () => {
   const svg = (attrs: string) => load(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}/>`);
   assert.equal(rootFontSize(svg('')), 16);

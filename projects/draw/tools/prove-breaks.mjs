@@ -2070,6 +2070,16 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n', to: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n    this.gridStepEnd();\n',
     run: drawTests('editor.test.ts'), expect: /✖ the Snap sheet’s Grid step field is one history entry/,
   },
+  {
+    id: 'B394', what: 'F10: a move of an element whose transform flattens it is not refused',
+    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse('Its transform flattens it, so its geometry can’t move.');\n", to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
+  },
+  {
+    id: 'B395', what: 'F14: Convert rem writes a unitless length into style="" again',
+    file: 'engine/geometry/lengths.ts', from: "`${fmt(Number(n) * rootFont, 4)}${css ? 'px' : ''}`", to: 'fmt(Number(n) * rootFont, 4)',
+    run: engineTests('geometry/lengths.test.ts'), expect: /✖ in a style declaration a converted rem keeps a unit/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
