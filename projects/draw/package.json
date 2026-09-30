@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node tools/check-sinks.mjs && node tools/ledger-check.mjs && tsc --noEmit && npm run test:unit && node tools/ledger-check.mjs --evidence node_modules/.evidence.jsonl && vite build && node tools/library-index.mjs",
+    "build": "node tools/check-sinks.mjs && node tools/ledger-check.mjs && tsc --noEmit && npm run test:unit && node tools/ledger-check.mjs --evidence node_modules/.evidence.jsonl && vite build && node tools/check-bundle.mjs && node tools/library-index.mjs",
     "test:unit": "node --test --test-reporter=dot --test-reporter-destination=stdout --test-reporter=./tools/evidence-reporter.mjs --test-reporter-destination=node_modules/.evidence.jsonl \"../../engine/test/**/*.test.ts\" \"test/unit/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

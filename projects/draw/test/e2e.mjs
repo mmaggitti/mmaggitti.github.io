@@ -2125,7 +2125,7 @@ async function aFullQuotaIsLoud(browser, origin) {
 
 // (j) The ledger (about 400 KB) is not in the initial JS: it loads when the Support tab first
 // opens, which then summarizes it and searches its rows (the search first, each capability and
-// feature row with its name).
+// feature row with its name). Its "Open-source licences" link serves THIRD-PARTY-NOTICES.txt (P1-M3).
 async function theLedgerLoadsOnlyForSupport(browser, origin) {
   const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
   const initial = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
@@ -2150,6 +2150,12 @@ async function theLedgerLoadsOnlyForSupport(browser, origin) {
       return { fieldBottom: field.bottom - body.top, bodyHeight: body.height, aboveTally: field.bottom <= tally.top };
     });
     must(at.fieldBottom <= at.bodyHeight && at.aboveTally, `the search is ${Math.round(at.fieldBottom)}pt into a ${Math.round(at.bodyHeight)}pt tab, ${at.aboveTally ? 'above' : 'below'} the summary`);
+    // P1-M3: the link to the open-source licences serves the notices beside the app, and is a 44 pt target.
+    const licences = page.locator('.draw-licences');
+    const box = await licences.boundingBox();
+    must(await licences.textContent() === 'Open-source licences' && box && box.height >= 44, `the licences link is ${JSON.stringify(box)}`);
+    const notices = await page.request.get(new URL(await licences.getAttribute('href'), page.url()).href);
+    must(notices.status() === 200 && (await notices.text()).startsWith('Third-party notices: Draw'), `the licences link serves ${notices.status()}`);
     await page.locator('.draw-ledger-search').fill('feature:support-tab');
     await until('the search narrows the rows', async () => (await page.locator('.draw-ledger-row').count()) === 1);
     const row = await page.locator('.draw-ledger-row').textContent();

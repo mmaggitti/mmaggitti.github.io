@@ -837,6 +837,7 @@
 .draw-support { padding: var(--space-3) var(--space-4) var(--space-6); }
 .draw-support-pad { margin: var(--space-4); }
 .draw-support-lead { margin: 0; }
+.draw-licences { display: flex; align-items: center; justify-content: center; margin-top: var(--space-3); text-decoration: none; }
 .draw-tally { margin: 0; font-size: var(--text-sm); }
 .draw-ledger-search { margin-top: var(--space-4); }
 .draw-ledger-count { margin: var(--space-2) 0; }
