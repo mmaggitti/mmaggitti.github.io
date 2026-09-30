@@ -475,6 +475,35 @@ test("a file that isn't well-formed opens as read-only source through the one im
   assert.equal(ws.unparsed.get()?.via, 'link');
 });
 
+// Mark's drafts from before P1-M0: one the stricter parser refuses (a bare &, which P0 opened)
+// reopens at boot as read-only source, marked where it fails, and stays in Files. Its record is
+// never written, emptied or deleted: not at boot, not when another file opens, not when Files
+// reads the list again, and the source view never makes a draft of its own (P1-M0 review, F10).
+test("a stored draft the strict parser refuses reopens as read-only source at its error, stays listed, and its record never changes", async () => {
+  const kv = memoryKV();
+  const text = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n  <text>Fish & chips</text>\n</svg>\n';
+  const seed = { id: 'fish', name: 'Fish', text, created: 1, updated: 2, exported: null, versions: [{ at: 1, text: '<svg/>' }, { at: 2, text }] };
+  await kv.set('draft:fish', seed);
+  const { ws, editor, store, settle } = rig(kv);
+  const stored = () => kv.get('draft:fish');
+  void ws.openSample();
+  await ws.boot('', () => assert.fail('there is no fragment to clear'));
+  const u = ws.unparsed.get();
+  assert.equal(u?.via, 'draft');
+  assert.deepEqual(u?.source, { text, at: text.indexOf('&') }, 'it reopens as source, its text exactly, marked where it fails');
+  assert.deepEqual([u?.line, u?.column, u?.message], [2, 14, 'a bare & (write &amp; for the character itself)']);
+  assert.equal(editor.doc, null, 'nothing is drawn or editable');
+  await settle();
+  assert.deepEqual(await stored(), seed, 'after boot its record is as it was stored');
+  assert.deepEqual((await store.list()).map((d) => d.id), ['fish'], 'the source view made no draft of its own');
+  assert.ok(await ws.openText(SAMPLE, 'sunset.svg', 'paste'));
+  await settle();
+  assert.deepEqual(await stored(), seed, 'after another file opens');
+  await ws.refreshDrafts();
+  assert.deepEqual(ws.drafts.get()?.filter((d) => d.id === 'fish').map((d) => d.name), ['Fish'], 'Files still lists it');
+  assert.deepEqual(await stored(), seed, 'after Files reads the list again');
+});
+
 test("a well-formed file over Draw's limits is refused as before: the report says why and where, it never opens as source, and the drawing that was open stays", async () => {
   const { ws, editor } = rig();
   void ws.openSample();

@@ -1572,6 +1572,12 @@ const BREAKS = [
     file: 'engine/xml/lex.ts', from: "      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });\n", to: '',
     run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one text, a reference \(line 2\), then U\+0001 \(line 3\)/,
   },
+  {
+    // P1-M0 review (F10): a stored draft the strict parser refuses is shown as source, never saved over.
+    id: 'B314', what: 'a draft shown as source is attached to be saved (the source view makes a draft of its own)',
+    file: 'projects/draw/src/workspace.ts', from: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: false });', to: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: true });',
+    run: drawTests('workspace.test.ts'), expect: /✖ a stored draft the strict parser refuses reopens as read-only source at its error[\s\S]*the source view made no draft of its own/,
+  },
   // P1-M0 review (F9): an entity chain is named once; a long name is cut in a message.
   {
     id: 'B312', what: "an entity chain's message repeats its sentence at every level again (about 800 characters at depth 8)",
