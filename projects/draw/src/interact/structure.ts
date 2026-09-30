@@ -7,7 +7,7 @@
 // next or previous element sibling and its whitespace; Delete takes both away; a copy, or a new
 // group, brings a copy of the whitespace before the element it follows.
 
-import { NS, attrValue, descendants, el, findAttr, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { NS, attrValue, descendants, el, findAttr, href, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type Op } from '../../../../engine/commands/ops.ts';
 import { parseFragment } from '../../../../engine/model/fragment.ts';
 import { freshId, idsInUse, renameIdsIn } from '../../../../engine/model/ids.ts';
@@ -16,6 +16,7 @@ import { DRAW_NS, isLocked } from '../../../../engine/model/draw-state.ts';
 import { cssSets } from '../../../../engine/geometry/css.ts';
 import { TokenEditError } from '../../../../engine/code/edit.ts';
 import { DEFAULT_LIMITS } from '../../../../engine/xml/cst.ts';
+import { decodeFragment } from '../../../../engine/values/url.ts';
 
 export const ROOT_DELETE = 'The root <svg> can’t be deleted.';
 
@@ -215,29 +216,54 @@ const KEEPS = (a: { ns: string | null; local: string }) => (a.ns === null && (a.
 const DRAWN_IN_PLACE = new Set(['circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'rect', 'text', 'use', 'image', 'foreignObject', 'g', 'a', 'switch', 'svg']);
 const drawnInPlace = (k: ElementNode) => k.ns === NS.svg && DRAWN_IN_PLACE.has(k.local);
 
+// The animation elements. Each animates its parent, unless its href names another element.
+const ANIMATIONS = new Set(['animate', 'set', 'animateTransform', 'animateMotion', 'discard']);
+/** Whether the animation `k`, a child of the group whose id is `gid`, animates the group: no href (so its parent), or an href to the group. */
+function animatesGroup(doc: Doc, k: ElementNode, gid: string | null): boolean {
+  const h = href(doc, k)?.trim();
+  if (!h) return true;
+  return gid !== null && h.startsWith('#') && decodeFragment(h.slice(1)) === gid;
+}
+
 /** Why the group `id` can't be ungrouped without changing how it looks, or null. */
 export function ungroupRefusal(doc: Doc, id: NodeId): string | null {
   const n = doc.nodes.get(id);
   if (!n || n.kind !== 'element' || n.ns !== NS.svg || n.local !== 'g' || id === doc.root) return 'Select a group to ungroup.';
   if (isLocked(doc, id)) return 'It’s locked. Unlock it in Layers first.';
+  const own = attrValue(doc, n, null, 'id');
   for (const c of n.children) {
     const k = doc.nodes.get(c);
     if (k?.kind !== 'element' || k.ns !== NS.svg) continue;
     if (k.local === 'title') return 'Its title names the group; ungrouping would give it to the parent.';
     if (k.local === 'desc') return 'Its desc describes the group; ungrouping would give it to the parent.';
+    if (ANIMATIONS.has(k.local) && animatesGroup(doc, k, own)) return 'It holds an animation that targets the group; ungrouping would retarget it.';
   }
   const other = n.attrs.find((a) => !KEEPS(a));
   if (other) return `It has ${other.qname}, which applies to the group as a whole; ungrouping would change how it looks.`;
   for (const prop of ['transform', 'transform-origin', 'transform-box']) {
     if (cssSets(doc, id, prop) !== 'no') return `Its ${prop} is set by CSS, so its children can’t take it.`;
   }
-  const own = attrValue(doc, n, null, 'id');
-  if (own !== null && buildRefIndex(doc).refs.get(own)?.length) return `Something refers to the group’s id (#${own}).`;
+  const index = buildRefIndex(doc);
+  if (own !== null && index.refs.get(own)?.length) return `Something refers to the group’s id (#${own}).`;
   for (const c of n.children) {
     const k = doc.nodes.get(c);
     if (k?.kind !== 'element' || !drawnInPlace(k)) continue;
     if (findAttr(k, null, 'transform-origin') || cssSets(doc, c, 'transform-origin') !== 'no' || cssSets(doc, c, 'transform') !== 'no') {
       return 'A child’s transform origin (or CSS transform) can’t take the group’s transform.';
+    }
+  }
+  // A use, an href or a url(#…) to a child that takes the transform, or to anything inside one:
+  // a use's copy of it would take the transform too.
+  if (attrValue(doc, n, null, 'transform')?.trim()) {
+    const pushed = new Set<NodeId>();
+    for (const c of n.children) {
+      const k = doc.nodes.get(c);
+      if (k?.kind === 'element' && drawnInPlace(k)) for (const d of descendants(doc, c)) pushed.add(d.id);
+    }
+    for (const [ref, owners] of index.ids) {
+      if (owners.some((o) => pushed.has(o)) && index.refs.get(ref)?.some((r) => r.kind === 'href' || r.kind === 'url')) {
+        return `Something refers to a shape inside it (#${ref}); ungrouping would move that reference’s copy too.`;
+      }
     }
   }
   return null;

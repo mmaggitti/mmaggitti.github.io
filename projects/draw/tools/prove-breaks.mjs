@@ -2118,6 +2118,16 @@ const BREAKS = [
     to: 'export const unionRect = (bs: readonly Rect[]): Rect => {\n  const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));\n  return { x, y, width: Math.max(...bs.map((b) => b.x + b.width)) - x, height: Math.max(...bs.map((b) => b.y + b.height)) - y };\n',
     run: drawTests('overlay-model.test.ts'), expect: /✖ the union boxes take 200,000 boxes without throwing/,
   },
+  {
+    id: 'B405', what: 'Ungroup takes a group that holds an animation of itself (the animation retargets to the parent)',
+    file: 'projects/draw/src/interact/structure.ts', from: "    if (ANIMATIONS.has(k.local) && animatesGroup(doc, k, own)) return 'It holds an animation that targets the group; ungrouping would retarget it.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when the group holds an animation that animates it/,
+  },
+  {
+    id: 'B406', what: 'Ungroup pushes its transform onto a child something refers to (a use of it takes the transform twice)',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (attrValue(doc, n, null, 'transform')?.trim()) {\n    const pushed", to: '  if (false) {\n    const pushed',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when a use, an href or a url\(#…\) refers to a child/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame over 2,000 shapes costs far more than 4× one over 500)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],

@@ -1215,6 +1215,66 @@ test('Ungroup gives the group’s transform only to the children drawn where the
   }
 });
 
+test('Ungroup is refused, with the reason, when the group holds an animation that animates it (one with no href, which animates its parent, or one whose href names the group); one naming another element moves out as it is', () => {
+  const WHY = 'It holds an animation that targets the group; ungrouping would retarget it.';
+  for (const anim of [
+    '<animate attributeName="opacity" to="0" dur="1s"/>',
+    '<set attributeName="opacity" to="0" begin="1s"/>',
+    '<animateTransform attributeName="transform" type="rotate" to="30" dur="1s"/>',
+    '<animateMotion path="M0 0h10" dur="1s"/>',
+    '<discard begin="2s"/>',
+    '<animate href="#g" attributeName="opacity" to="0" dur="1s"/>',
+    '<animate xlink:href="#g" attributeName="opacity" to="0" dur="1s"/>',
+  ]) {
+    const file = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"><g id="g" transform="translate(1 2)"><rect width="5" height="5"/>${anim}</g></svg>`;
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), WHY, anim);
+    assert.equal(r.editor.source(), file, `${anim}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, anim);
+  }
+  // An animation whose href names another element animates it wherever it sits: it moves out as it is.
+  const other = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect id="k" width="5" height="5"/><g id="g" transform="translate(1 2)"><circle r="2"/><animate href="#k" attributeName="x" to="9" dur="1s"/></g></svg>';
+  const o = rig();
+  o.editor.open(other);
+  o.editor.select([idOf(o, 'g')]);
+  o.editor.ungroup();
+  assert.equal(o.editor.history.get().undoLabel, 'Ungroup', `${o.editor.notice.get()}`);
+  assert.equal(o.editor.source(), other.replace('<g id="g" transform="translate(1 2)">', '').replace('</g>', '').replace('<circle r="2"/>', '<circle r="2" transform="translate(1 2)"/>'));
+});
+
+test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform, or to anything inside one; not when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
+  const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
+  const refused: [string, string][] = [
+    [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), 'k'], // a use elsewhere
+    [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/><use xlink:href="#k" x="20"/></g>'), 'k'], // a use beside it, by xlink:href
+    [svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // inside a child
+    [svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), 'lg'], // a url(#…) into a child
+  ];
+  for (const [file, id] of refused) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), `Something refers to a shape inside it (#${id}); ungrouping would move that reference’s copy too.`, file);
+    assert.equal(r.editor.source(), file, `${file}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, file);
+  }
+  for (const file of [
+    svg('<g id="g"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), // no transform: nothing is pushed
+    svg('<g id="g" transform="translate(5 5)"><clipPath id="c"><circle r="3"/></clipPath><rect width="5" height="5" clip-path="url(#c)"/></g>'), // the clip moves out as it is
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><text aria-labelledby="k">x</text>'), // an ARIA reference draws nothing
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${file}: ${r.editor.notice.get()}`);
+  }
+});
+
 test('Layers: Hide writes display="none" and Show gives the bytes back; Lock writes draw:locked with the declaration and Unlock gives the bytes back; Rename rewrites every reference, and refuses a bad or taken id', () => {
   const F = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <circle id="c" cx="20" cy="20" r="5"/>\n  <use href="#c" x="10"/>\n  <rect id="r" x="1" y="1" width="5" height="5" fill="url(#c)"/>\n</svg>`;
   const r = rig();
