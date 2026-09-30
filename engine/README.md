@@ -17,7 +17,7 @@ Tests live in `engine/test/` and run in Draw's build (`npm run test:unit` in `pr
 
 | Folder | What it does |
 |---|---|
-| `xml/` | Lossless lexer and CST: tokens tile the source, so `serialize(parse(x)) === x`. What a browser's XML parser refuses, it refuses, at the same place. Entity expansion is capped at 1 MB and depth 8. |
+| `xml/` | Lossless lexer and CST: tokens tile the source, so `serialize(parse(x)) === x`. What a browser's XML parser refuses, it refuses, at the same place (the first, when a file has several). Entity expansion is capped at 1 MB and depth 8, the work of expanding counted with the output. |
 | `model/` | The document over the CST: stable NodeIds, namespaces resolved by URI, edits that change only their own bytes. `refs.ts` indexes ids and every reference to them. |
 | `values/` | Numbers as Draw writes them (`fmt`: no exponents, no dotted runs), lengths, CSS Color 4, paint, viewBox and preserveAspectRatio, affine matrices, transform lists. |
 | `path/` | Path data: a lossless parser (text after an error is kept), edits that touch one number, absolute form, arcs, exact bounds and nearest point. |
@@ -59,6 +59,11 @@ to a browser rule by rule), and not fixed yet. Browsers refuse these files, and 
 - a public identifier holding a character XML doesn't allow there (`PUBLIC "a&b"`);
 - a namespace name that isn't a URI (`xmlns:p="a b"`).
 
+With two errors in one start tag, Draw can name another than the browser: it checks the element's
+prefix before its attributes' prefixes, where a browser checks the attributes first (`<p:g q:k="1"/>`
+with neither bound is marked at `p`; Chromium names `q`, at the end of the tag). Both are on the
+tag's line unless the tag spans lines.
+
 The other way round, one file browsers accept is refused, as over Draw's limits (so it isn't shown
 as source that isn't well-formed): an HTML entity such as `&nbsp;` under a DOCTYPE that names an
 XHTML DTD, which browsers supply themselves and Draw doesn't know.
@@ -73,7 +78,33 @@ Fixed in P1-M0:
   comment, a lowercase `<!doctype`, anything but XML whitespace outside the root, an unbound prefix,
   a namespace declaration XML forbids, a malformed qualified name, a character XML doesn't allow,
   and `]]>` in text;
-- a processing instruction inside the DOCTYPE may hold `]` or a quote.
+- a processing instruction inside the DOCTYPE may hold `]` or a quote;
+- `data-*` was claimed rendered in P0 (ledger row `attribute:data-*`), but the canvas never
+  consulted the generated pattern rows, so it wasn't. The canvas draws them now: `data-*`, and
+  `aria-*` too (its row is still planned);
+- the P1-M0 review:
+  - the entity budget counts the work of expanding as well as the output: a bomb of entities that
+    expand to nothing (535 bytes, fan 10, depth 8) took 34 s to parse, and as long again in Edit
+    source; it is refused in well under a second;
+  - the entity declarations are read in linear time: a subset of declarations that never close
+    was scanned to its end from each one (1 MB took minutes);
+  - namespace declarations are set and put back as the parser goes, not copied per element (255
+    nested elements declaring 150 prefixes each took 1.4 s, 1,200 each 14 s);
+  - an attribute whose name the DOM refuses to create (`data-😀`, `data-⁰x` in Chromium: the
+    `data-*` pattern and DOMPurify admit them) is dropped from the canvas and counted, never
+    thrown on; it made a well-formed file, or a P0 draft, open nowhere, and Edit source blank the
+    canvas;
+  - with several errors, the first is marked, where a browser's parser stops: a reference or
+    namespace error before where the lexer or the tree stops (in a tag the lexer stops inside,
+    and in text before a character XML doesn't allow, too) came second;
+  - a reference to an unparsed (`NDATA`) entity is refused, as browsers refuse it;
+  - an entity chain is named once in a message, by its ends, and a long name is cut to about 40
+    characters (a 1 MB name made a 1 MB message).
+
+  And two files browsers accept that Draw refused, the other way round: an entity whose name holds
+  a character outside ASCII (`&é;`, `&a·b;`), read now with the lexer's name characters; and an
+  entity declared twice, which binds its first declaration now, as XML says (the canvas drew the
+  last: `fill="&c;"` blue where a browser draws red).
 
 Fixed in P0-M5:
 - a failure over a limit (size, node count, depth, the entity budget and depth, an entity that
