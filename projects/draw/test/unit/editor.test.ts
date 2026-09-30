@@ -900,6 +900,9 @@ test('a cancelled move restores the file byte for byte and records nothing; a lo
   assert.equal(r.editor.history.get().canUndo, false);
   drag(r, hostAt(r, 15, 65), hostAt(r, 30, 80), [idOf(r, 'k')]);
   assert.equal(r.editor.source(), SHAPES, 'the locked shape did not move');
+  drag(r, hostAt(r, 15, 65), hostAt(r, 30, 80), [idOf(r, 'k'), idOf(r, 'a')]);
+  assert.equal(r.editor.source(), SHAPES, 'a drag from a locked shape is a marquee, even with a shape under it: that one did not move either');
+  assert.deepEqual(sel(r), [], 'and the marquee took what it enclosed: nothing');
   r.editor.select([idOf(r, 'k')]);
   const k = hostAt(r, 15, 65);
   drag(r, k, { x: k.x + 30, y: k.y }, [idOf(r, 'k')]);

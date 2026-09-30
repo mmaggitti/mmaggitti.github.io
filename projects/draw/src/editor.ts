@@ -551,12 +551,14 @@ export class Editor {
     const doc = this.#doc;
     if (!doc || this.#live || this.#gesture || this.#nudge) return;
     const all = this.#withThin(at, hits);
-    const target = all.map((id) => selectionTarget(doc, id)).find((t): t is NodeId => t !== null && !isLocked(doc, t)) ?? null;
+    const targets = all.map((id) => selectionTarget(doc, id)).filter((t): t is NodeId => t !== null);
+    const target = targets.find((t) => !isLocked(doc, t)) ?? null;
     // A guide's pill, then a handle within 26 px, take the press before any shape does.
     const model = this.overlayModel();
     const pill = pickPill(model.guides, at);
     const handle = pill === null ? pickHandle(model.handles, at)?.id ?? null : null;
-    this.#gesture = { at0: at, at, target, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle, hd: null, snapLines: [], guide: pill, gd: null };
+    const onLocked = targets.length > 0 && isLocked(doc, targets[0]);
+    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle, hd: null, snapLines: [], guide: pill, gd: null };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -828,8 +830,8 @@ export class Editor {
     const doc = this.#doc!;
     if (!held && g.guide !== null) return this.#startGuide(g);
     if (!held && g.handle !== null) return this.#startHandle(g);
-    if (held || g.target === null) {
-      g.mode = 'marquee';
+    if (held || g.target === null || g.onLocked) {
+      g.mode = 'marquee'; // a drag from a locked shape is a marquee, whatever is under it
       return;
     }
     // On a selected shape (it or an ancestor is selected) the whole selection moves; on another,
@@ -1862,6 +1864,7 @@ interface Gesture {
   at0: Point; // host px where the pointer went down
   at: Point;
   target: NodeId | null; // what a tap selects: the topmost hit's selectable element that isn't locked
+  onLocked: boolean; // the topmost hit is locked: a drag from it is a marquee
   add: boolean; // Select more, or ⇧/⌘ on the press
   mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'none';
   move: MoveState | null;

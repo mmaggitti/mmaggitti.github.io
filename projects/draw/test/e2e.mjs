@@ -41,7 +41,12 @@
 // coordinate guides on it, two attribute mutations a frame), a marquee takes what it encloses,
 // Bring forward, Send back and Delete patch only what moved on the canvas and in the code, the
 // arrows nudge only the canvas selection, the grid, the engine's geometry against the browser's,
-// and % lengths keeping their size under zoom (the view is the root's own box, never its viewBox).
+// and % lengths keeping their size under zoom (the view is the root's own box, never its viewBox);
+// the handles (the nearest within 26 pt wins, a rect's corners keep the opposite corner, the ring and
+// the diamond on the lab's house) and snapping to guides, shapes, the artboard and the grid; then
+// Duplicate (fresh ids, its own references), Group and Ungroup keeping every shape in place, the
+// Layers tab (hide, lock, rename), Draw's own state kept out of As-is, Copy and Clean, and the phone
+// rules on the selection tools.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -58,6 +63,7 @@ import { encodeImport } from '../src/platform/files.ts';
 import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
+import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
@@ -202,6 +208,11 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(rectCornerHandlesKeepTheOppositeCorner);
   await check(rotateAndScaleHandlesEditTheLabHouse);
   await check(movesSnapToGuidesShapesAndTheGrid);
+  await check(duplicateGetsFreshIdsAndItsOwnReferences);
+  await check(groupAndUngroupKeepEveryShapeInPlace);
+  await check(layersHideAndLockShapes);
+  await check(drawStateStaysOutOfAsIsAndClean);
+  for (const height of [956, 796]) await check(phoneRulesOnTheSelectionTools, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -4008,6 +4019,447 @@ async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
     must(await undo.getAttribute('aria-label') === 'Undo Remove guide', `the last entry is ${await undo.getAttribute('aria-label')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
+}
+
+// ── S4: structure, Layers and Draw state ───────────────────────────────────────────────────────
+
+const DRAW_NS_URI = 'https://mmaggitti.github.io/draw/ns';
+
+// A More sheet command, by its exact name; the sheet closes on it.
+async function moreCommand(page, name) {
+  await openMore(page);
+  await page.locator('.draw-more .ds-btn', { hasText: new RegExp(`^${name}$`) }).tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+// Runs in the page: drawn elements' client boxes, by id.
+function drawnBoxes(ids) {
+  const root = document.querySelector('.draw-host').shadowRoot;
+  return Object.fromEntries(ids.map((id) => [id, root.getElementById(id)?.getBoundingClientRect().toJSON() ?? null]));
+}
+// Runs in the page: the ids of the drawn elements under a client point, topmost first, as the Stage
+// asks (elementsFromPoint, else elementFromPoint).
+function hitIds({ x, y }) {
+  const root = document.querySelector('.draw-host').shadowRoot;
+  const els = typeof root.elementsFromPoint === 'function' ? root.elementsFromPoint(x, y) : [root.elementFromPoint(x, y)];
+  return els.filter((el) => el && el.id).map((el) => el.id);
+}
+const boxNear = (a, b, tol = 0.5) => !!a && !!b && ['x', 'y', 'width', 'height'].every((k) => Math.abs(a[k] - b[k]) <= tol);
+// The ContextBar's label (null when nothing is selected: it shows a hint instead).
+const label = (page) => page.locator('.draw-label').textContent({ timeout: 2000 }).catch(() => null);
+const toast = (page) => page.locator('.draw-toast').textContent({ timeout: 2000 }).catch(() => null);
+
+const BADGE = `<svg xmlns="${SVG_NS}" xmlns:draw="${DRAW_NS_URI}" viewBox="0 0 100 100">
+  <defs><linearGradient id="grad"><stop offset="0" stop-color="#e76f51"/><stop offset="1" stop-color="#264653"/></linearGradient></defs>
+  <g id="badge">
+    <clipPath id="clip"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face" x="10" y="10" width="20" height="20" clip-path="url(#clip)" style="fill:url(#grad)" draw:locked="true"/>
+  </g>
+</svg>
+`;
+const BADGE_COPY = `
+  <g id="badge-2" transform="translate(5 5)">
+    <clipPath id="clip-2"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face-2" x="10" y="10" width="20" height="20" clip-path="url(#clip-2)" style="fill:url(#grad)"/>
+  </g>`;
+
+// Duplicate on a group holding a clip and a locked shape that uses it (and a gradient outside the
+// group): the copy follows the original with its leading whitespace, with fresh ids (badge-2,
+// clip-2, face-2), its clip-path on its own clip, url(#grad) still on the original gradient, no
+// draw:locked, and a translate(5 5); the original keeps every byte. On the canvas the copy is drawn
+// 5 units right and down, clipped by its own clip. It is selected, one history entry; one undo gives
+// the file back byte for byte.
+async function duplicateGetsFreshIdsAndItsOwnReferences(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), BADGE)).ok, 'test setup: the badge did not open');
+    await showCode(page);
+    await twoFrames(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    must(await label(page) === '<g#badge>', `test setup: a tap on the group's end tag selected ${await label(page)}`);
+    const before = await page.evaluate(drawnBoxes, ['face']);
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    await moreCommand(page, 'Duplicate');
+    const got = await source(page);
+    const copy = got.slice(got.indexOf('\n  <g id="badge-2"'), got.lastIndexOf('</g>') + 4);
+    must(/id="badge-2"/.test(got) && /id="clip-2"/.test(got) && /id="face-2"/.test(got), `the copy's ids are not fresh (badge-2, clip-2, face-2):\n${got}`);
+    must(copy.includes('clip-path="url(#clip-2)"') && copy.includes('style="fill:url(#grad)"'), `the copy's references are not its own clip and the original gradient:\n${copy}`);
+    must(!copy.includes('draw:locked'), 'the copy kept draw:locked');
+    must(got === BADGE.replace('\n  </g>\n', `\n  </g>${BADGE_COPY}\n`), `the copy is not the original, renamed and moved by translate(5 5), right after it with its whitespace (or the original changed):\n${got}`);
+    must(await label(page) === '<g#badge-2>', `the copy is not selected (${await label(page)})`);
+    await twoFrames(page);
+    const after = await page.evaluate(drawnBoxes, ['face', 'face-2']);
+    const want = { ...before.face, x: before.face.x + 5 * k, y: before.face.y + 5 * k };
+    must(boxNear(after.face, before.face), `the original moved on the canvas: ${rect(before.face)} → ${after.face && rect(after.face)}`);
+    must(boxNear(after['face-2'], want), `the copy is drawn at ${after['face-2'] && rect(after['face-2'])}, not 5 units right and down of the original (${rect(want)})`);
+    const own = await page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot;
+      return { ref: root.getElementById('face-2')?.getAttribute('clip-path'), inCopy: !!root.getElementById('clip-2')?.closest('#badge-2') };
+    });
+    must(own.ref === 'url(#clip-2)' && own.inCopy, `the drawn copy's clip is ${own.ref}, ${own.inCopy ? 'inside' : 'not inside'} the copy`);
+    // Clipped: inside its circle it is the topmost hit; at its rect's corner, outside the circle, it isn't there.
+    const [inside, corner] = await Promise.all([page.evaluate(screenPoint, { x: 25, y: 25 }), page.evaluate(screenPoint, { x: 34, y: 34 })]);
+    const [atInside, atCorner] = [await page.evaluate(hitIds, inside), await page.evaluate(hitIds, corner)];
+    must(atInside[0] === 'face-2', `inside its clip the copy is not the topmost hit: ${atInside.join(', ')}`);
+    must(!atCorner.includes('face-2'), `the copy is not clipped by its own clip: it is hit at its corner (${atCorner.join(', ')})`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    must(await undo.getAttribute('aria-label') === 'Undo Duplicate', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === BADGE, 'one undo did not give the file back byte for byte');
+    must(await undo.isDisabled(), 'Duplicate was more than one history entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const THREE_LINES = THREE_RECTS.split('\n').slice(1, 4).map((l) => l.trim());
+const GROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <g>\n  ${THREE_LINES.join('\n  ')}\n  </g>\n</svg>\n`;
+const NESTED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g id="G"><rect id="P" x="10" y="10" width="20" height="20" fill="#2a9d8f"/></g>
+  <rect id="Q" x="60" y="60" width="20" height="20" fill="#e76f51"/>
+</svg>
+`;
+const TURNED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g transform="translate(10 5) rotate(15)">
+    <rect id="u1" x="20" y="10" width="30" height="20" fill="#2a9d8f"/>
+    <circle id="u2" cx="20" cy="30" r="6" fill="#e76f51" transform="scale(2)"/>
+  </g>
+</svg>
+`;
+const UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+    <rect id="u1" x="20" y="10" width="30" height="20" fill="#2a9d8f" transform="translate(10 5) rotate(15)"/>
+    <circle id="u2" cx="20" cy="30" r="6" fill="#e76f51" transform="translate(10 5) rotate(15) scale(2)"/>
+  \n</svg>
+`;
+
+// Group: three sibling shapes go into one <g> at the last one's place, in their order, and every
+// screen box stays where it was (± 0.5 px); the group is selected; one entry. Select group climbs
+// from a shape to its group. Shapes with different parents refuse to group. Ungroup pushes a
+// translate(10 5) rotate(15) into each child (before a child's own transform) and every screen box
+// stays; one entry. A group with opacity refuses to ungroup, and says why.
+async function groupAndUngroupKeepEveryShapeInPlace(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const open = async (text) => {
+      must((await page.evaluate((t) => window.drawTest.render(t), text)).ok, 'test setup: the file did not open');
+      await twoFrames(page);
+    };
+    const tapOn = async (sel) => {
+      const c = await page.evaluate(drawnCentre, sel);
+      await page.touchscreen.tap(c.x, c.y);
+    };
+    await open(THREE_RECTS);
+    const three = await page.evaluate(drawnBoxes, ['A', 'B', 'C']);
+    await tapOn('#A');
+    await moreCommand(page, 'Select all');
+    must(await label(page) === '3 selected', `test setup: Select all selected ${await label(page)}`);
+    await moreCommand(page, 'Group');
+    must(await source(page) === GROUPED, `Group did not put the three in one <g> at the last one's place, in order:\n${await source(page)}`);
+    must(await label(page) === '<g>', `the new group is not selected (${await label(page)})`);
+    must(await undo.getAttribute('aria-label') === 'Undo Group', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await twoFrames(page);
+    const grouped = await page.evaluate(drawnBoxes, ['A', 'B', 'C']);
+    for (const id of ['A', 'B', 'C']) must(boxNear(grouped[id], three[id]), `grouping moved ${id}: ${rect(three[id])} → ${grouped[id] && rect(grouped[id])}`);
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    await tapOn('#B');
+    must(await label(page) === '<rect#B>', `test setup: a tap on B selected ${await label(page)}`);
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `Select group did not climb from B to its group (${await label(page)})`);
+    await undo.tap();
+    must(await source(page) === THREE_RECTS && await undo.isDisabled(), 'one undo did not take the group back: Group was more than one entry');
+    // Different parents: refused.
+    await open(NESTED);
+    await tapOn('#P');
+    await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+    await tapOn('#Q');
+    must(await label(page) === '2 selected', `test setup: P and Q are not both selected (${await label(page)})`);
+    await moreCommand(page, 'Group');
+    must(await toast(page) === 'Group needs shapes with the same parent.', `shapes with different parents grouped, or said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === NESTED && await undo.isDisabled(), 'a refused Group changed the file or the history');
+    // Ungroup: the group's transform pushed down to each child; every screen box stays.
+    await open(TURNED);
+    const turned = await page.evaluate(drawnBoxes, ['u1', 'u2']);
+    await tapOn('#u1');
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `test setup: Select group from u1 selected ${await label(page)}`);
+    await moreCommand(page, 'Ungroup');
+    must(await source(page) === UNGROUPED, `Ungroup did not push translate(10 5) rotate(15) into each child, keeping their bytes:\n${await source(page)}`);
+    must(await label(page) === '2 selected', `the former children are not selected (${await label(page)})`);
+    must(await undo.getAttribute('aria-label') === 'Undo Ungroup', `the history's last entry is ${await undo.getAttribute('aria-label')}`);
+    await twoFrames(page);
+    const flat = await page.evaluate(drawnBoxes, ['u1', 'u2']);
+    for (const id of ['u1', 'u2']) must(boxNear(flat[id], turned[id]), `ungrouping moved ${id}: ${rect(turned[id])} → ${flat[id] && rect(flat[id])}`);
+    await undo.tap();
+    must(await source(page) === TURNED && await undo.isDisabled(), 'one undo did not give the group back: Ungroup was more than one entry');
+    // A group with opacity: refused, with the reason.
+    const FADED = TURNED.replace('<g transform', '<g opacity="0.5" transform');
+    await open(FADED);
+    await tapOn('#u1');
+    await moreCommand(page, 'Select group');
+    await moreCommand(page, 'Ungroup');
+    must(await toast(page) === 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.', `a group with opacity ungrouped, or said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === FADED && await undo.isDisabled(), 'a refused Ungroup changed the file or the history');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const LAYERS = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="c"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#e76f51"/></radialGradient>
+    <radialGradient id="glow" href="#c" r="0.3"/>
+  </defs>
+  <rect id="sky" x="10" y="10" width="50" height="50" fill="#264653"/>
+  <circle id="disc" cx="35" cy="35" r="12" fill="url(#c)">
+  </circle>
+  <rect id="spot" x="70" y="70" width="15" height="15" fill="url(#glow)"/>
+</svg>
+`;
+const LAYER_ROWS = ['#spot', '#disc', '#sky', '<defs>', '#glow', '#c', '<stop>', '<stop>'];
+
+// The Layers tab lists every element topmost first; a row tap selects it (the canvas and the code
+// follow). Hide writes exactly display="none" and the shape stops drawing (a tap there takes the
+// shape under it); Show gives the file back byte for byte. Lock writes draw:locked="true" and the
+// root's xmlns:draw: a tap on the locked shape takes the one beneath, a marquee around it leaves it
+// out, a drag from it draws a marquee (the shape beneath stays), and moving it after selecting it
+// from its code is refused with the reason; Unlock gives the file back, and the same marquee then
+// takes it. Rename c → sun rewrites url(#c) and href="#c". Rows and buttons are at least 44 pt; no
+// sideways scroll.
+async function layersHideAndLockShapes(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const entry = () => undo.getAttribute('aria-label');
+    const tab = async (name) => {
+      await page.locator('.draw-tabs button', { hasText: name }).tap();
+      if (name === 'Layers') await page.locator('.draw-layer').first().waitFor();
+      await twoFrames(page);
+    };
+    const deselect = async () => {
+      const x = page.locator('.draw-ctx-btn[aria-label="Deselect"]');
+      if (await x.count()) await x.tap();
+    };
+    must((await page.evaluate((t) => window.drawTest.render(t), LAYERS)).ok, 'test setup: the file did not open');
+    await tab('Layers');
+    const names = await page.locator('.draw-layer-name').allTextContents();
+    must(JSON.stringify(names) === JSON.stringify(LAYER_ROWS), `the tree is ${JSON.stringify(names)}, not every element topmost first ${JSON.stringify(LAYER_ROWS)}`);
+    await page.locator('.draw-layer-name', { hasText: /^#disc$/ }).tap();
+    must(await label(page) === '<circle#disc>', `a tap on the #disc row selected ${await label(page)}`);
+    must(await page.evaluate(() => [...document.querySelectorAll('.cv-block.cv-selected')].some((b) => b.textContent.includes('id="disc"'))), "the code doesn't mark the row's element");
+    must((await page.evaluate(handlesNow)).length > 0, "the overlay shows no handles for the row's element");
+    const discAt = await page.evaluate(screenPoint, { x: 35, y: 35 });
+    // Hide and Show.
+    await page.locator('[aria-label="Hide #disc"]').tap();
+    const HIDDEN = LAYERS.replace('fill="url(#c)">', 'fill="url(#c)" display="none">');
+    must(await source(page) === HIDDEN, `Hide did not write exactly display="none":\n${await source(page)}`);
+    must(await entry() === 'Undo Hide', `the history's last entry is ${await entry()}`);
+    await deselect();
+    await page.touchscreen.tap(discAt.x, discAt.y);
+    must(await label(page) === '<rect#sky>', `a tap where the hidden disc was took ${await label(page)}, not the sky under it`);
+    await page.locator('[aria-label="Show #disc"]').tap();
+    must(await source(page) === LAYERS, 'Show did not give the file back byte for byte');
+    // Lock.
+    await page.locator('[aria-label="Lock #disc"]').tap();
+    const LOCKED_FILE = LAYERS.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100" xmlns:draw="${DRAW_NS_URI}">`).replace('fill="url(#c)">', 'fill="url(#c)" draw:locked="true">');
+    must(await source(page) === LOCKED_FILE, `Lock did not write draw:locked="true" and the root's xmlns:draw:\n${await source(page)}`);
+    must(await entry() === 'Undo Lock', `the history's last entry is ${await entry()}`);
+    await deselect();
+    await page.touchscreen.tap(discAt.x, discAt.y);
+    must(await label(page) === '<rect#sky>', `a tap on the locked disc took ${await label(page)}, not the sky under it`);
+    // A marquee from empty canvas (right of the sky) around the disc: nothing taken.
+    const marquee = async (from, to) => {
+      await deselect();
+      const [a, b] = await Promise.all([page.evaluate(screenPoint, from), page.evaluate(screenPoint, to)]);
+      let drawn = false;
+      await dragOnCanvas(page, 'mouse', a, { x: b.x - a.x, y: b.y - a.y }, 8, async (i) => {
+        if (i === 8) drawn = await page.evaluate(() => [...document.querySelectorAll('.draw-marquee')].some((m) => m.style.display !== 'none'));
+      });
+      return drawn;
+    };
+    must(await marquee({ x: 65, y: 50 }, { x: 20, y: 20 }), 'test setup: no marquee from empty canvas');
+    const took = await page.locator('.draw-sel').textContent();
+    must(took === 'nothing selected', `a marquee around the locked disc took ${took}`);
+    must(await marquee({ x: 35, y: 35 }, { x: 55, y: 58 }), 'a drag from the locked disc drew no marquee');
+    must(await source(page) === LOCKED_FILE, 'a drag from the locked disc moved something');
+    // Selected from its code, it can't be moved.
+    await tab('Code');
+    await page.locator('.cv-block', { hasText: '</circle>' }).tap();
+    must(await label(page) === '<circle#disc>', `test setup: a tap on the disc's end tag selected ${await label(page)}`);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('ArrowRight');
+    must(await toast(page) === 'It’s locked. Unlock it in Layers first.', `moving the locked disc said ${JSON.stringify(await toast(page))}`);
+    must(await source(page) === LOCKED_FILE, 'the locked disc moved');
+    await tab('Layers');
+    await page.locator('[aria-label="Unlock #disc"]').tap();
+    must(await source(page) === LAYERS, 'Unlock did not give the file back byte for byte');
+    await marquee({ x: 65, y: 50 }, { x: 20, y: 20 });
+    must(await label(page) === '<circle#disc>', `unlocked, the same marquee took ${await label(page)}, not the disc`);
+    // Rename c → sun: every reference follows.
+    await page.locator('[aria-label="Rename #c"]').tap();
+    const field = page.locator('.draw-modal input[aria-label="New id"]');
+    await field.fill('sun');
+    await page.locator('.draw-rename-go').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === LAYERS.replace('id="c"', 'id="sun"').replace('href="#c"', 'href="#sun"').replace('url(#c)', 'url(#sun)'), `Rename c → sun left a reference behind, or changed more:\n${await source(page)}`);
+    must(await entry() === 'Undo Rename', `the history's last entry is ${await entry()}`);
+    // The phone rules on the tab.
+    const r = await page.evaluate((min) => {
+      const small = [...document.querySelectorAll('.draw-layer, .draw-layer-name, .draw-layer-btn')].map((el) => ({ el, b: el.getBoundingClientRect() })).filter(({ el, b }) => b.height < min - 0.5 || (el.tagName === 'BUTTON' && b.width < min - 0.5)).map(({ el, b }) => `${el.className} ${el.getAttribute('aria-label') ?? el.textContent} ${Math.round(b.width)}×${Math.round(b.height)}`);
+      const de = document.documentElement;
+      return { small, rows: document.querySelectorAll('.draw-layer').length, sideways: de.scrollWidth - de.clientWidth };
+    }, TAP_MIN);
+    must(r.rows === LAYER_ROWS.length && r.small.length === 0, `Layers rows or buttons under ${TAP_MIN} pt: ${r.small.join(', ')}`);
+    must(r.sideways <= 0, `the Layers tab scrolls sideways by ${r.sideways}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Draw's own state stays out of As-is, Copy and Clean: after a guide and a lock, Save to Files holds
+// <draw:state, draw:locked and xmlns:draw; the As-is export's bytes and the Copy text hold no draw:
+// at all and are the file as opened; Clean holds no Draw namespace and no Draw-made <metadata>, and
+// is the Clean export of the file as opened. The working copy re-opens with its guide and its lock,
+// and its import report counts draw:state as kept, not unclassified.
+async function drawStateStaysOutOfAsIsAndClean(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+      window.__copied = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void window.__copied.push(t) } });
+    });
+    const exportAs = async (kind) => {
+      await page.locator('.draw-export').tap();
+      const go = page.locator(`.draw-export-go[data-kind="${kind}"]`);
+      await go.waitFor();
+      const [download] = await Promise.all([page.waitForEvent('download'), go.tap()]);
+      const bytes = readFileSync(await download.path());
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      return bytes.toString('utf8');
+    };
+    await pickFile(page, 'state.svg', Buffer.from(SNAP_DOC));
+    await closeModal(page);
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Add vertical guide' }).tap();
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    await page.locator('[aria-label="Lock #a"]').tap();
+    const edited = await source(page);
+    must(edited.includes('guides="v 40"') && edited.includes('draw:locked="true"'), `test setup: the guide or the lock is missing:\n${edited}`);
+    const working = await exportAs('working');
+    must(working === edited, 'Save to Files is not the working copy');
+    must(working.includes('<draw:state') && working.includes('draw:locked="true"') && working.includes(`xmlns:draw="${DRAW_NS_URI}"`), `Save to Files lacks <draw:state, draw:locked or xmlns:draw:\n${working}`);
+    const asIs = await exportAs('as-is');
+    must(!asIs.includes('draw:'), `the As-is export holds draw::\n${asIs}`);
+    must(asIs === SNAP_DOC, `the As-is export is not the file as opened:\n${asIs}`);
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await page.locator('.draw-copy').tap();
+    const copied = await until('Copy writes the clipboard', () => page.evaluate(() => window.__copied[0] ?? null));
+    must(!copied.includes('draw:') && copied === SNAP_DOC, `Copy holds Draw state, or isn't the file as opened:\n${copied}`);
+    const clean = await exportAs('clean');
+    must(!clean.includes(DRAW_NS_URI) && !clean.includes('draw:') && !/<metadata\b/.test(clean), `Clean holds the Draw namespace or a Draw-made <metadata>:\n${clean}`);
+    const opened = parseDoc(SNAP_DOC);
+    must(opened.ok && clean === cleanExport(opened.doc).text, `Clean is not the clean export of the file as opened:\n${clean}`);
+    // The working copy opens again with its guide and its lock; its report keeps draw:state.
+    await pickFile(page, 'state-working.svg', Buffer.from(working));
+    const kept = await page.locator('.draw-group[data-bucket="kept"] .draw-item').allTextContents();
+    must(kept.some((t) => t.startsWith('<draw:state>')) && kept.some((t) => t.startsWith('draw:locked')), `the import report doesn't list draw:state and draw:locked as kept: ${kept.join(', ')}`);
+    must((await bucketCounts(page)).unclassified === 0, `the import report counts Draw state as unclassified: ${JSON.stringify(await bucketCounts(page))}`);
+    await closeModal(page);
+    must(await source(page) === working, 'the working copy did not open as saved');
+    const pills = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').length);
+    must(pills === 1, `the working copy opened with ${pills} guide(s), not its one`);
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    must(await page.locator('[aria-label="Unlock #a"]').count() === 1, 'the working copy opened without its lock');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const MOVING = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <rect id="A" x="10" y="10" width="15" height="15" fill="#e76f51"><animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/></rect>
+  <rect id="B" x="40" y="10" width="15" height="15" fill="#2a9d8f"/>
+  <rect id="C" x="70" y="70" width="15" height="15" fill="#264653"/>
+</svg>
+`;
+const BAR_ORDER = ['Deselect', 'Select more', 'Bring forward', 'Send back', 'Delete', 'More'];
+const HANDLE_ENTRY = { tl: 'Resize', tr: 'Resize', br: 'Resize', bl: 'Resize', center: 'Move', rot: 'Rotate', scale: 'Scale' };
+
+// The phone rules on the selection tools (under reduced motion, so an animated drawing shows Play):
+// with one and with three shapes selected, the ContextBar is 48 pt high, its label on one line, and
+// its six buttons at least 44 × 44 in order; the More sheet, the Snap sheet and the Layers tab keep
+// every control at least 44 pt and fields at least 16 px, with no sideways or page scroll; Grid and
+// Snap stay clear of Play; and a press 22 pt from each handle takes that handle.
+async function phoneRulesOnTheSelectionTools(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const problems = [];
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+    };
+    const bar = async (state) => {
+      const b = await page.evaluate(() => {
+        const ctx = document.querySelector('.draw-context');
+        const l = ctx.querySelector('.draw-label');
+        return {
+          h: ctx.getBoundingClientRect().height,
+          buttons: [...ctx.querySelectorAll('.draw-ctx-btn')].map((el) => ({ name: el.getAttribute('aria-label'), ...el.getBoundingClientRect().toJSON() })),
+          label: l && { text: l.textContent, h: l.getBoundingClientRect().height, font: parseFloat(getComputedStyle(l).fontSize) },
+        };
+      });
+      const names = b.buttons.map((x) => x.name);
+      if (JSON.stringify(names) !== JSON.stringify(BAR_ORDER)) problems.push(`${state}: the ContextBar's buttons are ${JSON.stringify(names)}, not ${JSON.stringify(BAR_ORDER)}`);
+      for (const x of b.buttons) if (x.width < TAP_MIN - 0.5 || x.height < TAP_MIN - 0.5) problems.push(`${state}: ${x.name} is ${Math.round(x.width)}×${Math.round(x.height)}`);
+      if (b.buttons.some((x, i) => i > 0 && x.left < b.buttons[i - 1].right - 0.5)) problems.push(`${state}: the ContextBar's buttons overlap or are out of order`);
+      if (!b.label || b.label.h >= 2 * b.label.font) problems.push(`${state}: the label ${JSON.stringify(b.label?.text)} is not on one line`);
+      if (Math.abs(b.h - 48) > 0.5) problems.push(`${state}: the ContextBar is ${b.h} high, not 48`);
+    };
+    must((await page.evaluate((t) => window.drawTest.render(t), MOVING)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const chrome = await page.evaluate(() => Object.fromEntries(['grid', 'snap', 'play'].map((k) => [k, document.querySelector(`.draw-${k}-btn`)?.getBoundingClientRect().toJSON() ?? null])));
+    must(chrome.play, 'test setup: the animated drawing offers no Play under reduced motion');
+    const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const [x, y] of [['grid', 'play'], ['snap', 'play'], ['grid', 'snap']]) if (overlap(chrome[x], chrome[y])) problems.push(`${x} ${rect(chrome[x])} overlaps ${y} ${rect(chrome[y])}`);
+    // One selected: the bar, and a press 22 pt from each handle takes it.
+    const c = await page.evaluate(drawnCentre, '#C');
+    await page.touchscreen.tap(c.x, c.y);
+    must(await label(page) === '<rect#C>', `test setup: a tap on C selected ${await label(page)}`);
+    await bar('one selected');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const hs = await page.evaluate(handlesNow);
+    must(['tl', 'tr', 'br', 'bl', 'center', 'rot'].every((id) => hs.some((h) => h.id === id)), `test setup: C's handles are ${hs.map((h) => h.id)}`);
+    for (const h of hs) {
+      let best = null;
+      for (let i = 0; i < 16; i++) {
+        const a = (i * Math.PI) / 8;
+        const p = { x: h.x + 22 * Math.cos(a), y: h.y + 22 * Math.sin(a) };
+        const clear = Math.min(...hs.filter((o) => o !== h).map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+        if (!best || clear > best.clear) best = { p, a, clear };
+      }
+      must(best.clear > 23, `test setup: no point 22 pt from the ${h.id} handle is nearer it than any other`);
+      await dragOnCanvas(page, 'mouse', best.p, { x: 30 * Math.cos(best.a), y: 30 * Math.sin(best.a) }, 6);
+      const got = await undo.getAttribute('aria-label');
+      if (got !== `Undo ${HANDLE_ENTRY[h.id]}`) problems.push(`a press 22 pt from the ${h.id} handle made ${got ?? 'no entry'}, not ${HANDLE_ENTRY[h.id]}`);
+      if (!(await undo.isDisabled())) await undo.tap();
+      if (await label(page) !== '<rect#C>') await page.touchscreen.tap(c.x, c.y);
+    }
+    must(await source(page) === MOVING, 'test setup: the handle presses were not all undone');
+    // Three selected.
+    await moreCommand(page, 'Select all');
+    must(await label(page) === '3 selected', `test setup: Select all selected ${await label(page)}`);
+    await bar('three selected');
+    await openMore(page);
+    await rules('the More sheet');
+    await closeModal(page);
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap-step input').waitFor();
+    await rules('the Snap sheet');
+    await closeModal(page);
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+    await page.locator('.draw-layer').first().waitFor();
+    await rules('the Layers tab at half');
+    await page.locator('.draw-handle').tap();
+    await rules('the Layers tab at full');
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { reducedMotion: 'reduce' });
 }
 
 function corpusFiles() {
