@@ -55,7 +55,9 @@
 // artboard, a drag draws it with snapping), each shape's own handles, and generated shapes that
 // redraw from their inputs and turn plain when edited by hand; Inspect writing each value where it
 // lives (and the computed style reading it), the Colour sheet's picker keeping each notation, a
-// multi-selection edit as one entry, and the phone rules on Inspect and the picker.
+// multi-selection edit as one entry, and the phone rules on Inspect and the picker; then gradients:
+// the handles where the gradient draws in both unit systems and under gradientTransform (and
+// Spread beyond the end), new gradients in defs with fresh ids, SVG Lab's gloss and Make unique.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -240,6 +242,9 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theColourPickerKeepsTheNotation);
   await check(aMultiSelectionEditIsOneEntry);
   for (const height of [956, 796]) await check(phoneRulesOnInspectAndThePicker, height);
+  await check(gradientHandlesSitWhereTheGradientDraws);
+  await check(gradientsGoInDefsWithFreshIds);
+  await check(glossAndMakeUnique);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -5561,7 +5566,289 @@ async function phoneRulesOnInspectAndThePicker(browser, origin, height) {
       await page.locator('.draw-modal-done').tap();
       await page.locator('.draw-modal').waitFor({ state: 'detached' });
     }
+    // A stop's colour sheet (S3), from a gradient's stop row at half: above the canvas too.
+    const GRADIENT = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <defs><linearGradient id="g"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs>\n  <rect id="r" x="10" y="10" width="80" height="80" fill="url(#g)"/>\n</svg>\n`;
+    must((await page.evaluate((t) => window.drawTest.render(t), GRADIENT)).ok, 'test setup: the gradient file did not open');
+    await twoFrames(page);
+    await toHalf();
+    await tapShape(page, 'r');
+    await showInspect(page);
+    await rules('Inspect with a gradient');
+    await page.locator('.draw-inspect button[aria-label^="stop 1 colour:"]').tap();
+    await page.locator('.draw-modal .draw-hsv').waitFor();
+    await twoFrames(page);
+    const st = await page.evaluate(() => {
+      const on = (el) => {
+        const b = el.getBoundingClientRect();
+        const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom, top: top === el || el.contains(top) ? 'it' : top ? `${top.tagName} ${top.getAttribute('class')}` : 'nothing' };
+      };
+      return { done: on(document.querySelector('.draw-modal-done')), field: on(document.querySelector('.draw-modal .draw-custom input')), title: document.querySelector('.draw-modal-title').textContent, chips: [...document.querySelectorAll('.draw-modal .draw-chip')].map((c) => c.textContent), w: innerWidth, h: innerHeight };
+    });
+    must(st.title === 'stop-color' && !st.chips.includes('none'), `the stop's sheet is ${st.title} with chips ${st.chips}`);
+    must(st.done.x >= 0 && st.done.y >= 0 && st.done.right <= st.w && st.done.bottom <= st.h && st.done.top === 'it' && st.field.top === 'it', `440×${height}: the stop's sheet: Done ${JSON.stringify(st.done)}, the field ${JSON.stringify(st.field)}`);
+    await rules('a stop’s colour sheet');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
     must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M2 S3: gradients, gloss and Make unique ───────────────────────────────────────────────────
+
+const RED_BLUE = '<stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>';
+const withDefs = (defs, body) => `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">\n  <defs>${defs}</defs>\n  ${body}\n</svg>\n`;
+const RED = [255, 0, 0];
+const BLUE = [0, 0, 255];
+const redBlue = (t) => [255 * (1 - t), 0, 255 * t];
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+// The code panel down to peek, the whole canvas in view, and the view fitted to it again (two frames:
+// the canvas re-fits on its ResizeObserver) before any point on it is read.
+async function toPeek(page) {
+  for (let n = 0; n < 3 && (await page.locator('.draw-sheet--peek').count()) === 0; n++) await page.locator('.draw-handle').tap();
+  await twoFrames(page);
+}
+// Edit on canvas for the drawn element with this id's `prop`: selected, Inspect open, its toggle on.
+async function editOnCanvas(page, id, prop = 'fill') {
+  await tapShape(page, id);
+  await showInspect(page);
+  const t = page.locator(`[aria-label="Edit the ${prop} gradient on canvas"]`);
+  if ((await t.getAttribute('aria-pressed')) !== 'true') await t.tap();
+  await twoFrames(page);
+}
+
+// A 3:1 rect filled red to blue by (a) a bounding-box linear gradient from (0.1, 0.5) to (0.4, 0.5);
+// (b) the same under gradientTransform="rotate(30 0.5 0.5)"; (c) a user-space one on a rect that is
+// itself turned (rotate(20 50 50)); (d) a bounding-box radial one with a written focus under
+// skewX(20). With Edit on canvas on, read with the overlay hidden: the pixel under the start handle
+// is the first stop's colour and under the end handle the last's (± 12 a channel), and halfway the
+// mix; for (d), under the focus handle the first and under the radius handle the last. (b)'s end
+// handle dragged: the pixel there becomes the last stop's colour, only x2 and y2 change (the
+// gradientTransform keeps its bytes), one "Gradient end". Spread on (a) (its stops from a
+// template): at box x 0.625 (t = 1.75), Pad draws the last stop's colour, Reflect the colour at
+// t = 0.25 and Repeat at t = 0.75. A bounding-box gradient on a zero-height line shows no handles
+// and says why.
+async function gradientHandlesSitWhereTheGradientDraws(browser, origin) {
+  const RECT = '<rect id="r" x="5" y="35" width="90" height="30" fill="url(#g)"/>';
+  const CASES = [
+    ['(a)', `<linearGradient id="g" x1="0.1" y1="0.5" x2="0.4" y2="0.5">${RED_BLUE}</linearGradient>`, RECT],
+    ['(b)', `<linearGradient id="g" x1="0.1" y1="0.5" x2="0.4" y2="0.5" gradientTransform="rotate(30 0.5 0.5)">${RED_BLUE}</linearGradient>`, RECT],
+    ['(c)', `<linearGradient id="g" gradientUnits="userSpaceOnUse" x1="20" y1="50" x2="60" y2="50">${RED_BLUE}</linearGradient>`, RECT.replace('/>', ' transform="rotate(20 50 50)"/>')],
+    ['(d)', `<radialGradient id="g" cx="0.4" cy="0.5" r="0.3" fx="0.3" fy="0.5" gradientTransform="skewX(20)">${RED_BLUE}</radialGradient>`, RECT],
+  ];
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const at = async (label, what, p, want) => {
+      const px = await pixelAt(page, p);
+      must(near3(px, want, 12), `${label}: the pixel under ${what} is ${px}, not ${want.map(Math.round)}`);
+    };
+    for (const [label, grad, shape] of CASES) {
+      must((await page.evaluate((t) => window.drawTest.render(t), withDefs(grad, shape))).ok, `test setup: ${label} did not open`);
+      await twoFrames(page);
+      await editOnCanvas(page, 'r');
+      const hs = await page.evaluate(handlesNow);
+      const h = (id) => hs.find((x) => x.id === id);
+      if (label === '(d)') {
+        must(!!h('g-centre') && !!h('g-radius') && !!h('g-focus') && hs.length === 3, `${label}: the handles are ${hs.map((x) => x.id)}`);
+        await at(label, 'the focus handle', h('g-focus'), RED);
+        await at(label, 'the radius handle', h('g-radius'), BLUE);
+        continue;
+      }
+      const s = h('g-start');
+      const e = h('g-end');
+      must(!!s && !!e && hs.length === 2, `${label}: the handles are ${hs.map((x) => x.id)}, not the gradient's start and end alone`);
+      await at(label, 'the start handle', s, RED);
+      await at(label, 'the end handle', e, BLUE);
+      await at(label, 'the point halfway', { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 }, redBlue(0.5));
+      if (label !== '(b)') continue;
+      // (b)'s end handle, dragged 30% of the way back towards the start.
+      const before = await source(page);
+      const to = { x: e.x + (s.x - e.x) * 0.3, y: e.y + (s.y - e.y) * 0.3 };
+      await dragOnCanvas(page, 'mouse', e, { x: to.x - e.x, y: to.y - e.y }, 6);
+      const after = await source(page);
+      const strip = (t) => t.replace(/ x2="[^"]*" y2="[^"]*"/, '');
+      must(after !== before && strip(after) === strip(before), `(b): the end handle's drag changed more than x2 and y2:\n${after}`);
+      must(await undo.getAttribute('aria-label') === 'Undo Gradient end', `(b): the drag is ${await undo.getAttribute('aria-label')}, not one "Gradient end"`);
+      await at(label, 'the dragged end handle', to, BLUE);
+    }
+    // Spread on (a), its stops from a template and its own spreadMethod.
+    const SPREAD = withDefs(`<linearGradient id="t">${RED_BLUE}</linearGradient><linearGradient id="g" href="#t" x1="0.1" y1="0.5" x2="0.4" y2="0.5" spreadMethod="pad"/>`, RECT);
+    must((await page.evaluate((t) => window.drawTest.render(t), SPREAD)).ok, 'test setup: the spread file did not open');
+    await twoFrames(page);
+    await tapShape(page, 'r');
+    await showInspect(page);
+    const beyond = await page.evaluate(elementPoint, { sel: '#r', x: 5 + 0.625 * 90, y: 50 });
+    for (const [text, t] of [['Pad', 1], ['Reflect', 0.25], ['Repeat', 0.75], ['Pad', 1]]) {
+      await page.locator('.draw-inspect [aria-label="fill spreadMethod"] button', { hasText: new RegExp(`^${text}$`) }).tap();
+      const px = await pixelAt(page, beyond);
+      must(near3(px, redBlue(t), 12), `${text}: at t = 1.75 the pixel is ${px}, not the colour at t = ${t}`);
+    }
+    // A zero-height line: no handles, and why.
+    const LINE = withDefs(`<linearGradient id="g" x1="0.1" y1="0.5" x2="0.4" y2="0.5">${RED_BLUE}</linearGradient>`, '<line id="r" x1="10" y1="50" x2="90" y2="50" stroke="url(#g)" stroke-width="6"/>');
+    must((await page.evaluate((t) => window.drawTest.render(t), LINE)).ok, 'test setup: the line did not open');
+    await twoFrames(page);
+    const p = await page.evaluate(screenPoint, { x: 50, y: 50 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    await showInspect(page);
+    await page.locator('[aria-label="Edit the stroke gradient on canvas"]').tap();
+    await twoFrames(page);
+    must((await page.evaluate(handlesNow)).length === 0, 'a zero-height line shows handles for its bounding-box gradient');
+    must(await page.locator('[aria-label="Stroke gradient"] .draw-inspect-note', { hasText: 'no width or height' }).count() === 1, 'Edit on canvas does not say why it shows no handles');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/style.svg (no <defs>): Inspect's Linear on the circle adds a Draw-made <defs> before it with
+// the file's whitespace, holding SVG Lab's top-to-bottom linear-1 from the circle's own colour to
+// #e76f51, and the fill url(#linear-1), drawn near #e9c46a at its top and #e76f51 at its bottom; one
+// entry. The polyline's stroke → Linear makes linear-2 in the same <defs>. The first stop's offset
+// typed 0.25 changes only its bytes; a stop added after it sits at the midpoint in the colour drawn
+// there before (± 2 a channel); Remove takes it with its whitespace. Colour on the circle gives back
+// #e9c46a and takes linear-1 away; with the polyline's Colour, linear-2, the <defs> and xmlns:draw go
+// too: the file byte for byte. On the built-in sample, a colour for the sky gradient's middle stop
+// rewrites that stop-color in place in its multi-line markup, and Colour leaves the file's own
+// gradient in it.
+async function gradientsGoInDefsWithFreshIds(browser, origin) {
+  const F = readFileSync(join(CORPUS, 'lab/style.svg'), 'utf8');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/style.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const tapAt = async (x, y) => {
+      const p = await page.evaluate(screenPoint, { x, y });
+      await page.touchscreen.tap(p.x, p.y);
+      await page.waitForTimeout(50);
+    };
+    const kind = (prop, text) => page.locator(`.draw-inspect [aria-label="${prop} kind"] button`, { hasText: new RegExp(`^${text}$`) }).tap();
+    await tapAt(50, 36);
+    await showInspect(page);
+    await kind('fill', 'Linear');
+    const one = F.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100" xmlns:draw="${DRAW_NS_URI}">`)
+      .replace('\n  <circle', '\n  <defs draw:made="true"><linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#e9c46a"/><stop offset="1" stop-color="#e76f51"/></linearGradient></defs>\n  <circle')
+      .replace('fill="#e9c46a"', 'fill="url(#linear-1)"');
+    must(await source(page) === one, `Linear on the circle:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set fill', `the entry is ${await undo.getAttribute('aria-label')}`);
+    const top = await pixelAt(page, await page.evaluate(screenPoint, { x: 50, y: 16 }));
+    const bottom = await pixelAt(page, await page.evaluate(screenPoint, { x: 50, y: 56 }));
+    must(near3(top, hex('#e9c46a'), 16) && near3(bottom, hex('#e76f51'), 16), `the circle is drawn ${top} at its top and ${bottom} at its bottom`);
+    // The polyline's stroke: linear-2, in the same <defs>.
+    await toPeek(page);
+    await tapAt(32, 68);
+    await showInspect(page);
+    must(await label(page) === '<polyline>', `test setup: ${await label(page)}`);
+    await kind('stroke', 'Linear');
+    const two = await source(page);
+    must(two.includes('</linearGradient><linearGradient id="linear-2" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#e76f51"/><stop offset="1" stop-color="#f4a261"/></linearGradient></defs>') && two.includes('stroke="url(#linear-2)"') && (two.match(/<defs/g) ?? []).length === 1, `the polyline's Linear:\n${two}`);
+    // The circle's stops: the first offset typed 0.25, then a stop added after it, then removed.
+    await twoFrames(page);
+    await tapAt(50, 36);
+    await showInspect(page);
+    const offset = page.locator('.draw-inspect input[aria-label="stop 1 offset"]');
+    await offset.tap();
+    await offset.fill('0.25');
+    await offset.press('Enter');
+    const quarter = two.replace('<stop offset="0" stop-color="#e9c46a"/>', '<stop offset="0.25" stop-color="#e9c46a"/>');
+    must(await source(page) === quarter, `the offset typed 0.25 changed more than its bytes:\n${await source(page)}`);
+    const drawn = await pixelAt(page, await page.evaluate(screenPoint, { x: 50, y: 12 + 0.625 * 48 }));
+    await page.locator('.draw-inspect [aria-label="Add a stop after stop 1"]').tap();
+    const added = /<stop offset="0.25" stop-color="#e9c46a"\/><stop offset="0\.625" stop-color="(#[0-9a-f]{6})"\/><stop offset="1"/.exec(await source(page));
+    must(!!added && near3(hex(added[1]), drawn, 2), `the new stop is not at the midpoint in the colour drawn there (${drawn}):\n${await source(page)}`);
+    await page.locator('.draw-inspect [aria-label="Remove stop 2"]').tap();
+    must(await source(page) === quarter, 'Remove did not take the new stop away with its whitespace');
+    // Colour back on both: the file as it was.
+    await kind('fill', 'Colour');
+    must(!(await source(page)).includes('linear-1') && (await source(page)).includes('fill="#e9c46a"'), `Colour on the circle:\n${await source(page)}`);
+    await toPeek(page);
+    await tapAt(32, 68);
+    await showInspect(page);
+    await kind('stroke', 'Colour');
+    must(await source(page) === F, `with linear-2 gone too, the file is not as it was:\n${await source(page)}`);
+    // The sample's own sky gradient: a stop colour rewritten in place; never removed.
+    must((await page.evaluate((t) => window.drawTest.render(t), SAMPLE)).ok, 'test setup: the sample did not open');
+    await toPeek(page);
+    await tapAt(160, 30);
+    await showInspect(page);
+    await page.locator('.draw-inspect button[aria-label^="stop 2 colour:"]').tap();
+    await page.locator('.draw-modal .draw-swatch[aria-label="#264653"]').tap();
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === SAMPLE.replace('<stop offset="0.6" stop-color="#e76f51"/>', '<stop offset="0.6" stop-color="#264653"/>'), `the sky's middle stop is not rewritten in place:\n${await source(page)}`);
+    await kind('fill', 'Colour');
+    must((await source(page)).includes('<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">'), 'Colour took the file’s own gradient away');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Gloss on lab/create-icon.svg's rect (#264653), from the More sheet: SVG Lab's gloss-1 (cx 0.35,
+// cy 0.3, r 0.8; #ffffff to #264653) and fill="url(#gloss-1)", drawn near white at the rect's box
+// point (0.35, 0.3) and near #264653 at (0.9, 0.9), inside its rounded corner and past r (the heart,
+// drawn over the first point, hidden while sampling); Gloss off gives the file back byte for byte.
+// Two rects sharing one gradient: Inspect says "Shared with 1 other shape"; a stop colour edit
+// changes both drawn rects; Make unique adds linear-1 right after it (its stops byte for byte),
+// re-points only this rect's url(#…) (its fallback kept), and a stop edit then changes only its
+// pixels. An Inkscape-style chain (#a with the stops, #b xlink:href="#a" with the geometry, in user
+// space) that another shape shares: Inspect shows #a's stops, a stop edit writes #a, and Make unique
+// writes one standalone gradient with #b's geometry and #a's stops and no href.
+async function glossAndMakeUnique(browser, origin) {
+  const ICON = readFileSync(join(CORPUS, 'lab/create-icon.svg'), 'utf8');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), ICON)).ok, 'test setup: lab/create-icon.svg did not open');
+    await twoFrames(page);
+    const corner = await page.evaluate(screenPoint, { x: 20, y: 20 });
+    await page.touchscreen.tap(corner.x, corner.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<rect>', `test setup: ${await label(page)}`);
+    const gloss = async () => {
+      await openMore(page);
+      await page.locator('.draw-more .draw-more-row', { hasText: /^Gloss$/ }).tap();
+      await page.waitForTimeout(50);
+    };
+    await gloss();
+    const on = await source(page);
+    must(on.includes('<defs draw:made="true"><radialGradient id="gloss-1" cx="0.35" cy="0.3" r="0.8" draw:made="true"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#264653"/></radialGradient></defs>') && on.includes('fill="url(#gloss-1)"'), `Gloss:\n${on}`);
+    await page.evaluate(() => (document.querySelector('.draw-host').shadowRoot.querySelector('path').style.visibility = 'hidden'));
+    const light = await pixelAt(page, await page.evaluate(elementPoint, { sel: 'rect', x: 12 + 0.35 * 76, y: 12 + 0.3 * 76 }));
+    const dark = await pixelAt(page, await page.evaluate(elementPoint, { sel: 'rect', x: 12 + 0.9 * 76, y: 12 + 0.9 * 76 }));
+    await page.evaluate(() => (document.querySelector('.draw-host').shadowRoot.querySelector('path').style.visibility = ''));
+    must(near3(light, [255, 255, 255], 12) && near3(dark, hex('#264653'), 12), `the gloss is drawn ${light} at its focus and ${dark} past its radius`);
+    await gloss();
+    must(await source(page) === ICON, `Gloss off did not give the file back:\n${await source(page)}`);
+    // Two rects share one gradient.
+    const SHARED = withDefs(`\n    <linearGradient id="s">${RED_BLUE}</linearGradient>\n  `, '<rect id="p" x="5" y="10" width="40" height="30" fill="url(#s) #000"/>\n  <rect id="q" x="55" y="10" width="40" height="30" fill="url(#s)"/>');
+    must((await page.evaluate((t) => window.drawTest.render(t), SHARED)).ok, 'test setup: the shared file did not open');
+    await twoFrames(page);
+    await tapShape(page, 'p');
+    await showInspect(page);
+    must(await page.locator('.draw-inspect [aria-label="Fill gradient"] [role="status"]', { hasText: 'Shared with 1 other shape' }).count() === 1, 'Inspect does not say the gradient is shared');
+    const left = async (id) => pixelAt(page, await page.evaluate(elementPoint, { sel: `#${id}`, x: id === 'p' ? 6 : 56, y: 25 }));
+    const stopColour = async (n, colour) => {
+      await page.locator(`.draw-inspect button[aria-label^="stop ${n} colour:"]`).tap();
+      await page.locator(`.draw-modal .draw-swatch[aria-label="${colour}"]`).tap();
+      await page.locator('.draw-modal-done').tap();
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    };
+    await stopColour(1, '#264653');
+    must(near3(await left('p'), hex('#264653'), 16) && near3(await left('q'), hex('#264653'), 16), `a stop colour edit on the shared gradient did not change both rects (${await left('p')}, ${await left('q')})`);
+    const shared = await source(page);
+    await page.locator('.draw-inspect button', { hasText: /^Make unique$/ }).tap();
+    const unique = await source(page);
+    must(unique === shared.replace('</linearGradient>\n  </defs>', '</linearGradient>\n    <linearGradient id="linear-1" draw:made="true"><stop offset="0" stop-color="#264653"/><stop offset="1" stop-color="#0000ff"/></linearGradient>\n  </defs>').replace('fill="url(#s) #000"', 'fill="url(#linear-1) #000"').replace(`viewBox="0 0 100 100">`, `viewBox="0 0 100 100" xmlns:draw="${DRAW_NS_URI}">`), `Make unique:\n${unique}`);
+    await stopColour(1, '#e9c46a');
+    must(near3(await left('p'), hex('#e9c46a'), 16) && near3(await left('q'), hex('#264653'), 16), `after Make unique a stop edit changed the other rect too (${await left('p')}, ${await left('q')})`);
+    // An Inkscape-style chain that another shape shares.
+    const CHAIN = withDefs(`\n    <linearGradient id="a"><stop offset="0" style="stop-color:#ff0000;stop-opacity:1"/><stop offset="1" style="stop-color:#0000ff;stop-opacity:1"/></linearGradient>\n    <linearGradient id="b" xlink:href="#a" x1="10" y1="50" x2="90" y2="50" gradientUnits="userSpaceOnUse"/>\n  `, '<rect id="r" x="10" y="10" width="80" height="40" fill="url(#b)"/>\n  <rect id="o" x="10" y="60" width="80" height="30" fill="url(#a)"/>');
+    must((await page.evaluate((t) => window.drawTest.render(t), CHAIN)).ok, 'test setup: the chain did not open');
+    await twoFrames(page);
+    await tapShape(page, 'r');
+    await showInspect(page);
+    const colours = await page.locator('.draw-inspect [aria-label="Fill gradient"] button[aria-label*="colour:"]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    must(JSON.stringify(colours) === JSON.stringify(['stop 1 colour: #ff0000', 'stop 2 colour: #0000ff']), `Inspect shows ${colours}, not #a's stops`);
+    await stopColour(2, '#264653');
+    must((await source(page)).includes('<stop offset="1" style="stop-color:#264653;stop-opacity:1"/></linearGradient>\n    <linearGradient id="b"'), `the stop edit did not write #a:\n${await source(page)}`);
+    await page.locator('.draw-inspect button', { hasText: /^Make unique$/ }).tap();
+    must((await source(page)).includes('gradientUnits="userSpaceOnUse"/>\n    <linearGradient id="linear-1" x1="10" y1="50" x2="90" y2="50" gradientUnits="userSpaceOnUse" draw:made="true"><stop offset="0" style="stop-color:#ff0000;stop-opacity:1"/><stop offset="1" style="stop-color:#264653;stop-opacity:1"/></linearGradient>') && (await source(page)).includes('fill="url(#linear-1)"'), `Make unique of the chain:\n${await source(page)}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

@@ -2488,6 +2488,32 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n', to: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n      this.fieldEnd();\n      this.fieldStart(f.field);\n',
     run: drawTests('inspect.test.ts'), expect: /✖ the stop editor, one entry per editing session/,
   },
+  // P1-M2 S3 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B470', what: 'the gradient handles ignore gradientTransform (the pixel under the end handle isn’t the last stop’s colour)', slow: true, checks: ['gradientHandlesSitWhereTheGradientDraws'],
+    file: 'engine/paint/handles.ts', from: "  const T = parseTransform(valueOf(r, 'gradientTransform'))?.matrix ?? IDENTITY; // an unreadable list draws as none", to: '  const T = IDENTITY;',
+    run: DRAW_E2E, expect: /gradientHandlesSitWhereTheGradientDraws: \(b\): the pixel under the (start|end) handle/,
+  },
+  {
+    id: 'B471', what: 'Spread writes spreadMethod on the gradient’s template even where the gradient sets its own (which still wins)', slow: true, checks: ['gradientHandlesSitWhereTheGradientDraws'],
+    file: 'engine/paint/gradients.ts', from: '  return a ? opSetAttr(doc, a.from, null, name, value) : opSetAttr(doc, r.id, null, name, value);', to: '  return opSetAttr(doc, r.chain[r.chain.length - 1], null, name, value);',
+    run: DRAW_E2E, expect: /gradientHandlesSitWhereTheGradientDraws: Reflect: at t = 1\.75/,
+  },
+  {
+    id: 'B472', what: 'Linear makes a second Draw <defs> instead of using the root’s first', slow: true, checks: ['gradientsGoInDefsWithFreshIds'],
+    file: 'engine/paint/gradients.ts', from: '  const defs = rootDefs(doc);', to: '  const defs = null;',
+    run: DRAW_E2E, expect: /gradientsGoInDefsWithFreshIds: the polyline's Linear/,
+  },
+  {
+    id: 'B473', what: 'a stop edit on a shared gradient quietly makes it unique first (only one rect changes)', slow: true, checks: ['glossAndMakeUnique'],
+    file: 'projects/draw/src/panels/Inspect.tsx', from: "onClick={() => editor.openStyleSheet('stop-color', [stop.id])}", to: "onClick={() => { if ((editor.paintInfo(prop)?.shared ?? 0) > 0) editor.makeUnique(prop); editor.openStyleSheet('stop-color', [editor.paintInfo(prop)!.stops[n - 1].id]); }}",
+    run: DRAW_E2E, expect: /glossAndMakeUnique: a stop colour edit on the shared gradient did not change both rects/,
+  },
+  {
+    id: 'B474', what: 'Gloss off leaves xmlns:draw on the root (the file isn’t given back)', slow: true, checks: ['glossAndMakeUnique'],
+    file: 'engine/paint/gradients.ts', from: '  undeclareIfUnused(doc, apply);\n', to: '',
+    run: DRAW_E2E, expect: /glossAndMakeUnique: Gloss off did not give the file back/,
+  },
 ];
 
 const args = process.argv.slice(2);

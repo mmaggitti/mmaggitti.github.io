@@ -507,3 +507,43 @@ test('lab/style.svg: the polyline’s stroke and width (polyline-stroke) and its
   for (let i = 0; i < 3; i++) r.editor.undo();
   assert.equal(r.editor.source(), r.file, 'one entry each');
 });
+
+// ── P1-M2 S3: the Style lesson's gradient (lab/style.svg) ────────────────────────────────────────
+
+test('lab goal "Gradient fill" (style): Inspect’s Linear on the circle writes SVG Lab’s top-to-bottom gradient (x1 0, y1 0, x2 0, y2 1) with a fresh numbered id into a new Draw-made <defs>, the fill url(#linear-1); one entry, and Colour gives the file back', () => {
+  const r = open('lab/style.svg');
+  const circle = element(r, 'circle');
+  r.editor.select([circle.id]);
+  const isGradient = () => /^url\(#[^)]+\)$/.test(attrValue(doc(r), circle, null, 'fill') ?? '');
+  assert.equal(isGradient(), false, 'the goal is not met at first');
+  r.editor.setPaintKind('fill', 'linear');
+  assert.ok(isGradient(), 'the goal: the circle’s fill is a gradient');
+  const text = r.editor.source();
+  assert.ok(text.includes('<defs draw:made="true"><linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#e9c46a"/><stop offset="1" stop-color="#e76f51"/></linearGradient></defs>\n  <circle'), text);
+  assert.equal(r.editor.paintInfo('fill')?.kind, 'linear', 'Inspect reads it as Linear');
+  oneEntry(r, 'Set fill');
+  r.editor.setPaintKind('fill', 'color');
+  assert.equal(r.editor.source(), r.file, 'Colour: the first stop’s colour, and what Draw made goes');
+});
+
+test('lab/style.svg’s gradient stops (gradient-stops): their offsets step by 0.05, one entry each, and their colours take no none (the stop’s Colour sheet offers no none chip and refuses it)', () => {
+  const r = open('lab/style.svg');
+  r.editor.select([element(r, 'circle').id]);
+  r.editor.setPaintKind('fill', 'linear');
+  const made = r.editor.source();
+  const [a, b] = r.editor.paintInfo('fill')!.stops;
+  r.editor.stepStopOffset(a.id, 1);
+  r.editor.stepStopOffset(b.id, -1);
+  assert.deepEqual(r.editor.paintInfo('fill')!.stops.map((x) => x.offset), [0.05, 0.95]);
+  assert.equal(r.editor.source(), made.replace('<stop offset="0" ', '<stop offset="0.05" ').replace('<stop offset="1" ', '<stop offset="0.95" '));
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), made, 'one entry each');
+  assert.deepEqual(colorChoices(styleSlot('stop-color', ['stop']), a.colour).chips.map((c) => c.value), ['currentColor'], 'no none chip');
+  r.editor.openStyleSheet('stop-color', [a.id]);
+  assert.deepEqual(r.editor.sheetInput('none'), { error: '"none" is not a colour' }, 'none is refused');
+  assert.ok('text' in r.editor.sheetInput(PALETTE[0]));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), made.replace('stop-color="#e9c46a"', 'stop-color="#264653"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set stop-color');
+});

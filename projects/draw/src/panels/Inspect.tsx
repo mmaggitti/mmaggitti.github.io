@@ -8,7 +8,7 @@
 //   entry while it has focus.
 // - Gradients (S3), for one element whose fill or stroke is a gradient (engine/paint/): the paint
 //   kinds None, Colour, Linear and Radial (and the Gloss switch for a fill); then "Shared with N
-//   other shapes" and Make unique, the stops (offset, colour, opacity, Remove; Add stop), Spread,
+//   other shapes" and Make unique, the stops (offset, colour, opacity, Add after it, Remove), Spread,
 //   Units, a radial gradient's fx, fy and fr, and Edit on canvas.
 // - Generator (S1), for one generated shape (engine/generators/): its kind, a field per input with −
 //   and + (one entry each), and Detach.
@@ -231,9 +231,11 @@ function GradientSection({ editor, prop, info }: { editor: Editor; prop: 'fill' 
       {info.stops.map((stop, i) => (
         <StopRow key={stop.id} editor={editor} prop={prop} stop={stop} n={i + 1} last={info.stops.length === 1} />
       ))}
-      <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.addStop(prop, null)}>
-        Add stop
-      </button>
+      {!info.stops.length && (
+        <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.addStop(prop, null)}>
+          Add stop
+        </button>
+      )}
       <div className="draw-inspect-row">
         <span className="draw-inspect-name">Spread</span>
         <div className="ds-seg draw-inspect-seg" role="group" aria-label={`${prop} spreadMethod`}>
@@ -263,7 +265,7 @@ function GradientSection({ editor, prop, info }: { editor: Editor; prop: 'fill' 
   );
 }
 
-/** One stop: its offset (− and + by 0.05, or typed), its colour (the Colour sheet, no none), its opacity, and Remove. */
+/** One stop: its offset (− and + by 0.05, or typed), its colour (the Colour sheet, no none), its opacity, Add (a stop after it, at the midpoint) and Remove. */
 function StopRow({ editor, prop, stop, n, last }: { editor: Editor; prop: 'fill' | 'stroke'; stop: PaintInfo['stops'][number]; n: number; last: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const row = editor.styleRow('stop-opacity', [stop.id]);
@@ -287,6 +289,9 @@ function StopRow({ editor, prop, stop, n, last }: { editor: Editor; prop: 'fill'
         <button type="button" className="draw-inspect-swatch" aria-label={`stop ${n} colour: ${stop.colour}`} onClick={() => editor.openStyleSheet('stop-color', [stop.id])}>
           <span className="draw-inspect-chip" style={colour ? { background: stop.colour } : undefined} />
           <span className="draw-inspect-text ds-mono">{stop.colour}</span>
+        </button>
+        <button type="button" className="ds-btn draw-inspect-btn" aria-label={`Add a stop after stop ${n}`} onClick={() => editor.addStop(prop, stop.id)}>
+          Add
         </button>
         <button type="button" className="ds-btn draw-inspect-btn" aria-label={`Remove stop ${n}`} disabled={last} onClick={() => editor.removeStop(prop, stop.id)}>
           Remove
