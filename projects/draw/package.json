@@ -11,6 +11,8 @@
   "dependencies": {
     "dompurify": "3.4.16",
     "idb-keyval": "6.3.0",
+    "paper": "0.12.18",
+    "path-bool": "1.0.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -23,5 +25,8 @@
     "svg-tag-names": "3.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
+  },
+  "overrides": {
+    "gl-matrix": "3.4.4"
   }
 }
