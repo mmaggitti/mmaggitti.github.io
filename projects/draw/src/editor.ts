@@ -75,7 +75,7 @@ import { planStyle, ruleWhy, type StyleCtx } from '../../../engine/style/write.t
 import { shownValue, styleSource } from '../../../engine/style/where.ts';
 import { checkStyle } from './style-edit.ts';
 import { GRADIENT_LABELS, gradientHandles, planGradientHandle, type GradientGeo, type GradientHandleId } from '../../../engine/paint/handles.ts';
-import { LAB_A, gradientAttrOp, gradientUsers, makeUnique as makeUniqueCopy, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, valueOf, type PaintProp } from '../../../engine/paint/gradients.ts';
+import { LAB_A, gradientAttrOp, gradientUsers, makeUnique as makeUniqueCopy, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, stopSpelling, valueOf, type PaintProp } from '../../../engine/paint/gradients.ts';
 import { addStop as addStopAfter, offsetOp, removeStop as removeStopOf, stopOffset } from '../../../engine/paint/stops.ts';
 import { glossOf, glossOff, glossOn, glossable } from '../../../engine/paint/gloss.ts';
 import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
@@ -1835,7 +1835,7 @@ export class Editor {
       if (!graded.length) return this.openStyleSheet(prop);
       const first = (id: NodeId) => {
         const r = resolveGradient(doc, ownPaint(doc, id, prop).gradient!)!;
-        return r.stops.length ? stopColour(doc, r.stops[0]) : LAB_A;
+        return r.stops.length ? stopSpelling(doc, r.stops[0]) : LAB_A;
       };
       done = this.#dispatch(`Set ${prop}`, (apply) => (refused = setPlainPaint(doc, graded, prop, first, ctx, apply)));
       if (done) this.#kept(prop, graded, refused);

@@ -13,10 +13,10 @@ import { NS, attrValue, type Doc, type NodeId } from '../model/doc.ts';
 import type { Op } from '../commands/ops.ts';
 import { parseColor } from '../values/color.ts';
 import { numberedIds } from '../model/ids.ts';
-import { styleSource } from '../style/where.ts';
+import { rawSpelling, styleSource } from '../style/where.ts';
 import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
-import { dropUnused, gradientMarkup, idMap, insertGradients, resolveGradient, stopColour, LAB_B } from './gradients.ts';
+import { dropUnused, gradientMarkup, idMap, insertGradients, resolveGradient, stopSpelling, LAB_B, type Spelled } from './gradients.ts';
 
 type Apply = (op: Op) => void;
 
@@ -40,11 +40,11 @@ export function glossOf(doc: Doc, id: NodeId): NodeId | null {
   return n?.kind === 'element' && n.ns === NS.svg && n.local === 'radialGradient' && attrValue(doc, n, null, 'id') === m[1] ? g! : null;
 }
 
-/** The colour a gloss ends in: the element's own fill where it is a colour (as written), else SVG Lab's #e76f51. */
-export function glossColour(doc: Doc, id: NodeId): string {
+/** The colour a gloss ends in: the element's own fill where it is a colour, as written (a reference and all), else SVG Lab's #e76f51. */
+export function glossColour(doc: Doc, id: NodeId): Spelled {
   const v = styleSource(doc, id, 'fill').value;
   const c = v === null ? null : parseColor(v);
-  return c && c.kind === 'color' ? v! : LAB_B;
+  return c && c.kind === 'color' ? { value: v!, raw: rawSpelling(doc, id, 'fill') } : { value: LAB_B, raw: null };
 }
 
 /**
@@ -65,7 +65,7 @@ export function glossOn(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply: 
       refused.push(plan.refused[0]);
       continue;
     }
-    markups.push((draw) => gradientMarkup(doc, 'radialGradient', gid, GLOSS_ATTRS, [['0', '#ffffff'], ['1', colour]], draw));
+    markups.push((draw) => gradientMarkup(doc, 'radialGradient', gid, GLOSS_ATTRS, [['0', { value: '#ffffff', raw: null }], ['1', colour]], draw));
     plans.push(plan);
   }
   insertGradients(doc, markups, apply);
@@ -86,7 +86,8 @@ export function glossOff(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply:
     if (g === null) continue;
     const r = resolveGradient(doc, g)!;
     const last = r.stops[r.stops.length - 1];
-    const plan = planStyle(doc, [id], 'fill', last === undefined ? LAB_B : stopColour(doc, last), ctx);
+    const end = last === undefined ? { value: LAB_B, raw: null } : stopSpelling(doc, last);
+    const plan = planStyle(doc, [id], 'fill', end.value, ctx, end.raw ?? undefined);
     if (plan.refused.length) {
       refused.push(plan.refused[0]);
       continue;

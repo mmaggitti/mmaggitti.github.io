@@ -13,6 +13,7 @@
 //   stylesheets), and an ancestor's as coming from that ancestor, value unknown.
 
 import { attrValue, el, findAttr, type Doc, type NodeId } from '../model/doc.ts';
+import { decodeAttr } from '../xml/entities.ts';
 import { declarations, sheetSets, type SheetSource } from '../geometry/css.ts';
 import { decodedSrc } from '../code/tokens.ts';
 import { STYLE_PROPS } from './props.ts';
@@ -50,6 +51,20 @@ export function styleSource(doc: Doc, id: NodeId, prop: string, styleRaw?: strin
   }
   const v = attrValue(doc, n, null, prop);
   return v !== null ? { at: 'attr', value: v.trim(), sheet, decl: null } : { at: 'none', value: null, sheet, decl: null };
+}
+
+/**
+ * The value's raw text where it lives (its style="" declaration's span, or its attribute's raw
+ * text) when that holds an entity or character reference and reads as exactly the value; else
+ * null, the decoded value being how it is spelled. Draw carries it into what it writes from the
+ * value (a new gradient's stop, and back again), so the file comes back as it was written.
+ */
+export function rawSpelling(doc: Doc, id: NodeId, prop: string): string | null {
+  const s = styleSource(doc, id, prop);
+  const n = el(doc, id);
+  const raw = s.at === 'style' ? findAttr(n, null, 'style')!.raw.slice(s.decl!.start, s.decl!.end) : s.at === 'attr' ? findAttr(n, null, prop)!.raw : null;
+  if (raw === null || !raw.includes('&') || raw.includes('"')) return null;
+  return decodeAttr(raw, doc.entities).trim() === s.value ? raw : null;
 }
 
 /** Does a <style> rule's value show instead of the element's own (the rule may set it, and nothing of the element's wins over it)? */

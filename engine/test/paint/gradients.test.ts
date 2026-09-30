@@ -15,7 +15,7 @@ import { stripDrawState } from '../../model/draw-state.ts';
 import { cleanExport } from '../../export/clean.ts';
 import { planStyle } from '../../style/write.ts';
 import { applyPlan } from '../../geometry/write.ts';
-import { gradientUsers, idMap, makeUnique, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, valueOf } from '../../paint/gradients.ts';
+import { gradientUsers, idMap, makeUnique, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, stopSpelling, valueOf } from '../../paint/gradients.ts';
 import { addStop, offsetOp, removeStop, stopOffset, LAST_STOP } from '../../paint/stops.ts';
 import { glossOf, glossOff, glossOn, glossable } from '../../paint/gloss.ts';
 
@@ -338,4 +338,18 @@ test('the gradient editor resolves a plain id only, as the canvas does (it never
   assert.deepEqual(ownPaint(only, at(only, 'id', 'r'), 'fill'), { value: 'url(#g)', gradient: null, url: 'g', fallback: '' }, 'an xml:id alone: no gradient');
   const t = resolveGradient(only, at(only, 'id', 't'))!;
   assert.deepEqual([t.chain, t.stops], [[at(only, 'id', 't')], []], 'nor a template');
+});
+
+test('a colour written with a reference is carried as written: on tools/edge-entity-references.svg, Gloss on then off, and Linear then Colour, give the rect’s fill="&accent;" and the circle’s fill="&#x23;2a9d8f" back byte for byte, the new stop holding the reference', () => {
+  const F = corpus('tools/edge-entity-references.svg');
+  for (const [local, ref] of [['rect', '&accent;'], ['circle', '&#x23;2a9d8f']]) {
+    const g = run(F, 'Gloss', (doc, apply) => assert.deepEqual(glossOn(doc, [first(doc, local)], CTX, apply), []));
+    assert.ok(serialize(g.doc).includes(`<stop offset="1" stop-color="${ref}"/>`), `${local}: the gloss ends in ${ref}, as written`);
+    g.dispatch('Gloss off', (apply) => glossOff(g.doc, [first(g.doc, local)], CTX, apply));
+    assert.equal(serialize(g.doc), F, `${local}: Gloss on then off, byte for byte`);
+    const l = run(F, 'Set fill', (doc, apply) => assert.deepEqual(setGradientPaint(doc, [first(doc, local)], 'fill', 'linearGradient', CTX, apply), []));
+    assert.ok(serialize(l.doc).includes(`<stop offset="0" stop-color="${ref}"/>`), `${local}: Linear starts at ${ref}, as written`);
+    l.dispatch('Set fill', (apply) => setPlainPaint(l.doc, [first(l.doc, local)], 'fill', (id) => stopSpelling(l.doc, resolveGradient(l.doc, ownPaint(l.doc, id, 'fill').gradient!)!.stops[0]), CTX, apply));
+    assert.equal(serialize(l.doc), F, `${local}: Linear then Colour, byte for byte`);
+  }
 });

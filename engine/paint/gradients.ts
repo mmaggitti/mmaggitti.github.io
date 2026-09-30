@@ -28,7 +28,7 @@ import { declare, undeclareIfUnused } from '../model/draw-state.ts';
 import { isDrawMadeEmpty, isDrawMadeGradient } from '../model/draw-ns.ts';
 import { insertMarkup, insertMarkups, removeWithSpace } from '../model/space.ts';
 import { numberedIds } from '../model/ids.ts';
-import { shownValue, styleSource } from '../style/where.ts';
+import { rawSpelling, shownValue, styleSource } from '../style/where.ts';
 import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
 import { sheetUrlRefs } from '../geometry/css.ts';
@@ -306,11 +306,18 @@ export function insertGradients(doc: Doc, markups: readonly ((draw: string) => s
   return [...el(doc, made).children];
 }
 
-/** A gradient's markup, one line, as SVG Lab writes one: `attrs` after its id, then draw:made, then its stops. */
-export function gradientMarkup(doc: Doc, kind: GradientKind, id: string, attrs: string, stops: readonly [string, string][], draw: string): string {
+/** A colour as written: its value, and its raw text where that holds a reference (where.ts rawSpelling), else null. */
+export interface Spelled {
+  value: string;
+  raw: string | null;
+}
+const plain = (value: string): Spelled => ({ value, raw: null });
+
+/** A gradient's markup, one line, as SVG Lab writes one: `attrs` after its id, then draw:made, then its stops (each colour as written). */
+export function gradientMarkup(doc: Doc, kind: GradientKind, id: string, attrs: string, stops: readonly [string, Spelled][], draw: string): string {
   const q = qn(doc, kind);
   const s = qn(doc, 'stop');
-  return `<${q} id="${id}" ${attrs} ${draw}:made="true">${stops.map(([o, c]) => `<${s} offset="${o}" stop-color="${escape(c, '"')}"/>`).join('')}</${q}>`;
+  return `<${q} id="${id}" ${attrs} ${draw}:made="true">${stops.map(([o, c]) => `<${s} offset="${o}" stop-color="${c.raw ?? escape(c.value, '"')}"/>`).join('')}</${q}>`;
 }
 
 /** Linear (SVG Lab's Style gradient, top to bottom) and Radial (LabPaint's centre and radius). */
@@ -321,15 +328,18 @@ export const NEW_ATTRS: Readonly<Record<GradientKind, string>> = {
 
 /**
  * A new gradient's stop colours: the element's current colour for the paint as written (its own, or
- * an ancestor's it inherits), else SVG Lab's first (none, currentColor, a context paint, a gradient);
- * then SVG Lab's second, or its first when the colour is that already.
+ * an ancestor's it inherits; a reference and all, so Colour gives it back as written), else SVG
+ * Lab's first (none, currentColor, a context paint, a gradient); then SVG Lab's second, or its first
+ * when the colour is that already.
  */
-export function newStops(doc: Doc, id: NodeId, prop: PaintProp): [string, string] {
-  const v = shownValue(doc, id, prop).value;
+export function newStops(doc: Doc, id: NodeId, prop: PaintProp): [Spelled, Spelled] {
+  const shown = shownValue(doc, id, prop);
+  const v = shown.value;
   const c = v === null ? null : parseColor(v);
-  const a = c && c.kind === 'color' ? v! : LAB_A;
+  const colour = !!c && c.kind === 'color';
+  const a = colour ? v! : LAB_A;
   const b = a.toLowerCase() === LAB_B ? LAB_A : LAB_B;
-  return [a, b];
+  return [{ value: a, raw: colour ? rawSpelling(doc, shown.holder ?? id, prop) : null }, plain(b)];
 }
 
 /**
@@ -366,17 +376,18 @@ export function setGradientPaint(doc: Doc, ids: readonly NodeId[], prop: PaintPr
 
 /**
  * The paint back to a colour or none: `value` for each element (for Colour, the caller passes the
- * gradient's first stop colour as written), and the Draw-made gradients nothing uses any more
- * taken away. Returns the refusals. Every element (and `value`) is read before anything is
- * written, so it stays linear over many shapes.
+ * gradient's first stop colour as written: stopSpelling), and the Draw-made gradients nothing uses
+ * any more taken away. Returns the refusals. Every element (and `value`) is read before anything
+ * is written, so it stays linear over many shapes.
  */
-export function setPlainPaint(doc: Doc, ids: readonly NodeId[], prop: PaintProp, value: (id: NodeId) => string, ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
+export function setPlainPaint(doc: Doc, ids: readonly NodeId[], prop: PaintProp, value: (id: NodeId) => string | Spelled, ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
   const refused: { id: NodeId; why: string }[] = [];
   const dropped: NodeId[] = [];
   const plans: StylePlan[] = [];
   for (const e of ids) {
     const own = ownPaint(doc, e, prop);
-    const plan = planStyle(doc, [e], prop, value(e), ctx);
+    const v = value(e);
+    const plan = typeof v === 'string' ? planStyle(doc, [e], prop, v, ctx) : planStyle(doc, [e], prop, v.value, ctx, v.raw ?? undefined);
     refused.push(...plan.refused);
     if (plan.refused.length) continue;
     plans.push(plan);
@@ -390,6 +401,11 @@ export function setPlainPaint(doc: Doc, ids: readonly NodeId[], prop: PaintProp,
 /** A stop's colour as written (its style="" declaration or attribute), else black (the initial value). */
 export function stopColour(doc: Doc, stop: NodeId): string {
   return styleSource(doc, stop, 'stop-color').value ?? 'black';
+}
+
+/** A stop's colour as written, a reference and all (stopColour, and where.ts rawSpelling). */
+export function stopSpelling(doc: Doc, stop: NodeId): Spelled {
+  return { value: stopColour(doc, stop), raw: rawSpelling(doc, stop, 'stop-color') };
 }
 
 /**

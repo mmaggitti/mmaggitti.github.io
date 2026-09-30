@@ -2589,6 +2589,11 @@ const BREAKS = [
     file: 'projects/draw/src/style-edit.ts', from: "  if (words) return words.some((w) => w.toLowerCase() === text.toLowerCase()) ? { text } : { error: `${JSON.stringify(input)} is not one of ${words.join(', ')}` };\n", to: '',
     run: drawTests('inspect.test.ts'), expect: /✖ the keyword properties take only their own keywords/,
   },
+  {
+    id: 'B488', what: 'N3: a new gradient’s stop writes a reference-written colour decoded again (Gloss off and Colour give back #e76f51 for fill="&accent;")',
+    file: 'engine/paint/gradients.ts', from: 'stop-color="${c.raw ?? escape(c.value, \'"\')}"', to: 'stop-color="${escape(c.value, \'"\')}"',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a colour written with a reference is carried as written/,
+  },
 ];
 
 const args = process.argv.slice(2);

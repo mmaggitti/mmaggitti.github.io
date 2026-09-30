@@ -52,8 +52,11 @@ export function ruleWhy(s: StyleSource, prop: string): string | null {
 /**
  * One element's edit for `prop` = `value` (see the header): an attribute edit, a refusal, or null
  * (nothing to do). `styleRaw` reads style="" as an earlier edit in the same plan left it.
+ * `spelling`, when given, is the value's raw text (it reads as `value`, and holds a reference:
+ * where.ts rawSpelling): written as it is where the value is its attribute, so a colour written
+ * with a reference comes back as written; in style="" the value is written.
  */
-export function planStyleOne(doc: Doc, id: NodeId, prop: string, value: string, styleRaw?: string): AttrEdit | { refused: string } | null {
+export function planStyleOne(doc: Doc, id: NodeId, prop: string, value: string, styleRaw?: string, spelling?: string): AttrEdit | { refused: string } | null {
   const s = styleSource(doc, id, prop, styleRaw);
   const why = ruleWhy(s, prop);
   if (why) return { refused: why };
@@ -69,7 +72,7 @@ export function planStyleOne(doc: Doc, id: NodeId, prop: string, value: string, 
   if (s.at === 'attr') {
     if (s.value === v) return null;
     const a = findAttr(el(doc, id), null, prop)!;
-    return { id, ns: null, local: prop, raw: escape(v, a.quote), add: false };
+    return { id, ns: null, local: prop, raw: spelling !== undefined && !spelling.includes(a.quote) ? spelling : escape(v, a.quote), add: false };
   }
   return { id, ns: null, local: prop, raw: v, add: true };
 }
@@ -84,13 +87,13 @@ function strokeIsNone(doc: Doc, id: NodeId): boolean {
   return true;
 }
 
-/** The plan for `prop` = `value` over `ids`: every element's edit, and the ones refused with why. */
-export function planStyle(doc: Doc, ids: readonly NodeId[], prop: string, value: string, ctx: StyleCtx): StylePlan {
+/** The plan for `prop` = `value` over `ids`: every element's edit, and the ones refused with why (`spelling`: planStyleOne's). */
+export function planStyle(doc: Doc, ids: readonly NodeId[], prop: string, value: string, ctx: StyleCtx, spelling?: string): StylePlan {
   const out: StylePlan = { edits: [], refused: [] };
   const widthTwo = prop === 'stroke' && value.trim().toLowerCase() !== 'none';
   for (const id of ids) {
     const was = widthTwo && strokeIsNone(doc, id);
-    const e = planStyleOne(doc, id, prop, value);
+    const e = planStyleOne(doc, id, prop, value, undefined, spelling);
     if (e && 'refused' in e) {
       out.refused.push({ id, why: e.refused });
       continue;
