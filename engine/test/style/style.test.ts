@@ -4,7 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { descendants, parseDoc, serialize, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
+import { readdirSync, readFileSync } from 'node:fs';
+import { NS, descendants, findAttr, parseDoc, serialize, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
+import { Session } from '../../commands/session.ts';
 import { applyPlan } from '../../geometry/write.ts';
 import { STYLE_PROPS } from '../../style/props.ts';
 import { shownValue, styleSource } from '../../style/where.ts';
@@ -136,4 +138,88 @@ test('what Inspect shows: the element’s own value (style="" over the attribute
   assert.deepEqual(shown('plain', 'stroke'), { value: 'none', from: 'default', holder: null });
   assert.deepEqual(shown('k', 'fill'), { value: null, from: 'rule', holder: null }, 'a rule may set it');
   assert.deepEqual(shown('under', 'stroke'), { value: null, from: 'ancestor', holder: byId(doc, 'rg') }, 'the group’s stroke is a rule’s');
+});
+
+// §5.9's property test over the corpus: a style write changes only the bytes it claims. Every file
+// Draw opens, every SVG element but the root, six properties (so style="", attributes, new
+// attributes, the width-2 rule and the rules' refusals all come up): about 8,300 writes, under a
+// second in node.
+test('corpus property: planStyle over every element of every corpus file, for fill, stroke, stroke-width, opacity, stroke-dasharray and paint-order, changes only what it claims (the value spans in style="", an attribute’s value, or an attribute appended to the start tag), and one undo gives the file back byte for byte', () => {
+  const dir = new URL('../fixtures/corpus/', import.meta.url);
+  const files = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.svg'));
+  const WRITES: [string, string][] = [['fill', '#123456'], ['stroke', '#654321'], ['stroke-width', '3'], ['opacity', '0.5'], ['stroke-dasharray', '10 6'], ['paint-order', 'stroke']];
+  // Everything but the spans cut out of `old` is in `now`, in order, and nothing else is added around it.
+  const keepsOutside = (old: string, now: string, spans: { start: number; end: number }[]): boolean => {
+    const pieces: string[] = [];
+    let at = 0;
+    for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+      pieces.push(old.slice(at, s.start));
+      at = s.end;
+    }
+    pieces.push(old.slice(at));
+    if (!now.startsWith(pieces[0]) || !now.endsWith(pieces[pieces.length - 1])) return false;
+    let from = pieces[0].length;
+    for (const p of pieces.slice(1, -1)) {
+      const i = now.indexOf(p, from);
+      if (i === -1) return false;
+      from = i + p.length;
+    }
+    return from <= now.length - pieces[pieces.length - 1].length;
+  };
+  let writes = 0;
+  const problems: string[] = [];
+  for (const f of files) {
+    const S = readFileSync(new URL(f, dir), 'utf8');
+    const r = parseDoc(S);
+    if (!r.ok) continue; // a file Draw opens as read-only source
+    const doc = r.doc;
+    const session = new Session(doc);
+    const elements = [...descendants(doc, doc.root)].filter((n): n is ElementNode => n.kind === 'element' && n.ns === NS.svg && n.id !== doc.root);
+    for (const e of elements) {
+      for (const [prop, value] of WRITES) {
+        const plan = planStyle(doc, [e.id], prop, value, CTX);
+        if (plan.refused.length || !plan.edits.length) continue;
+        const was = e.attrs.map((a) => ({ ...a }));
+        session.dispatch(`Set ${prop}`, (apply) => applyPlan(doc, plan, apply));
+        writes++;
+        const T = serialize(doc);
+        const where = `${f} <${e.qname}> ${prop}`;
+        // The change stays inside the start tag's attribute text.
+        let a = 0;
+        while (a < S.length && a < T.length && S[a] === T[a]) a++;
+        let b = 0;
+        while (b < S.length - a && b < T.length - a && S[S.length - 1 - b] === T[T.length - 1 - b]) b++;
+        if (/[<>]/.test(S.slice(a, S.length - b) + T.slice(a, T.length - b))) problems.push(`${where}: the change crosses markup`);
+        // What the plan adds is appended at the end of the start tag, in order: one space, double quotes.
+        const added = plan.edits.filter((x) => x.add).map((x) => findAttr(e, x.ns, x.local));
+        const tail = e.attrs.slice(e.attrs.length - added.length);
+        if (!added.every((x, i) => x === tail[i] && x.lead === ' ' && x.quote === '"')) problems.push(`${where}: what it adds isn't appended at the end of the start tag`);
+        for (const x of plan.edits) {
+          const old = was.find((w) => w.ns === x.ns && w.local === x.local);
+          const now = findAttr(e, x.ns, x.local)!;
+          if (!old) continue;
+          if (old.quote !== now.quote || old.lead !== now.lead || old.eq !== now.eq || old.qname !== now.qname) problems.push(`${where}: ${x.local}'s quote, spacing or name changed`);
+          if (x.local === 'style') {
+            // Only the spans of the values written (the width-2 rule's width too) changed.
+            const spans = [prop, 'stroke-width'].flatMap((p) => {
+              const d = styleSource(doc, e.id, p, old.raw);
+              return d.decl && d.value !== styleSource(doc, e.id, p, now.raw).value ? [d.decl] : [];
+            });
+            if (!spans.length || !keepsOutside(old.raw, now.raw, spans)) problems.push(`${where}: style="" changed outside its value spans: ${JSON.stringify(old.raw)} → ${JSON.stringify(now.raw)}`);
+          }
+        }
+        // Every attribute the plan didn't name is byte for byte as it was.
+        for (const w of was) {
+          if (plan.edits.some((x) => x.ns === w.ns && x.local === w.local)) continue;
+          const now = findAttr(e, w.ns, w.local);
+          if (!now || now.raw !== w.raw || now.quote !== w.quote || now.lead !== w.lead) problems.push(`${where}: ${w.qname} changed, though nothing wrote it`);
+        }
+        session.undo();
+        if (serialize(doc) !== S) problems.push(`${where}: one undo doesn't give the file back`);
+        if (problems.length > 20) break;
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
+  assert.ok(writes > 8000, `test setup: ${writes} writes over the corpus`);
 });

@@ -2594,6 +2594,11 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: 'stop-color="${c.raw ?? escape(c.value, \'"\')}"', to: 'stop-color="${escape(c.value, \'"\')}"',
     run: engineTests('paint/gradients.test.ts'), expect: /✖ a colour written with a reference is carried as written/,
   },
+  {
+    id: 'B489', what: 'N4: planStyleOne re-serializes the whole style attribute (every declaration re-spaced), not only the value’s span',
+    file: 'engine/style/write.ts', from: 'raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };', to: "raw: (raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end)).split(';').map((x) => x.trim()).filter(Boolean).join('; '), add: false };",
+    run: engineTests('style/style.test.ts'), expect: /✖ corpus property: planStyle over every element of every corpus file/,
+  },
 ];
 
 const args = process.argv.slice(2);

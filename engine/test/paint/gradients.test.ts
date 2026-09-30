@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { attrValue, descendants, parseDoc, serialize, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
 import { Session } from '../../commands/session.ts';
@@ -18,6 +18,9 @@ import { applyPlan } from '../../geometry/write.ts';
 import { gradientUsers, idMap, makeUnique, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, stopSpelling, valueOf } from '../../paint/gradients.ts';
 import { addStop, offsetOp, removeStop, stopOffset, LAST_STOP } from '../../paint/stops.ts';
 import { glossOf, glossOff, glossOn, glossable } from '../../paint/gloss.ts';
+import { finishGenerators } from '../../generators/index.ts';
+import { styleSource } from '../../style/where.ts';
+import { parseColor } from '../../values/color.ts';
 
 const CORPUS = fileURLToPath(new URL('../fixtures/corpus/', import.meta.url));
 const corpus = (name: string) => readFileSync(CORPUS + name, 'utf8');
@@ -352,4 +355,52 @@ test('a colour written with a reference is carried as written: on tools/edge-ent
     l.dispatch('Set fill', (apply) => setPlainPaint(l.doc, [first(l.doc, local)], 'fill', (id) => stopSpelling(l.doc, resolveGradient(l.doc, ownPaint(l.doc, id, 'fill').gradient!)!.stops[0]), CTX, apply));
     assert.equal(serialize(l.doc), F, `${local}: Linear then Colour, byte for byte`);
   }
+});
+
+// §5.9's property test over the corpus, for gloss and gradients: every glossable element of every
+// corpus file (about 700; under a second in node), through a Session with the editor's finish hook.
+test('corpus property: Gloss on then off, and Linear then Colour, over every glossable element of every corpus file give the file back byte for byte where its fill is a colour of its own (else only its start tag changes: the fill Draw gives it), and two undos give it back in any case', () => {
+  const dir = new URL('../fixtures/corpus/', import.meta.url);
+  const files = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.svg'));
+  let exact = 0;
+  const problems: string[] = [];
+  for (const f of files) {
+    const S = readFileSync(new URL(f, dir), 'utf8');
+    const r = parseDoc(S);
+    if (!r.ok) continue;
+    const doc = r.doc;
+    const s = new Session(doc, { finish: (d, ops, apply) => void finishGenerators(d, ops, apply) });
+    const shapes = [...descendants(doc, doc.root)].filter((n): n is ElementNode => n.kind === 'element' && glossable(doc, n.id));
+    for (const e of shapes) {
+      const own = styleSource(doc, e.id, 'fill').value;
+      const colour = parseColor(own ?? '')?.kind === 'color';
+      for (const kind of ['Gloss', 'Linear'] as const) {
+        let refused: { why: string }[] = [];
+        s.dispatch(kind, (apply) => (refused = kind === 'Gloss' ? glossOn(doc, [e.id], CTX, apply) : setGradientPaint(doc, [e.id], 'fill', 'linearGradient', CTX, apply)));
+        if (refused.length) {
+          if (serialize(doc) !== S) problems.push(`${f} <${e.qname}> ${kind}: refused, but something was written`);
+          continue;
+        }
+        s.dispatch('back', (apply) => void (kind === 'Gloss' ? glossOff(doc, [e.id], CTX, apply) : setPlainPaint(doc, [e.id], 'fill', (id) => stopSpelling(doc, resolveGradient(doc, ownPaint(doc, id, 'fill').gradient!)!.stops[0]), CTX, apply)));
+        const T = serialize(doc);
+        if (colour) {
+          if (T === S) exact++;
+          else problems.push(`${f} <${e.qname}> fill=${own}: ${kind} then back isn't byte for byte`);
+        } else {
+          // No colour of its own: it keeps the fill Draw gave it, and nothing outside its start tag changes.
+          let a = 0;
+          while (a < S.length && a < T.length && S[a] === T[a]) a++;
+          let b = 0;
+          while (b < S.length - a && b < T.length - a && S[S.length - 1 - b] === T[T.length - 1 - b]) b++;
+          if (/[<>]/.test(S.slice(a, S.length - b) + T.slice(a, T.length - b))) problems.push(`${f} <${e.qname}> fill=${own}: ${kind} then back changed more than its start tag`);
+        }
+        s.undo();
+        s.undo();
+        if (serialize(doc) !== S) problems.push(`${f} <${e.qname}> ${kind}: two undos don't give the file back`);
+      }
+      if (problems.length > 20) break;
+    }
+  }
+  assert.deepEqual(problems, []);
+  assert.ok(exact > 300, `test setup: ${exact} round trips on a colour fill over the corpus`);
 });
