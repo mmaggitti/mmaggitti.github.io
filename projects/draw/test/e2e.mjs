@@ -63,6 +63,11 @@
 // the anchors and controls through the path's own CTM (their arms, a bend handle through the finger,
 // the S's mirror guide, Make smooth and Make corner), the letter tokens' L → Q → C cycle and
 // Relative/Absolute keeping the rest of the path, and the phone rules on the Pen's and the Node tool's bars.
+// Then arcs, holes and the donut: an arc's ghost arcs drawn where the other flag pairs draw, each
+// labelled, a tap switching to one; the direction arrows, Inspect's Fill rule and Reverse cutting the
+// holes of SVG Lab's keyhole two ways (the paper shows through); and SVG Lab's donut, Edit as donut
+// on its own file, a boundary dragged round the ring redrawing the slices from the data comment, and
+// a hand edit of a slice turning it plain, the comment's tokens going with it.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -79,6 +84,8 @@ import { encodeImport } from '../src/platform/files.ts';
 import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { starPoints } from '../../../engine/generators/radial.ts';
+import { arcCenter, arcPoint } from '../../../engine/path/arc.ts';
+import { donutSlices } from '../../../engine/generators/donut.ts';
 import { clampRgb, parseColor } from '../../../engine/values/color.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
@@ -255,6 +262,9 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(nodeHandlesSitOnTheAnchorsAndControls);
   await check(theLetterCycleAndRelativeKeepTheRestOfThePath);
   for (const height of [956, 796]) await check(phoneRulesOnThePenAndNodeTools, height);
+  await check(ghostArcsSwitchTheFlags);
+  await check(holesCutTwoWays);
+  await check(theDonutRegeneratesFromItsData);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -6247,6 +6257,290 @@ async function phoneRulesOnThePenAndNodeTools(browser, origin, height) {
     await page.waitForTimeout(50);
     if (await source(page) !== before.replace('Q 40 32, 50 44', 'Q 40 32, 50 49')) problems.push(`a press 20 pt from the middle anchor did not move it:\n${await source(page)}`);
     must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M3 S2: arcs, holes and the donut ───────────────────────────────────────────────────────
+
+// Runs in the page: root units → client px, through the root's getScreenCTM.
+function rootToScreen(pts) {
+  const m = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM();
+  return pts.map(([x, y]) => {
+    const p = new DOMPoint(x, y).matrixTransform(m);
+    return { x: p.x, y: p.y };
+  });
+}
+// Runs in the page: the overlay's shown ghost arcs, each 400 points along it in client px.
+function ghostsNow() {
+  return [...document.querySelectorAll('path.draw-ghost')].filter((p) => p.style.display !== 'none').map((p) => {
+    const m = p.getScreenCTM();
+    const L = p.getTotalLength();
+    const pts = [];
+    for (let i = 0; i <= 400; i++) {
+      const q = p.getPointAtLength((L * i) / 400).matrixTransform(m);
+      pts.push([q.x, q.y]);
+    }
+    return { flags: p.getAttribute('data-flags'), pts };
+  });
+}
+// Runs in the page: the overlay's shown text marks of a class (their anchor point, client px).
+function overlayTexts(cls) {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll(`text.${cls}`)].filter((t) => t.style.display !== 'none').map((t) => ({ text: t.textContent, on: t.classList.contains('on'), x: +t.getAttribute('x') + o.x, y: +t.getAttribute('y') + o.y }));
+}
+// Runs in the page: the shown direction arrows: centre (s = 4.5 px behind the tip's 1.7s, from the base's
+// middle), direction in degrees, and whether it is an inner one, client px.
+function arrowsNow() {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll('polygon.draw-dir')].filter((p) => p.style.display !== 'none').map((p) => {
+    const [tip, b1, b2] = p.getAttribute('points').split(' ').map((q) => q.split(',').map(Number));
+    const base = [(b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2];
+    const len = Math.hypot(tip[0] - base[0], tip[1] - base[1]);
+    const u = [(tip[0] - base[0]) / len, (tip[1] - base[1]) / len];
+    return { x: base[0] + 4.5 * u[0] + o.x, y: base[1] + 4.5 * u[1] + o.y, deg: (Math.atan2(u[1], u[0]) * 180) / Math.PI, inner: p.classList.contains('draw-dir--in') };
+  });
+}
+/** The screen points of the arc from (x0, y0) to (x1, y1) with these flags: `n` along it, in root units → screen. */
+async function arcOnScreen(page, [x0, y0, r, x1, y1], large, sweep, n = 19) {
+  const c = arcCenter(x0, y0, r, r, 0, large, sweep, x1, y1);
+  return page.evaluate(rootToScreen, Array.from({ length: n }, (_, i) => arcPoint(c, c.t1 + (c.dt * i) / (n - 1))));
+}
+const PAIRS = [[false, false], [false, true], [true, false], [true, true]];
+const flagText = (L, S) => `${+L} ${+S}`;
+
+// lab/arcs.svg, its path in the Node tool: three dashed ghost arcs, each within 1 px of the 19 screen
+// points (computed here from arcCenter and arcPoint, through the root's getScreenCTM) of the arc its
+// flags give; the labels "0 0", "1 0" and "1 1" beside the ghosts and "0 1" (.on) beside the arc,
+// each within 2 px of where they go (10 px out from the chord's midpoint, 4 px lower, inside the
+// canvas). A tap on each ghost's own midpoint sets its pair, one "Set arc flags" each, and the arc the
+// canvas draws then passes within 1 px of that midpoint. Then the end anchor dragged from (76, 50) to
+// (70, 40) rewrites only those two numbers, and the ghosts follow it.
+async function ghostArcsSwitchTheFlags(browser, origin) {
+  const F = LAB('arcs.svg');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const p = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 35 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the arc selected ${await label(page)}`);
+    await page.locator('.draw-node-tool').tap();
+    await page.waitForTimeout(50);
+    const ghostsSit = async (arc, now, as) => {
+      const ghosts = await page.evaluate(ghostsNow);
+      const want = PAIRS.filter(([L, S]) => flagText(L, S) !== now).map(([L, S]) => flagText(L, S));
+      must(JSON.stringify(ghosts.map((g) => g.flags).sort()) === JSON.stringify(want), `${as}: the ghosts are ${ghosts.map((g) => g.flags)}, not ${want}`);
+      for (const g of ghosts) {
+        const [L, S] = g.flags.split(' ').map((f) => f === '1');
+        const pts = await arcOnScreen(page, arc, L, S);
+        const far = Math.max(...pts.map(({ x, y }) => Math.min(...g.pts.map(([a, b]) => Math.hypot(a - x, b - y)))));
+        must(far <= 1, `${as}: the ${g.flags} ghost passes ${far.toFixed(2)} px from the arc those flags draw`);
+      }
+    };
+    const ARC = [24, 50, 30, 76, 50];
+    await ghostsSit(ARC, '0 1', 'lab/arcs.svg');
+    // The labels: at each arc's midpoint, 10 px out from the chord's midpoint, 4 px lower, inside the canvas.
+    const host = await page.evaluate(() => document.querySelector('.draw-host').getBoundingClientRect().toJSON());
+    const [chord] = await page.evaluate(rootToScreen, [[50, 50]]);
+    const labels = await page.evaluate(overlayTexts, 'draw-flag-label');
+    must(labels.length === 4, `${labels.length} flag labels`);
+    for (const [L, S] of PAIRS) {
+      const [mid] = await arcOnScreen(page, ARC, L, S, 3).then((m) => [m[1]]);
+      const len = Math.hypot(mid.x - chord.x, mid.y - chord.y);
+      const at = { x: Math.min(Math.max(mid.x + (10 * (mid.x - chord.x)) / len, host.x + 8), host.x + host.width - 8), y: Math.min(Math.max(mid.y + (10 * (mid.y - chord.y)) / len + 4, host.y + 13), host.y + host.height - 4) };
+      const l = labels.find((q) => q.text === flagText(L, S));
+      must(l && nearPt(l, at, 2) && l.on === (flagText(L, S) === '0 1'), `the ${flagText(L, S)} label is ${JSON.stringify(l)}, not at ${JSON.stringify(at)}${flagText(L, S) === '0 1' ? ' (.on)' : ''}`);
+    }
+    // A tap on each ghost's midpoint: its pair, one entry, and the canvas's arc passes through it.
+    for (const [L, S] of [[false, false], [true, false], [true, true]]) {
+      const [, mid] = await arcOnScreen(page, ARC, L, S, 3);
+      await page.touchscreen.tap(mid.x, mid.y);
+      await page.waitForTimeout(50);
+      const want = F.replace('A 30 30 0 0 1 76 50', `A 30 30 0 ${+L} ${+S} 76 50`);
+      must(await source(page) === want, `the tap on the ${flagText(L, S)} ghost wrote:\n${await source(page)}`);
+      must(await undo.getAttribute('aria-label') === 'Undo Set arc flags', `the tap is ${await undo.getAttribute('aria-label')}`);
+      const [d] = await page.evaluate(pathDistances, { pts: [mid] });
+      must(d <= 1, `the drawn ${flagText(L, S)} arc passes ${d.toFixed(2)} px from the ghost's midpoint`);
+    }
+    for (let i = 0; i < 3; i++) await undo.tap();
+    must(await source(page) === F, `three undos left:\n${await source(page)}`);
+    // The end anchor dragged from (76, 50) to (70, 40): only those numbers, and the ghosts follow.
+    await snapOff(page);
+    const end = (await page.evaluate(handlesNow)).find((h) => h.id === 'a1');
+    const [e0, e1] = await page.evaluate(rootToScreen, [[76, 50], [70, 40]]);
+    must(end && nearPt(end, e0), `the end anchor is drawn at ${JSON.stringify(end)}, not (76, 50) = ${JSON.stringify(e0)}`);
+    await dragOnCanvas(page, 'mouse', end, { x: e1.x - end.x, y: e1.y - end.y }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === F.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 0 1 70 40'), `the end anchor dragged to (70, 40) wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move point', `the drag is ${await undo.getAttribute('aria-label')}`);
+    await ghostsSit([24, 50, 30, 70, 40], '0 1', 'the end moved');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
+const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z';
+const PAPER = (px) => px.every((v) => v >= 200); // the light checkerboard, 238 or 255
+
+// lab/arcs--holes.svg, its path in the Node tool: arrowheads at the screen points of (50, 14), pointing
+// right (± 10°), and (50, 86), pointing left. Inspect's Fill rule → Evenodd: the pixel at (50, 55), in
+// the keyhole, is the paper's and (50, 20) is #264653; Nonzero: (50, 55) is #264653 again. An inner
+// anchor tapped, then Reverse: the source holds SVG Lab's HOLE_REV, (50, 55) is the paper's again, and
+// the inner arrow on the bottom line (50, 66) now points right; one undo gives the file back.
+async function holesCutTwoWays(browser, origin) {
+  const F = LAB('arcs--holes.svg');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs--holes.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const p = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 20 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the ring selected ${await label(page)}`);
+    await page.locator('.draw-node-tool').tap();
+    await page.waitForTimeout(50);
+    const arrowNear = async (x, y) => {
+      const [at] = await page.evaluate(rootToScreen, [[x, y]]);
+      const arrows = await page.evaluate(arrowsNow);
+      return arrows.map((a) => ({ ...a, off: Math.hypot(a.x - at.x, a.y - at.y) })).sort((a, b) => a.off - b.off)[0];
+    };
+    const top = await arrowNear(50, 14);
+    const bottom = await arrowNear(50, 86);
+    must(top && top.off <= 2 && Math.abs(top.deg) <= 10 && !top.inner, `the arrow near (50, 14) is ${JSON.stringify(top)}: not there, pointing right`);
+    must(bottom && bottom.off <= 2 && Math.abs(Math.abs(bottom.deg) - 180) <= 10 && !bottom.inner, `the arrow near (50, 86) is ${JSON.stringify(bottom)}: not there, pointing left`);
+    const line = await arrowNear(50, 66);
+    must(line && line.off <= 2 && line.inner && Math.abs(Math.abs(line.deg) - 180) <= 10, `the inner bottom line's arrow is ${JSON.stringify(line)}: not an inner one pointing left`);
+    const pixels = async () => {
+      await toPeek(page);
+      const [hole, ring] = await page.evaluate(rootToScreen, [[50, 55], [50, 20]]);
+      return { hole: await pixelAt(page, hole), ring: await pixelAt(page, ring) };
+    };
+    const INK = hex('#264653');
+    let px = await pixels();
+    must(near3(px.hole, INK, 8) && near3(px.ring, INK, 8), `nonzero, both clockwise: the keyhole is drawn ${px.hole}, the ring ${px.ring}, not both #264653`);
+    await showInspect(page);
+    await inspectSegment(page, 'fill-rule', 'Evenodd');
+    must(await source(page) === F.replace('fill-rule="nonzero"', 'fill-rule="evenodd"'), `Evenodd wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set fill-rule', `Evenodd is ${await undo.getAttribute('aria-label')}`);
+    px = await pixels();
+    must(PAPER(px.hole) && near3(px.ring, INK, 8), `evenodd: the keyhole is drawn ${px.hole} (not the paper), the ring ${px.ring}`);
+    await showInspect(page);
+    await inspectSegment(page, 'fill-rule', 'Nonzero');
+    must(await source(page) === F, `Nonzero did not give the file back:\n${await source(page)}`);
+    px = await pixels();
+    must(near3(px.hole, INK, 8), `nonzero again: the keyhole is drawn ${px.hole}, not #264653`);
+    // An inner anchor, then Reverse.
+    const a6 = (await page.evaluate(handlesNow)).find((h) => h.id === 'a6');
+    const [at6] = await page.evaluate(rootToScreen, [[61, 66]]);
+    must(a6 && nearPt(a6, at6), `the inner anchor a6 is drawn at ${JSON.stringify(a6)}, not (61, 66)`);
+    await page.touchscreen.tap(a6.x, a6.y);
+    await page.waitForTimeout(50);
+    await page.locator('.draw-ctx-btn[aria-label="Reverse"]').tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === F.replace(HOLE_IN, HOLE_REV), `Reverse on the inner subpath wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Reverse', `Reverse is ${await undo.getAttribute('aria-label')}`);
+    px = await pixels();
+    must(PAPER(px.hole) && near3(px.ring, INK, 8), `the inner subpath reversed: the keyhole is drawn ${px.hole} (not the paper), the ring ${px.ring}`);
+    const turned = await arrowNear(50, 66);
+    must(turned && turned.off <= 2 && turned.inner && Math.abs(turned.deg) <= 10, `after Reverse the bottom line's arrow is ${JSON.stringify(turned)}: not pointing right`);
+    await undo.tap();
+    must(await source(page) === F, `undo did not give the file back:\n${await source(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const DONUT_ATTRS = ` xmlns:draw="${DRAW_NS_URI}" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28"`;
+const DETACHED_NOTICE = 'It’s a plain shape now: its generator inputs were dropped.';
+
+// lab/arcs--donut.svg: a tap on the first slice, Inspect → Edit as donut: the source is the file with
+// the four attributes on its root, and the comment's block in the code holds four number tokens.
+// Boundary 0 is drawn at the screen point of (66.5, 72.7) (± 1 px); dragged round the ring to 70% of
+// the turn, the tooltip reads "64 | 1" above the finger, the comment reads data: 64, 1, 20, 15, the
+// first slice's drawn arc ends where the generator says (its getPointAtLength end within 0.5 px) and
+// is drawn the long way round (its middle on the far side of the centre from its chord), and the %
+// labels read 64%, 1%, 20%, 15%; one entry. A scrub of a slice's own d number detaches it: M2's
+// notice, the root's draw: attributes and xmlns:draw gone, and the comment's tokens gone; one undo
+// brings all of it back.
+async function theDonutRegeneratesFromItsData(browser, origin) {
+  const F = LAB('arcs--donut.svg');
+  const ADOPTED = F.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100"${DONUT_ATTRS}>`);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs--donut.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const ring = (f) => [50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI)];
+    const [first] = await page.evaluate(rootToScreen, [ring(0.2)]);
+    await page.touchscreen.tap(first.x, first.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the first slice selected ${await label(page)}`);
+    await showInspect(page);
+    await page.locator('.draw-inspect button', { hasText: /^Edit as donut$/ }).tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === ADOPTED, `Edit as donut wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Edit as donut', `Edit as donut is ${await undo.getAttribute('aria-label')}`);
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await showCode(page);
+    const comment = page.locator('.cv-block', { hasText: '<!-- data:' });
+    const tokens = () => comment.locator('.cv-number').allTextContents();
+    must(JSON.stringify(await tokens()) === '["40","25","20","15"]', `the comment's block holds the number tokens ${JSON.stringify(await tokens())}`);
+    await toPeek(page);
+    // Boundary 0, then round the ring to 70% of the turn.
+    const b0 = (await page.evaluate(handlesNow)).find((h) => h.id === 'donut-b0');
+    const [at0] = await page.evaluate(rootToScreen, [[66.5, 72.7]]);
+    must(b0 && nearPt(b0, at0), `boundary 0 is drawn at ${JSON.stringify(b0)}, not (66.5, 72.7) = ${JSON.stringify(at0)}`);
+    const path = await page.evaluate(rootToScreen, [0.45, 0.5, 0.55, 0.6, 0.65, 0.7].map(ring));
+    await page.mouse.move(b0.x, b0.y);
+    await page.mouse.down();
+    let during = null;
+    for (const [i, q] of path.entries()) {
+      await page.mouse.move(q.x, q.y, { steps: 2 });
+      if (i === path.length - 1) {
+        during = await page.evaluate(() => {
+          const t = document.querySelector('.draw-tip');
+          return { text: t && !t.hidden ? t.textContent : null, bottom: t?.getBoundingClientRect().bottom ?? null };
+        });
+      }
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(50);
+    const finger = path[path.length - 1];
+    must(during?.text === '64 | 1' && during.bottom !== null && during.bottom < finger.y, `during the drag the tooltip read ${JSON.stringify(during)}, not "64 | 1" above the finger at ${finger.y.toFixed(1)}`);
+    must((await source(page)).includes('<!-- data: 64, 1, 20, 15 -->'), `the comment reads:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set donut values', `the drag is ${await undo.getAttribute('aria-label')}`);
+    const want = donutSlices([64, 1, 20, 15], 50, 50, 28);
+    const [ex, ey] = parsePath(want[0]).segs[1].args.slice(5);
+    const [end] = await page.evaluate(rootToScreen, [[ex, ey]]);
+    const drawn = await page.evaluate(() => {
+      const p = document.querySelector('.draw-host').shadowRoot.querySelectorAll('path')[0];
+      const m = p.getScreenCTM();
+      const L = p.getTotalLength();
+      const at = (t) => {
+        const q = p.getPointAtLength(L * t).matrixTransform(m);
+        return { x: q.x, y: q.y };
+      };
+      return { start: at(0), mid: at(0.5), end: at(1) };
+    });
+    must(nearPt(drawn.end, end, 0.5), `the first slice's drawn arc ends at ${JSON.stringify(drawn.end)}, not where the generator says, ${JSON.stringify(end)}`);
+    const [centre] = await page.evaluate(rootToScreen, [[50, 50]]);
+    const chordMid = { x: (drawn.start.x + drawn.end.x) / 2, y: (drawn.start.y + drawn.end.y) / 2 };
+    must((drawn.mid.x - centre.x) * (chordMid.x - centre.x) + (drawn.mid.y - centre.y) * (chordMid.y - centre.y) < 0, `the first slice is not drawn the long way round: its middle ${JSON.stringify(drawn.mid)} is on its chord's side of the centre`);
+    const pct = (await page.evaluate(overlayTexts, 'draw-donut-label')).map((l) => l.text);
+    must(JSON.stringify(pct) === '["64%","1%","20%","15%"]', `the % labels read ${pct}`);
+    // A scrub of a slice's own d number: a hand edit, so the donut is detached.
+    const dragged = await source(page);
+    await showCode(page);
+    const sliceNumber = page.locator('.cv-block', { hasText: '<path d=' }).nth(2).locator('.cv-number').first();
+    await scrubToken(page, sliceNumber, 3);
+    await page.waitForTimeout(50);
+    must(await toast(page) === DETACHED_NOTICE, `the notice after the scrub is ${JSON.stringify(await toast(page))}`);
+    must(!(await source(page)).includes('draw:'), `the root keeps Draw's attributes:\n${await source(page)}`);
+    must(JSON.stringify(await tokens()) === '[]', `the comment still holds tokens ${JSON.stringify(await tokens())}`);
+    await undo.tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === dragged, `one undo did not bring the donut back:\n${await source(page)}`);
+    must(JSON.stringify(await tokens()) === '["64","1","20","15"]', `after the undo the comment's tokens are ${JSON.stringify(await tokens())}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
