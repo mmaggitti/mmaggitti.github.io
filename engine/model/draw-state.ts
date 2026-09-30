@@ -21,7 +21,7 @@
 
 import { NS, attrValue, el, findAttr, serialize, type Doc, type ElementNode, type NodeId } from './doc.ts';
 import { parseFragment } from './fragment.ts';
-import { DRAW_NS } from './draw-ns.ts';
+import { DRAW_NS, isDrawMadeEmpty } from './draw-ns.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
 import { rewriteNumbers } from '../code/edit.ts';
 import { stripNamespaces } from '../export/clean.ts';
@@ -163,7 +163,7 @@ export function writeState(doc: Doc, next: DrawState, apply: Apply): void {
     if (!cur) return;
     const meta = el(doc, cur.parent!);
     removeWithSpace(doc, cur.id, apply);
-    if (meta.attrs.some((a) => a.ns === DRAW_NS && a.local === 'made') && !elementKids(doc, meta).length) removeWithSpace(doc, meta.id, apply);
+    if (isDrawMadeEmpty(doc, meta)) removeWithSpace(doc, meta.id, apply); // Draw's own, with nothing of the file's in it
     undeclareIfUnused(doc, apply);
     return;
   }
@@ -189,7 +189,9 @@ export function writeState(doc: Doc, next: DrawState, apply: Apply): void {
     insertWithSpace(doc, made.nodes[0], meta.id, at, blank(doc, ws) ? ws! : null, apply);
     return;
   }
-  const made = parseFragment(doc, root.id, `<metadata ${p}:made="true"><${attrs}/></metadata>`);
+  // In the SVG namespace, whatever the root calls it (<svg:svg> has no default namespace: <svg:metadata>).
+  const tag = root.prefix ? `${root.prefix}:metadata` : 'metadata';
+  const made = parseFragment(doc, root.id, `<${tag} ${p}:made="true"><${attrs}/></${tag}>`);
   if (!made.ok) throw new Error(made.error.message);
   // Before the first element and its whitespace; with no element, first (nothing before it, so its
   // removal takes none of the file's own whitespace).

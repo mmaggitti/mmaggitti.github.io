@@ -9,11 +9,11 @@
 //
 // stripNamespaces is the same for any set of namespaces; cleanExport strips every editor's, Draw's
 // own included, and stripDrawState (model/draw-state.ts) Draw's alone. What Draw inserted goes with
-// the whitespace it brought: a draw: element takes the whitespace just before it, and a
-// <metadata draw:made="true"> left with no element in it goes too.
+// the whitespace it brought: a draw: element takes the whitespace just before it, and an element Draw
+// made (draw-ns.ts: a <metadata draw:made="true">) goes too when nothing of the file's is left in it.
 
 import { descendants, detachNode, parseDoc, restoreAttr, serialize, type Doc, type ElementNode } from '../model/doc.ts';
-import { DRAW_NS } from '../model/draw-ns.ts';
+import { DRAW_NS, holdsOnlyDrawItems, isDrawMade } from '../model/draw-ns.ts';
 import { decodeAttr } from '../xml/entities.ts';
 
 /** Editor namespaces: the ledger's namespace rows marked "Editor data" (checked by a test). */
@@ -50,8 +50,8 @@ export function stripNamespaces(doc: Doc, uris: ReadonlySet<string>): CleanResul
   let removedElements = 0;
   let removedAttributes = 0;
   const editorEls: ElementNode[] = [];
-  // Draw's own <metadata>, found before its draw:made attribute goes.
-  const made = uris.has(DRAW_NS) ? [...descendants(copy, copy.root)].filter((n): n is ElementNode => n.kind === 'element' && n.attrs.some((a) => a.ns === DRAW_NS && a.local === 'made')) : [];
+  // What Draw made, found before its draw:made attribute goes.
+  const made = uris.has(DRAW_NS) ? [...descendants(copy, copy.root)].filter((n): n is ElementNode => n.kind === 'element' && isDrawMade(n)) : [];
   for (const n of descendants(copy, copy.root)) {
     if (n.kind !== 'element') continue;
     if (n.ns !== null && uris.has(n.ns) && n.id !== copy.root) {
@@ -77,7 +77,7 @@ export function stripNamespaces(doc: Doc, uris: ReadonlySet<string>): CleanResul
   };
   for (const e of editorEls) if (isAttached(copy, e)) drop(e);
   for (const m of made) {
-    if (isAttached(copy, m) && !m.children.some((c) => copy.nodes.get(c)?.kind === 'element')) drop(m);
+    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);
   }
   // Declarations of editor namespaces nothing uses any more.
   const used = usedNamespaces(copy);

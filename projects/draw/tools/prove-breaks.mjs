@@ -1876,7 +1876,8 @@ const BREAKS = [
   },
   {
     id: 'B352', what: 'stripNamespaces leaves an empty Draw-made <metadata>',
-    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && !m.children.some((c) => copy.nodes.get(c)?.kind === \'element\')) drop(m);', to: '    void m;',
+    // P1-M1 fix (F1): re-anchored; what Draw made is judged by draw-ns.ts's one rule.
+    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
     run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState gives every corpus file back byte for byte/,
   },
   {
@@ -2028,6 +2029,11 @@ const BREAKS = [
     id: 'B383', what: 'F16: Ungroup takes a group with a <title> (its name goes to the parent)',
     file: 'projects/draw/src/interact/structure.ts', from: "    if (k.local === 'title') return 'Its title names the group; ungrouping would give it to the parent.';\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ Ungroup gives the group’s transform only to the children drawn where they sit/,
+  },
+  {
+    id: 'B384', what: 'F1: any element marked draw:made counts as Draw’s own (a shape so marked leaves the As-is export)',
+    file: 'engine/model/draw-ns.ts', from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some(', to: '  return n.attrs.some(',
+    run: engineTests('draw-state.test.ts'), expect: /✖ only Draw’s own empty <metadata> is taken away/,
   },
   // P1-M1 review fixes, slow.
   {

@@ -116,3 +116,40 @@ test('stripDrawState of a file with no Draw state is the file itself: it never p
   assert.ok(r.ok, 'test setup: read with a deeper limit');
   assert.equal(stripDrawState(r.doc), deep);
 });
+
+test('only Draw’s own empty <metadata> is taken away: a shape marked draw:made, a draw:made that isn’t exactly "true", and a <metadata> holding text or a comment keep their bytes (As-is, Clean, and a removal of Draw’s state)', () => {
+  const NS = `xmlns="http://www.w3.org/2000/svg" xmlns:draw="${DRAW_NS}"`;
+  const svg = (body: string) => `<svg ${NS} viewBox="0 0 100 100">\n  ${body}\n  <rect x="10" y="10" width="10" height="10"/>\n</svg>`;
+  const plain = (text: string) => text.replace(` xmlns:draw="${DRAW_NS}"`, '');
+  // Elements other than <metadata>, and a value other than "true": only the draw: attribute goes.
+  for (const el of ['<path draw:made="true" d="M0 0L50 50" stroke="red"/>', '<text draw:made="no" x="5" y="50">Hello</text>', '<metadata draw:made="yes"></metadata>']) {
+    const doc = load(svg(el));
+    const kept = plain(svg(el.replace(/ draw:made="[^"]*"/, '')));
+    assert.equal(stripDrawState(doc), kept, `As-is: ${el}`);
+    assert.equal(cleanExport(doc).text, kept, `Clean: ${el}`);
+  }
+  // A Draw-made <metadata> holding the file's comment or text: only the mark goes.
+  for (const inner of ['<!-- (c) Someone, CC-BY -->', 'Licensed CC-BY 4.0', '<![CDATA[x]]>']) {
+    const doc = load(svg(`<metadata draw:made="true">${inner}</metadata>`));
+    const kept = plain(svg(`<metadata>${inner}</metadata>`));
+    assert.equal(stripDrawState(doc), kept, `As-is: ${inner}`);
+    assert.equal(cleanExport(doc).text, kept, `Clean: ${inner}`);
+  }
+  // Only whitespace besides Draw's own state: it is Draw's, and goes with its whitespace.
+  const own = load(svg('<metadata draw:made="true">\n    <draw:state version="1" guides="v 5"/>\n  </metadata>'));
+  assert.equal(stripDrawState(own), plain(svg('')).replace('\n  \n', '\n'));
+  // Removing the last guide: Draw's <draw:state> goes, and the file's text keeps the <metadata>.
+  const text = svg('<metadata draw:made="true">Licensed CC-BY 4.0<draw:state version="1" guides="v 5"/></metadata>');
+  const s = new Session(load(text));
+  put(s, 'Remove guide', state([]));
+  assert.equal(serialize(s.doc), svg('<metadata draw:made="true">Licensed CC-BY 4.0</metadata>'), 'the text stays, in its <metadata>');
+  // A root with no default namespace (<svg:svg>): Draw's <metadata> is SVG's too, so it is found and taken away.
+  const prefixed = `<svg:svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n  <svg:rect width="5" height="5"/>\n</svg:svg>`;
+  const p = new Session(load(prefixed));
+  put(p, 'Add guide', state([{ axis: 'h', at: 3 }]));
+  assert.match(serialize(p.doc), /<svg:metadata draw:made="true"><draw:state version="1" guides="h 3"\/><\/svg:metadata>/);
+  assert.deepEqual(readState(p.doc), state([{ axis: 'h', at: 3 }]), 'the state is read back');
+  assert.equal(stripDrawState(p.doc), prefixed);
+  put(p, 'Remove guide', state([]));
+  assert.equal(serialize(p.doc), prefixed);
+});
