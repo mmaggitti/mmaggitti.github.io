@@ -1127,3 +1127,26 @@ test('Group puts the selection in a new <g> where the last one was; Ungroup push
   assert.equal(r4.editor.notice.get(), 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.');
   assert.equal(r4.editor.history.get().canUndo, false);
 });
+
+test('Layers: Hide writes display="none" and Show gives the bytes back; Lock writes draw:locked with the declaration and Unlock gives the bytes back; Rename rewrites every reference, and refuses a bad or taken id', () => {
+  const F = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <circle id="c" cx="20" cy="20" r="5"/>\n  <use href="#c" x="10"/>\n  <rect id="r" x="1" y="1" width="5" height="5" fill="url(#c)"/>\n</svg>`;
+  const r = rig();
+  r.editor.open(F);
+  const [c, rect] = [idOf(r, 'c'), idOf(r, 'r')];
+  r.editor.setHidden(c, true);
+  assert.equal(r.editor.source(), F.replace('r="5"/>', 'r="5" display="none"/>'), 'Hide: exactly display="none"');
+  assert.equal(r.editor.history.get().undoLabel, 'Hide');
+  r.editor.setHidden(c, false);
+  assert.equal(r.editor.source(), F, 'Show: the file back');
+  r.editor.setLocked(rect, true);
+  assert.equal(r.editor.source(), F.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns">').replace('fill="url(#c)"/>', 'fill="url(#c)" draw:locked="true"/>'));
+  assert.equal(r.editor.history.get().undoLabel, 'Lock');
+  r.editor.setLocked(rect, false);
+  assert.equal(r.editor.source(), F, 'Unlock: the file back, the declaration gone with the last Draw item');
+  assert.equal(r.editor.rename(c, 'sun'), null);
+  assert.equal(r.editor.source(), F.replace('id="c"', 'id="sun"').replace('href="#c"', 'href="#sun"').replace('url(#c)', 'url(#sun)'), 'every reference follows');
+  assert.equal(r.editor.history.get().undoLabel, 'Rename');
+  assert.equal(r.editor.rename(rect, '1bad'), '"1bad" is not an id');
+  assert.equal(r.editor.rename(rect, 'sun'), 'Another element already has the id "sun".');
+  assert.equal(r.editor.history.get().undoLabel, 'Rename', 'the refusals recorded nothing');
+});

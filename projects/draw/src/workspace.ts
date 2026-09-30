@@ -22,7 +22,7 @@
 
 import { serialize, type Doc } from '../../../engine/model/doc.ts';
 import { stripDrawState } from '../../../engine/model/draw-state.ts';
-import type { ImportReport } from '../../../engine/report/import-report.ts';
+import { importReport, type ImportReport } from '../../../engine/report/import-report.ts';
 import type { Editor } from './editor.ts';
 import { importSvg, why, type ImportFailure, type ImportInput, type Via } from './import.ts';
 import { Autosave, type Lock, type Timers } from './autosave.ts';
@@ -363,6 +363,18 @@ export class Workspace {
   }
 
   // ── export ─────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The import report's Convert rem to user units: one "Convert rem" entry (editor.convertRem), then
+   * the report read again, so its rem count is 0. A refusal is the notice.
+   */
+  convertRem(): void {
+    const why = this.#editor.convertRem();
+    if (why) return void this.#editor.notice.set(why);
+    const doc = this.#editor.doc;
+    const current = this.current.get();
+    if (doc && current) this.current.set({ ...current, report: importReport(doc) });
+  }
 
   /** The file an export writes, now (synchronously: the share sheet needs the tap's activation). */
   exportFile(kind: ExportKind): ExportFile | null {

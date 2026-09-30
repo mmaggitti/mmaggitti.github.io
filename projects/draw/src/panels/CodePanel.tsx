@@ -21,10 +21,11 @@ import { DOCK, useMedia } from './media.ts';
 import { useStore } from './store.ts';
 import { Support } from './Support.tsx';
 import { Guard } from './Guard.tsx';
+import { Layers } from './Layers.tsx';
 import type { Views } from './views.ts';
 
 const HANDLE_LABEL: Record<Detent, string> = { peek: 'Show the code', half: 'Expand the code', full: 'Collapse the code' };
-type Tab = 'code' | 'inspect' | 'support';
+type Tab = 'code' | 'layers' | 'inspect' | 'support';
 
 interface Press {
   id: number;
@@ -170,6 +171,9 @@ export function CodePanel({ editor, views, files, copy, source }: Props) {
             <button type="button" aria-pressed={tab === 'code'} onClick={() => show('code')}>
               Code
             </button>
+            <button type="button" aria-pressed={tab === 'layers'} onClick={() => show('layers')}>
+              Layers
+            </button>
             <button type="button" aria-pressed={tab === 'inspect'} onClick={() => show('inspect')}>
               Inspect
             </button>
@@ -194,6 +198,7 @@ export function CodePanel({ editor, views, files, copy, source }: Props) {
         </div>
         <div ref={code} className="draw-code" role="region" aria-label="SVG source" hidden={tab !== 'code'} />
         <Guard files={files}>
+          {tab === 'layers' && <Layers editor={editor} />}
           {tab === 'inspect' && <Inspect editor={editor} />}
           {tab === 'support' && <Support />}
         </Guard>

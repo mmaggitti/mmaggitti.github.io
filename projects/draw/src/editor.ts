@@ -23,7 +23,9 @@
 import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
-import { opInsert, opRemove, type ChangeSet } from '../../../engine/commands/ops.ts';
+import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type ChangeSet } from '../../../engine/commands/ops.ts';
+import { REM_UNCONVERTIBLE } from '../../../engine/report/import-report.ts';
+import { hasRem, remToUserUnits, rootFontSize } from '../../../engine/geometry/lengths.ts';
 import { Session, type Build, type Drag } from '../../../engine/commands/session.ts';
 import { blockFor, blocksOf, codeBlocks, endBlockFor, type Block, type BlockToken } from '../../../engine/code/blocks.ts';
 import { TokenEditError, type TokenTarget } from '../../../engine/code/edit.ts';
@@ -48,7 +50,10 @@ import { duplicate, group, groupRefusal, groupsOf, remove, restack, ungroup, ung
 import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
-import { NO_STATE, isLocked, moveGuide, readState, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { DRAW_NS, NO_STATE, declare, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { cssSets } from '../../../engine/geometry/css.ts';
+import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
+import { ID } from '../../../engine/code/edit.ts';
 import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
 import { itemMatrix, parseTransform } from '../../../engine/values/transform.ts';
 import { fmt } from '../../../engine/values/number-format.ts';
@@ -1167,6 +1172,79 @@ export class Editor {
       out.push({ from: { x: 0, y: hy }, to: { x: this.#size.width, y: hy } });
     }
     return out;
+  }
+
+  // ── rem (decision 13) ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Convert rem to user units: every rem number in an attribute or style="" becomes user units
+   * against the file's own root font size, in one "Convert rem" entry (rem in <style> text stays).
+   * The reason it can't, or null.
+   */
+  convertRem(): string | null {
+    const doc = this.#doc;
+    if (!doc) return null;
+    if (cssSets(doc, doc.root, 'font-size') === 'sheet') return REM_UNCONVERTIBLE;
+    const font = rootFontSize(doc);
+    const edits: { id: NodeId; ns: string | null; local: string; raw: string }[] = [];
+    for (const id of this.#elements()) {
+      const n = doc.nodes.get(id) as ElementNode;
+      for (const a of n.attrs) if (hasRem(a.raw)) edits.push({ id, ns: a.ns, local: a.local, raw: remToUserUnits(a.raw, font) });
+    }
+    if (!edits.length) return null;
+    const ok = this.#dispatch('Convert rem', (apply) => {
+      for (const e of edits) apply(opSetAttrRaw(doc, e.id, e.ns, e.local, e.raw));
+    });
+    return ok ? null : this.notice.get();
+  }
+
+  // ── Layers: hide, lock, rename ───────────────────────────────────────────────────────────────
+
+  /** Hide an element (display="none", "Hide") or show it again (that attribute removed, "Show"). */
+  setHidden(id: NodeId, hidden: boolean): void {
+    const doc = this.#doc;
+    const n = doc?.nodes.get(id);
+    if (!doc || n?.kind !== 'element' || id === doc.root) return;
+    if (cssSets(doc, id, 'display') !== 'no') return void this.notice.set('Its display is set by CSS.');
+    const none = attrValue(doc, n, null, 'display')?.trim() === 'none';
+    if (none === hidden) return;
+    this.#dispatch(hidden ? 'Hide' : 'Show', (apply) => apply(opSetAttr(doc, id, null, 'display', hidden ? 'none' : null)));
+  }
+
+  /** Lock an element (draw:locked="true", with the declaration if it is the file's first Draw state), or unlock it. */
+  setLocked(id: NodeId, locked: boolean): void {
+    const doc = this.#doc;
+    const n = doc?.nodes.get(id);
+    if (!doc || n?.kind !== 'element' || id === doc.root) return;
+    const has = n.attrs.some((a) => a.ns === DRAW_NS && a.local === 'locked');
+    if (has === locked) return;
+    this.#dispatch(locked ? 'Lock' : 'Unlock', (apply) => {
+      if (locked) {
+        const p = declare(doc, apply);
+        apply(opSetAttr(doc, id, DRAW_NS, 'locked', 'true', `${p}:locked`));
+      } else {
+        apply(opSetAttr(doc, id, DRAW_NS, 'locked', null));
+        undeclareIfUnused(doc, apply);
+      }
+    });
+    if (locked && this.selection.get().has(id)) this.#show(); // its handles go
+  }
+
+  /** Rename an element's id, and every reference to it in the document ("Rename"); the reason it can't, or null. */
+  rename(id: NodeId, next: string): string | null {
+    const doc = this.#doc;
+    const n = doc?.nodes.get(id);
+    if (!doc || n?.kind !== 'element') return 'That element is no longer in the document';
+    if (this.readOnly.get()) return READ_ONLY;
+    const was = attrValue(doc, n, null, 'id');
+    if (next === was) return null;
+    if (!ID.test(next)) return `${JSON.stringify(next)} is not an id`;
+    if (idsInUse(doc).has(next)) return `Another element already has the id "${next}".`;
+    const ok = this.#dispatch('Rename', (apply) => {
+      if (was === null) apply(opSetAttr(doc, id, null, 'id', next));
+      else renameIdsIn(doc, doc.root, new Map([[was, next]]), apply);
+    });
+    return ok ? null : this.notice.get();
   }
 
   // ── Draw's own state: guides and the grid step (engine/model/draw-state.ts) ──────────────────

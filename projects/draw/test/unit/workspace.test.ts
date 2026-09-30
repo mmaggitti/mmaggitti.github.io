@@ -553,3 +553,16 @@ test('Copy puts the file on the clipboard exactly as it is (xmlns, viewBox and a
   await ws.copy(async (t) => (got.push(t), true));
   assert.equal(got.at(-1), bad, 'a file open as source copies its text');
 });
+
+test('Convert rem to user units rewrites every rem number in attributes and style="" in one entry, against the file’s own root font size; the report then counts none', async () => {
+  const { ws, editor } = rig();
+  const text = '<svg xmlns="http://www.w3.org/2000/svg" font-size="20" viewBox="0 0 100 100">\n  <rect x="1rem" y="2" width="2.5rem" height="10" style="stroke-width: .1rem"/>\n</svg>';
+  assert.ok(await ws.openText(text, 'rem.svg', 'paste'));
+  assert.equal(ws.current.get()!.report.rem.count, 3);
+  ws.convertRem();
+  assert.equal(editor.source(), text.replace('x="1rem"', 'x="20"').replace('width="2.5rem"', 'width="50"').replace('stroke-width: .1rem', 'stroke-width: 2'));
+  assert.equal(editor.history.get().undoLabel, 'Convert rem');
+  assert.equal(ws.current.get()!.report.rem.count, 0, 'the report counts none now');
+  editor.undo();
+  assert.equal(editor.source(), text, 'one undo');
+});

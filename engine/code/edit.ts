@@ -27,7 +27,8 @@ const NUMBER = /^-?(?:\d+|\d*\.\d+)$/; // plain decimal: no exponent, no leading
 // A character outside XML 1.0's Char: no escape can write one (&#1; is refused too), so a browser
 // would refuse the whole file.
 const NOT_XML_CHAR = /[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
-const ID = /^[A-Za-z_À-￿][\w.\-·À-￿]*$/;
+/** An XML id, as the Text sheet and Rename take it. */
+export const ID = /^[A-Za-z_À-￿][\w.\-·À-￿]*$/;
 
 /** Why `text` can't replace this token, or null when it can. */
 export function tokenTextError(token: Token, text: string): string | null {

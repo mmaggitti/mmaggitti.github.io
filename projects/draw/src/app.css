@@ -711,3 +711,41 @@
   box-shadow: none;
 }
 .draw-sheet--dock .draw-sheet-head { padding-top: var(--space-2); }
+
+/* ── The Layers tab ─────────────────────────────────────────────────────────── */
+
+.draw-layers { padding: var(--space-2) var(--space-3) var(--space-4); }
+.draw-layer-list { margin: 0; padding: 0; list-style: none; }
+.draw-layer { display: flex; align-items: center; gap: var(--space-1); min-height: var(--tap-min); border-bottom: 1px solid var(--line); }
+.draw-layer.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.draw-layer-name {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+}
+.draw-layer-btn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  touch-action: manipulation;
+}
+.draw-layer-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-layer-btn[aria-pressed="true"] { color: var(--accent); }
+.draw-layers-more { width: 100%; margin-top: var(--space-2); }
+.draw-layers-empty { padding: var(--space-3); }

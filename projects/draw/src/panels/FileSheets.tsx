@@ -194,6 +194,11 @@ function ReportSheet({ workspace, close }: { workspace: Workspace; close: () => 
           ))}
         </ul>
       )}
+      {current.report.rem.count > 0 && (
+        <button type="button" className="ds-btn draw-convert-rem" disabled={!current.report.rem.convertible} onClick={() => workspace.convertRem()}>
+          Convert rem to user units
+        </button>
+      )}
       {v.buckets.filter((b) => b.total > 0).map((b) => (
         <section key={b.bucket} className="draw-group" data-bucket={b.bucket}>
           <h3 className="draw-subhead">
