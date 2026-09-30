@@ -75,7 +75,7 @@ export function cssSets(doc: Doc, id: NodeId, prop: string): CssSource {
   return 'no';
 }
 
-// ── the document's sheets, read once per version ──────────────────────────────────────────────
+// ── the document's sheets, read again only when what its <style> elements say may have changed ──
 
 interface Rule {
   selectors: Compound[]; // each selector's last compound
@@ -91,16 +91,18 @@ interface Sheet {
   keyframes: Set<string>; // properties any @keyframes block animates
 }
 
+// Keyed on the stylesheets' own content (doc.styleVersion), not on every edit: a move of k shapes
+// asks about each of them, and must not read the whole document k times.
 const cache = new WeakMap<Doc, { version: number; sheet: Sheet }>();
 
 function sheetOf(doc: Doc): Sheet {
   const hit = cache.get(doc);
-  if (hit && hit.version === doc.version) return hit.sheet;
+  if (hit && hit.version === doc.styleVersion) return hit.sheet;
   const sheet: Sheet = { rules: [], keyframes: new Set() };
   for (const n of descendants(doc, doc.root)) {
     if (n.kind === 'element' && n.local === 'style' && (n.ns === NS.svg || n.ns === NS.xhtml)) readSheet(stripComments(textContent(doc, n.id)), sheet);
   }
-  cache.set(doc, { version: doc.version, sheet });
+  cache.set(doc, { version: doc.styleVersion, sheet });
   return sheet;
 }
 

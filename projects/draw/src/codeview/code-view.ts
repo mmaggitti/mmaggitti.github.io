@@ -48,6 +48,12 @@ export interface ViewBlock {
   flow: Flow;
 }
 
+/** Blocks to put in the listing (a node placed or moved, with everything under it), before the block keyed `before` or at the end. */
+export interface Placement {
+  blocks: readonly ViewBlock[];
+  before: string | null;
+}
+
 /** A token by its block's key and its index among the block's tokens (which an edit keeps). */
 export interface FocusMark {
   key: string;
@@ -154,26 +160,61 @@ export class CodeView {
   }
 
   /**
-   * Put these blocks (a node inserted or moved, and everything under it) before the block keyed
-   * `before`, or at the end. Every other block keeps its DOM node.
+   * Put each placement's blocks (a node inserted or moved, and everything under it) before the block
+   * keyed `before`, which may be one placed in the same call, or at the end: as placing them one at a
+   * time in this order would, but in one pass over the listing however many there are (a change
+   * that moves 2,000 nodes is one call). Every other block keeps its DOM node.
    */
-  place(blocks: readonly ViewBlock[], before: string | null): void {
-    if (this.raw || !blocks.length) return;
-    this.drop(blocks.map((b) => b.key));
-    const found = before === null ? -1 : this.order.indexOf(before);
-    const at = found === -1 ? this.order.length : found;
-    for (const b of blocks) this.blocks.set(b.key, { data: b, el: null });
-    this.order.splice(at, 0, ...blocks.map((b) => b.key));
-    const after = this.order[at + blocks.length];
-    const next = after === undefined ? null : this.blocks.get(after)!.el;
-    if (this.firstMoved() || (after !== undefined && next?.parentNode !== this.root)) return this.rebuild();
-    const made = document.createDocumentFragment();
-    for (const b of blocks) {
-      const el = this.build(b);
-      this.blocks.get(b.key)!.el = el;
-      made.append(el);
+  place(placements: readonly Placement[]): void {
+    const placed = new Set(placements.flatMap((p) => p.blocks.map((b) => b.key)));
+    if (this.raw || !placed.size) return;
+    this.drop([...placed]);
+    for (const p of placements) for (const b of p.blocks) this.blocks.set(b.key, { data: b, el: null });
+    // Each placement hangs before its block; one whose block isn't in the listing goes at the end.
+    const before = new Map<string, Placement[]>();
+    const atEnd: Placement[] = [];
+    for (const p of placements) {
+      if (!p.blocks.length) continue;
+      if (p.before === null || !this.blocks.has(p.before)) atEnd.push(p);
+      else {
+        const list = before.get(p.before);
+        if (list) list.push(p);
+        else before.set(p.before, [p]);
+      }
     }
-    this.root.insertBefore(made, next);
+    // The new order: every block, after what hangs before it (placements hanging on placed blocks
+    // too, so a stack, not recursion, however long the chain).
+    const order: string[] = [];
+    const put = (key: string) => {
+      const stack: [string, boolean][] = [[key, false]];
+      while (stack.length) {
+        const [k, ready] = stack.pop()!;
+        if (ready) {
+          order.push(k);
+          continue;
+        }
+        stack.push([k, true]);
+        const hung = before.get(k);
+        if (!hung) continue;
+        before.delete(k);
+        const keys = hung.flatMap((p) => p.blocks.map((b) => b.key));
+        for (let i = keys.length - 1; i >= 0; i--) stack.push([keys[i], false]);
+      }
+    };
+    for (const k of this.order) put(k);
+    for (const p of atEnd) for (const b of p.blocks) put(b.key);
+    this.order = order;
+    if (this.firstMoved()) return this.rebuild();
+    // Each placed block before the next block's element, from the end: every other element stays.
+    let next: HTMLElement | null = null;
+    for (let i = order.length - 1; i >= 0; i--) {
+      const entry = this.blocks.get(order[i])!;
+      if (placed.has(order[i])) {
+        entry.el = this.build(entry.data);
+        this.root.insertBefore(entry.el, next);
+      } else if (entry.el?.parentNode !== this.root) return this.rebuild();
+      next = entry.el;
+    }
     this.markFocus();
   }
 

@@ -2,7 +2,8 @@
 // what Layers' Rename does.
 //
 // - freshId: the first of `base`, `base-2`, `base-3`, … that no element's id (or xml:id) uses and
-//   `taken` doesn't hold, so one batch can reserve several.
+//   `taken` doesn't hold, so one batch can reserve several. A batch reads the ids in use once
+//   (idsInUse) and passes them in, so it doesn't walk the document once per id.
 // - renameIdsIn: inside one subtree only, every mapped id and every reference refs.ts indexes to a
 //   mapped id (url(#…) in any attribute, style="" included; href and xlink:href="#…"; aria id
 //   lists; SMIL begin and end "id.event" values). Only the id's own characters change, as
@@ -20,9 +21,8 @@ export function idsInUse(doc: Doc): Set<string> {
   return new Set(buildRefIndex(doc).ids.keys());
 }
 
-/** The first of base, base-2, base-3, … that no element uses and `taken` doesn't hold. */
-export function freshId(doc: Doc, base: string, taken: ReadonlySet<string> = new Set()): string {
-  const used = idsInUse(doc);
+/** The first of base, base-2, base-3, … that no element uses (`used`: the ids in use) and `taken` doesn't hold. */
+export function freshId(doc: Doc, base: string, taken: ReadonlySet<string> = new Set(), used: ReadonlySet<string> = idsInUse(doc)): string {
   if (!used.has(base) && !taken.has(base)) return base;
   for (let k = 2; ; k++) {
     const id = `${base}-${k}`;

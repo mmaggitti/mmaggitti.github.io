@@ -89,8 +89,9 @@ export function route(doc: Doc, cs: ChangeSet): Route {
   const moved = [...placed.filter((id) => !order.has(id)), ...placed.filter((id) => order.has(id)).sort((a, b) => order.get(b)! - order.get(a)!)];
   const drawn = new Set([...top, ...moved.filter((id) => order.has(id))]);
   const attrs = [...cs.attrs].filter((id) => attached(doc, id) && !under(doc, id, drawn, true));
+  const isMoved = new Set(moved);
   const code = reset
     ? { reset: true as const }
-    : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts])].filter((id) => !moved.includes(id)), moved, parents: [...cs.structure] };
+    : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts])].filter((id) => !isMoved.has(id)), moved, parents: [...cs.structure] };
   return { attrs, subtrees, moved, code };
 }

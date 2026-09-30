@@ -34,7 +34,7 @@ import { createStore, type Store } from './panels/store.ts';
 import { attached, route, type Route } from './routing.ts';
 import { elementOf, outlineable, selectionTarget } from './selectable.ts';
 import { blockKey, keyOrder, mixes, subtreeKeys, viewBlock } from './codeview/blocks.ts';
-import type { FocusMark, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
+import type { FocusMark, Placement, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
 import { artboard, rootViewport } from './canvas/artboard.ts';
 import { cameraBox, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
 import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
@@ -88,9 +88,9 @@ export interface CanvasPort {
 export interface CodePort {
   set(blocks: readonly ViewBlock[]): void;
   patch(block: ViewBlock): void;
-  /** Put these blocks (a node placed or moved, with everything under it) before the block keyed `before`, or at the end. */
-  place(blocks: readonly ViewBlock[], before: string | null): void;
-  /** Take these blocks away. */
+  /** Put each placement's blocks (a node placed or moved, with everything under it) before the block keyed `before` (one placed in the same call, maybe), or at the end: one call per change. */
+  place(placements: readonly Placement[]): void;
+  /** Take these blocks away: one call per change. */
   remove(keys: readonly string[]): void;
   select(nodes: ReadonlySet<number>): void;
   /** Mark the number the Scrub strip holds, or none. */
@@ -310,7 +310,8 @@ export class Editor {
     session.subscribe(() => {
       if (r.code.reset) return this.#resetCode();
       if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();
-      for (const id of r.code.blocks) this.#patchCode(id);
+      const memo = new Map<NodeId, boolean>(); // one change: each parent's mixed content is read once
+      for (const id of r.code.blocks) this.#patchCode(id, memo);
     });
     session.subscribe(() => {
       const kept = [...this.selection.get()].filter((id) => attached(session.doc, id));
@@ -364,9 +365,10 @@ export class Editor {
    * A structure change in the code: each moved node's blocks taken away, and the attached ones
    * placed again (last first, each before the next block already in the listing); then the start
    * and end blocks of the parents whose children changed are read again (a <g/> that gains a child
-   * gets an end tag). Every other block keeps its DOM node. False when a block can't be placed, or
-   * when a moved leaf of real text changes how its parent's other blocks flow (mixed content): the
-   * listing is then rebuilt.
+   * gets an end tag). Every other block keeps its DOM node. Whatever goes is one removal and
+   * whatever comes is one placement, so a change that moves 2,000 nodes is two calls, not 4,000.
+   * False when a block can't be placed, or when a moved leaf of real text changes how its parent's
+   * other blocks flow (mixed content): the listing is then rebuilt.
    */
   #placeCode(moved: readonly NodeId[], parents: readonly NodeId[]): boolean {
     const doc = this.#doc!;
@@ -380,13 +382,17 @@ export class Editor {
       for (let i = at + 1; i < order.length; i++) if (this.#blocks.has(order[i])) return order[i];
       return null;
     };
-    for (const id of moved) {
-      const keys = subtreeKeys(doc, id).filter((k) => this.#blocks.has(k));
-      if (!keys.length) continue;
-      code.remove(keys);
-      for (const k of keys) this.#blocks.delete(k);
+    const gone: string[] = [];
+    for (const id of moved) for (const k of subtreeKeys(doc, id)) if (this.#blocks.delete(k)) gone.push(k);
+    // A parent left with no end tag (it closes itself again) loses its end block.
+    const live = parents.filter((p) => attached(doc, p) && doc.nodes.get(p)?.kind === 'element');
+    for (const p of live) {
+      const key = blockKey(p, 'end');
+      if (!endBlockFor(doc, p) && this.#blocks.delete(key)) gone.push(key);
     }
+    if (gone.length) code.remove(gone);
     const memo = new Map<NodeId, boolean>();
+    const placements: Placement[] = [];
     for (const id of moved) {
       if (!attached(doc, id)) continue;
       const blocks = blocksOf(doc, id);
@@ -394,37 +400,32 @@ export class Editor {
       if (!index.has(last)) return false;
       const before = next(last);
       for (const b of blocks) this.#blocks.set(blockKey(b.node, b.part), b);
-      code.place(blocks.map((b) => viewBlock(doc, b, memo)), before);
+      placements.push({ blocks: blocks.map((b) => viewBlock(doc, b, memo)), before });
     }
-    for (const p of parents) {
-      if (!attached(doc, p) || doc.nodes.get(p)?.kind !== 'element') continue;
-      this.#patchCode(p);
+    const patches: ViewBlock[] = [];
+    for (const p of live) {
       const end = endBlockFor(doc, p);
+      if (!end) continue;
       const key = blockKey(p, 'end');
-      if (end && this.#blocks.has(key)) {
-        this.#blocks.set(key, end);
-        code.patch(viewBlock(doc, end));
-      } else if (end) {
-        const before = next(key);
-        this.#blocks.set(key, end);
-        code.place([viewBlock(doc, end)], before);
-      } else if (this.#blocks.has(key)) {
-        code.remove([key]);
-        this.#blocks.delete(key);
-      }
+      if (this.#blocks.has(key)) patches.push(viewBlock(doc, end, memo));
+      else placements.push({ blocks: [viewBlock(doc, end, memo)], before: next(key) });
+      this.#blocks.set(key, end);
     }
+    if (placements.length) code.place(placements);
+    for (const p of live) this.#patchCode(p, memo);
+    for (const b of patches) code.patch(b);
     code.select(this.selection.get());
     return true;
   }
 
-  #patchCode(id: NodeId): void {
+  #patchCode(id: NodeId, memo?: Map<NodeId, boolean>): void {
     const doc = this.#doc!;
     if (!doc.nodes.has(id)) return;
     const b = blockFor(doc, id);
     const key = blockKey(b.node, b.part);
     if (!this.#blocks.has(key)) return; // not in the listing (detached)
     this.#blocks.set(key, b);
-    this.#ports.code.patch(viewBlock(doc, b));
+    this.#ports.code.patch(viewBlock(doc, b, memo));
   }
 
   // The code view marks the number the Scrub strip holds: its block and its index there, read again
@@ -653,11 +654,12 @@ export class Editor {
     if (!ids?.length) return;
     let copies: NodeId[] = [];
     const refused: string[] = [];
+    const toParent = this.#rootDeltas(ids); // a copy's parent is its original's
     const ok = this.#dispatch('Duplicate', (apply) => {
       copies = duplicate(doc, ids, apply);
       const opts = { ctx: this.geo, decimals: 3 };
       for (const c of copies) {
-        const d = this.#rootDelta(c, { x: 5, y: 5 });
+        const d = toParent(c, { x: 5, y: 5 });
         const plan = d ? planMove(doc, c, d.x, d.y, opts) : { refused: 'Draw can’t tell where it is.' };
         if ('refused' in plan) refused.push(plan.refused);
         else applyPlan(doc, plan, apply);
@@ -674,7 +676,7 @@ export class Editor {
     if (!doc || this.#live || this.#gesture) return;
     const sel = [...this.selection.get()];
     const order = documentOrder(doc);
-    const ids = sel.filter((id) => !sel.some((o) => o !== id && isInside(doc, id, o))).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    const ids = outermost(doc, sel).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
     const why = groupRefusal(doc, ids);
     if (why) return void this.notice.set(why);
     let g: NodeId | null = null;
@@ -730,11 +732,12 @@ export class Editor {
     const ds = deltas(boxes);
     if (!ds) return void this.notice.set(label.startsWith('Distribute') ? 'Distribute needs three shapes or more.' : 'There is nothing to align to.');
     const refused: string[] = [];
+    const toParent = this.#rootDeltas(have);
     this.#dispatch(label, (apply) => {
       const opts = { ctx: this.geo, decimals: 3 };
       have.forEach((id, i) => {
         if (Math.abs(ds[i].x) < 1e-9 && Math.abs(ds[i].y) < 1e-9) return;
-        const d = this.#rootDelta(id, ds[i]);
+        const d = toParent(id, ds[i]);
         const plan = d ? planMove(doc, id, d.x, d.y, opts) : { refused: 'Draw can’t tell where it is.' };
         if ('refused' in plan) refused.push(elementName(doc, id));
         else applyPlan(doc, plan, apply);
@@ -743,17 +746,22 @@ export class Editor {
     if (refused.length) this.notice.set(`${refused.length} shape${refused.length === 1 ? '' : 's'} couldn’t move: ${refused.join(', ')}`);
   }
 
-  // A delta in root user units, in the element's parent's units (through the canvas's measurements).
-  #rootDelta(id: NodeId, d: Point): Point | null {
+  // A delta in root user units, in an element's parent's units (through the canvas's measurements),
+  // for these elements (and any with the same parents): the root and each parent measured once for
+  // the whole command, not once per element.
+  #rootDeltas(ids: readonly NodeId[]): (id: NodeId, d: Point) => Point | null {
     const doc = this.#doc!;
-    const parent = doc.nodes.get(id)!.parent!;
-    const m = this.#ports.canvas.measure([doc.root, parent]);
+    const parents = [...new Set(ids.map((id) => doc.nodes.get(id)!.parent!))].filter((p) => p !== doc.root);
+    const m = this.#ports.canvas.measure([doc.root, ...parents]);
     const root = m.get(doc.root)?.toHost ?? (this.#box ? rootToHostMatrix(this.#box, this.#viewport, this.#M) : null);
-    const p = parent === doc.root ? root : m.get(parent)?.toHost;
-    const inv = p && invert(linear(p));
-    if (!root || !inv) return null;
-    const [x, y] = applyM(multiply(inv, linear(root)), d.x, d.y);
-    return { x, y };
+    return (id, d) => {
+      const parent = doc.nodes.get(id)!.parent!;
+      const p = parent === doc.root ? root : m.get(parent)?.toHost;
+      const inv = p && invert(linear(p));
+      if (!root || !inv) return null;
+      const [x, y] = applyM(multiply(inv, linear(root)), d.x, d.y);
+      return { x, y };
+    };
   }
 
   #restack(label: string, dir: 1 | -1): void {
@@ -768,7 +776,7 @@ export class Editor {
   #acted(sel: readonly NodeId[]): NodeId[] | null {
     const doc = this.#doc!;
     const order = documentOrder(doc);
-    const ids = sel.filter((id) => id !== doc.root && order.has(id) && !sel.some((o) => o !== id && isInside(doc, id, o)));
+    const ids = outermost(doc, sel).filter((id) => id !== doc.root && order.has(id));
     if (ids.some((id) => isLocked(doc, id))) {
       this.notice.set(LOCKED);
       return null;
@@ -863,7 +871,7 @@ export class Editor {
   #openMove(selection: NodeId[], label: string, step?: number): MoveState | null {
     const doc = this.#doc!;
     if (!this.#writable()) return null;
-    const ids = selection.filter((id) => id !== doc.root && attached(doc, id) && !selection.some((o) => o !== id && isInside(doc, id, o)));
+    const ids = outermost(doc, selection).filter((id) => id !== doc.root && attached(doc, id));
     if (!ids.length || !this.#session) {
       if (selection.includes(doc.root)) this.notice.set(ROOT_MOVE);
       return null;
@@ -1129,7 +1137,11 @@ export class Editor {
     const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
     const inv = toHost && invert(toHost);
     if (prefs.shapes && inv) {
-      const skip = (id: NodeId) => moving.some((m) => m === id || isInside(doc, id, m) || isInside(doc, m, id));
+      // A moving element, one inside it, or one it is inside: each element's ancestors are walked once.
+      const inMoving = new Set(moving);
+      const holdsMoving = new Set<NodeId>();
+      for (const m of moving) for (let p = doc.nodes.get(m)?.parent ?? null; p !== null && !holdsMoving.has(p); p = doc.nodes.get(p)?.parent ?? null) holdsMoving.add(p);
+      const skip = (id: NodeId) => inMoving.has(id) || holdsMoving.has(id) || hasAncestorIn(doc, id, inMoving);
       const ids = this.#leaves(null).filter((id) => !skip(id));
       const measured = this.#ports.canvas.measure(ids);
       const c = { x: this.#size.width / 2, y: this.#size.height / 2 };
@@ -1928,9 +1940,16 @@ function rectInRoot(inv: Affine, r: Rect): Rect {
 }
 const rectOf = (a: Point, b: Point): Rect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) });
 
-function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {
-  for (let n = doc.nodes.get(id)?.parent ?? null; n !== null; n = doc.nodes.get(n)?.parent ?? null) if (n === ancestor) return true;
+/** Is one of `id`'s ancestors in `set`? */
+function hasAncestorIn(doc: Doc, id: NodeId, set: ReadonlySet<NodeId>): boolean {
+  for (let n = doc.nodes.get(id)?.parent ?? null; n !== null; n = doc.nodes.get(n)?.parent ?? null) if (set.has(n)) return true;
   return false;
+}
+
+/** The elements of `sel` that aren't inside another element of `sel` (each one's ancestors walked once, against a Set). */
+function outermost(doc: Doc, sel: readonly NodeId[]): NodeId[] {
+  const set = new Set(sel);
+  return sel.filter((id) => !hasAncestorIn(doc, id, set));
 }
 
 function attrValueOf(doc: Doc, id: NodeId, local: string): string | null {

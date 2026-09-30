@@ -85,6 +85,9 @@ export interface Doc {
   entities: EntityTable;
   budget: Budget; // the entity-expansion budget: spent while parsing, and by every fragment parsed in since
   version: number; // bumped by every edit
+  /** Bumped only by an edit that can change what the document's <style> elements say: a text or CDATA
+   *  leaf in one edited, or a <style> (or a leaf in one) coming or going. CSS readers key on it. */
+  styleVersion: number;
 }
 
 let nextId = 1;
@@ -115,7 +118,7 @@ function build(source: string, cst: { prolog: CstLeaf[]; root: CstElement | null
   const nodes = new Map<NodeId, Node>();
   const doctype = cst.prolog.find((l) => l.tok.kind === 'doctype')?.tok;
   const entities = doctype?.kind === 'doctype' ? readEntityTable(doctype.subset, publicId(source.slice(doctype.start, doctype.end))) : readEntityTable(null);
-  const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget, version: 0 };
+  const doc: Doc = { source, nodes, root: 0, prolog: [], epilog: [], entities, budget, version: 0, styleVersion: 0 };
 
   // Check every reference, then expand it once, now, against the document's budget (see the header).
   // `at` is where the raw text starts in the source.
@@ -354,6 +357,7 @@ export function setTextRaw(doc: Doc, id: NodeId, raw: string): void {
   n.raw = raw;
   n.dirty = true;
   doc.version++;
+  if (inStyle(doc, n.parent)) doc.styleVersion++;
 }
 
 /**
@@ -370,14 +374,20 @@ export function setLeafRaw(doc: Doc, id: NodeId, raw: string): void {
   n.raw = raw;
   n.dirty = true;
   doc.version++;
+  if (inStyle(doc, n.parent)) doc.styleVersion++;
 }
 
-/** Detach a node from its parent; it stays in doc.nodes so it can be reinserted (undo). */
+/**
+ * Detach a node from its parent; it stays in doc.nodes so it can be reinserted (undo). The node is
+ * looked for from the end, so a batch taken away last first costs nothing per node (no search, and
+ * nothing after it to shift).
+ */
 export function detachNode(doc: Doc, id: NodeId): { parent: NodeId; index: number } {
   const n = doc.nodes.get(id);
   if (!n || n.parent === null) throw new Error(`detachNode: node ${id} has no parent`);
   const parent = el(doc, n.parent);
-  const index = parent.children.indexOf(id);
+  const index = parent.children.lastIndexOf(id);
+  if (inStyle(doc, parent.id) || holdsStyle(doc, id)) doc.styleVersion++;
   parent.children.splice(index, 1);
   parent.childrenDirty = true;
   n.parent = null;
@@ -385,15 +395,32 @@ export function detachNode(doc: Doc, id: NodeId): { parent: NodeId; index: numbe
   return { parent: parent.id, index };
 }
 
-/** Insert a detached node (and its subtree) under a parent, at an index. */
-export function attachNode(doc: Doc, id: NodeId, parent: NodeId, index: number): void {
+/** Insert a detached node (and its subtree) under a parent, at an index; returns the index it took. */
+export function attachNode(doc: Doc, id: NodeId, parent: NodeId, index: number): number {
   const n = doc.nodes.get(id);
   if (!n || n.parent !== null) throw new Error(`attachNode: node ${id} is not detached`);
   const p = el(doc, parent);
-  p.children.splice(Math.min(index, p.children.length), 0, id);
+  const at = Math.min(index, p.children.length);
+  p.children.splice(at, 0, id);
   p.childrenDirty = true;
   n.parent = parent;
   doc.version++;
+  if (inStyle(doc, parent) || holdsStyle(doc, id)) doc.styleVersion++;
+  return at;
+}
+
+// Is `id` (an element, or null) a <style> or inside one?
+function inStyle(doc: Doc, id: NodeId | null): boolean {
+  for (let n = id === null ? undefined : doc.nodes.get(id); n; n = n.parent === null ? undefined : doc.nodes.get(n.parent)) {
+    if (n.kind === 'element' && n.local === 'style') return true;
+  }
+  return false;
+}
+
+// Does the subtree at `id` hold a <style>?
+function holdsStyle(doc: Doc, id: NodeId): boolean {
+  const n = doc.nodes.get(id);
+  return n?.kind === 'element' && (n.local === 'style' || n.children.some((c) => holdsStyle(doc, c)));
 }
 
 export function removeAttr(doc: Doc, id: NodeId, ns: string | null, local: string): void {

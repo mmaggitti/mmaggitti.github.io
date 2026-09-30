@@ -2,8 +2,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { descendants, parseDoc, type Doc, type ElementNode } from '../../model/doc.ts';
+import { descendants, el, parseDoc, type Doc, type ElementNode } from '../../model/doc.ts';
 import { cssSets, declarations, inlineDecl } from '../../geometry/css.ts';
+import { opInsert, opRemove, opSetAttr, opSetLeafRaw, undoOp } from '../../commands/ops.ts';
+import { parseFragment } from '../../model/fragment.ts';
 
 const load = (src: string): Doc => {
   const r = parseDoc(src);
@@ -64,4 +66,38 @@ test('keyframes set what they animate on an element something animates, and font
   assert.equal(cssSets(doc, byId(doc, 'a'), 'transform'), 'sheet');
   assert.equal(cssSets(doc, byId(doc, 'b'), 'transform'), 'no', 'nothing animates it');
   assert.equal(cssSets(doc, byId(doc, 't'), 'font-size'), 'inline', 'the shorthand');
+});
+
+test('the sheets are read again whenever what a <style> says can change (its text; a <style>, or text in one, coming or going; each undone), and never for any other edit', () => {
+  const doc = svg('<style id="s">rect { x: 1px }</style><rect id="r"/><g id="g"/>');
+  const [r, s, g] = ['r', 's', 'g'].map((id) => byId(doc, id));
+  const text = el(doc, s).children[0];
+  assert.equal(cssSets(doc, r, 'x'), 'sheet');
+  // Every other edit keeps the sheets as they were read: a move of 4,000 shapes asks about each one.
+  const version = doc.styleVersion;
+  undoOp(doc, opSetAttr(doc, r, null, 'width', '5'));
+  undoOp(doc, opSetAttr(doc, s, null, 'media', 'print'));
+  const away = opRemove(doc, g);
+  undoOp(doc, opInsert(doc, g, doc.root, 0));
+  undoOp(doc, away);
+  assert.equal(doc.styleVersion, version, 'attributes, and a move of an element holding no <style>, leave the sheets alone');
+  const edit = opSetLeafRaw(doc, text, 'circle { x: 1px }');
+  assert.equal(cssSets(doc, r, 'x'), 'no', 'its text edited');
+  undoOp(doc, edit);
+  assert.equal(cssSets(doc, r, 'x'), 'sheet', 'and undone');
+  const out = opRemove(doc, s);
+  assert.equal(cssSets(doc, r, 'x'), 'no', 'the <style> taken away');
+  undoOp(doc, out);
+  assert.equal(cssSets(doc, r, 'x'), 'sheet', 'and put back');
+  const leaf = opRemove(doc, text);
+  assert.equal(cssSets(doc, r, 'x'), 'no', 'its text taken away');
+  undoOp(doc, leaf);
+  assert.equal(cssSets(doc, r, 'x'), 'sheet', 'and put back');
+  const made = parseFragment(doc, g, '<g><style>rect { y: 2px }</style></g>');
+  assert.ok(made.ok);
+  assert.equal(cssSets(doc, r, 'y'), 'no', 'parsed in, not yet in the document');
+  const put = opInsert(doc, made.nodes[0], g, 0);
+  assert.equal(cssSets(doc, r, 'y'), 'sheet', 'a group holding a <style> inserted');
+  undoOp(doc, put);
+  assert.equal(cssSets(doc, r, 'y'), 'no', 'and taken out again');
 });

@@ -10,7 +10,7 @@
 import { NS, attrValue, descendants, el, findAttr, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type Op } from '../../../../engine/commands/ops.ts';
 import { parseFragment } from '../../../../engine/model/fragment.ts';
-import { freshId, renameIdsIn } from '../../../../engine/model/ids.ts';
+import { freshId, idsInUse, renameIdsIn } from '../../../../engine/model/ids.ts';
 import { buildRefIndex } from '../../../../engine/model/refs.ts';
 import { DRAW_NS, isLocked } from '../../../../engine/model/draw-state.ts';
 import { cssSets } from '../../../../engine/geometry/css.ts';
@@ -18,12 +18,12 @@ import { TokenEditError } from '../../../../engine/code/edit.ts';
 
 export const ROOT_DELETE = 'The root <svg> can’t be deleted.';
 
-/** The whitespace-only text node right before `id` among its siblings, or null. */
+/** The whitespace-only text node right before `id` among its siblings, or null (looked for from the end, as detachNode does). */
 export function leadingSpace(doc: Doc, id: NodeId): NodeId | null {
   const parent = doc.nodes.get(id)?.parent ?? null;
   if (parent === null) return null;
   const kids = el(doc, parent).children;
-  const prev = doc.nodes.get(kids[kids.indexOf(id) - 1]);
+  const prev = doc.nodes.get(kids[kids.lastIndexOf(id) - 1]);
   return prev?.kind === 'text' && /^[ \t\r\n]+$/.test(prev.raw) ? prev.id : null;
 }
 
@@ -57,9 +57,13 @@ export function restack(doc: Doc, ids: readonly NodeId[], dir: 1 | -1, apply: (o
   }
 }
 
-/** Delete each of `ids` with its leading whitespace (attached elements, none the root). */
+/**
+ * Delete each of `ids` with its leading whitespace (attached elements, none the root, in document
+ * order). Last first: each leaves from the end of what is left, so deleting 4,000 shapes shifts
+ * nothing, and the undo puts them back in order.
+ */
 export function remove(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => void): void {
-  for (const id of ids) {
+  for (const id of [...ids].reverse()) {
     const ws = leadingSpace(doc, id);
     if (ws !== null) apply(opRemove(doc, ws));
     apply(opRemove(doc, id));
@@ -76,21 +80,37 @@ function spaceLike(doc: Doc, parent: NodeId, ws: NodeId): NodeId | null {
  * Duplicate each of `ids` (attached elements, none the root, in document order): a copy right after
  * its original, with a copy of the original's leading whitespace; every id in the copy fresh (id,
  * id-2, …, reserved across the batch) and the references inside the copy following them (those
- * outside keep pointing at the originals); draw:locked left off. One fragment parse per parent.
+ * outside keep pointing at the originals); draw:locked left off. One fragment parse per parent, the
+ * copies' whitespace included, and the ids in use read once: linear in what is copied.
  * Returns the copies, in order.
  */
 export function duplicate(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => void): NodeId[] {
   const byParent = new Map<NodeId, NodeId[]>();
   for (const id of ids) {
     const p = doc.nodes.get(id)!.parent!;
-    byParent.set(p, [...(byParent.get(p) ?? []), id]);
+    const list = byParent.get(p);
+    if (list) list.push(id);
+    else byParent.set(p, [id]);
   }
   const taken = new Set<string>();
+  const used = idsInUse(doc);
   const copies: NodeId[] = [];
   for (const [parent, list] of byParent) {
-    const made = parseFragment(doc, parent, list.map((id) => serializeNode(doc, id)).join(''));
+    // Each copy after a copy of its original's leading whitespace, all in one parse.
+    const spaces = list.map((id) => leadingSpace(doc, id));
+    const made = parseFragment(doc, parent, list.map((id, i) => `${spaces[i] === null ? '' : (doc.nodes.get(spaces[i]!) as LeafNode).raw}${serializeNode(doc, id)}`).join(''));
     if (!made.ok) throw new TokenEditError(`It can’t be duplicated here: ${made.error.message}`);
-    const els = made.nodes.filter((n) => doc.nodes.get(n)?.kind === 'element');
+    const els: NodeId[] = [];
+    const wsOf: (NodeId | null)[] = [];
+    let ws: NodeId | null = null;
+    for (const n of made.nodes) {
+      if (doc.nodes.get(n)?.kind !== 'element') ws = n;
+      else {
+        els.push(n);
+        wsOf.push(ws);
+        ws = null;
+      }
+    }
     els.forEach((copy, i) => {
       const map = new Map<string, string>();
       for (const n of descendants(doc, copy)) {
@@ -99,7 +119,7 @@ export function duplicate(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => v
           if (!(a.local === 'id' && (a.ns === null || a.ns === NS.xml))) continue;
           const was = attrValue(doc, n, a.ns, 'id');
           if (was === null || map.has(was)) continue;
-          const now = freshId(doc, was, taken);
+          const now = freshId(doc, was, taken, used);
           taken.add(now);
           map.set(was, now);
         }
@@ -108,8 +128,7 @@ export function duplicate(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => v
       for (const n of descendants(doc, copy)) if (n.kind === 'element' && findAttr(n, DRAW_NS, 'locked')) apply(opSetAttr(doc, n.id, DRAW_NS, 'locked', null));
       const orig = list[i];
       let at = el(doc, parent).children.indexOf(orig) + 1;
-      const ws = leadingSpace(doc, orig);
-      const copyWs = ws === null ? null : spaceLike(doc, parent, ws);
+      const copyWs = wsOf[i];
       if (copyWs !== null) apply(opInsert(doc, copyWs, parent, at++));
       apply(opInsert(doc, copy, parent, at));
       copies.push(copy);
@@ -142,13 +161,15 @@ export function group(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => void)
   const made = parseFragment(doc, parent, '<g></g>');
   if (!made.ok) throw new TokenEditError(made.error.message);
   const g = made.nodes[0];
+  // Taken out last first (nothing left behind them to shift), then put in the group in order.
   const moving: [NodeId | null, NodeId][] = [];
-  for (const id of ids) {
+  for (const id of [...ids].reverse()) {
     const ws = leadingSpace(doc, id);
     if (ws !== null) apply(opRemove(doc, ws));
     apply(opRemove(doc, id));
     moving.push([ws, id]);
   }
+  moving.reverse();
   let at = after === null ? el(doc, parent).children.length : el(doc, parent).children.indexOf(after);
   const before = lastWs === null ? null : spaceLike(doc, parent, lastWs);
   if (before !== null) apply(opInsert(doc, before, parent, at++));

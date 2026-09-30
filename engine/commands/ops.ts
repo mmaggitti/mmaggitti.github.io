@@ -81,8 +81,7 @@ export function opRemove(doc: Doc, id: NodeId): Op {
 /** Attach a detached node (a node from opRemove, or one built by the importer) under a parent. */
 export function opInsert(doc: Doc, id: NodeId, parent: NodeId, index: number): Op {
   if (isInside(doc, parent, id)) throw new Error('opInsert: a node cannot be inserted inside itself');
-  attachNode(doc, id, parent, index);
-  return { kind: 'place', id, before: null, after: { parent, index: el(doc, parent).children.indexOf(id) } };
+  return { kind: 'place', id, before: null, after: { parent, index: attachNode(doc, id, parent, index) } };
 }
 
 function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {
@@ -146,8 +145,17 @@ export function coalesce(ops: readonly Op[], doc?: Doc): Op[] {
 }
 
 // Undo the place ops on copies of the children lists they touch: if every list comes back as it
-// is now, the ops moved nothing in the end.
+// is now, the ops moved nothing in the end. A node that ends under another parent than it began
+// (or in or out of the tree) settles it at once, without the undo (a Duplicate, a Delete, a Group).
 function placesUnchanged(doc: Doc, ops: readonly Op[]): boolean {
+  const first = new Map<NodeId, Place | null>();
+  const last = new Map<NodeId, Place | null>();
+  for (const op of ops) {
+    if (op.kind !== 'place') continue;
+    if (!first.has(op.id)) first.set(op.id, op.before);
+    last.set(op.id, op.after);
+  }
+  for (const [id, b] of first) if ((b?.parent ?? null) !== (last.get(id)?.parent ?? null)) return false;
   const lists = new Map<NodeId, NodeId[]>();
   const list = (p: NodeId): NodeId[] => {
     let l = lists.get(p);

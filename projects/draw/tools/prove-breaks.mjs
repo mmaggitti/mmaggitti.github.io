@@ -452,8 +452,9 @@ const BREAKS = [
     run: drawTests('routing.test.ts'), expect: /✖ structure: a moved, inserted or removed node is patched alone/,
   },
   {
+    // P1-M1 fix (F5): re-anchored; the patches share one memo per change now.
     id: 'B72', what: 'the code view is not patched after an edit',
-    file: 'projects/draw/src/editor.ts', from: '      for (const id of r.code.blocks) this.#patchCode(id);\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '      for (const id of r.code.blocks) this.#patchCode(id, memo);\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
   },
   {
@@ -1967,8 +1968,9 @@ const BREAKS = [
   },
   // P1-M1 S4, slow.
   {
+    // P1-M1 fix (F5): re-anchored; Duplicate reads the ids in use once and hands them to freshId.
     id: 'B368', what: "the copy keeps the original's ids", slow: true, checks: ['duplicateGetsFreshIdsAndItsOwnReferences'],
-    file: 'projects/draw/src/interact/structure.ts', from: '          const now = freshId(doc, was, taken);', to: '          const now = was;',
+    file: 'projects/draw/src/interact/structure.ts', from: '          const now = freshId(doc, was, taken, used);', to: '          const now = was;',
     run: DRAW_E2E, expect: /duplicateGetsFreshIdsAndItsOwnReferences: the copy's ids are not fresh/,
   },
   {
