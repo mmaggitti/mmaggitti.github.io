@@ -440,9 +440,9 @@ const BREAKS = [
     run: PATCH_TESTS, expect: /a node taken off the canvas still maps to its NodeId/,
   },
   {
-    id: 'B71', what: "the editor's routing re-renders nested subtrees twice",
-    file: 'projects/draw/src/routing.ts', from: 'const subtrees = [...roots].filter((id) => !under(doc, id, roots, false));', to: 'const subtrees = [...roots];',
-    run: drawTests('routing.test.ts'), expect: /✖ structure: only the topmost subtrees/,
+    id: 'B71', what: 'a moved node re-renders its parent again (P1-M1: moved nodes are patched alone)',
+    file: 'projects/draw/src/routing.ts', from: '  const alone = [...cs.moved].filter((id) => !isStyle(doc, doc.nodes.get(id)?.parent));', to: '  const alone: NodeId[] = [];\n  for (const p of cs.structure) roots.add(p);',
+    run: drawTests('routing.test.ts'), expect: /✖ structure: a moved, inserted or removed node is patched alone/,
   },
   {
     id: 'B72', what: 'the code view is not patched after an edit',
@@ -1756,6 +1756,17 @@ const BREAKS = [
     id: 'B330', what: 'a drag on an unselected shape only selects it (no move)',
     file: 'projects/draw/src/editor.ts', from: '    if (!selected) this.select(g.add ? [...sel, g.target] : [g.target]);', to: "    if (!selected) {\n      this.select(g.add ? [...sel, g.target] : [g.target]);\n      g.mode = 'none';\n      return;\n    }",
     run: drawTests('editor.test.ts'), expect: /✖ a drag on an unselected shape selects and moves it/,
+  },
+  // P1-M1 S2: per-node structure routing (B71 above is the route itself).
+  {
+    id: 'B331', what: 'a text leaf that moved draws its parent again instead of being placed alone',
+    file: 'projects/draw/src/canvas/renderer.ts', from: '    if (judgedWhole(doc, at)) return this.#patch(at);\n', to: '    return this.#patch(at);\n',
+    run: PATCH_TESTS, expect: /a whitespace leaf moved alone: only what moved is drawn again/,
+  },
+  {
+    id: 'B332', what: 'a moved node rebuilds the whole code listing',
+    file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
+    run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
   },
 ];
 

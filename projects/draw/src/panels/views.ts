@@ -38,6 +38,8 @@ export class Views {
       code: {
         set: (blocks) => this.code?.set(blocks),
         patch: (block) => this.code?.patch(block),
+        place: (blocks, before) => this.code?.place(blocks, before),
+        remove: (keys) => this.code?.remove(keys),
         select: (nodes) => this.code?.select(nodes),
         focus: (mark) => this.code?.focus(mark),
         readOnly: (on) => this.code?.readOnly(on),

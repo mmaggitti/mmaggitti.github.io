@@ -47,6 +47,32 @@ export function codeBlocks(doc: Doc): Block[] {
   return out;
 }
 
+/** The blocks of one node and everything under it, in order (a node placed or moved alone). */
+export function blocksOf(doc: Doc, nodeId: NodeId): Block[] {
+  const out: Block[] = [];
+  const emit = (id: NodeId): void => {
+    const n = doc.nodes.get(id)!;
+    if (n.kind !== 'element') {
+      out.push(leafBlock(doc, n));
+      return;
+    }
+    out.push(startBlock(doc, n));
+    for (const c of n.children) emit(c);
+    const end = endTag(doc, n);
+    if (end !== null) out.push({ node: id, part: 'end', text: end, tokens: [] });
+  };
+  emit(nodeId);
+  return out;
+}
+
+/** An element's end-tag block, or null when it closes itself (a self-closing tag that is still empty). */
+export function endBlockFor(doc: Doc, nodeId: NodeId): Block | null {
+  const n = doc.nodes.get(nodeId);
+  if (!n || n.kind !== 'element') return null;
+  const end = endTag(doc, n);
+  return end === null ? null : { node: nodeId, part: 'end', text: end, tokens: [] };
+}
+
 /**
  * One node's block after an edit: an element's start tag (the only part of it a token edit
  * changes; its end tag never has tokens), or a leaf.

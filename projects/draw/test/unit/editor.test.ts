@@ -77,6 +77,19 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
           log.push(`code patch ${b.key}`);
           if (listing.has(b.key)) listing.set(b.key, b);
         },
+        place: (blocks, before) => {
+          log.push(`code place ${blocks.map((b) => b.key).join(' ')}`);
+          const keys = blocks.map((b) => b.key);
+          order = order.filter((k) => !keys.includes(k));
+          const at = before === null ? order.length : order.indexOf(before);
+          order.splice(at === -1 ? order.length : at, 0, ...keys);
+          for (const b of blocks) listing.set(b.key, b);
+        },
+        remove: (keys) => {
+          log.push(`code remove ${keys.join(' ')}`);
+          order = order.filter((k) => !keys.includes(k));
+          for (const k of keys) listing.delete(k);
+        },
         select: (nodes) => selected.push(new Set(nodes)),
         focus: (mark) => focused.push(mark),
         readOnly: (on) => log.push(`code read-only ${on}`),
@@ -175,12 +188,18 @@ test('an edit reaches the canvas, then the code, then the overlay, then the stor
     assert.equal(text(r), r.editor.source(), `${step}: the code shows exactly the document`);
   }
 
-  // A structure change re-renders the parent's subtree and rebuilds the listing.
+  // A structure change (Edit source) takes the old element away and places the new one alone, on
+  // the canvas and then in the code: nothing else is drawn again or rebuilt, and the listing stays
+  // the source.
   r.editor.select([poly.id]);
   r.editor.openSource();
   r.log.length = 0;
   assert.equal(r.editor.applySource(poly.id, '<circle r="3"/>'), null);
-  assert.deepEqual(r.log.slice(0, 2), [`canvas subtree ${doc(r).root}`, 'code set']);
+  const made = element(doc(r), (n) => n.local === 'circle' && attr(n, 'r') === '3');
+  const parent = made.parent!;
+  assert.deepEqual(r.log.slice(0, 4), [`canvas subtree ${poly.id}`, `canvas subtree ${made.id}`, `code remove ${poly.id}:start`, `code place ${made.id}:start`]);
+  assert.deepEqual(r.log.slice(4).filter((l) => l.startsWith('canvas') || l.startsWith('code')), [`code patch ${parent}:start`, `code patch ${parent}:end`], 'then its parent’s tags are read again');
+  assert.ok(r.log.indexOf('overlay') > r.log.indexOf(`code place ${made.id}:start`), 'the overlay after the code');
   assert.equal(text(r), r.editor.source());
 });
 

@@ -25,13 +25,13 @@ import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, type ChangeSet } from '../../../engine/commands/ops.ts';
 import { Session, type Build, type Drag } from '../../../engine/commands/session.ts';
-import { blockFor, codeBlocks, type Block, type BlockToken } from '../../../engine/code/blocks.ts';
+import { blockFor, blocksOf, codeBlocks, endBlockFor, type Block, type BlockToken } from '../../../engine/code/blocks.ts';
 import { TokenEditError, type TokenTarget } from '../../../engine/code/edit.ts';
 import type { ColorToken, NumberToken, TextToken, Token } from '../../../engine/code/tokens.ts';
 import { createStore, type Store } from './panels/store.ts';
 import { attached, route, type Route } from './routing.ts';
 import { elementOf, outlineable, selectionTarget } from './selectable.ts';
-import { blockKey, viewBlock } from './codeview/blocks.ts';
+import { blockKey, keyOrder, mixes, subtreeKeys, viewBlock } from './codeview/blocks.ts';
 import type { FocusMark, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
 import { artboard, rootViewport } from './canvas/artboard.ts';
 import { cameraBox, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
@@ -78,6 +78,10 @@ export interface CanvasPort {
 export interface CodePort {
   set(blocks: readonly ViewBlock[]): void;
   patch(block: ViewBlock): void;
+  /** Put these blocks (a node placed or moved, with everything under it) before the block keyed `before`, or at the end. */
+  place(blocks: readonly ViewBlock[], before: string | null): void;
+  /** Take these blocks away. */
+  remove(keys: readonly string[]): void;
   select(nodes: ReadonlySet<number>): void;
   /** Mark the number the Scrub strip holds, or none. */
   focus(mark: FocusMark | null): void;
@@ -276,7 +280,7 @@ export class Editor {
 
   // The fixed order of the plan's data flow: canvas → code view → overlay → stores → drafts.
   #wire(session: Session): void {
-    let r: Route = { attrs: [], subtrees: [], code: { reset: false, blocks: [] } };
+    let r: Route = { attrs: [], subtrees: [], moved: [], code: { reset: false, blocks: [], moved: [], parents: [] } };
     session.subscribe((cs: ChangeSet) => {
       r = route(session.doc, cs);
       if (cs.attrs.has(session.doc.root)) this.#artboardChanged();
@@ -284,6 +288,7 @@ export class Editor {
       if (this.canvasError.get() !== null) return this.#redraw(); // it failed before: the whole drawing, again
       try {
         for (const id of r.subtrees) canvas.patchSubtree(id);
+        for (const id of r.moved) canvas.patchSubtree(id);
         for (const id of r.attrs) canvas.patchAttributes(id);
       } catch {
         this.#redraw();
@@ -291,6 +296,7 @@ export class Editor {
     });
     session.subscribe(() => {
       if (r.code.reset) return this.#resetCode();
+      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();
       for (const id of r.code.blocks) this.#patchCode(id);
     });
     session.subscribe(() => {
@@ -338,6 +344,63 @@ export class Editor {
       }
       this.canvasError.set(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /**
+   * A structure change in the code: each moved node's blocks taken away, and the attached ones
+   * placed again (last first, each before the next block already in the listing); then the start
+   * and end blocks of the parents whose children changed are read again (a <g/> that gains a child
+   * gets an end tag). Every other block keeps its DOM node. False when a block can't be placed, or
+   * when a moved leaf of real text changes how its parent's other blocks flow (mixed content): the
+   * listing is then rebuilt.
+   */
+  #placeCode(moved: readonly NodeId[], parents: readonly NodeId[]): boolean {
+    const doc = this.#doc!;
+    const code = this.#ports.code;
+    if (moved.some((id) => mixes(doc.nodes.get(id)))) return false;
+    const order = keyOrder(doc);
+    const index = new Map(order.map((k, i) => [k, i]));
+    const next = (key: string): string | null => {
+      const at = index.get(key);
+      if (at === undefined) return null;
+      for (let i = at + 1; i < order.length; i++) if (this.#blocks.has(order[i])) return order[i];
+      return null;
+    };
+    for (const id of moved) {
+      const keys = subtreeKeys(doc, id).filter((k) => this.#blocks.has(k));
+      if (!keys.length) continue;
+      code.remove(keys);
+      for (const k of keys) this.#blocks.delete(k);
+    }
+    const memo = new Map<NodeId, boolean>();
+    for (const id of moved) {
+      if (!attached(doc, id)) continue;
+      const blocks = blocksOf(doc, id);
+      const last = blockKey(blocks[blocks.length - 1].node, blocks[blocks.length - 1].part);
+      if (!index.has(last)) return false;
+      const before = next(last);
+      for (const b of blocks) this.#blocks.set(blockKey(b.node, b.part), b);
+      code.place(blocks.map((b) => viewBlock(doc, b, memo)), before);
+    }
+    for (const p of parents) {
+      if (!attached(doc, p) || doc.nodes.get(p)?.kind !== 'element') continue;
+      this.#patchCode(p);
+      const end = endBlockFor(doc, p);
+      const key = blockKey(p, 'end');
+      if (end && this.#blocks.has(key)) {
+        this.#blocks.set(key, end);
+        code.patch(viewBlock(doc, end));
+      } else if (end) {
+        const before = next(key);
+        this.#blocks.set(key, end);
+        code.place([viewBlock(doc, end)], before);
+      } else if (this.#blocks.has(key)) {
+        code.remove([key]);
+        this.#blocks.delete(key);
+      }
+    }
+    code.select(this.selection.get());
+    return true;
   }
 
   #patchCode(id: NodeId): void {

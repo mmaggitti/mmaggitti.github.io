@@ -1,18 +1,32 @@
 // Where a ChangeSet goes. The editor applies one route per session emit, in the plan's fixed order:
-// the canvas (one element's attributes, or the smallest set of subtrees), then the code view (one
-// block per changed node, or the whole listing when the tree's shape changed). Pure, so the rules
-// are unit-tested in node; editor.ts only calls the views.
+// the canvas (one element's attributes, a node placed or taken away alone, or the smallest set of
+// subtrees), then the code view (one block per changed node, a moved node's blocks placed or taken
+// away, or the whole listing). Pure, so the rules are unit-tested in node; editor.ts only calls
+// the views.
+//
+// A node whose place changed (cs.moved: inserted, removed, reordered, moved to another parent) is
+// patched alone, on the canvas and in the code: its parent is not drawn again, so every other node
+// keeps its DOM node (a Forward on a 2,000-node drawing moves one element and its whitespace). They
+// go last to first in document order, so each lands before a sibling already in its place. A node
+// moved in or out of a <style> keeps the old route (the <style> is judged whole, and drawn again),
+// and so does one inside a subtree that is being drawn again anyway.
 
 import type { ChangeSet } from '../../../engine/commands/ops.ts';
 import type { Doc, NodeId } from '../../../engine/model/doc.ts';
+import { NS } from '../../../engine/model/doc.ts';
 
 export interface Route {
   /** Elements whose start tag changed and that are not inside a subtree being re-rendered. */
   attrs: NodeId[];
-  /** The topmost nodes to re-render: parents whose child list changed, and edited text's parents. */
+  /** The topmost nodes to re-render: edited text's parents, and a <style> whose children moved. */
   subtrees: NodeId[];
-  /** The code view: re-read these nodes' blocks, or rebuild the whole listing. */
-  code: { reset: true } | { reset: false; blocks: NodeId[] };
+  /** Nodes to place alone at their model position, or take away: last first in document order. */
+  moved: NodeId[];
+  /**
+   * The code view: re-read these nodes' blocks, place or take away the moved ones' blocks, and
+   * re-read the start and end blocks of the parents whose children changed; or rebuild it all.
+   */
+  code: { reset: true } | { reset: false; blocks: NodeId[]; moved: NodeId[]; parents: NodeId[] };
 }
 
 /** Is `id` in the document (its parents reach the root)? */
@@ -32,16 +46,51 @@ function under(doc: Doc, id: NodeId, roots: ReadonlySet<NodeId>, self: boolean):
   return false;
 }
 
+const isStyle = (doc: Doc, id: NodeId | null | undefined): boolean => {
+  const n = id === null || id === undefined ? undefined : doc.nodes.get(id);
+  return n?.kind === 'element' && n.local === 'style' && (n.ns === NS.svg || n.ns === NS.xhtml);
+};
+
+/** Every node's place in document order (attached nodes only). */
+function orderOf(doc: Doc): Map<NodeId, number> {
+  const order = new Map<NodeId, number>();
+  let i = 0;
+  const walk = (id: NodeId) => {
+    order.set(id, i++);
+    const n = doc.nodes.get(id);
+    if (n?.kind === 'element') for (const c of n.children) walk(c);
+  };
+  for (const id of doc.prolog) walk(id);
+  walk(doc.root);
+  for (const id of doc.epilog) walk(id);
+  return order;
+}
+
 export function route(doc: Doc, cs: ChangeSet): Route {
-  const roots = new Set<NodeId>(cs.structure);
+  const roots = new Set<NodeId>();
   for (const id of cs.texts) {
     const p = doc.nodes.get(id)?.parent;
     if (p != null) roots.add(p);
   }
+  // A child moved in or out of a <style>: the <style> is judged whole, so it is drawn again (and
+  // the code listing rebuilt).
+  const styles = [...cs.structure].filter((id) => isStyle(doc, id));
+  for (const s of styles) roots.add(s);
+  const reset = styles.length > 0;
+  const alone = [...cs.moved].filter((id) => !isStyle(doc, doc.nodes.get(id)?.parent));
   // Only the topmost: re-rendering a parent re-renders everything under it.
   const subtrees = [...roots].filter((id) => !under(doc, id, roots, false));
   const top = new Set(subtrees);
-  const attrs = [...cs.attrs].filter((id) => attached(doc, id) && !under(doc, id, top, true));
-  const code = cs.structure.size ? { reset: true as const } : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts])] };
-  return { attrs, subtrees, code };
+  const order = orderOf(doc);
+  // A node inside another placed node comes with it.
+  const within = new Set(alone.filter((id) => order.has(id)));
+  const placed = alone.filter((id) => !order.has(id) || (!under(doc, id, top, false) && !under(doc, id, within, false)));
+  // Taken away first (they have no place), then the rest last to first.
+  const moved = [...placed.filter((id) => !order.has(id)), ...placed.filter((id) => order.has(id)).sort((a, b) => order.get(b)! - order.get(a)!)];
+  const drawn = new Set([...top, ...moved.filter((id) => order.has(id))]);
+  const attrs = [...cs.attrs].filter((id) => attached(doc, id) && !under(doc, id, drawn, true));
+  const code = reset
+    ? { reset: true as const }
+    : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts])].filter((id) => !moved.includes(id)), moved, parents: [...cs.structure] };
+  return { attrs, subtrees, moved, code };
 }

@@ -5,8 +5,10 @@
 // previous drawing. P0-M3 adds the camera (in P1-M1 the root's own box, never its viewBox), an attribute put back
 // in the middle of the list (an undo), a value edit that must be exactly one attribute mutation
 // (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The P1-M0 review
-// adds attribute names the DOM refuses (dropped, never thrown on). The real Renderer is bundled
-// from source (test/harness/entry.ts) and driven directly.
+// adds attribute names the DOM refuses (dropped, never thrown on). P1-M1 adds nodes that move alone
+// (within a parent, to another, deleted with their whitespace, a whitespace leaf), routed as the
+// editor routes them. The real Renderer is bundled from source (test/harness/entry.ts) and driven
+// directly.
 //
 // Run by test/e2e.mjs on the /draw/ page (Chromium here, WebKit in CI), or alone, quickly:
 //   node test/renderer-patch.mjs
@@ -44,7 +46,7 @@ export default async function rendererPatch({ browser, origin }) {
 
 // Runs in the page.
 function cases(engine) {
-  const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, Renderer, sinkReady } = window.drawHarness;
+  const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, emptyChangeSet, noteChange, opInsert, opRemove, route, Renderer, sinkReady } = window.drawHarness;
   const SVG = 'http://www.w3.org/2000/svg';
   const host = () => {
     const div = document.createElement('div');
@@ -191,6 +193,48 @@ function cases(engine) {
     attach(doc, doc.nodes.get(id), byId(doc, 'A').id, 1);
     r.patchSubtree(id);
     check('an insert', r, root, doc);
+  }
+  // P1-M1: a node whose place changed is patched alone, routed as the editor routes it (the engine's
+  // place ops, then src/routing.ts: each moved node, last first in document order). Each element
+  // carries its leading whitespace, as Forward, Back and Delete move it; a whitespace leaf can move
+  // alone. Every other drawn node keeps its DOM node.
+  const SPACED = `<svg xmlns="${SVG}" viewBox="0 0 100 100">\n  <g id="A">\n    <rect id="r1" width="5" height="5"/>\n    <circle id="c1" r="3"/>\n  </g>\n  <g id="B">\n    <text id="t">hi</text>\n  </g>\n</svg>`;
+  const alone = [
+    ['a node and its whitespace moved within its parent (Forward)', (doc) => {
+      const r1 = byId(doc, 'r1'), A = byId(doc, 'A');
+      const ws = A.children[A.children.indexOf(r1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, r1.id), opInsert(doc, ws, A.id, A.children.indexOf(byId(doc, 'c1').id) + 1), opInsert(doc, r1.id, A.id, A.children.indexOf(ws) + 1)];
+    }],
+    ['a node and its whitespace moved to another parent', (doc) => {
+      const r1 = byId(doc, 'r1'), A = byId(doc, 'A'), B = byId(doc, 'B');
+      const ws = A.children[A.children.indexOf(r1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, r1.id), opInsert(doc, ws, B.id, 1), opInsert(doc, r1.id, B.id, 2)];
+    }],
+    ['a node deleted with its whitespace', (doc) => {
+      const c1 = byId(doc, 'c1'), A = byId(doc, 'A');
+      const ws = A.children[A.children.indexOf(c1.id) - 1];
+      return [opRemove(doc, ws), opRemove(doc, c1.id)];
+    }],
+    ['a whitespace leaf moved alone', (doc) => {
+      const A = byId(doc, 'A'), B = byId(doc, 'B');
+      const ws = A.children[0];
+      return [opRemove(doc, ws), opInsert(doc, ws, B.id, B.children.length)];
+    }],
+  ];
+  for (const [label, edit] of alone) {
+    const { r, root, doc } = setup(SPACED);
+    const kept = new Map([...doc.nodes.keys()].map((id) => [id, r.nodeFor(id)]).filter(([, d]) => d));
+    const cs = emptyChangeSet();
+    for (const op of edit(doc)) noteChange(cs, op);
+    const rt = route(doc, cs);
+    const problems = [];
+    if (rt.subtrees.length || rt.code.reset) problems.push(`routed ${JSON.stringify(rt.subtrees)} to be drawn again${rt.code.reset ? ', and the code rebuilt' : ''}`);
+    for (const id of rt.subtrees) r.patchSubtree(id);
+    for (const id of rt.moved) r.patchSubtree(id);
+    for (const id of rt.attrs) r.patchAttributes(id);
+    for (const [id, dom] of kept) if (!cs.moved.has(id) && r.nodeFor(id) !== dom) problems.push(`node ${id} (not moved) was drawn again`);
+    results.push({ label: `${label}: only what moved is drawn again`, problems });
+    check(label, r, root, doc);
   }
   // Ids: an animation's href target follows them, so changing one re-judges it.
   const ANIM = `<svg xmlns="${SVG}" viewBox="0 0 100 100"><rect id="a" width="5" height="5"/><circle id="b" r="3"/><animate href="#a" attributeName="width" values="5;9" dur="1s"/></svg>`;

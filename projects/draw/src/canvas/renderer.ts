@@ -4,7 +4,8 @@
 // element's attributes or one subtree and selection, history and the code view keep pointing at
 // the same node. A patched canvas always equals a fresh render of the same model: a patched node
 // is rebuilt at its model position (so a moved or reordered node lands where it now is, and a copy
-// left at its old place is taken away), and after an edit that can move ids every attribute
+// left at its old place is taken away; a text leaf is placed or taken away alone, except in a
+// <style>, which is judged whole and drawn again), and after an edit that can move ids every attribute
 // animation with an href is judged again, since the browser re-binds its target. Framework-free:
 // React owns the chrome, never the canvas. This file only inserts, moves and removes nodes the
 // sink made; creating or filling them happens in the sink alone.
@@ -78,6 +79,12 @@ function stillTime(svg: SVGSVGElement): number {
     }
   }
   return Number.isFinite(end) && end > 0 ? Math.min(end, 3600) - 0.001 : 0;
+}
+
+// A <style>'s text is judged whole (the sink reads all of it), so its leaves are never placed alone.
+function judgedWhole(doc: Doc, id: NodeId): boolean {
+  const n = doc.nodes.get(id);
+  return n?.kind === 'element' && n.local === 'style' && (n.ns === NS.svg || n.ns === NS.xhtml);
 }
 
 export class Renderer {
@@ -248,17 +255,36 @@ export class Renderer {
     if (!doc) return;
     if (id === doc.root) return this.render(doc);
     const node = doc.nodes.get(id);
-    // Text is re-rendered with its element, so a <style> is always judged whole.
-    if (node && node.kind !== 'element') return node.parent === null ? undefined : this.#patch(node.parent);
+    if (node && node.kind !== 'element') return this.#patchLeaf(node);
     this.#detach(id);
     const at = node?.parent ?? null;
     const parent = at === null ? undefined : this.#nodes.get(at);
     if (!node || at === null || !parent) return; // it left the document, or its parent isn't drawn
     const dom = this.#build(node, this.#inForeignObject(node), at);
     if (!dom) return void this.#skipped.set(id, at);
+    this.#insert(parent, at, id, dom);
+  }
+
+  // A text or CDATA leaf is placed or taken away alone. A <style>'s text is judged whole, so a
+  // <style> it joins or leaves is drawn again instead.
+  #patchLeaf(node: LeafNode): void {
+    const doc = this.#doc!;
+    const was = this.#nodes.get(node.id)?.parent ?? null;
+    this.#detach(node.id);
+    if (was !== null && was !== node.parent && judgedWhole(doc, was)) this.#patch(was);
+    const at = node.parent;
+    if (at === null) return; // it left the document
+    if (judgedWhole(doc, at)) return this.#patch(at);
+    const parent = this.#nodes.get(at);
+    if (!parent) return; // its parent isn't drawn
+    const dom = this.#text(node, el(doc, at));
+    if (dom) this.#insert(parent, at, node.id, dom);
+  }
+
+  // Before the next sibling already drawn under the same parent: the node's place in the model.
+  #insert(parent: Rendered, at: NodeId, id: NodeId, dom: Node): void {
     parent.kids.push(id);
-    // Before the next sibling already drawn under the same parent: the node's place in the model.
-    const siblings = el(doc, at).children;
+    const siblings = el(this.#doc!, at).children;
     const next = siblings.slice(siblings.indexOf(id) + 1).map((s) => this.#nodes.get(s)?.dom).find((d) => d?.parentNode === parent.dom);
     (parent.dom as Element).insertBefore(dom, next ?? null);
   }

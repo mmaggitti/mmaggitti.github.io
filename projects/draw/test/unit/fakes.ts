@@ -63,7 +63,7 @@ export function fakePorts(options: { refuseRoot?: boolean } = {}): EditorPorts {
         return e ? measureWith(e, ids) : new Map();
       },
     },
-    code: { set: () => {}, patch: () => {}, select: () => {}, focus: () => {}, readOnly: () => {}, source: () => {} },
+    code: { set: () => {}, patch: () => {}, place: () => {}, remove: () => {}, select: () => {}, focus: () => {}, readOnly: () => {}, source: () => {} },
     overlay: { show: () => {} },
     hostSize: () => ({ width: 416, height: 528 }),
     sinkReady: () => true,

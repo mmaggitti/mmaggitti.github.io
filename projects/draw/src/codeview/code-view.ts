@@ -153,6 +153,51 @@ export class CodeView {
     if (this.focused?.key === b.key) this.markFocus();
   }
 
+  /**
+   * Put these blocks (a node inserted or moved, and everything under it) before the block keyed
+   * `before`, or at the end. Every other block keeps its DOM node.
+   */
+  place(blocks: readonly ViewBlock[], before: string | null): void {
+    if (this.raw || !blocks.length) return;
+    this.drop(blocks.map((b) => b.key));
+    const found = before === null ? -1 : this.order.indexOf(before);
+    const at = found === -1 ? this.order.length : found;
+    for (const b of blocks) this.blocks.set(b.key, { data: b, el: null });
+    this.order.splice(at, 0, ...blocks.map((b) => b.key));
+    const after = this.order[at + blocks.length];
+    const next = after === undefined ? null : this.blocks.get(after)!.el;
+    if (this.firstMoved() || (after !== undefined && next?.parentNode !== this.root)) return this.rebuild();
+    const made = document.createDocumentFragment();
+    for (const b of blocks) {
+      const el = this.build(b);
+      this.blocks.get(b.key)!.el = el;
+      made.append(el);
+    }
+    this.root.insertBefore(made, next);
+    this.markFocus();
+  }
+
+  /** Take these blocks away (a node removed); the rest stay. */
+  remove(keys: readonly string[]): void {
+    if (this.drop(keys) && this.firstMoved()) this.rebuild();
+  }
+
+  private drop(keys: readonly string[]): boolean {
+    const gone = new Set(keys.filter((k) => this.blocks.has(k)));
+    for (const k of gone) {
+      this.blocks.get(k)!.el?.remove();
+      this.blocks.delete(k);
+    }
+    if (gone.size) this.order = this.order.filter((k) => !gone.has(k));
+    return gone.size > 0;
+  }
+
+  // The tidy view lays out its first shown block apart (no line break before it): when another
+  // block becomes the first, the listing is laid out again.
+  private firstMoved(): boolean {
+    return this.tidyOn && (this.order.find((k) => this.blocks.get(k)!.data.flow !== 'hidden') ?? null) !== this.firstLine;
+  }
+
   /** Mark the blocks of the selected nodes, and bring the first into view. */
   select(nodes: ReadonlySet<number>): void {
     let first: HTMLElement | null = null;
