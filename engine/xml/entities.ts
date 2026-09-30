@@ -20,7 +20,7 @@
 //   one under a DOCTYPE that names an XHTML DTD, where browsers supply HTML's named references
 //   (&nbsp;, &copy;…) themselves and Draw doesn't.
 
-import { NAME_PATTERN } from './lex.ts';
+import { NAME_PATTERN, clip } from './lex.ts';
 
 // Characters produced by expansion, per document, plus the work of expanding (see decode): one per
 // expansion, and the replacement text an expansion reads for references.
@@ -165,51 +165,70 @@ const REF = new RegExp(`&(#x[0-9a-fA-F]+|#[0-9]+|${NAME_PATTERN})?(;?)`, 'y');
  * (each entity once per document and context); how far they expand is decode's to limit.
  */
 export function wellFormedRefs(raw: string, table: EntityTable, inAttr: boolean): RefError | null {
-  return refError(raw, table, inAttr, []);
+  const r = refError(raw, table, inAttr, []);
+  return r && (r.kind ? { at: r.at, message: r.message, kind: r.kind } : { at: r.at, message: r.message });
 }
 
-function refError(raw: string, table: EntityTable, inAttr: boolean, open: string[]): RefError | null {
+/**
+ * What is wrong in an entity's replacement text: `chain` is the entities expanded to reach the text
+ * at fault, outermost first, and `cause` what is wrong in it.
+ */
+interface Fault {
+  chain: string[];
+  cause: string;
+  kind?: 'limit';
+}
+type Found = RefError & { fault?: Fault };
+
+// A chain is named once, by its ends: "the entity &c8; (through &c7; … &c0;) expands to…".
+function faultMessage({ chain, cause }: Fault): string {
+  if (!chain.length) return cause; // an entity that refers to itself, met while expanding it
+  const through = chain.length < 2 ? '' : ` (through ${chain.length > 2 ? `&${clip(chain[1])}; … ` : ''}&${clip(chain[chain.length - 1])};)`;
+  return `the entity &${clip(chain[0])};${through} expands to text that isn't well-formed: ${cause}`;
+}
+
+function refError(raw: string, table: EntityTable, inAttr: boolean, open: string[]): Found | null {
   for (let i = raw.indexOf('&'); i !== -1; i = raw.indexOf('&', i + 1)) {
     REF.lastIndex = i;
     const [, ref, semi] = REF.exec(raw)!;
     if (ref === undefined) return { at: i, message: raw[i + 1] === '#' ? 'a malformed character reference' : "a bare & (write &amp; for the character itself)" };
-    if (!semi) return { at: i, message: ref[0] === '#' ? 'a malformed character reference' : `the reference &${ref} has no closing ;` };
+    if (!semi) return { at: i, message: ref[0] === '#' ? 'a malformed character reference' : `the reference &${clip(ref)} has no closing ;` };
     if (ref[0] === '#') {
-      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${ref}; names a character XML doesn't allow` };
+      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${clip(ref)}; names a character XML doesn't allow` };
     } else if (Object.hasOwn(PREDEFINED, ref)) continue;
     else if (table.internal.has(ref)) {
-      const inner = entityError(ref, table, inAttr, open);
-      if (inner) return { ...inner, at: i };
+      const fault = entityError(ref, table, inAttr, open);
+      if (fault) return fault.kind ? { at: i, message: faultMessage(fault), kind: fault.kind, fault } : { at: i, message: faultMessage(fault), fault };
     } else if (table.unparsed.has(ref)) {
-      return { at: i, message: `the entity &${ref}; is unparsed (declared NDATA): no reference may name it` };
+      return { at: i, message: `the entity &${clip(ref)}; is unparsed (declared NDATA): no reference may name it` };
     } else if (table.external.has(ref)) {
-      if (inAttr) return { at: i, message: `the external entity &${ref}; can't be used in an attribute value` };
+      if (inAttr) return { at: i, message: `the external entity &${clip(ref)}; can't be used in an attribute value` };
     } else if (table.hasPERefs) {
-      return { at: i, message: `the entity &${ref}; is not declared; it may be declared by a parameter entity, which Draw doesn't expand`, kind: 'limit' };
+      return { at: i, message: `the entity &${clip(ref)}; is not declared; it may be declared by a parameter entity, which Draw doesn't expand`, kind: 'limit' };
     } else if (table.xhtmlDtd) {
-      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };
-    } else return { at: i, message: `the entity &${ref}; is not declared` };
+      return { at: i, message: `the entity &${clip(ref)}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };
+    } else return { at: i, message: `the entity &${clip(ref)}; is not declared` };
   }
   return null;
 }
 
-const CHECKED = new WeakMap<EntityTable, Map<string, Omit<RefError, 'at'> | null>>();
+const CHECKED = new WeakMap<EntityTable, Map<string, Fault | null>>();
 
 /** Why an internal entity's replacement text is not well-formed in this context (text or attribute), or null. */
-function entityError(name: string, table: EntityTable, inAttr: boolean, open: string[]): Omit<RefError, 'at'> | null {
+function entityError(name: string, table: EntityTable, inAttr: boolean, open: string[]): Fault | null {
   let memo = CHECKED.get(table);
   if (!memo) CHECKED.set(table, (memo = new Map()));
   const key = `${inAttr ? 'attr' : 'text'} ${name}`;
   const known = memo.get(key);
   if (known !== undefined) return known;
-  if (open.includes(name)) return { message: `the entity &${name}; refers to itself` };
+  if (open.includes(name)) return { chain: [], cause: `the entity &${clip(name)}; refers to itself` };
   if (open.length > ENTITY_DEPTH) return null; // deeper than decode goes: it refuses the file
   const rep = table.internal.get(name)!;
   open.push(name);
-  const inner: Omit<RefError, 'at'> | null = !inAttr && rep.includes(']]>') ? { message: "']]>' in text" } : refError(rep, table, inAttr, open);
+  const inner: Found | null = !inAttr && rep.includes(']]>') ? { at: 0, message: "']]>' in text" } : refError(rep, table, inAttr, open);
   open.pop();
-  const message = inner && `the entity &${name}; expands to text that isn't well-formed: ${inner.message}`;
-  const out = !inner ? null : inner.kind ? { message: message!, kind: inner.kind } : { message: message! };
+  const below: Fault | null = inner && (inner.fault ?? (inner.kind ? { chain: [], cause: inner.message, kind: inner.kind } : { chain: [], cause: inner.message }));
+  const out: Fault | null = below && { ...below, chain: [name, ...below.chain] };
   memo.set(key, out);
   return out;
 }
@@ -243,7 +262,7 @@ export function decode(s: string, table: EntityTable = NO_ENTITIES, budget: Budg
     }
     if (rep.includes('<')) throw new EntityMarkupError(`entity &${ref}; expands to markup`);
     const bad = entityError(ref, table, attr, []);
-    if (bad && bad.kind === undefined) throw new EntityWellFormednessError(bad.message);
+    if (bad && bad.kind === undefined) throw new EntityWellFormednessError(faultMessage(bad));
     // An expansion costs work as well as output, or one that makes nothing is free and a bomb of
     // empty entities runs fan^depth expansions: one for the expansion, and its replacement text when
     // it holds references (read again at every use; text without them is output, charged below).

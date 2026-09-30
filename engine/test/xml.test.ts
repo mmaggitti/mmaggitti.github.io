@@ -467,6 +467,41 @@ test('strict well-formedness: what a browser refuses, Draw refuses, each with it
   }
 });
 
+// A chain of entities is named once, by its ends; each level used to repeat the sentence, about
+// 800 characters at depth 8 in the source view's overlay (P1-M0 review, F9).
+test('an entity chain is named once in a message, by its ends', () => {
+  let subset = '<!ENTITY c0 "a &#38; b">';
+  for (let k = 1; k <= 8; k++) subset += `<!ENTITY c${k} "&c${k - 1};">`;
+  const message = (use: string) => {
+    const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><text>${use}</text></svg>`);
+    return r.ok ? 'parsed' : r.error.message;
+  };
+  const bare = "a bare & (write &amp; for the character itself)";
+  assert.equal(message('&c8;'), `the entity &c8; (through &c7; … &c0;) expands to text that isn't well-formed: ${bare}`);
+  assert.ok(message('&c8;').length < 200, `${message('&c8;').length} characters at depth 8`);
+  assert.equal(message('&c1;'), `the entity &c1; (through &c0;) expands to text that isn't well-formed: ${bare}`);
+  assert.equal(message('&c0;'), `the entity &c0; expands to text that isn't well-formed: ${bare}`);
+});
+
+// Names in messages are cut to about 40 characters: a 1 MB name used to make a 1 MB message, which
+// the source view and the import report show (P1-M0 review, F9).
+test('a message cuts a long name to about 40 characters', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  const long = 'a'.repeat(1_000_000);
+  for (const [label, src, message] of [
+    ['a colon out of place', `${svg}<a${':b'.repeat(500_000)}/></svg>`, /^a[:b]{38}… is not a valid name: a colon must stand once, between two names$/],
+    ['a reference without ;', `${svg}<text>&${long}</text></svg>`, /^the reference &a{39}… has no closing ;$/],
+    ['an attribute written twice', `${svg}<g ${long}="1" ${long}="2"/></svg>`, /^attribute a{39}… is written twice in <g>$/],
+    ['an undeclared entity', `${svg}<text>&${long};</text></svg>`, /^the entity &a{39}…; is not declared$/],
+    ['an unbound prefix', `${svg}<${long}:g/></svg>`, /^the prefix a{39}… of <a{39}…> is not declared$/],
+  ] as const) {
+    const r = parseDoc(src);
+    assert.ok(!r.ok, `${label}: parsed`);
+    assert.ok(r.error.message.length < 200, `${label}: a message of ${r.error.message.length} characters`);
+    assert.match(r.error.message, message, label);
+  }
+});
+
 test('a processing instruction in the DOCTYPE may hold ] and quotes', () => {
   const src = `<!DOCTYPE svg [\n  <?draw a ] b ' c " d?>\n  <!-- ] ' -->\n  <!ENTITY e "ok">\n  <?draw <!ENTITY x "no"> ?>\n]>\n<svg xmlns="http://www.w3.org/2000/svg"><text>&e;</text></svg>`;
   const r = parseDoc(src);

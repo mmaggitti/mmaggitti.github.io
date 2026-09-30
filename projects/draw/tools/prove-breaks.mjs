@@ -1501,45 +1501,45 @@ const BREAKS = [
   // P1-M0: the engine refuses what a browser's XML parser refuses, each at its place.
   {
     id: 'B278', what: 'an attribute written twice is accepted',
-    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>`, attrs };\n', to: '',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${clip(an)} is written twice in <${clip(name)}>`, attrs };\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: an attribute written twice: parsed\n/,
   },
   {
     id: 'B279', what: 'a bare & is accepted',
     file: 'engine/xml/entities.ts', from: "if (ref === undefined) return { at: i, message: raw[i + 1] === '#' ? 'a malformed character reference' : \"a bare & (write &amp; for the character itself)\" };", to: 'if (ref === undefined) continue;',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a bare & in text: parsed\n/,
   },
   {
     id: 'B280', what: '&nbsp; is accepted with no DTD (an undeclared entity stays as written)',
-    file: 'engine/xml/entities.ts', from: '    } else return { at: i, message: `the entity &${ref}; is not declared` };', to: '    }',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    file: 'engine/xml/entities.ts', from: '    } else return { at: i, message: `the entity &${clip(ref)}; is not declared` };', to: '    }',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: &nbsp; with no DTD: parsed\n/,
   },
   {
     id: 'B281', what: '&#0; is accepted (read as U+FFFD, as before P1)',
-    file: 'engine/xml/entities.ts', from: "      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${ref}; names a character XML doesn't allow` };\n", to: '',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    file: 'engine/xml/entities.ts', from: "      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${clip(ref)}; names a character XML doesn't allow` };\n", to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: &#0;: parsed\n/,
   },
   {
     id: 'B282', what: "'--' in a comment is accepted",
     file: 'engine/xml/lex.ts', from: "      if (dashes !== close) return fail(dashes, \"'--' inside a comment\");\n", to: '',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: -- in a comment: parsed\n/,
   },
   {
     id: 'B283', what: 'an element prefix nobody declared is accepted',
-    file: 'engine/model/doc.ts', from: '    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${prefix} of <${tag}> is not declared`);\n', to: '',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    file: 'engine/model/doc.ts', from: '    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${clip(prefix)} of <${clip(tag)}> is not declared`);\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: an unbound element prefix: parsed\n/,
   },
   {
     id: 'B284', what: 'a lowercase <!doctype is accepted',
     file: 'engine/xml/lex.ts', from: "    if (src.startsWith('<!DOCTYPE', i)) {", to: "    if (src.startsWith('<!DOCTYPE', i) || src.startsWith('<!doctype', i)) {",
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a lowercase <!doctype: parsed\n/,
   },
   {
     // A form feed is refused wherever it stands (it is no XML character at all); what the old /\S/
     // lets through outside the root is JavaScript's other whitespace: a no-break space, a late BOM.
     id: 'B285', what: 'text outside the root is judged by the old /\\S/ again (a no-break space before the root passes)',
     file: 'engine/xml/cst.ts', from: 'const STRAY = /[^ \\t\\r\\n]/;', to: 'const STRAY = /\\S/;',
-    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a no-break space before the root: parsed\n/,
   },
   {
     id: 'B286', what: "the DOCTYPE's subset scan loses its processing-instruction skip (a ] or a quote in one breaks the DOCTYPE)",
@@ -1553,7 +1553,7 @@ const BREAKS = [
   },
   {
     id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
-    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${clip(ref)}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
     run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
   },
   // P1-M0 review (F8): with several errors, the first is reported, as a browser's parser stops there.
@@ -1572,6 +1572,17 @@ const BREAKS = [
     file: 'engine/xml/lex.ts', from: "      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });\n", to: '',
     run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one text, a reference \(line 2\), then U\+0001 \(line 3\)/,
   },
+  // P1-M0 review (F9): an entity chain is named once; a long name is cut in a message.
+  {
+    id: 'B312', what: "an entity chain's message repeats its sentence at every level again (about 800 characters at depth 8)",
+    file: 'engine/xml/entities.ts', from: '  const out: Fault | null = below && { ...below, chain: [name, ...below.chain] };', to: '  const out: Fault | null = below && { ...below, chain: [name], cause: faultMessage(below) };',
+    run: XML_TESTS, expect: /✖ an entity chain is named once in a message, by its ends/,
+  },
+  {
+    id: 'B313', what: 'a message holds a long name whole again (a 1 MB name makes a 1 MB message)',
+    file: 'engine/xml/lex.ts', from: "export const clip = (name: string): string => (name.length > 40 ? `${name.slice(0, 39).replace(/[\\uD800-\\uDBFF]$/, '')}…` : name);", to: 'export const clip = (name: string): string => name;',
+    run: XML_TESTS, expect: /✖ a message cuts a long name to about 40 characters[\s\S]*a colon out of place: a message of \d+ characters/,
+  },
   // P1-M0 review: one name pattern for entities (F6), the first declaration binds (F7), an unparsed entity is never referenced (F9).
   {
     id: 'B309', what: "an entity's declaration takes ASCII names only again (a declared &é; reads as undeclared)",
@@ -1585,7 +1596,7 @@ const BREAKS = [
   },
   {
     id: 'B311', what: 'a reference to an unparsed (NDATA) entity is accepted in text',
-    file: 'engine/xml/entities.ts', from: "    } else if (table.unparsed.has(ref)) {\n      return { at: i, message: `the entity &${ref}; is unparsed (declared NDATA): no reference may name it` };\n", to: '',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.unparsed.has(ref)) {\n      return { at: i, message: `the entity &${clip(ref)}; is unparsed (declared NDATA): no reference may name it` };\n", to: '',
     run: XML_TESTS, expect: /✖ a reference to an unparsed \(NDATA\) entity is refused[\s\S]*<text>&logo;<\/text>: parsed/,
   },
   {

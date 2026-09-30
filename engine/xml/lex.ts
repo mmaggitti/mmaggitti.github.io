@@ -76,7 +76,10 @@ function badQName(name: string): boolean {
   if (c === -1) return false;
   return c === 0 || name.indexOf(':', c + 1) !== -1 || !/[A-Za-z_À-￿]/.test(name.charAt(c + 1));
 }
-const qnameMessage = (name: string): string => `${name} is not a valid name: a colon must stand once, between two names`;
+const qnameMessage = (name: string): string => `${clip(name)} is not a valid name: a colon must stand once, between two names`;
+
+/** A name as a message shows it: cut to about 40 characters, so a long one can't flood the view. */
+export const clip = (name: string): string => (name.length > 40 ? `${name.slice(0, 39).replace(/[\uD800-\uDBFF]$/, '')}…` : name);
 
 export function lex(src: string): LexResult {
   const r = scan(src);
@@ -200,7 +203,7 @@ function scanStartTag(src: string, i: number): StartTok | (LexError & { attrs: A
     const an = matchAt(NAME, src, k);
     if (!an) return { at: k, message: `bad attribute name in <${name}>`, attrs };
     if (badQName(an)) return { at: k, message: qnameMessage(an), attrs };
-    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>`, attrs };
+    if (seen.has(an)) return { at: k, message: `attribute ${clip(an)} is written twice in <${clip(name)}>`, attrs };
     seen.add(an);
     let e = k + an.length;
     const w1 = matchAt(WS, src, e) ?? '';

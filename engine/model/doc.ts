@@ -16,7 +16,7 @@
 //   (xmlns:p="", or the xml and xmlns prefixes and namespaces bound otherwise), and one attribute
 //   written twice under two prefixes of one namespace.
 
-import type { AttrTok, LexError, Quote } from '../xml/lex.ts';
+import { clip, type AttrTok, type LexError, type Quote } from '../xml/lex.ts';
 import { parseCst, DEFAULT_LIMITS, type CstElement, type CstLeaf, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
 import { decodeAttr, decodeText, escape, readEntityTable, newBudget, normalizeEol, wellFormedRefs, EntityBudgetError, EntityMarkupError, EntityWellFormednessError, type Budget, type EntityTable } from '../xml/entities.ts';
 
@@ -168,18 +168,18 @@ function build(source: string, cst: { prolog: CstLeaf[]; root: CstElement | null
     const map = scope; // what is in scope here, this element's own declarations included
     const bound = (p: string): boolean => p === 'xml' || !!map.get(p);
     const [prefix, local] = splitName(tag);
-    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${prefix} of <${tag}> is not declared`);
+    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${clip(prefix)} of <${clip(tag)}> is not declared`);
     const seen = new Map<string, string>(); // namespace and local name → the name as first written
     const attrs: Attr[] = el.start.attrs.map((a) => {
       const [ap, al] = splitName(a.name);
       const declaration = a.name === 'xmlns' || ap === 'xmlns';
-      if (!declaration && ap !== null && !bound(ap)) throw new ParseFail(a.at, `the prefix ${ap} of attribute ${a.name} is not declared`);
+      if (!declaration && ap !== null && !bound(ap)) throw new ParseFail(a.at, `the prefix ${clip(ap)} of attribute ${clip(a.name)} is not declared`);
       const ns = declaration ? NS.xmlns : ap === 'xml' ? NS.xml : ap ? map.get(ap) ?? null : null;
       if (!declaration) {
         const key = `${ns ?? ''} ${al}`;
         const first = seen.get(key);
         // The same name twice is the lexer's to refuse; here, two names for one attribute.
-        if (first !== undefined && first !== a.name) throw new ParseFail(a.at, `attributes ${first} and ${a.name} of <${tag}> are one attribute: their prefixes name the same namespace`);
+        if (first !== undefined && first !== a.name) throw new ParseFail(a.at, `attributes ${clip(first)} and ${clip(a.name)} of <${clip(tag)}> are one attribute: their prefixes name the same namespace`);
         seen.set(key, a.name);
       }
       return { qname: a.name, prefix: ap, local: al, ns, lead: a.lead, eq: a.eq, quote: a.quote, raw: a.raw };
@@ -253,7 +253,7 @@ function declarationError(prefix: string, uri: string): string | null {
   if (prefix === 'xml') return uri === NS.xml ? null : `the prefix xml is bound to ${NS.xml} only`;
   if (uri === NS.xml) return `only the prefix xml may name ${NS.xml}`;
   if (uri === NS.xmlns) return `no prefix may name ${NS.xmlns}`;
-  if (prefix && !uri) return `xmlns:${prefix} is empty: a prefix can’t be undeclared`;
+  if (prefix && !uri) return `xmlns:${clip(prefix)} is empty: a prefix can’t be undeclared`;
   return null;
 }
 
