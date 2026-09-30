@@ -147,7 +147,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   hand, in the same transaction.
 - **Paths (P1-M3).** The Pen and the Node tool write `d` through `engine/path/segments.ts`: numbers
   rewritten in place (`rewriteNumbers`' glue rule), one segment's text at a time, never the whole
-  attribute.
+  attribute. Booleans load path-bool (and paper-core only as a fallback) from lazy chunks in
+  `src/paths/`; `tools/check-bundle.mjs` fails the build on `eval` or `new Function` in `dist/`.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
@@ -164,11 +165,12 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Device checks:** `projects/draw/DEVICE-CHECKS.md` lists what CI can't prove (gesture feel, iOS
   pickers and share sheets, the keyboard, storage); Mark signs it on his phone for each phase.
 - **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit, recorded as
-  evidence) → ledger-check --evidence → vite build → library-index`. It runs inside `npm run build`,
-  so CI gates all of it. After the smoke test, `ledger-check --e2e-evidence` requires every e2e check
-  a ledger row cites to have passed in that run (WebKit in CI), in every call and asserting
-  something, in a complete run newer than the e2e, its helpers and the built page. A row whose note
-  or reason names an e2e check must cite it (ledger-check), so the evidence holds that claim too.
+  evidence) → ledger-check --evidence → vite build → check-bundle → library-index`. It runs inside
+  `npm run build`, so CI gates all of it. After the smoke test, `ledger-check --e2e-evidence`
+  requires every e2e check a ledger row cites to have passed in that run (WebKit in CI), in every
+  call and asserting something, in a complete run newer than the e2e, its helpers and the built
+  page. A row whose note or reason names an e2e check must cite it (ledger-check), so the evidence
+  holds that claim too.
 - **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
   earlier phase must be done or superseded. P0 closed on 2026-09-29 (`currentPhase` 1).
 

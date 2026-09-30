@@ -2873,7 +2873,7 @@ const BREAKS = [
   {
     id: 'B541', what: 'the fallback never runs (only path-bool is tried)',
     file: 'projects/draw/src/paths/pipeline.ts', from: "[['path-bool', libs.primary], ['paper', libs.fallback]] as const", to: "[['path-bool', libs.primary]] as const",
-    run: drawTests('booleans.test.ts'), expect: /✖ a path-bool that throws hands the operation to paper-core/,
+    run: drawTests('booleans.test.ts'), expect: /✖ a path-bool that throws, or misses more than 1% of the self-check’s samples, hands the operation to paper-core/,
   },
   {
     id: 'B542', what: 'Subtract takes the top operand from the rest (path-bool gets the operands top first, so paper-core writes every subtract)',

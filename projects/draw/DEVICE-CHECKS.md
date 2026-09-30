@@ -61,5 +61,7 @@ To take the house's group: tap the roof, then More → Select group.
 | 39 | Ghost arcs by thumb | Open the file SVG Lab's Arcs lesson exports in arc mode, and select its path in the Node tool: tap each dashed ghost arc with your thumb; the one you meant takes over first try, and its "L S" label turns pink | ☐ |
 | 40 | The donut's ring | Open the file the Arcs lesson exports in donut mode, tap a slice, Inspect → Edit as donut, then drag a boundary between two slices all the way round the ring: the handle stays under your thumb, the "a \| b" tooltip is readable above it, and the % labels follow | ☐ |
 | 41 | Direction arrows | Open the file the Arcs lesson exports in holes mode, and select its path in the Node tool at the fit: every arrowhead is readable, the inner ones pink; tap an inner point, then Reverse: the inner arrows turn, and the hole opens | ☐ |
+| 42 | Union by thumb | Draw a rect and a circle that overlap, select both with a marquee, then More → Union: one shape is left where the two were, drawn in the rect's colour, and Undo brings both back; Subtract, Intersect and Exclude each do what they say the same way | ☐ |
+| 43 | Union offline | Open Draw, then turn on Airplane mode without reloading and try Union: it works (Safari kept its code from an earlier Union) or the notice says Draw couldn't load the shape tools and nothing changes; back online, Union works, and from then on it works offline too until Draw is reloaded | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

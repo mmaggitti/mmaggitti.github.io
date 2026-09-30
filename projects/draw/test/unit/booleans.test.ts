@@ -111,7 +111,7 @@ test('the boolean corpus: every pair combined four ways by Draw’s pipeline (pa
   assert.deepEqual(tally, OUTCOMES, 'each case written as pinned (the libraries are pinned too)');
 });
 
-test('a path-bool that throws hands the operation to paper-core, whose result is written; paper-core’s chunk loads only then', async () => {
+test('a path-bool that throws, or misses more than 1% of the self-check’s samples, hands the operation to paper-core, whose result is written; paper-core’s chunk loads only then', async () => {
   const inputs = inputsOf(PAIRS[0]); // two overlapping squares
   let fallbacks = 0;
   const counting: Libraries = { primary: async () => pathBool, fallback: async () => (fallbacks++, paperCore) };
@@ -128,6 +128,12 @@ test('a path-bool that throws hands the operation to paper-core, whose result is
   assert.deepEqual(out.tried.map((t) => [t.by, t.error]), [['path-bool', 'forced'], ['paper', null]]);
   assert.deepEqual(out.loops, resultLoops(paperCore(inputs, 'union')), 'the loops written are paper-core’s');
   assert.ok(worst(scoreOf(inputs, 'union', out.loops)) <= CORPUS.limit);
+  // A result that misses more than 1% of the self-check's samples (the bottom alone, for a union) hands over too.
+  const wrong: Combine = (ins) => `M ${ins[0].loops[0].start.join(' ')}${ins[0].loops[0].segs.map((s) => ` L ${s.to.join(' ')}`).join('')} Z`;
+  const missed = await runPipeline(inputs, 'union', { primary: async () => wrong, fallback: counting.fallback });
+  assert.equal(fallbacks, 2);
+  assert.ok('loops' in missed && missed.by === 'paper', 'paper-core wrote the union');
+  assert.ok(missed.tried[0].score && worst(missed.tried[0].score) > 0.01, `path-bool's stand-in missed ${JSON.stringify(missed.tried[0].score)}`);
   // Both failing refuses; a chunk that can't load says so.
   assert.deepEqual(await runPipeline(inputs, 'union', { primary: async () => throwing, fallback: async () => throwing }), { refused: REFUSED, tried: [{ by: 'path-bool', score: null, error: 'forced' }, { by: 'paper', score: null, error: 'forced' }] });
   const offline = await runPipeline(inputs, 'union', { primary: () => Promise.reject(new Error('Failed to fetch')), fallback: counting.fallback });
