@@ -220,6 +220,17 @@ test('corner resizes: a rect keeps its opposite corner, at least 1 a side; a cir
   assert.match(serialize(doc), /<line id="l" x1="-10" y1="-20" x2="10" y2="20"\/>/, 'a line scales about the fixed corner');
 });
 
+test('corner resizes of a nested svg, an image and a foreignObject write x, y, width and height, the opposite corner kept', () => {
+  for (const el of ['<svg id="e" x="5" y="5" width="20" height="10" viewBox="0 0 10 5"/>', '<image id="e" x="5" y="5" width="20" height="10"/>', '<foreignObject id="e" x="5" y="5" width="20" height="10"/>']) {
+    const doc = load(svg(el));
+    const out = run(doc, planResize(doc, byId(doc, 'e'), { corner: 'tl', to: { x: 1, y: 2 } }, OPTS));
+    assert.ok(out.includes(el.replace('x="5" y="5" width="20" height="10"', 'x="1" y="2" width="24" height="13"')), `the top-left of ${el} to (1, 2), the bottom-right kept at (25, 15):\n${out}`);
+    const back = load(svg(el));
+    const br = run(back, planResize(back, byId(back, 'e'), { corner: 'br', to: { x: 40, y: 30 } }, OPTS));
+    assert.ok(br.includes(el.replace('width="20" height="10"', 'width="35" height="25"')), `the bottom-right of ${el}: x and y untouched:\n${br}`);
+  }
+});
+
 test('rotate rewrites an existing angle; scale rewrites scale() and keeps the ratio of two; both say why not', () => {
   const doc = load(svg('<g id="h" transform="translate(50 50)\n    rotate(0)\n    scale(1)"/><g id="s" transform="scale(1 2)"/><g id="n"/>'));
   const h = byId(doc, 'h');

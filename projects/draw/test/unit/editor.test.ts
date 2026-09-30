@@ -1430,6 +1430,100 @@ test('the Snap sheet’s Grid step field is one history entry while it is typed 
   assert.equal(r.editor.drawState.grid, 5);
 });
 
+test('Hide and Show are refused, with the reason, when CSS sets display (a <style> rule, or the element’s own style=""), and nothing is written', () => {
+  const T = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>#a { display: inline }</style>
+  <rect id="a" width="10" height="10"/><rect id="b" style="display: inline" x="20" width="10" height="10"/><rect id="c" x="40" width="10" height="10" display="none"/>
+</svg>`;
+  const r = rig();
+  r.editor.open(T);
+  for (const [name, hide] of [['a', true], ['b', true]] as const) {
+    r.editor.notice.set(null);
+    r.editor.setHidden(idOf(r, name), hide);
+    assert.equal(r.editor.notice.get(), 'Its display is set by CSS.', name);
+  }
+  assert.equal(r.editor.source(), T, 'nothing was written');
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.setHidden(idOf(r, 'c'), false);
+  assert.equal(r.editor.history.get().undoLabel, 'Show', 'a display the attribute sets is Draw’s to change');
+});
+
+test('a drag moves a rect, an image, a use, a foreignObject and a nested svg by their own x and y', () => {
+  const XY = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><circle id="dot" r="4"/></defs>
+  <rect id="r" x="10" y="10" width="10" height="10"/>
+  <image id="i" x="30" y="10" width="10" height="10" href="data:image/png;base64,iVBORw0KGgo="/>
+  <use id="u" href="#dot" x="55" y="15"/>
+  <foreignObject id="f" x="70" y="10" width="10" height="10"/>
+  <svg id="s" x="10" y="40" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>
+</svg>`;
+  const moved: Record<string, [string, string]> = {
+    r: ['<rect id="r" x="10" y="10"', '<rect id="r" x="13" y="12"'],
+    i: ['<image id="i" x="30" y="10"', '<image id="i" x="33" y="12"'],
+    u: ['<use id="u" href="#dot" x="55" y="15"', '<use id="u" href="#dot" x="58" y="17"'],
+    f: ['<foreignObject id="f" x="70" y="10"', '<foreignObject id="f" x="73" y="12"'],
+    s: ['<svg id="s" x="10" y="40"', '<svg id="s" x="13" y="42"'],
+  };
+  for (const [name, [from, to]] of Object.entries(moved)) {
+    const r = rig();
+    r.editor.open(XY);
+    r.editor.snap.set(NO_SNAP);
+    const k = pxPerUnit(r);
+    const at = hostAt(r, 50, 50);
+    drag(r, at, { x: at.x + 3 * k, y: at.y + 2 * k }, [idOf(r, name)]);
+    assert.equal(r.editor.source(), XY.replace(from, to), `${name}: moved by its x and y, nothing else`);
+    assert.equal(r.editor.history.get().undoLabel, 'Move');
+  }
+});
+
+test('the centre handle moves the shape by whole units, with the tooltip "x N, y N" at the shape’s new centre', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const centre = r.editor.overlayModel().handles.find((h) => h.kind === 'center')!;
+  const k = pxPerUnit(r);
+  const to = { x: centre.at.x + 7.4 * k, y: centre.at.y + 3.2 * k };
+  r.editor.pointerDown(centre.at, [a], { add: false });
+  r.editor.pointerDrag({ x: (centre.at.x + to.x) / 2, y: (centre.at.y + to.y) / 2 });
+  r.editor.pointerDrag(to);
+  const tip = r.editor.overlayModel().tip;
+  r.editor.pointerUp(to);
+  assert.equal(tip?.text, 'x 22, y 18', 'the centre (15, 15) moved by (7, 3)');
+  assert.equal(r.editor.source(), SHAPES.replace('<rect id="a" x="10" y="10"', '<rect id="a" x="17" y="13"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Move');
+});
+
+test('a dragged corner snaps to a guide within 8 px, with a snap line on it, and not from further away', () => {
+  const corner = (r: Rig, x: number) => {
+    const a = idOf(r, 'a');
+    r.editor.select([a]);
+    const br = r.editor.overlayModel().handles.find((h) => h.id === 'br')!;
+    const to = hostAt(r, x, 20);
+    r.editor.pointerDown(br.at, [a], { add: false });
+    r.editor.pointerDrag({ x: (br.at.x + to.x) / 2, y: to.y });
+    r.editor.pointerDrag(to);
+    const lines = r.editor.overlayModel().snapLines;
+    r.editor.pointerUp(to);
+    return lines;
+  };
+  const r = rig();
+  r.editor.open(SHAPES);
+  r.editor.addGuide('v'); // at x 50, the artboard's centre
+  const withGuide = r.editor.source();
+  const k = pxPerUnit(r);
+  const lines = corner(r, 49.1); // 0.9 units short: 3.7 px on screen
+  assert.ok(0.9 * k < 8, 'test setup: within 8 px');
+  assert.match(r.editor.source(), /<rect id="a" x="10" y="10" width="40" height="10"\/>/, 'the corner landed on the guide');
+  const guideX = hostAt(r, 50, 0).x;
+  assert.ok(lines.some((l) => Math.abs(l.from.x - guideX) < 0.01 && Math.abs(l.to.x - guideX) < 0.01), 'a snap line along the guide');
+  r.editor.undo();
+  assert.equal(r.editor.source(), withGuide);
+  corner(r, 47.6); // 2.4 units short: 10 px
+  assert.ok(2.4 * k > 8, 'test setup: beyond 8 px');
+  assert.match(r.editor.source(), /<rect id="a" x="10" y="10" width="38" height="10"\/>/, 'beyond 8 px: whole units, no snap');
+});
+
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
   const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect id="a" x="10" y="10" width="10" height="10"/>

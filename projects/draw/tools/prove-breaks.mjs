@@ -2080,6 +2080,31 @@ const BREAKS = [
     file: 'engine/geometry/lengths.ts', from: "`${fmt(Number(n) * rootFont, 4)}${css ? 'px' : ''}`", to: 'fmt(Number(n) * rootFont, 4)',
     run: engineTests('geometry/lengths.test.ts'), expect: /✖ in a style declaration a converted rem keeps a unit/,
   },
+  {
+    id: 'B397', what: 'F12: Hide writes display="none" where CSS sets display (the refusal skipped)',
+    file: 'projects/draw/src/editor.ts', from: "    if (cssSets(doc, id, 'display') !== 'no') return void this.notice.set('Its display is set by CSS.');\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Hide and Show are refused, with the reason, when CSS sets display/,
+  },
+  {
+    id: 'B398', what: 'F12: the centre handle’s tooltip reads the shape’s old centre',
+    file: 'projects/draw/src/editor.ts', from: "    let text = `x ${fmt(cx, dec)}, y ${fmt(cy, dec)}`;", to: "    let text = `x ${fmt(cx - m.delta.x, dec)}, y ${fmt(cy - m.delta.y, dec)}`;",
+    run: drawTests('editor.test.ts'), expect: /✖ the centre handle moves the shape by whole units, with the tooltip/,
+  },
+  {
+    id: 'B399', what: 'F12: a dragged corner ignores the snap targets',
+    file: 'projects/draw/src/editor.ts', from: '    if (!toHost || !inv || !targets) return to;', to: '    if (!toHost || !inv || !targets || true) return to;',
+    run: drawTests('editor.test.ts'), expect: /✖ a dragged corner snaps to a guide within 8 px/,
+  },
+  {
+    id: 'B400', what: 'F12: the ring and the diamond lose the lab’s magenta stroke',
+    file: 'projects/draw/src/app.css', from: '.draw-hd.rot, .draw-hd.scale { stroke: #e6007e; }', to: '.draw-hd.rot, .draw-hd.scale { stroke: #00a3e0; }',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the seven handle styles are SVG Lab’s/,
+  },
+  {
+    id: 'B401', what: 'F12: a nested svg’s corner resize measures its content, not its own viewport',
+    file: 'engine/geometry/write.ts', from: '    const vp = nestedViewport(doc, n, opts.ctx);', to: '    const vp = localBounds(doc, id, opts.ctx);',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ corner resizes of a nested svg, an image and a foreignObject/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
@@ -2100,6 +2125,11 @@ const BREAKS = [
     id: 'B396', what: "F17: the camera's rule leaves its cascade layer (a file's #id rule with !important moves the drawing off its paper)", slow: true, checks: ['aFilesOwnCssCantMoveItsDrawing'],
     file: 'projects/draw/src/canvas/safe-sink.ts', from: /`@layer draw-camera \{ (:host > svg \{[^`]*\}) \}`/, to: '`$1`',
     run: DRAW_E2E, expect: /aFilesOwnCssCantMoveItsDrawing: the file's #r \{ left, top !important \} moved the drawing/,
+  },
+  {
+    id: 'B402', what: 'F12: the Snap sheet’s toggles are not kept on the device (forgotten on a reload)', slow: true, checks: ['theGridToggleShowsTheGrid'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "    writePref('snap', SNAP_NAMES.filter(([n]) => !next[n]).map(([n]) => n).join(' ') || null);\n", to: '',
+    run: DRAW_E2E, expect: /theGridToggleShowsTheGrid: after a reload the Snap toggles are/,
   },
   {
     id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],

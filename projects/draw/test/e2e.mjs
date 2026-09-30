@@ -3654,7 +3654,8 @@ function gridNow() {
 // The Grid button (44 pt at least) is off at first, and no line is drawn. On, the grid's lines are
 // drawn over the paper only, at least 12 px apart, at multiples of a 1, 2 or 5 × 10ⁿ step in the
 // root's user units (read back through its getScreenCTM), every fifth major; zoomed ×4 the step is
-// finer. The file never changes, and the choice survives a reload.
+// finer. The file never changes, and the choice survives a reload; so do the Snap sheet's toggles
+// (device preferences too: Guides turned off stays off, the rest on).
 async function theGridToggleShowsTheGrid(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const btn = page.locator('.draw-grid-btn');
@@ -3691,10 +3692,23 @@ async function theGridToggleShowsTheGrid(browser, origin) {
     must(zoomed.step < fit.step, `zoomed ×4 the step is ${zoomed.step}, not finer than ${fit.step} at fit`);
     must(problems.length === 0, problems.slice(0, 12).join('\n'));
     must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'the grid changed the file');
+    const snapToggles = async () => {
+      await page.locator('.draw-snap-btn').tap();
+      const on = {};
+      for (const name of ['Grid', 'Guides', 'Shapes', 'Artboard']) on[name] = await page.locator('.draw-snap-toggles .ds-btn', { hasText: new RegExp(`^${name}$`) }).getAttribute('aria-pressed');
+      return on;
+    };
+    must(JSON.stringify(await snapToggles()) === JSON.stringify({ Grid: 'true', Guides: 'true', Shapes: 'true', Artboard: 'true' }), 'test setup: not everything snaps at first');
+    await page.locator('.draw-snap-toggles .ds-btn', { hasText: /^Guides$/ }).tap();
+    await page.locator('.draw-modal-done').tap();
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'a Snap toggle changed the file');
     await page.reload({ waitUntil: 'networkidle' });
     await twoFrames(page);
     must(await btn.getAttribute('aria-pressed') === 'true', 'the grid did not stay on across a reload');
     must((await page.evaluate(gridNow)).lines.length > 0, 'after a reload the grid draws nothing');
+    const kept = await snapToggles();
+    must(JSON.stringify(kept) === JSON.stringify({ Grid: 'true', Guides: 'false', Shapes: 'true', Artboard: 'true' }), `after a reload the Snap toggles are ${JSON.stringify(kept)}, not Guides off and the rest on`);
+    await page.locator('.draw-modal-done').tap();
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

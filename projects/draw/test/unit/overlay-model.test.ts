@@ -3,8 +3,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
 import { DIAMOND_PX, HANDLE_PICK_PX, RING_PX, handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from '../../src/interact/handles.ts';
+import { CENTRE_DOT_R, HANDLE } from '../../src/canvas/overlay/marks.ts';
 
 const HOST = { width: 400, height: 300 };
 
@@ -121,4 +123,24 @@ test('a transformed element’s local grid: lines every 1-2-5 step of its own un
   assert.deepEqual(g.labels.map((l) => l.text), ['x', 'y']);
   const turned = localGridModel(box, [0, 4, -4, 0, 200, 200]); // rotate(90) about the origin
   assert.ok(turned.lines.some((l) => Math.abs(l.from.y - 240) < 1e-9 && Math.abs(l.to.y - 240) < 1e-9), 'the grid turns with it: local x = 10 is host y = 240');
+});
+
+test('the seven handle styles are SVG Lab’s: its sizes (squares, circles, the diamond, the centre’s dot) and colours, the dragged one yellow', () => {
+  assert.deepEqual(HANDLE, {
+    anchor: ['square', 5.5, 7], start: ['square', 5.5, 7], ctrl: ['circle', 6, 7.5], bend: ['circle', 4.5, 6.5],
+    scale: ['diamond', 6.5, 8], center: ['circle', 8, 9.5], rot: ['circle', 8, 9.5],
+  });
+  assert.equal(CENTRE_DOT_R, 2.2);
+  const css = readFileSync(new URL('../../src/app.css', import.meta.url), 'utf8');
+  const rule = (selector: string) => {
+    const m = new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{ ([^}]*) \\}$`, 'm').exec(css);
+    return m && Object.fromEntries(m[1].split(';').map((d) => d.split(':').map((x) => x.trim())).filter(([k]) => k));
+  };
+  assert.deepEqual(rule('.draw-hd'), { fill: '#fff', stroke: '#00a3e0', 'stroke-width': '2' }, 'white, the lab’s blue stroke 2');
+  assert.deepEqual(rule('.draw-hd.start'), { fill: '#00a3e0', stroke: '#fff', 'stroke-width': '1.5' });
+  assert.deepEqual(rule('.draw-hd.ctrl'), { fill: '#e6007e', stroke: '#fff', 'stroke-width': '1.5' });
+  assert.deepEqual(rule('.draw-hd.bend'), { fill: '#fff', stroke: '#00a3e0', 'stroke-width': '1.5', opacity: '0.8' });
+  assert.deepEqual(rule('.draw-hd.rot, .draw-hd.scale'), { stroke: '#e6007e' }, 'the ring and the diamond in the lab’s magenta');
+  assert.deepEqual(rule('.draw-hd.on'), { fill: '#ffe600' }, 'the dragged one yellow');
+  assert.deepEqual(rule('.draw-hd-dot'), { fill: '#00a3e0' });
 });

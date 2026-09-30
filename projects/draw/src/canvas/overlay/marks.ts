@@ -45,8 +45,8 @@ class Pool {
   }
 }
 
-const HANDLE = {
-  // [shape, size, size when active]: half-sides for squares, radii for circles (SVG Lab's px)
+/** The handles' shapes and sizes: [shape, size, size when active], half-sides for squares, radii for circles (SVG Lab's px). */
+export const HANDLE = {
   anchor: ['square', 5.5, 7],
   start: ['square', 5.5, 7],
   ctrl: ['circle', 6, 7.5],
@@ -55,6 +55,9 @@ const HANDLE = {
   center: ['circle', 8, 9.5],
   rot: ['circle', 8, 9.5],
 } as const;
+
+/** The centre handle's dot (SVG Lab's). */
+export const CENTRE_DOT_R = 2.2;
 
 export class Marks {
   #root: SVGGElement;
@@ -169,7 +172,7 @@ export class Marks {
     centres.forEach((h, i) => {
       put(dots[i], 'cx', n2(h.at.x));
       put(dots[i], 'cy', n2(h.at.y));
-      put(dots[i], 'r', '2.2');
+      put(dots[i], 'r', String(CENTRE_DOT_R));
     });
   }
 
