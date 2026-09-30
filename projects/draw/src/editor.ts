@@ -8,8 +8,8 @@
 // Every change is a named Session transaction (or a drag: a scrub, or a sheet open for one value,
 // which commits as ONE history entry). Each emit is routed in the plan's fixed order: the canvas
 // patch, the code view patch, the overlay, the store bumps, then the change listeners (the draft
-// autosave, src/workspace.ts). The view is applied as the rendered root's viewBox, never written
-// to the file. A draft another tab holds opens read-only: every edit is refused, with a notice, and
+// autosave, src/workspace.ts). The view is applied as the rendered root's own box (its CSS size and
+// offset), never its viewBox and never the file. A draft another tab holds opens read-only: every edit is refused, with a notice, and
 // the code shows it as plain text.
 //
 // - A file that isn't well-formed is shown as its source only (showSource): nothing is drawn and
@@ -33,9 +33,12 @@ import { attached, route, type Route } from './routing.ts';
 import { elementOf, outlineable, selectionTarget } from './selectable.ts';
 import { blockKey, viewBlock } from './codeview/blocks.ts';
 import type { FocusMark, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
-import { artboard, fitsNatively } from './canvas/artboard.ts';
-import { camera, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
-import type { Motion, RenderStats } from './canvas/renderer.ts';
+import { artboard, rootViewport } from './canvas/artboard.ts';
+import { cameraBox, drawable, fit, panBy, pinch, zoomAbout, type Point, type Rect, type Size, type View } from './canvas/viewport.ts';
+import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
+import { rootTransform } from '../../../engine/geometry/ctm.ts';
+import { mapRect } from '../../../engine/geometry/bounds.ts';
+import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
@@ -44,8 +47,8 @@ export interface CanvasPort {
   render(doc: Doc): void;
   patchAttributes(id: NodeId): void;
   patchSubtree(id: NodeId): void;
-  /** The document rectangle to show (the rendered root's viewBox), or null for the file's own. */
-  setCamera(rect: Rect | null): void;
+  /** Place the rendered root's own box (the camera), or null to fill the host. */
+  setCamera(camera: Camera | null): void;
   nodeFor(id: NodeId): unknown;
   stats(): RenderStats;
   /** Draw nothing. */
@@ -148,8 +151,10 @@ export class Editor {
   #live: Live | null = null;
   #size: Size = { width: 0, height: 0 };
   #board: Rect | null = null;
-  #native = false; // the file's own root shows the fitted view (see artboard.ts)
-  #view: View = { cx: 0, cy: 0, scale: 1 };
+  #rootHost: Size = { width: 1, height: 1 }; // the host size the root's viewport was read against
+  #viewport: Size = { width: 1, height: 1 }; // the root's viewport at 100% (W0 × H0, CSS px)
+  #M: Affine = IDENTITY; // the root's user units → its box px at 100%
+  #view: View = { cx: 0, cy: 0, scale: 1 }; // in box px
   #fitScale = 1;
   #fitted = true; // true until the user zooms or pans: a resize then fits again
   #navStart: View | null = null;
@@ -218,7 +223,6 @@ export class Editor {
     this.#session = new Session(doc);
     this.#wire(this.#session);
     this.#board = artboard(doc);
-    this.#native = fitsNatively(doc);
     this.#size = this.#ports.hostSize();
     this.#fitView();
     this.selection.set(new Set());
@@ -681,23 +685,41 @@ export class Editor {
     this.#bump();
   }
 
-  // ── the view: zoom and pan (the rendered root's viewBox, never the file) ─────────────────────
+  // ── the view: zoom and pan (the rendered root's own box, never its viewBox or the file) ───────
 
-  // An edit of the root's viewBox or size moves the artboard: a fitted view fits it again.
+  /** The root's viewport at 100% (W0 × H0) and M, its user units → box px, as the view uses them. */
+  get rootBox(): { viewport: Size; M: Affine } {
+    return { viewport: { ...this.#viewport }, M: this.#M };
+  }
+
+  // The root's box at 100% and M, read against the host size the view last fitted (a document
+  // opening, a resize while fitted, Fit), and again after an edit of the root's own attributes.
+  #measureRoot(): void {
+    const doc = this.#doc!;
+    this.#viewport = rootViewport(doc, this.#rootHost);
+    this.#M = rootTransform(doc, this.#viewport);
+  }
+
+  // An edit of the root's viewBox, size or preserveAspectRatio moves the artboard or the box: a
+  // fitted view fits it again; a moved view keeps its place and draws the root's box anew.
   #artboardChanged(): void {
     const board = artboard(this.#doc!);
     const same = (a: Rect | null, b: Rect | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
-    this.#native = fitsNatively(this.#doc!);
-    if (same(board, this.#board)) return;
+    const was = { viewport: this.#viewport, M: this.#M };
+    this.#measureRoot();
+    const moved = !same(board, this.#board);
     this.#board = board;
-    if (!this.#fitted) return;
-    this.#fitView();
+    if (moved && this.#fitted) this.#fitView();
+    else if (!moved && was.viewport.width === this.#viewport.width && was.viewport.height === this.#viewport.height && was.M.every((v, i) => v === this.#M[i])) return;
     this.#applyView();
   }
 
   #fitView(): void {
     const s = this.#size;
-    this.#view = fit(this.#board ?? { x: 0, y: 0, width: Math.max(1, s.width), height: Math.max(1, s.height) }, s, 0);
+    this.#rootHost = { width: Math.max(1, s.width), height: Math.max(1, s.height) };
+    this.#measureRoot();
+    const vp = this.#viewport;
+    this.#view = fit(this.#board ? mapRect(this.#M, this.#board) : { x: 0, y: 0, width: vp.width, height: vp.height }, s, 0);
     this.#fitScale = this.#view.scale;
     this.#fitted = true;
   }
@@ -705,10 +727,7 @@ export class Editor {
   #applyView(): void {
     const s = this.#size;
     const usable = s.width > 0 && s.height > 0;
-    // Until the user moves the view, a file whose own root already shows the fitted view (or that
-    // has no artboard) draws exactly as a browser draws it on its own: no camera.
-    const own = this.#fitted && (this.#native || !this.#board);
-    this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);
+    this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);
     this.#outline();
   }
 
@@ -740,10 +759,10 @@ export class Editor {
     this.#move(panBy(this.#view, dx, dy));
   }
 
-  // The user moved the view. One whose camera would overflow (a viewBox near the float limit)
-  // can't be drawn, so the view stays where it was.
+  // The user moved the view. One whose camera would overflow (a viewBox near the float limit, a box
+  // too big to draw) can't be drawn, so the view stays where it was.
   #move(next: View): void {
-    if (!drawable(next, this.#size)) return;
+    if (!drawable(next, this.#size, this.#viewport)) return;
     this.#view = next;
     this.#fitted = false;
     this.#applyView();

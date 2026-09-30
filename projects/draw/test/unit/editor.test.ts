@@ -11,8 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { descendants, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { Editor, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
-import { camera, fit, toDoc, toScreen, type Rect } from '../../src/canvas/viewport.ts';
-import { artboard } from '../../src/canvas/artboard.ts';
+import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
+import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
+import type { Camera } from '../../src/canvas/renderer.ts';
+import { rootTransform } from '../../../../engine/geometry/ctm.ts';
+import { mapRect } from '../../../../engine/geometry/bounds.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -25,7 +28,7 @@ interface Rig {
   log: string[];
   listing: Map<string, ViewBlock>;
   order: string[];
-  cameras: (Rect | null)[];
+  cameras: (Camera | null)[];
   outlines: NodeId[][];
   selected: ReadonlySet<number>[];
   focused: (FocusMark | null)[];
@@ -35,7 +38,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
-  const cameras: (Rect | null)[] = [];
+  const cameras: (Camera | null)[] = [];
   const outlines: NodeId[][] = [];
   const selected: ReadonlySet<number>[] = [];
   const focused: (FocusMark | null)[] = [];
@@ -109,6 +112,15 @@ function onlyBetween(before: string, after: string, start: number, end: number):
 
 const circleOf = (r: Rig) => element(doc(r), (n) => n.local === 'circle');
 
+/** The fitted view and its camera, composed from the pure pieces the editor uses. */
+function fitted(d: Doc, host = HOST) {
+  const viewport = rootViewport(d, host);
+  const M = rootTransform(d, viewport);
+  const board = artboard(d);
+  const view = fit(board ? mapRect(M, board) : { x: 0, y: 0, width: viewport.width, height: viewport.height }, host, 0);
+  return { view, camera: { box: cameraBox(view, host, viewport), viewport } };
+}
+
 // ── opening ────────────────────────────────────────────────────────────────────────────────────
 
 test('opening fits the artboard into the host and lists the whole source as code', () => {
@@ -117,11 +129,11 @@ test('opening fits the artboard into the host and lists the whole source as code
   assert.ok(res.ok, res.error);
   assert.equal(r.log.filter((l) => l === 'canvas render').length, 1);
   assert.equal(text(r), SAMPLE, 'the listing is the source, byte for byte');
-  // The sample's own viewBox already shows the fitted view: no camera until the view moves.
-  assert.equal(r.cameras.at(-1), null);
-  assert.deepEqual(r.editor.view, fit(artboard(doc(r))!, HOST, 0));
+  // The sample has a viewBox and no size: its own box is the host at fit, pixel for pixel as alone.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width, height: HOST.height }, viewport: HOST });
+  assert.deepEqual(r.editor.view, fitted(doc(r)).view);
   r.editor.zoomAt({ x: 10, y: 10 }, 1);
-  assert.deepEqual(r.cameras.at(-1), camera(fit(artboard(doc(r))!, HOST, 0), HOST), 'then the camera is the fitted view itself');
+  assert.deepEqual(r.cameras.at(-1), fitted(doc(r)).camera, 'the camera stays the fitted view itself');
   assert.equal(r.editor.source(), SAMPLE);
   assert.deepEqual(r.editor.history.get(), { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null });
   const bad = r.editor.open('<svg');
@@ -539,7 +551,7 @@ test('zoom and pan move the camera about the point, never the file', () => {
   assert.ok(Math.abs(v.scale / r.editor.fitScale - 4) < 1e-9);
   const back = toScreen(v, HOST, under);
   assert.ok(Math.abs(back.x - at.x) < 1e-9 && Math.abs(back.y - at.y) < 1e-9, 'the zoom invariant');
-  assert.deepEqual(r.cameras.at(-1), camera(v, HOST));
+  assert.deepEqual(r.cameras.at(-1), { box: cameraBox(v, HOST, HOST), viewport: HOST }, 'the root’s box, scaled and moved');
   r.editor.navStart();
   const a0 = { x: 100, y: 100 }, b0 = { x: 200, y: 200 };
   r.editor.navigate(a0, b0, { x: 90, y: 90 }, { x: 210, y: 210 });
@@ -555,18 +567,20 @@ test('zoom and pan move the camera about the point, never the file', () => {
   assert.deepEqual(r.editor.view, kept);
   r.editor.fitToScreen();
   r.editor.resize({ width: 416, height: 528 });
-  assert.deepEqual(r.editor.view, fit(artboard(doc(r))!, { width: 416, height: 528 }, 0));
+  assert.deepEqual(r.editor.view, fitted(doc(r), { width: 416, height: 528 }).view);
 });
 
 test('a file placed otherwise (preserveAspectRatio) opens with the camera fitting it; a viewBox edit fits again', () => {
   const r = rig();
   r.editor.open('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 20" preserveAspectRatio="xMinYMin"><rect width="10" height="10"/></svg>');
-  assert.deepEqual(r.cameras.at(-1), camera(fit({ x: 0, y: 0, width: 10, height: 20 }, HOST, 0), HOST));
+  // Alone the artboard sits at the host's left (xMinYMin); the camera box moves the root's box right to centre it.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 76, top: 0, width: 416, height: 528 }, viewport: HOST });
+  assert.deepEqual(r.cameras.at(-1), fitted(doc(r)).camera);
   const root = doc(r).root;
   const { block, token } = tokenIn(r, root, 'number', 2); // viewBox width
   r.editor.tapToken(block, token);
   r.editor.stepFocus(10);
-  assert.deepEqual(r.cameras.at(-1), camera(fit({ x: 0, y: 0, width: 20, height: 20 }, HOST, 0), HOST), 'a fitted view follows the artboard');
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 56, width: 416, height: 528 }, viewport: HOST }, 'a fitted view follows the artboard');
   r.editor.zoomAt({ x: 0, y: 0 }, 2);
   const zoomed = r.cameras.at(-1);
   r.editor.stepFocus(-5);
@@ -574,26 +588,31 @@ test('a file placed otherwise (preserveAspectRatio) opens with the camera fittin
 });
 
 test('a hostile viewBox near the float limit: zoom, pinch and pan keep a view whose camera can be drawn', () => {
-  for (const vb of ['1.7e308 1.7e308 1.7e308 1.7e308', '0 0 1e308 1e308']) {
+  // A viewBox near the float limit, and a root so wide that zooming in would make its box too big
+  // to draw (over MAX_BOX CSS px a side): every camera the renderer is given can be placed.
+  for (const attrs of ['viewBox="1.7e308 1.7e308 1.7e308 1.7e308"', 'viewBox="0 0 1e308 1e308"', 'width="1e30" height="1e30"']) {
     const r = rig();
-    assert.ok(r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}"><rect width="10" height="10"/></svg>`).ok, vb);
+    assert.ok(r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}><rect width="10" height="10"/></svg>`).ok, attrs);
     r.editor.zoomAt({ x: 10, y: 10 }, 1 / 16);
     r.editor.zoomAt({ x: 10, y: 10 }, 2);
+    for (let i = 0; i < 60; i++) r.editor.zoomAt({ x: 10, y: 10 }, 4);
     r.editor.navStart();
     r.editor.navigate({ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 140, y: 100 }, { x: 160, y: 100 });
     r.editor.navEnd();
     r.editor.panBy(40, 40);
-    const overflowed = r.cameras.filter((c) => c !== null && ![c.x, c.y, c.width, c.height].every(Number.isFinite));
-    assert.deepEqual(overflowed, [], `${vb}: a camera the renderer can't write`);
+    const bad = r.cameras.filter((c) => c !== null && (![c.box.left, c.box.top, c.box.width, c.box.height].every(Number.isFinite) || c.box.width > MAX_BOX || c.box.height > MAX_BOX));
+    assert.deepEqual(bad, [], `${attrs}: a camera the renderer can't place`);
+    assert.ok(r.cameras.length > 3, `${attrs}: the view moved`);
   }
 });
 
 test('a document with no artboard draws as the browser draws it until the view moves', () => {
   const r = rig();
   r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>');
-  assert.equal(r.cameras.at(-1), null);
+  // At fit its box is the host at scale 1, so the renderer supplies no viewBox: as the browser draws it.
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width, height: HOST.height }, viewport: HOST });
   r.editor.zoomAt({ x: 0, y: 0 }, 2);
-  assert.deepEqual(r.cameras.at(-1), { x: 0, y: 0, width: HOST.width / 2, height: HOST.height / 2 });
+  assert.deepEqual(r.cameras.at(-1), { box: { left: 0, top: 0, width: HOST.width * 2, height: HOST.height * 2 }, viewport: HOST }, 'the scale leaves 1 only when the view moves');
 });
 
 // ── P0-M5: the keyboard, the source view, render errors ────────────────────────────────────────

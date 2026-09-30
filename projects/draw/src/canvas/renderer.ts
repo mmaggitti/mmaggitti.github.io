@@ -10,10 +10,13 @@
 // sink made; creating or filling them happens in the sink alone.
 //
 // A refused element is skipped with its whole subtree; it stays in the model and the file. The
-// root must be an SVG <svg>. The sink's canvas stylesheet makes it fill the host and stops CSS
-// animations under prefers-reduced-motion, when its SMIL animations also start paused. The view
-// (zoom and pan) is the rendered root's viewBox, set by setCamera: never the file's. An edit writes
-// only the attributes that changed, so a scrub frame is one attribute mutation on the canvas.
+// root must be an SVG <svg>. The sink's canvas stylesheet stops CSS animations under
+// prefers-reduced-motion, when its SMIL animations also start paused. The view (zoom and pan) is
+// the rendered root's own box, its CSS size and offset (setCamera, through the sink's camera
+// sheet): never its viewBox, never the file. Only a root with no viewBox of its own, drawn at a
+// scale other than 1, is given one (0 0 W0 H0), so its content scales with its box. A pan or zoom
+// frame is one stylesheet replacement. An edit writes only the attributes that changed, so a scrub
+// frame is one attribute mutation on the canvas.
 //
 // Under reduced motion a document that animates opens paused, on the frame where its first cycle
 // ends (where a drawing that animates in has arrived), and Play starts the motion: its SMIL runs
@@ -25,9 +28,15 @@ import { NS, attrValue, el, findAttr, type Doc, type ElementNode, type LeafNode,
 import { buildRefIndex } from '../../../../engine/model/refs.ts';
 import { animatesAttribute } from '../../../../engine/policy/render-policy.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
-import { canvasSheet, resetInheritedFont, sinkAttributes, sinkElement, sinkText, type Supplied } from './safe-sink.ts';
-import { rootSize } from './artboard.ts';
-import type { Rect } from './viewport.ts';
+import { cameraSheet, canvasSheet, placeRoot, resetInheritedFont, sinkAttributes, sinkElement, sinkText, type CameraBox, type Supplied } from './safe-sink.ts';
+import { hasOwnViewBox } from './artboard.ts';
+import type { Size } from './viewport.ts';
+
+/** The camera: the root's box in the host, and the root's viewport at 100% it scales. */
+export interface Camera {
+  box: CameraBox;
+  viewport: Size;
+}
 
 export interface RenderStats {
   rendered: number; // elements on the canvas
@@ -80,13 +89,16 @@ export class Renderer {
   #rootSkipped = false;
   #ids: { version: number; ids: Map<string, NodeId[]> } | null = null;
   #back = new WeakMap<Node, NodeId>(); // drawn node → its NodeId, for hit testing
-  #camera: string | null = null; // the viewBox the view gives the root, or null for the file's own
+  #sheet: CSSStyleSheet; // the camera's: where the root's box goes
+  #camera: Camera | null = null;
+  #viewBox: string | null = null; // the viewBox supplied to a root without one, drawn at a scale other than 1
   #playing = false; // Play was pressed (reduced motion)
   #fromStill = false; // on the opening still (reduced motion): Play starts from the beginning
 
   constructor(host: ShadowRoot) {
     this.#host = host;
-    host.adoptedStyleSheets = [canvasSheet()];
+    this.#sheet = cameraSheet();
+    host.adoptedStyleSheets = [canvasSheet(), this.#sheet];
     resetInheritedFont(host);
   }
 
@@ -197,15 +209,29 @@ export class Renderer {
   }
 
   /**
-   * The document rectangle the canvas shows: the rendered root's viewBox (the file itself is never
-   * changed), or null to show the file's own. Written through the sink like any attribute.
+   * Place the rendered root's own box (null: fill the host). Its viewBox is never replaced; a root
+   * with none is given 0 0 W0 H0 while it is drawn at a scale other than 1, re-patched only when
+   * that changes, so a pan or zoom frame writes no attribute.
    */
-  setCamera(rect: Rect | null): void {
-    const next = rect && [rect.x, rect.y, rect.width, rect.height].map((n) => fmt(n, 6)).join(' '); // fmt throws on a non-finite side
-    if (next === this.#camera) return;
-    this.#camera = next;
+  setCamera(camera: Camera | null): void {
+    const was = this.#camera?.box ?? null;
+    const box = camera?.box ?? null;
+    if (!(was === box || (was && box && was.left === box.left && was.top === box.top && was.width === box.width && was.height === box.height))) placeRoot(this.#sheet, box);
+    this.#camera = camera;
+    const next = this.#suppliedViewBox();
+    if (next === this.#viewBox) return;
+    this.#viewBox = next;
     const doc = this.#doc;
     if (doc && this.#nodes.get(doc.root)) this.patchAttributes(doc.root);
+  }
+
+  // A root with no viewBox of its own, drawn at a scale other than 1: its viewport as a viewBox.
+  #suppliedViewBox(): string | null {
+    const doc = this.#doc;
+    const c = this.#camera;
+    if (!doc || !c || hasOwnViewBox(doc)) return null;
+    const k = c.box.width / c.viewport.width;
+    return Math.abs(k - 1) > 1e-9 ? `0 0 ${fmt(c.viewport.width, 6)} ${fmt(c.viewport.height, 6)}` : null;
   }
 
   stats(): RenderStats {
@@ -323,14 +349,12 @@ export class Renderer {
     return found.length ? found : null;
   };
 
-  // What the renderer gives the root besides its own attributes: the camera's viewBox, or, with no
-  // camera, a viewBox for a document with a size but none, so it scales to the host like any other.
+  // What the renderer gives the root besides its own attributes: a viewBox for a root with none,
+  // while its box is drawn at a scale other than 1 (see setCamera).
   #supplied(node: ElementNode): Supplied[] {
     const doc = this.#doc!;
     if (node.id !== doc.root) return [];
-    if (this.#camera !== null) return [{ local: 'viewBox', value: this.#camera }];
-    if (attrValue(doc, node, null, 'viewBox') !== null) return [];
-    const size = rootSize(doc, node);
-    return size ? [{ local: 'viewBox', value: `0 0 ${fmt(size.width)} ${fmt(size.height)}` }] : [];
+    this.#viewBox = this.#suppliedViewBox();
+    return this.#viewBox === null ? [] : [{ local: 'viewBox', value: this.#viewBox }];
   }
 }

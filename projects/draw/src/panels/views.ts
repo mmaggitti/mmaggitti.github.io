@@ -27,7 +27,7 @@ export class Views {
         render: (doc) => r().render(doc),
         patchAttributes: (id) => r().patchAttributes(id),
         patchSubtree: (id) => r().patchSubtree(id),
-        setCamera: (rect) => r().setCamera(rect),
+        setCamera: (camera) => r().setCamera(camera),
         nodeFor: (id) => r().nodeFor(id),
         stats: () => r().stats(),
         clear: () => r().clear(),

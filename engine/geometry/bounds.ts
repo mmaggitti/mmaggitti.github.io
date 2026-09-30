@@ -81,6 +81,13 @@ export function rootBounds(doc: Doc, id: NodeId, ctx: GeoContext): Rect | null {
 
 /** The box around a rectangle's four corners through a matrix. */
 export function mapRect(m: Affine, r: Rect): Rect {
+  if (m[1] === 0 && m[2] === 0) {
+    // Axis-aligned (every viewport transform): scale the size itself, so a far corner near the
+    // float limit (x + width overflowing) never has to be formed.
+    const x = m[0] * r.x + m[4], y = m[3] * r.y + m[5];
+    const w = m[0] * r.width, h = m[3] * r.height;
+    return { x: w < 0 ? x + w : x, y: h < 0 ? y + h : y, width: Math.abs(w), height: Math.abs(h) };
+  }
   const pts = [apply(m, r.x, r.y), apply(m, r.x + r.width, r.y), apply(m, r.x + r.width, r.y + r.height), apply(m, r.x, r.y + r.height)];
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);

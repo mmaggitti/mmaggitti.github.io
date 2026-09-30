@@ -226,7 +226,8 @@ const BREAKS = [
   },
   {
     id: 'B30', what: "the rendered root takes the size its own CSS gives it", slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: ':host > svg { width: 100% !important; height: 100% !important;', to: ':host > svg {',
+    // P1-M1: the size is the camera sheet's now; without !important the root's own inline size wins.
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: 'width: ${width} !important; height: ${height} !important;', to: 'width: ${width}; height: ${height};',
     run: SITE_E2E, expect: /doesn't fill the host|a root sized by its own CSS: the root is/,
   },
   {
@@ -427,9 +428,10 @@ const BREAKS = [
     run: PATCH_TESTS, expect: /a value edit is one attribute mutation/,
   },
   {
-    id: 'B69', what: 'the camera is not written to the drawn root',
-    file: 'projects/draw/src/canvas/renderer.ts', from: "if (this.#camera !== null) return [{ local: 'viewBox', value: this.#camera }];", to: '',
-    run: PATCH_TESTS, expect: /a camera on a root with a viewBox: the viewBox/,
+    // P1-M1: the camera is the root's own box (the camera sheet), no longer its viewBox.
+    id: 'B69', what: 'the camera box is not placed on the drawn root',
+    file: 'projects/draw/src/canvas/renderer.ts', from: '&& was.width === box.width && was.height === box.height))) placeRoot(this.#sheet, box);', to: '&& was.width === box.width && was.height === box.height))) void 0;',
+    run: PATCH_TESTS, expect: /a camera on a root with a viewBox: the box/,
   },
   {
     id: 'B70', what: "the canvas's hit test maps a stale node back to a NodeId",
@@ -477,9 +479,10 @@ const BREAKS = [
     run: drawTests('editor.test.ts'), expect: /✖ a file placed otherwise/,
   },
   {
-    id: 'B79', what: 'a file with its own preserveAspectRatio is shown without the camera that fits it',
-    file: 'projects/draw/src/canvas/artboard.ts', from: 'if (p.align !== DEFAULT_PAR.align || p.meetOrSlice !== DEFAULT_PAR.meetOrSlice) return false;', to: '',
-    run: drawTests('artboard.test.ts'), expect: /✖ a file whose own root shows the fitted view/,
+    // P1-M1: fitsNatively went with the camera box; re-planted as the same fault in M.
+    id: 'B79', what: "the camera box ignores the root's own preserveAspectRatio (a file placed otherwise is shown as if centred)",
+    file: 'engine/geometry/ctm.ts', from: '  return viewportTransform(vb, parOf(doc, root), viewport.width, viewport.height);', to: '  return viewportTransform(vb, DEFAULT_PAR, viewport.width, viewport.height);',
+    run: drawTests('artboard.test.ts'), expect: /✖ the camera box at fit/,
   },
   {
     id: 'B80', what: 'the page zooms under a pinch on the canvas (touch-action removed from the canvas and the app)', slow: true,
@@ -503,7 +506,8 @@ const BREAKS = [
   },
   {
     id: 'B84', what: 'the outline does not follow the zoom', slow: true,
-    file: 'projects/draw/src/editor.ts', from: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);\n    this.#outline();', to: 'this.#ports.canvas.setCamera(usable && !own ? camera(this.#view, s) : null);',
+    // P1-M1: re-planted on the camera box's #applyView.
+    file: 'projects/draw/src/editor.ts', from: 'this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);\n    this.#outline();', to: 'this.#ports.canvas.setCamera(usable ? { box: cameraBox(this.#view, s, this.#viewport), viewport: this.#viewport } : null);',
     run: SITE_E2E, expect: /at 400% the outline is [\d.]+pt off/,
   },
   {
@@ -569,7 +573,7 @@ const BREAKS = [
   },
   {
     id: 'B97', what: 'a view whose camera overflows (a hostile viewBox) is applied anyway',
-    file: 'projects/draw/src/editor.ts', from: '    if (!drawable(next, this.#size)) return;\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '    if (!drawable(next, this.#size, this.#viewport)) return;\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ a hostile viewBox near the float limit/,
   },
   {

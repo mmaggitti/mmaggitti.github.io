@@ -268,9 +268,9 @@ async function phoneRules(browser, origin, height) {
 }
 
 // The built-in sample: every element and attribute in its source reaches the shadow root, and the
-// viewBox is fitted into the host (meet, centred), so its circle lands exactly where the geometry
-// says. Its paint comes through the sink too: inside the frame the sky gradient shows, and in the
-// frame's rounded corner, clipped away, the paper does.
+// viewBox is fitted into the drawn root's own box (meet, centred: the camera box, P1-M1), so its
+// circle lands exactly where the geometry says. Its paint comes through the sink too: inside the
+// frame the sky gradient shows, and in the frame's rounded corner, clipped away, the paper does.
 async function sampleRenders(browser, origin) {
   const [vw, vh] = /viewBox="0 0 (\d+) (\d+)"/.exec(SAMPLE).slice(1).map(Number);
   const [cx, cy, radius] = /<circle cx="(\d+)" cy="(\d+)" r="(\d+)"/.exec(SAMPLE).slice(1).map(Number);
@@ -287,7 +287,7 @@ async function sampleRenders(browser, origin) {
         mode: root.mode,
         root: `${svg.namespaceURI} ${svg.localName}`,
         names: [svg, ...svg.querySelectorAll('*')].map((e) => e.localName),
-        host: host.getBoundingClientRect().toJSON(),
+        host: svg.getBoundingClientRect().toJSON(), // the drawn root's own box
         circle: root.querySelector('circle').getBoundingClientRect().toJSON(),
         violations: window.__violations,
       };
@@ -535,8 +535,9 @@ function readStyles(onCanvas) {
 
 // Every static corpus file (no SMIL, script, CSS animation or transition: their frame depends on
 // time) looks on the canvas as it does opened on its own. The canvas host takes the left half of
-// the canvas area and the browser's own rendering of the same file, an <img> on the same white
-// paper, the right half; one screenshot compares them pixel for pixel, in light and dark.
+// the canvas area and the browser's own rendering of the same file, an <img> on the same paper
+// (a copy of the canvas's underlay), the right half, placed where the drawn root's own box is and
+// at its size; one screenshot compares them pixel for pixel inside that box, in light and dark.
 // Differences the canvas makes on purpose are named.
 const LOOKS_DIFFERENT = new Map([
   ['lab/media.svg', 'its <video> is refused'],
@@ -563,11 +564,14 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
   await withPage(browser, origin, 320, async (page) => {
     const [a, b] = await page.evaluate(() => {
       for (const sel of ['.draw-sheet', '.draw-context', '.draw-rail']) document.querySelector(sel).style.display = 'none';
+      // The canvas's own buttons (Grid, Snap) sit over the drawing.
+      for (const el of document.querySelectorAll('.draw-canvas .draw-chrome')) el.style.display = 'none';
       const host = document.querySelector('.draw-host');
       const alone = document.createElement('div');
       alone.id = 'alone';
-      alone.style.cssText = 'width:50%;height:100%;background:#fff';
+      alone.style.cssText = 'position:relative;overflow:hidden;width:50%;height:100%;background:#fff';
       host.style.width = '50%';
+      host.style.overflow = 'hidden'; // what the left half draws past its box stays out of the right half
       host.after(alone);
       document.querySelector('.draw-canvas').style.display = 'flex';
       return [host, alone].map((e) => e.getBoundingClientRect().toJSON());
@@ -575,17 +579,21 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
     must(a.width === b.width && a.height === b.height && a.width > 150 && a.height > 240, `test setup: the halves are ${rect(a)} and ${rect(b)}`);
     const differ = [];
     for (const f of files) {
-      const decoded = await page.evaluate(showBoth, f.text);
+      const { decoded, box } = await page.evaluate(showBoth, f.text);
       const shot = decodePng(await page.screenshot({ clip: { x: a.x, y: a.y, width: b.x + b.width - a.x, height: a.height } }));
       const dx = Math.round(b.x - a.x);
+      // Inside the drawn root's box, clipped to the half: outside it the canvas shows what the file
+      // draws past its box on purpose (overflow: visible), where an <img> clips.
+      const [x0, x1] = [Math.max(0, Math.ceil(box.left)), Math.min(Math.floor(a.width), Math.floor(box.left + box.width))];
+      const [y0, y1] = [Math.max(0, Math.ceil(box.top)), Math.min(shot.height, Math.floor(box.top + box.height))];
       let n = 0;
-      for (let y = 0; y < shot.height; y++) {
-        for (let x = 0; x < a.width; x++) {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
           const [p, q] = [shot.rgb(x, y), shot.rgb(x + dx, y)];
           if (p.some((v, k) => Math.abs(v - q[k]) > PIXEL_TOLERANCE)) n++;
         }
       }
-      const share = n / (a.width * shot.height);
+      const share = n / Math.max(1, (x1 - x0) * (y1 - y0));
       if (!decoded) differ.push(`${f.name}: test setup: the file did not load as an <img>`);
       else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
     }
@@ -598,11 +606,29 @@ function knownIn(browser, name, colorScheme) {
   return !!known && (!known.scheme || known.scheme === colorScheme);
 }
 
-// Runs in the page: the file on the canvas, and beside it the file itself as an <img>, its root
-// sized as the renderer sizes it (to fill, with the viewBox the renderer gave it, if any).
+// Runs in the page: the file on the canvas, and beside it the file itself as an <img> where the
+// drawn root's own box is and at its size (the camera box), its root filling the <img>, with the
+// viewBox the renderer gave it, if any, on a copy of the canvas's underlay (the surround and the
+// checkerboard paper, where they are on the canvas).
 async function showBoth(text) {
   window.drawTest.render(text);
-  const drawn = document.querySelector('.draw-host').shadowRoot.firstElementChild;
+  const host = document.querySelector('.draw-host');
+  const drawn = host.shadowRoot.firstElementChild;
+  const hb = host.getBoundingClientRect();
+  const rb = drawn ? drawn.getBoundingClientRect() : hb;
+  const box = { left: rb.left - hb.left, top: rb.top - hb.top, width: rb.width, height: rb.height };
+  const alone = document.getElementById('alone');
+  const parts = [];
+  const under = document.querySelector('.draw-under');
+  const paper = document.querySelector('.draw-paper');
+  if (under && paper) {
+    alone.style.background = getComputedStyle(under).backgroundColor;
+    const pb = paper.getBoundingClientRect();
+    const copy = document.createElement('div');
+    copy.style.cssText = `position:absolute;left:${pb.left - hb.left}px;top:${pb.top - hb.top}px;width:${pb.width}px;height:${pb.height}px`;
+    copy.style.background = getComputedStyle(paper).background;
+    parts.push(copy);
+  }
   // A byte-order mark marks the encoding, not content; WebKit's DOMParser refuses one in a string.
   const doc = new DOMParser().parseFromString(text.replace(/^\uFEFF/, ''), 'image/svg+xml');
   const svg = doc.documentElement;
@@ -610,15 +636,15 @@ async function showBoth(text) {
   svg.setAttribute('height', '100%');
   if (drawn?.hasAttribute('viewBox')) svg.setAttribute('viewBox', drawn.getAttribute('viewBox'));
   const img = document.createElement('img');
-  img.style.cssText = 'display:block;width:100%;height:100%';
+  img.style.cssText = `position:absolute;display:block;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px`;
   img.src = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
-  document.getElementById('alone').replaceChildren(img);
+  alone.replaceChildren(...parts, img);
   await document.fonts.ready;
   try {
     await img.decode();
-    return true;
+    return { decoded: true, box };
   } catch {
-    return false;
+    return { decoded: false, box };
   }
 }
 

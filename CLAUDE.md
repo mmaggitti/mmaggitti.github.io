@@ -138,8 +138,9 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   attributes that differ, so a scrub frame is one mutation).
 - **The editor (`src/editor.ts`) is the one controller.** Every change is a Session transaction
   (a scrub, or a sheet open on one value, is one drag and one history entry), routed canvas → code
-  view → overlay → stores. Zoom and pan are the rendered root's viewBox, never the file. React
-  panels only read its stores; the canvas and the code view are framework-free.
+  view → overlay → stores. Zoom and pan are the rendered root's own box (its CSS size and offset),
+  never its viewBox or the file. React panels only read its stores; the canvas and the code view
+  are framework-free.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
