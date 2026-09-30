@@ -115,6 +115,18 @@ test('declarations: each value’s span in the text given (trimmed; !important a
   assert.equal(ds[3].start, css.indexOf('y:;') + 2, 'an empty value sits right after its colon');
 });
 
+// A backslash escapes the next character, as the CSS tokenizer reads it: inside url(…) it carries
+// the url on past a ")" (Chromium computes fill:url(#a\);stroke:blue as one fill, url("#a);stroke:blue"),
+// and stroke none), inside a string past its quote, and outside both it makes a ";" a name's.
+test('declarations: a backslash escapes the next character, as the browser splits a declaration block: an escaped ")" carries a url on and swallows what follows it, as an escaped quote does in a string, and so does an escaped ";" at the top level', () => {
+  const split = (css: string) => declarations(css).map((d) => [d.name, d.value]);
+  assert.deepEqual(split('fill:url(#a\\);stroke:blue'), [['fill', 'url(#a\\);stroke:blue']]);
+  assert.deepEqual(split("fill:url('#a\\') red;stroke:blue"), [['fill', "url('#a\\') red;stroke:blue"]]);
+  assert.deepEqual(split('fill:red\\;stroke:blue'), [['fill', 'red\\;stroke:blue']]);
+  assert.deepEqual(split('fill:url(#a\\29);stroke:blue'), [['fill', 'url(#a\\29)'], ['stroke', 'blue']], 'a hex escape is one character: the url still ends at its ")"');
+  assert.deepEqual(split('fill:url(#a);stroke:blue'), [['fill', 'url(#a)'], ['stroke', 'blue']]);
+});
+
 test('sheetSets: whether a <style> rule may set the property whatever style="" says, and whether one that may marks it !important', () => {
   const doc = svg(`<style>.k { fill: red } .i { fill: red !important } .i2 { fill: blue } #other { stroke: red !important } .s { stroke: red }
     text { font: 12px serif !important } @keyframes spin { to { opacity: 0 } } .a { animation: spin 1s }</style>

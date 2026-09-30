@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { descendants, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../../src/editor.ts';
 import { RULE_SETS } from '../../../../engine/style/write.ts';
-import { dashPresets, paintKinds } from '../../src/style-edit.ts';
+import { checkStyle, dashPresets, paintKinds } from '../../src/style-edit.ts';
 import { colorChoices, styleSlot } from '../../src/color-choices.ts';
 import { pickAlpha, pickHue, pickSV, pickerStart, pickerText } from '../../src/color-picker.ts';
 import { bind, fakeEditor, fakePorts } from './fakes.ts';
@@ -580,4 +580,21 @@ test('a <style> rule that decides the paint wins over the gradient the element n
   select(e, 'o');
   e.setSpread('fill', 'reflect');
   assert.equal(e.source(), F.replace('<linearGradient id="g">', '<linearGradient id="g" spreadMethod="reflect">'));
+});
+
+// The CSS tokenizer reads a backslash as an escape: url(#a\) in style="" would run the url on to the
+// end of the attribute, so the stroke after it would compute as none while Inspect still read blue.
+test('a typed paint with a backslash inside url() is refused and writes nothing, in checkStyle and typed into the fill sheet over style="fill:red;stroke:blue"', () => {
+  for (const text of ['url(#a\\)', "url('#a\\') red", 'url("#a\\")', 'url(#a\\62 )']) {
+    assert.ok('error' in checkStyle('fill', text), `${text} is refused`);
+  }
+  assert.deepEqual(checkStyle('fill', 'url(#a) red'), { text: 'url(#a) red' }, 'test setup: a paint without one is taken');
+  const F = svg('<rect id="r" width="10" height="10" style="fill:red;stroke:blue"/>');
+  const e = opened(F);
+  select(e, 'r');
+  e.openStyleSheet('fill');
+  for (const text of ['url(#a\\)', "url('#a\\') red"]) assert.ok('error' in e.sheetInput(text), `the sheet refuses ${text}`);
+  e.closeSheet();
+  assert.equal(e.source(), F, 'nothing written');
+  assert.equal(e.styleRow('stroke')?.value, 'blue');
 });

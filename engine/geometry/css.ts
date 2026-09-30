@@ -58,6 +58,7 @@ export function declarations(css: string): Decl[] {
       const e = css.indexOf('*/', i + 2);
       i = e === -1 ? css.length : e + 2;
     } else if (c === '"' || c === "'") i = skipString(css, i);
+    else if (c === '\\') i += 2; // an escape: the next character is a name's, never a separator
     else if (c === '(') i = skipParens(css, i);
     else if (c === ';') {
       push(seg, i);
@@ -333,6 +334,7 @@ function skipParens(v: string, i: number): number {
   for (let k = i; k < v.length; ) {
     const c = v[k];
     if (c === '"' || c === "'") k = skipString(v, k);
+    else if (c === '\\') k += 2; // an escape: the next character is part of a name or url, never a parenthesis
     else {
       if (c === '(') depth++;
       else if (c === ')' && --depth === 0) return k + 1;

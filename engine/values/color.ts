@@ -154,8 +154,10 @@ export function parsePaint(input: string): Paint | null {
   if (k === 'none') return { kind: 'none' };
   if (k === 'context-fill' || k === 'context-stroke') return { kind: k };
   // The unquoted form is non-empty (url() fails the length check anyway), so no alternative can
-  // match nothing between the two whitespace runs: an empty one made backtracking quadratic.
-  const u = /^url\([ \t\n\r\f]*(?:"([^"]*)"|'([^']*)'|([^ \t\n\r\f"'()]+))[ \t\n\r\f]*\)([^]*)$/i.exec(s);
+  // match nothing between the two whitespace runs: an empty one made backtracking quadratic. A
+  // backslash in the argument, quoted or not, is refused: the CSS tokenizer reads it as an escape,
+  // which carries the url or the string on past its end and swallows the declarations after it.
+  const u = /^url\([ \t\n\r\f]*(?:"([^"\\]*)"|'([^'\\]*)'|([^ \t\n\r\f"'()\\]+))[ \t\n\r\f]*\)([^]*)$/i.exec(s);
   if (!u) {
     const color = parseColor(s);
     return color && { kind: 'color', color };

@@ -2553,6 +2553,16 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    return doc && id !== undefined ? ruleWhy(styleSource(doc, id, prop), prop) : null;', to: '    return null;',
     run: drawTests('inspect.test.ts'), expect: /✖ a <style> rule that decides the paint wins over the gradient the element names/,
   },
+  {
+    id: 'B481', what: 'F1: parsePaint takes a backslash inside url() again (a typed url(#a\\) runs on past its end and swallows the declarations after it)',
+    file: 'engine/values/color.ts', from: "  const u = /^url\\([ \\t\\n\\r\\f]*(?:\"([^\"\\\\]*)\"|'([^'\\\\]*)'|([^ \\t\\n\\r\\f\"'()\\\\]+))[ \\t\\n\\r\\f]*\\)([^]*)$/i.exec(s);", to: "  const u = /^url\\([ \\t\\n\\r\\f]*(?:\"([^\"]*)\"|'([^']*)'|([^ \\t\\n\\r\\f\"'()]+))[ \\t\\n\\r\\f]*\\)([^]*)$/i.exec(s);",
+    run: drawTests('inspect.test.ts'), expect: /✖ a typed paint with a backslash inside url\(\) is refused/,
+  },
+  {
+    id: 'B482', what: 'F1: declarations() ignores an escape inside parentheses again (it splits fill:url(#a\\);stroke:blue in two, where the browser reads one declaration)',
+    file: 'engine/geometry/css.ts', from: "    else if (c === '\\\\') k += 2; // an escape: the next character is part of a name or url, never a parenthesis\n", to: '',
+    run: engineTests('geometry/css.test.ts'), expect: /✖ declarations: a backslash escapes the next character/,
+  },
 ];
 
 const args = process.argv.slice(2);
