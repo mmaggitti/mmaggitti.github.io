@@ -2599,6 +2599,11 @@ const BREAKS = [
     file: 'engine/style/write.ts', from: 'raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };', to: "raw: (raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end)).split(';').map((x) => x.trim()).filter(Boolean).join('; '), add: false };",
     run: engineTests('style/style.test.ts'), expect: /✖ corpus property: planStyle over every element of every corpus file/,
   },
+  {
+    id: 'B490', what: 'N5: the picker rounds an alpha nobody moved again (rgba(255, 0, 0, 0.333) becomes 0.33 the moment the square moves)',
+    file: 'projects/draw/src/color-picker.ts', from: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent, p.alphaText);', to: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent);',
+    run: drawTests('color-picker.test.ts'), expect: /✖ an alpha the Alpha slider hasn’t moved keeps its own text/,
+  },
 ];
 
 const args = process.argv.slice(2);

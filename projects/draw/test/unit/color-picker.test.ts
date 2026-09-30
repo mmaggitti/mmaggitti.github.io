@@ -63,3 +63,14 @@ test('the picker keeps its own hue through grey and black: a drag to saturation 
   assert.equal(pickText(p, '#00f').h, 240, 'a colour takes its own');
   assert.equal(pickText(p, 'none'), p, 'a keyword leaves the picker where it was');
 });
+
+test('an alpha the Alpha slider hasn’t moved keeps its own text: rgba(255, 0, 0, 0.333) keeps 0.333 and rgb(255 0 0 / 33.3%) keeps 33.3% through the square and the Hue slider, as does an alpha typed in; the Alpha slider writes its own value, rounded', () => {
+  const sv = pickSV(pickerStart('rgba(255, 0, 0, 0.333)'), 0.4, 0.6);
+  assert.match(pickerText(sv), /^rgba\([\d.]+, [\d.]+, [\d.]+, 0\.333\)$/, pickerText(sv));
+  assert.match(pickerText(pickHue(sv, 200)), /, 0\.333\)$/);
+  const pct = pickHue(pickSV(pickerStart('rgb(255 0 0 / 33.3%)'), 0.4, 0.6), 120);
+  assert.match(pickerText(pct), /^rgb\([\d.]+ [\d.]+ [\d.]+ \/ 33\.3%\)$/, pickerText(pct));
+  assert.match(pickerText(pickSV(pickText(sv, 'rgba(0, 0, 255, 0.125)'), 0.5, 0.5)), /, 0\.125\)$/, 'typed text’s alpha, kept');
+  assert.match(pickerText(pickAlpha(sv, 0.4567)), /, 0\.46\)$/, 'the slider’s own, at 2 decimals');
+  assert.match(pickerText(pickSV(pickAlpha(pct, 0.25), 0.3, 0.3)), / \/ 25%\)$/, 'a percentage stays one');
+});

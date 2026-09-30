@@ -236,14 +236,19 @@ export function notationOf(c: Color): Notation {
   return c.space;
 }
 
-/** Is the colour's alpha written as a percentage (rgb(… / 50%), rgba(…, 50%))? */
-export function alphaIsPercent(c: Color): boolean {
+/** The colour's alpha as written in its function, trimmed (rgba(…, 0.333) gives "0.333", rgb(… / 50%) "50%"), or null: none written there (a hex or a name has none). */
+export function alphaTextOf(c: Color): string | null {
   const body = /^[a-z]+\(([^()]*)\)$/i.exec(c.spelling)?.[1];
-  if (body === undefined) return false;
+  if (body === undefined) return null;
   const slash = body.lastIndexOf('/');
   const parts = body.split(',');
   const alpha = slash !== -1 ? body.slice(slash + 1) : parts.length === 4 ? parts[3] : null;
-  return alpha !== null && trimWs(alpha).endsWith('%');
+  return alpha === null ? null : trimWs(alpha);
+}
+
+/** Is the colour's alpha written as a percentage (rgb(… / 50%), rgba(…, 50%))? */
+export function alphaIsPercent(c: Color): boolean {
+  return alphaTextOf(c)?.endsWith('%') ?? false;
 }
 
 /**
@@ -254,13 +259,14 @@ export function alphaIsPercent(c: Color): boolean {
  * - hsl(H, S%, L%) / hsla(…, A), and hsl(H S% L% / A); hwb(H W% B% / A); each fmt(·, 2);
  * - lab(L a b / A), each fmt(·, 3); lch(L C H / A), fmt(L, 3) fmt(C, 3) fmt(H, 2);
  * - oklab(L a b / A), each fmt(·, 5); oklch as formatColor writes it, then / A.
- * A is fmt(alpha, 2), or a whole percentage when `alphaPercent` (the original's was one); alpha 1 is
- * left out. A grey's hue is 0.
+ * A is fmt(alpha, 2), or a whole percentage when `alphaPercent` (the original's was one), or
+ * `alphaText` as it is when given (an alpha as written, which nothing has moved); alpha 1 is left
+ * out. A grey's hue is 0.
  */
-export function writeColor(rgb: readonly [number, number, number], alpha: number, notation: Notation, alphaPercent = false): string {
+export function writeColor(rgb: readonly [number, number, number], alpha: number, notation: Notation, alphaPercent = false, alphaText: string | null = null): string {
   const [r, g, b] = [clamp(rgb[0], 0, 1), clamp(rgb[1], 0, 1), clamp(rgb[2], 0, 1)];
   const a = clamp(alpha, 0, 1);
-  const A = a >= 1 ? null : alphaPercent ? `${fmt(a * 100, 0)}%` : fmt(a, 2);
+  const A = a >= 1 ? null : alphaText ?? (alphaPercent ? `${fmt(a * 100, 0)}%` : fmt(a, 2));
   const modern = (fn: string, parts: readonly string[]) => `${fn}(${parts.join(' ')}${A === null ? '' : ` / ${A}`})`;
   const legacy = (fn: string, parts: readonly string[]) => (A === null ? `${fn}(${parts.join(', ')})` : `${fn}a(${parts.join(', ')}, ${A})`);
   const srgb: Color = { kind: 'color', space: 'srgb', r, g, b, alpha: a, spelling: '' };
