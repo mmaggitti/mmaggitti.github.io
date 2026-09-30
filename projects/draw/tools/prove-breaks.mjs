@@ -2432,7 +2432,7 @@ const BREAKS = [
   },
   {
     id: 'B457', what: 'Make unique re-points every user of the gradient, not only this paint',
-    file: 'engine/paint/gradients.ts', from: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n', to: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n  for (const u of gradientUsers(doc).get(r.id) ?? []) repoint(doc, u.el, u.prop, own.url, gid, apply);\n',
+    file: 'engine/paint/gradients.ts', from: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n', to: "  const why = repoint(doc, id, prop, own.url, gid, apply);\n  for (const u of gradientUsers(doc).of([r.id])) if (u.prop !== 'rule') repoint(doc, u.el, u.prop, own.url, gid, apply);\n", // P1-M2 fix (F7): the users' new API, the same fault
     run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique/,
   },
   {
@@ -2578,6 +2578,11 @@ const BREAKS = [
     id: 'B485', what: 'F6: the finish hook descends into moved nodes again (Group detaches a stale generated shape it only moved)',
     file: 'engine/generators/index.ts', from: '    for (const c of n.children) if (fresh.get(c) !== false) add(c);', to: '    for (const c of n.children) add(c);',
     run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: Group moves a stale generated shape/,
+  },
+  {
+    id: 'B486', what: 'F7: gradientUsers resolves each paint’s whole chain again (selecting a shape at the end of a long template chain is quadratic)',
+    file: 'engine/paint/gradients.ts', from: '      if (g !== null) push(direct, g, { el: n.id, prop });', to: '      if (g !== null) {\n        resolveGradient(doc, g);\n        push(direct, g, { el: n.id, prop });\n      }',
+    run: drawTests('inspect.test.ts'), expect: /✖ Shared with N reads a long chain of templates in linear time/,
   },
 ];
 

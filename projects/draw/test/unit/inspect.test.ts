@@ -636,3 +636,41 @@ test('the relative URL inside a paint’s url() holds a URL and nothing else: #x
   e.undo();
   assert.equal(e.source(), F, 'one entry each');
 });
+
+// Inspect's "Shared with N other shapes" asks who else draws with any gradient in a paint's chain.
+// The users are read once per document version, and asked by walking the template links backwards
+// once, so a long chain costs time in proportion to it. Measured in node: the last rect of a 1,000-
+// and a 4,000-link chain took about 7 and 27 ms; resolving every paint's chain, 0.5 and 12 s.
+test('Shared with N reads a long chain of templates in linear time: the last rect of a 4,000-link chain (each link painting a rect of its own) costs under 6× what the last of a 1,000-link chain does, and under 2 s', () => {
+  const chain = (n: number) => {
+    const g = ['<linearGradient id="g0"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>'];
+    for (let i = 1; i < n; i++) g.push(`<linearGradient id="g${i}" href="#g${i - 1}"/>`);
+    const r = Array.from({ length: n }, (_, i) => `<rect id="r${i}" x="${(i % 100) * 10}" y="${Math.floor(i / 100) * 10}" width="8" height="8" fill="url(#g${i})"/>`);
+    return svg(`<defs>${g.join('')}</defs>\n  ${r.join('\n  ')}`, `0 0 1000 ${Math.ceil(n / 100) * 10}`);
+  };
+  const LIMIT = 2000;
+  const cost = (n: number): number => {
+    const e = opened(chain(n));
+    select(e, `r${n - 1}`);
+    const t = performance.now();
+    const info = e.paintInfo('fill');
+    const ms = performance.now() - t;
+    assert.equal(info?.shared, n - 1, `test setup: every other rect draws with the last one’s chain (${n} links)`);
+    return ms;
+  };
+  cost(200); // warm the engine up
+  // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest run
+  // of each size counts. A quadratic walk costs about half a second at 1,000 already, so then 4,000
+  // isn't waited for.
+  let small = Infinity;
+  let big = Infinity;
+  for (let run = 0; run < 3; run++) {
+    small = Math.min(small, cost(1000));
+    if (small >= LIMIT / 8) continue;
+    big = Math.min(big, cost(4000));
+    if (big < 6 * small && big < LIMIT) break;
+  }
+  assert.ok(small < LIMIT / 8, `${small.toFixed(0)} ms at 1,000 links (the limit is ${LIMIT / 8})`);
+  assert.ok(big < 6 * small, `${small.toFixed(1)} ms at 1,000 links, ${big.toFixed(1)} ms at 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
+  assert.ok(big < LIMIT, `${big.toFixed(0)} ms at 4,000 links (the limit is ${LIMIT})`);
+});

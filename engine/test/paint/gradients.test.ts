@@ -110,8 +110,8 @@ test('a relative URL is not followed: a linearGradient and a radialGradient whos
     assert.deepEqual([r.stopsFrom, r.stops], [null, []], `${id} takes no stops from #a`);
   }
   const users = gradientUsers(doc);
-  assert.deepEqual(users.get(byId(doc, 'a')), [{ el: byId(doc, 'own'), prop: 'fill' }], '#a’s only user is the rect that names it');
-  assert.equal(users.get(byId(doc, 'ra')), undefined);
+  assert.deepEqual(users.of([byId(doc, 'a')]), [{ el: byId(doc, 'own'), prop: 'fill' }], '#a’s only user is the rect that names it');
+  assert.deepEqual(users.of([byId(doc, 'ra')]), []);
 });
 
 test('users and sharing: every paint whose chain includes a gradient uses it (fill and stroke, attribute and style="", through templates); an edit is shared when another element draws with what it writes', () => {
@@ -124,8 +124,8 @@ test('users and sharing: every paint whose chain includes a gradient uses it (fi
 </svg>`);
   const [g, t, p, q, u] = ['g', 't', 'p', 'q', 'u'].map((id) => byId(doc, id));
   const users = gradientUsers(doc);
-  assert.deepEqual(users.get(g), [{ el: p, prop: 'fill' }, { el: q, prop: 'fill' }, { el: q, prop: 'stroke' }, { el: u, prop: 'fill' }]);
-  assert.deepEqual(users.get(t), [{ el: u, prop: 'fill' }]);
+  assert.deepEqual(users.of([g]), [{ el: p, prop: 'fill' }, { el: q, prop: 'fill' }, { el: q, prop: 'stroke' }, { el: u, prop: 'fill' }]);
+  assert.deepEqual(users.of([t]), [{ el: u, prop: 'fill' }]);
   assert.deepEqual(sharedWith(users, [g], { el: p, prop: 'fill' }).sort(), [q, u].sort(), 'p’s stop edit changes q and u too');
   assert.deepEqual(sharedWith(users, [g], { el: q, prop: 'fill' }).sort(), [p, u].sort(), 'q’s own stroke is no other shape');
   assert.deepEqual(sharedWith(users, [t], { el: u, prop: 'fill' }), [], 'u’s x2 lives on t, which only u uses');
@@ -333,7 +333,7 @@ test('the gradient editor resolves a plain id only, as the canvas does (it never
   const r = at(both, 'id', 'r');
   assert.equal(ownPaint(both, r, 'fill').gradient, at(both, 'id', 'g'), 'url(#g) names the id="g" one');
   assert.deepEqual(resolveGradient(both, ownPaint(both, r, 'fill').gradient!)!.stops.map((s) => stopColour(both, s)), ['lime']);
-  assert.equal(gradientUsers(both).get(at(both, 'xml:id', 'g')), undefined, 'the xml:id one has no user');
+  assert.deepEqual(gradientUsers(both).of([at(both, 'xml:id', 'g')]), [], 'the xml:id one has no user');
   const only = load(`<svg ${SVG}>${G('xml:id="g"', 'red')}<linearGradient id="t" href="#g"/><rect id="r" fill="url(#g)"/><rect id="q" fill="url(#t)"/></svg>`);
   assert.deepEqual(ownPaint(only, at(only, 'id', 'r'), 'fill'), { value: 'url(#g)', gradient: null, url: 'g', fallback: '' }, 'an xml:id alone: no gradient');
   const t = resolveGradient(only, at(only, 'id', 't'))!;

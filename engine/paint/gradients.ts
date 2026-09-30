@@ -186,57 +186,81 @@ export interface User {
   prop: PaintProp | 'rule';
 }
 
+/** Who uses the document's gradients (gradientUsers), read once per document version. */
+export interface Users {
+  /** Each paint and <style> rule whose chain includes any of these gradient elements, each once. */
+  of(chain: readonly NodeId[]): User[];
+}
+
+let usersMemo: { doc: Doc; version: number; users: Users } | null = null;
+
 /**
- * Each gradient element and the paints whose chain includes it (every element's own fill and
- * stroke, read once), and the <style> rules that name one whose chain includes it (css.ts
- * sheetUrlRefs: one user per rule, the same object in each chain element's list).
+ * Who uses the document's gradients: each paint (every element's own fill and stroke) and each
+ * <style> rule (css.ts sheetUrlRefs: one user per rule) by the gradient it names, and each gradient's
+ * template link, read in one walk and kept per document version. A user of a gradient uses every
+ * gradient in its chain, so users.of(chain) walks the links backwards from `chain` once: linear in
+ * the document, however long a chain of templates is (listing every chain element's users would be
+ * quadratic in it).
  */
-export function gradientUsers(doc: Doc): Map<NodeId, User[]> {
-  const out = new Map<NodeId, User[]>();
-  const chains = new Map<NodeId, NodeId[]>();
-  const chainOf = (g: NodeId): NodeId[] => {
-    let chain = chains.get(g);
-    if (!chain) chains.set(g, (chain = resolveGradient(doc, g)!.chain));
-    return chain;
+export function gradientUsers(doc: Doc): Users {
+  if (usersMemo && usersMemo.doc === doc && usersMemo.version === doc.version) return usersMemo.users;
+  const direct = new Map<NodeId, User[]>(); // each gradient, and the paints and rules that name it
+  const takers = new Map<NodeId, NodeId[]>(); // each gradient, and the gradients whose template it is
+  const push = <V>(m: Map<NodeId, V[]>, k: NodeId, v: V) => {
+    const list = m.get(k);
+    if (list) list.push(v);
+    else m.set(k, [v]);
   };
-  const use = (u: User, chain: readonly NodeId[]) => {
-    for (const c of chain) {
-      const list = out.get(c);
-      if (list) list.push(u);
-      else out.set(c, [u]);
-    }
-  };
+  const ids = idMap(doc);
   const stack: NodeId[] = [doc.root];
   while (stack.length) {
     const n = doc.nodes.get(stack.pop()!);
     if (n?.kind !== 'element') continue;
+    if (isGradient(n)) {
+      const t = templateOf(doc, n, ids);
+      if (t && t.id !== n.id) push(takers, t.id, n.id);
+    }
     for (const prop of ['fill', 'stroke'] as const) {
       const g = ownPaint(doc, n.id, prop).gradient;
-      if (g !== null) use({ el: n.id, prop }, chainOf(g));
+      if (g !== null) push(direct, g, { el: n.id, prop });
     }
     for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]);
   }
-  const ids = idMap(doc);
   for (const [name, styles] of sheetUrlRefs(doc)) {
     const g = ids.get(name);
-    if (g === undefined || !isGradient(doc.nodes.get(g))) continue;
-    for (const style of styles) use({ el: style, prop: 'rule' }, chainOf(g));
+    if (g !== undefined && isGradient(doc.nodes.get(g))) for (const style of styles) push(direct, g, { el: style, prop: 'rule' });
   }
-  return out;
+  const users: Users = {
+    of(chain) {
+      // Every gradient whose chain reaches one of these: backwards along the template links, each once.
+      const seen = new Set<NodeId>(chain);
+      const queue = [...seen];
+      const out: User[] = [];
+      for (let i = 0; i < queue.length; i++) {
+        for (const u of direct.get(queue[i]) ?? []) out.push(u);
+        for (const k of takers.get(queue[i]) ?? []) {
+          if (seen.has(k)) continue;
+          seen.add(k);
+          queue.push(k);
+        }
+      }
+      return out;
+    },
+  };
+  usersMemo = { doc, version: doc.version, users };
+  return users;
 }
 
 /**
  * The others (not this paint) that an edit of these chain elements would change too: each other
  * element once, and the <style> element of each rule that names one (once per rule).
  */
-export function sharedWith(users: Map<NodeId, User[]>, written: readonly NodeId[], me: User): NodeId[] {
+export function sharedWith(users: Users, written: readonly NodeId[], me: User): NodeId[] {
   const others = new Set<NodeId>();
   const rules = new Set<User>();
-  for (const w of written) {
-    for (const u of users.get(w) ?? []) {
-      if (u.prop === 'rule') rules.add(u);
-      else if (u.el !== me.el || u.prop !== me.prop) others.add(u.el);
-    }
+  for (const u of users.of(written)) {
+    if (u.prop === 'rule') rules.add(u);
+    else if (u.el !== me.el || u.prop !== me.prop) others.add(u.el);
   }
   others.delete(me.el);
   return [...others, ...[...rules].map((u) => u.el)];

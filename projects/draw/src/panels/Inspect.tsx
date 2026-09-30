@@ -90,18 +90,21 @@ function StyleSections({ editor, locals }: { editor: Editor; locals: readonly st
   const joins = !join.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv] as [string, string]] : JOINS;
   const miter = join.mixed || jv === 'miter' || jv === 'miter-clip';
   const fillKinds = paintKinds('fill', locals);
+  // Each paint's gradient read once per render (it walks the document's gradient users).
+  const fill = fillKinds ? editor.paintInfo('fill') : null;
+  const stroke = editor.paintInfo('stroke');
   return (
     <>
       {fillKinds && (
         <Section title="Fill">
-          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} info={editor.paintInfo('fill')} />
+          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} info={fill} />
           <GlossRow editor={editor} />
-          {locals.length === 1 && <GradientSection editor={editor} prop="fill" info={editor.paintInfo('fill')} />}
+          {locals.length === 1 && <GradientSection editor={editor} prop="fill" info={fill} />}
         </Section>
       )}
       <Section title="Stroke">
-        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds={paintKinds('stroke', locals)!} info={editor.paintInfo('stroke')} />
-        {locals.length === 1 && <GradientSection editor={editor} prop="stroke" info={editor.paintInfo('stroke')} />}
+        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds={paintKinds('stroke', locals)!} info={stroke} />
+        {locals.length === 1 && <GradientSection editor={editor} prop="stroke" info={stroke} />}
         <NumberRow editor={editor} prop="stroke-width" label="Width" row={row('stroke-width')} slider={widthRange(ctx)} />
       </Section>
       <Section title="Opacity">
