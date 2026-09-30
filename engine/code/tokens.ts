@@ -35,6 +35,8 @@ export interface NumberToken extends Span {
   min?: number;
   max?: number;
   step?: number; // only where the property has a natural step (opacity 0.01)
+  /** What the number is, where it isn't the property alone: path data's "point 2 x", "control 1 y", "rx" (P1-M3; SVG Lab's dParts). */
+  label?: string;
 }
 
 export interface ColorToken extends Span {
@@ -46,6 +48,11 @@ export interface ColorToken extends Span {
 export interface EnumToken extends Span {
   kind: 'enum';
   options: readonly string[];
+  /**
+   * A <path>'s written L, Q or C letter (P1-M3): the segment's index in parsePath(d).segs. A tap cycles
+   * it L → Q → C as a segment rewrite (engine/path/segments.ts), never as a token edit.
+   */
+  segment?: number;
 }
 
 export interface RefToken extends Span {
@@ -356,23 +363,81 @@ const semi =
     }
   };
 
-/** Path data: every argument of every segment parsePath keeps; arc flags cycle 0/1. */
-const path: Grammar = (v, at, emit, prop) => {
+/** The letters a <path>'s letter token cycles through (P1-M3): absolute, or relative. */
+export const SEGMENT_LETTERS = { abs: ['L', 'Q', 'C'], rel: ['l', 'q', 'c'] } as const;
+
+// Each argument's name, SVG Lab's dParts labels: an end point is "point N x/y", N counting the path's
+// anchors from 1 (the M included); a control is "control" (Q), "control 1"/"control 2" (C), "control 2" (S).
+const POINT = ['x', 'y'];
+function argLabels(U: string, n: number): (string | null)[] {
+  const pt = POINT.map((a) => `point ${n} ${a}`);
+  switch (U) {
+    case 'H':
+      return [pt[0]];
+    case 'V':
+      return [pt[1]];
+    case 'C':
+      return ['control 1 x', 'control 1 y', 'control 2 x', 'control 2 y', ...pt];
+    case 'S':
+      return ['control 2 x', 'control 2 y', ...pt];
+    case 'Q':
+      return ['control x', 'control y', ...pt];
+    case 'A':
+      return ['rx', 'ry', 'rotation', null, null, ...pt];
+    case 'Z':
+      return [];
+    default: // M, L, T
+      return pt;
+  }
+}
+
+/**
+ * Path data: every argument of every segment parsePath keeps, each number labelled; arc flags cycle
+ * 0/1. With `letters` (a <path>'s own d, P1-M3), each written L, l, Q, q, C and c letter is an enum
+ * token too, carrying its segment's index.
+ */
+const pathTokens = (letters: boolean): Grammar => (v, at, emit, prop) => {
   let base = at;
-  for (const seg of parsePath(v).segs) {
+  let anchors = 0;
+  parsePath(v).segs.forEach((seg, index) => {
+    const U = seg.cmd.toUpperCase();
+    if (U !== 'Z') anchors++;
+    const labels = argLabels(U, anchors);
     let spans: { start: number; end: number }[] = [];
     try {
       spans = argSpans(seg);
     } catch {
       spans = [];
     }
+    if (letters && !seg.implicit && 'LQC'.includes(U)) {
+      let i = 0;
+      while (i < seg.raw.length && isWs(seg.raw[i])) i++;
+      emit(base + i, base + i + 1, { kind: 'enum', prop, options: seg.cmd === U ? SEGMENT_LETTERS.abs : SEGMENT_LETTERS.rel, segment: index });
+    }
     spans.forEach((sp, k) => {
-      const d: Data | null = isFlag(seg.cmd, k) ? { kind: 'enum', prop, options: ENUMS['d.arcFlag'] } : numberData(seg.raw.slice(sp.start, sp.end), '', prop, undefined);
+      let d: Data | null;
+      if (isFlag(seg.cmd, k)) d = { kind: 'enum', prop, options: ENUMS['d.arcFlag'] };
+      else {
+        d = numberData(seg.raw.slice(sp.start, sp.end), '', prop, undefined);
+        if (d?.kind === 'number' && labels[k]) d.label = labels[k]!;
+      }
       if (d) emit(base + sp.start, base + sp.end, d);
     });
     base += seg.raw.length;
-  }
+  });
 };
+const path: Grammar = pathTokens(false);
+const pathD: Grammar = pathTokens(true);
+
+/**
+ * The tokens a <path>'s d would have for this raw text, which must hold no reference (Draw's segment
+ * rewrites refuse one first): what engine/path/segments.ts re-reads an edit with.
+ */
+export function tokenizePathData(raw: string): Token[] {
+  const out: Token[] = [];
+  pathD(raw, 0, collector({ raw, s: raw, map: null, bad: null }, out), 'd');
+  return inOrder(out);
+}
 
 const FN = /([A-Za-z][\w-]*)[ \t\n\r\f]*\(/y;
 
@@ -585,6 +650,7 @@ function grammarFor(doc: Doc, node: ElementNode, attr: AttrRef): Grammar | 'text
   if (ns !== null) return null;
   if (local === 'style') return cssDeclarations;
   if (node.ns !== NS.svg) return null;
+  if (local === 'd' && node.local === 'path') return pathD; // its letters too (P1-M3)
   if (TEXT_ATTRS.has(local)) return 'text';
   const scoped = OPTIONS.get(`${node.local}/${local}`);
   if (scoped) return local === 'rotate' || local === 'orient' ? enumOrAngle(scoped) : enumOf(scoped);

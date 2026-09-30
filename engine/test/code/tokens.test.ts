@@ -51,11 +51,12 @@ const kinds = (ts: Token[]): string[] => ts.map((t) => t.kind);
 test('path data: every argument, glued numbers apart, arc flags as 0/1 keywords, nothing after an error', () => {
   const doc = load('<path d="M10,20L30-40.5.5 6a5 5 0 0110 10z"/><path d="M1 2 L3 x 5"/><path d="M1e2 3"/>');
   const ts = attr(doc, 'path', 'd');
-  assert.deepEqual(texts(ts), ['10', '20', '30', '-40.5', '.5', '6', '5', '5', '0', '0', '1', '10', '10']);
-  assert.deepEqual(kinds(ts).slice(8), ['number', 'enum', 'enum', 'number', 'number']);
-  const flag = ts[9];
+  // P1-M3: a <path>'s written L (and l, Q, q, C, c) is a token too; the implicit L after it and the a are not.
+  assert.deepEqual(texts(ts), ['10', '20', 'L', '30', '-40.5', '.5', '6', '5', '5', '0', '0', '1', '10', '10']);
+  assert.deepEqual(kinds(ts).slice(9), ['number', 'enum', 'enum', 'number', 'number']);
+  const flag = ts[10];
   assert.ok(flag.kind === 'enum' && flag.options === ENUMS['d.arcFlag']);
-  assert.deepEqual(texts(attr(doc, 'path', 'd', null, 1)), ['1', '2'], 'the failed segment and the tail are not tokens');
+  assert.deepEqual(texts(attr(doc, 'path', 'd', null, 1)), ['1', '2'], 'the failed segment (its letter too) and the tail are not tokens');
   const [e] = attr(doc, 'path', 'd', null, 2);
   assert.ok(e.kind === 'number' && e.value === 100 && e.decimals === 0 && e.prop === 'd');
 });
@@ -316,7 +317,7 @@ test('entity safety: a value written partly or wholly as a reference gets no tok
   assert.deepEqual(texts(attr(doc, 'rect', 'width')), ['2'], 'a reference that is only whitespace separates');
   assert.deepEqual(texts(attr(doc, 'rect', 'style')), ['red']);
   assert.deepEqual(attr(doc, 'rect', 'opacity'), []);
-  assert.deepEqual(texts(attr(doc, 'path', 'd')), ['2', '3', '4']);
+  assert.deepEqual(texts(attr(doc, 'path', 'd')), ['2', 'L', '3', '4'], 'a letter token is a letter, not a reference');
   const pts = attr(doc, 'polygon', 'points');
   assert.deepEqual(
     pts.map((t) => [t.text, t.start]),
@@ -358,4 +359,41 @@ test('a relative URL (value:url/relative): in a gradient’s href and xlink:href
   assert.deepEqual(kinds(attr(doc, 'rect', 'style', null, 1)), ['text:other.svg#g'], 'between the quotes, in style=""');
   assert.deepEqual(kinds(attr(doc, 'rect', 'fill', null, 2)), ['ref:g']);
   assert.deepEqual(kinds(attr(doc, 'rect', 'stroke', null, 3)), ['text:x.svg#y'], 'quoted by references, the URL’s own characters are still its token');
+});
+
+// ── P1-M3: a path's letter tokens and its numbers' labels ──────────────────────────────────────
+
+const LAB = new URL('../fixtures/corpus/lab/', import.meta.url);
+const labDoc = async (f: string) => load((await import('node:fs')).readFileSync(new URL(f, LAB), 'utf8').replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, ''));
+
+test('a <path>’s written L, l, Q, q, C and c letters are enum tokens over that one character, cycling L → Q → C, each with its segment’s index; M, H, V, S, T, A and Z letters and letter-less segments are plain text', async () => {
+  const paths = await labDoc('paths.svg');
+  const d = findAttr(nth(paths, 'path'), null, 'd')!.raw;
+  const ts = attr(paths, 'path', 'd');
+  assert.deepEqual(texts(ts), ['20', '75', 'L', '50', '30']);
+  const [L] = ts.filter((t) => t.kind === 'enum');
+  assert.ok(L.kind === 'enum' && L.segment === 1 && L.options.join() === 'L,Q,C' && L.prop === 'd');
+  assert.equal(d.slice(L.start, L.end), 'L', 'its span is the letter');
+  const logo = await labDoc('create-logo.svg');
+  const lt = attr(logo, 'path', 'd').filter((t) => t.kind === 'enum');
+  assert.deepEqual(lt.map((t) => [t.text, t.kind === 'enum' ? t.segment : -1]), [['Q', 1], ['Q', 2]]);
+  const doc = load('<path d="M0 0l10 10 20 20H5V6c1 1 2 2 3 3s1 1 2 2t4 4a1 1 0 0 1 2 2Z"/><animate attributeName="d" values="M0 0 L1 1;M0 0 L2 2"/><glyph d="M0 0 L1 1"/>');
+  const all = attr(doc, 'path', 'd');
+  assert.deepEqual(all.filter((t) => t.kind === 'enum' && t.segment !== undefined).map((t) => t.text), ['l', 'c'], 'the implicit l after it, H, V, s, t, a and Z are not tokens');
+  const l = all.find((t) => t.text === 'l')!;
+  assert.ok(l.kind === 'enum' && l.options.join() === 'l,q,c' && l.segment === 1, 'a relative letter cycles in lowercase');
+  assert.ok(!attr(doc, 'animate', 'values').some((t) => t.kind === 'enum'), 'an animation’s path values have no letter tokens');
+  assert.ok(!attr(doc, 'glyph', 'd').some((t) => t.kind === 'enum'), 'nor a glyph’s d (Draw edits d on <path> only)');
+});
+
+test('a path’s number tokens are labelled as SVG Lab’s dParts labels them: point N x/y (N counting anchors from 1, the M too), control x/y, control 1 and 2, an S’s control 2, an arc’s rx, ry and rotation', () => {
+  const doc = load('<path d="M 1 2 L 3 4 H 5 V 6 Q 7 8 9 10 C 11 12 13 14 15 16 S 17 18 19 20 T 21 22 A 23 24 25 0 1 26 27 Z"/>');
+  const labels = attr(doc, 'path', 'd').filter((t) => t.kind === 'number').map((t) => (t.kind === 'number' ? `${t.text}:${t.label}` : ''));
+  assert.deepEqual(labels, [
+    '1:point 1 x', '2:point 1 y', '3:point 2 x', '4:point 2 y', '5:point 3 x', '6:point 4 y',
+    '7:control x', '8:control y', '9:point 5 x', '10:point 5 y',
+    '11:control 1 x', '12:control 1 y', '13:control 2 x', '14:control 2 y', '15:point 6 x', '16:point 6 y',
+    '17:control 2 x', '18:control 2 y', '19:point 7 x', '20:point 7 y', '21:point 8 x', '22:point 8 y',
+    '23:rx', '24:ry', '25:rotation', '26:point 9 x', '27:point 9 y',
+  ]);
 });

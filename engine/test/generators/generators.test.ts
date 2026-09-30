@@ -185,3 +185,36 @@ test('the finish hook: Group moves a stale generated shape (valid inputs, points
   });
   assert.equal(detached[detached.length - 1].length, 1, 'the new stale star detaches');
 });
+
+// P1-M3: every node-tool, letter and Relative edit of a generated spiral's d is a hand edit, so the
+// finish hook detaches it in the same transaction (M2's rule), and one undo brings it back.
+test('the finish hook: a node drag, a letter cycle and Make relative on a generated spiral each detach it in one transaction, and one undo restores it', async () => {
+  const { planNodeDrag } = await import('../../path/nodes.ts');
+  const { cycleSegment, toggleRelative } = await import('../../path/segments.ts');
+  const SPIRAL = `<path d="${spiralPath(50, 50, 20, 1)}" fill="none" stroke="#264653" draw:gen="spiral" draw:cx="50" draw:cy="50" draw:r="20" draw:turns="1"/>`;
+  const src = svg(SPIRAL);
+  const edits: [string, (doc: Doc, n: ElementNode) => string][] = [
+    ['a node drag', (doc, n) => {
+      const plan = planNodeDrag(doc, n.id, 'a2', { x: 60, y: 70 }, { step: 1, k: 1 });
+      assert.ok('edits' in plan && plan.edits.length === 1, JSON.stringify(plan));
+      return plan.edits[0].raw;
+    }],
+    ['a letter cycle', (doc, n) => cycleSegment(n.attrs.find((a) => a.local === 'd')!.raw, 1, { step: 1, k: 1 })],
+    ['Make relative', (_doc, n) => toggleRelative(n.attrs.find((a) => a.local === 'd')!.raw)],
+  ];
+  for (const [what, raw] of edits) {
+    const doc = load(src);
+    const n = first(doc, 'path');
+    assert.equal(generatorOf(doc, n.id)?.kind, 'spiral');
+    const { s, detached } = session(doc);
+    const d = raw(doc, n);
+    s.dispatch(what, (apply) => apply(opSetAttrRaw(doc, n.id, null, 'd', d)));
+    assert.deepEqual(detached.at(-1), [n.id], `${what}: detached in the same transaction`);
+    assert.equal(generatorOf(doc, n.id), null);
+    assert.ok(!serialize(doc).includes('draw:'), `${what}: its inputs and the declaration went`);
+    assert.equal(attrValue(doc, n, null, 'd'), d, `${what}: the edit itself stays`);
+    s.undo();
+    assert.equal(serialize(doc), src, `${what}: one undo gives the generated spiral back`);
+    assert.equal(generatorOf(doc, n.id)?.kind, 'spiral');
+  }
+});

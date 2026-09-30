@@ -94,7 +94,7 @@ export function movesBy(doc: Doc, id: NodeId): 'geometry' | 'translate' | 'none'
 }
 
 const refuse = (why: string): Plan => ({ refused: why });
-const cssWhy = (prop: string, where: 'inline' | 'sheet') => `Its ${prop} is set by CSS (${where === 'inline' ? 'its style attribute' : 'a <style> rule'}), which wins over the attribute.`;
+export const cssWhy = (prop: string, where: 'inline' | 'sheet') => `Its ${prop} is set by CSS (${where === 'inline' ? 'its style attribute' : 'a <style> rule'}), which wins over the attribute.`;
 
 // ── numbers ────────────────────────────────────────────────────────────────────────────────────
 
@@ -359,7 +359,8 @@ function transformPath(
   const a = findAttr(n, null, 'd');
   if (!a) return null;
   const segs = parsePath(attrValue(doc, n, null, 'd')!).segs;
-  const tokens = tokenizeAttrRaw(doc, n, { ns: null, local: 'd' }, a.raw);
+  // The argument tokens (numbers and arc flags): a <path>'s L, Q and C letters are tokens too (P1-M3).
+  const tokens = tokenizeAttrRaw(doc, n, { ns: null, local: 'd' }, a.raw).filter((t) => !(t.kind === 'enum' && t.segment !== undefined));
   const args = segs.reduce((s, g) => s + g.args.length, 0);
   if (tokens.length !== args) return { refused: 'Its path data is written with entity references, so Draw can’t change its numbers.' };
   const d = opts.decimals ?? 0;

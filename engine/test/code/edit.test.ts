@@ -287,7 +287,7 @@ test('rewriteNumbers rewrites the chosen numbers right to left and keeps every o
   assert.equal(out, 'translate(53 47.5)&#10;  rotate(0)\n  scale(2)', 'the character reference and the line break stay');
   const path = first(doc, 'path');
   const d = findAttr(path, null, 'd')!.raw;
-  const pn = tokenizeAttrRaw(doc, path, { ns: null, local: 'd' }, d);
+  const pn = tokenizeAttrRaw(doc, path, { ns: null, local: 'd' }, d).filter((t) => t.kind === 'number'); // not the L (P1-M3)
   assert.equal(rewriteNumbers(d, pn.map((t, i) => ({ start: t.start, end: t.end, text: String(i) }))), 'M0,1 L 2 3', 'every separator kept');
   assert.equal(rewriteNumbers('1 2 3', []), '1 2 3', 'nothing to do');
 });

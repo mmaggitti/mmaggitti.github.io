@@ -241,3 +241,21 @@ test('rotate rewrites an existing angle; scale rewrites scale() and keeps the ra
   assert.equal(attrValue(doc, el(doc, byId(doc, 's')), null, 'transform'), 'scale(3 6)');
   assert.equal(refusal(planScale(doc, byId(doc, 'n'), 2, OPTS)), 'It has no scale() to change.');
 });
+
+// P1-M3: a <path>'s L, Q and C letters are tokens too; the move, resize and rotate planners count only
+// the argument tokens (numbers and arc flags) against the path's arguments, so they work as before.
+test('a path whose letters are tokens still moves, resizes and rotates as before', async () => {
+  const { tokenizeAttr } = await import('../../code/tokens.ts');
+  const src = svg('<path id="p" d="M 10 10 L 20 20 Q 30 10 40 20 C 50 30 60 30 70 20 l 5 5 A 5 5 0 0 1 90 30 Z"/>');
+  const doc = load(src);
+  const id = byId(doc, 'p');
+  const letters = tokenizeAttr(doc, id, { ns: null, local: 'd' }).filter((t) => t.kind === 'enum' && t.segment !== undefined).map((t) => t.text);
+  assert.deepEqual(letters, ['L', 'Q', 'C', 'l'], 'the test path has letter tokens');
+  assert.equal(run(doc, planMove(doc, id, 5, -5, OPTS)), svg('<path id="p" d="M 15 5 L 25 15 Q 35 5 45 15 C 55 25 65 25 75 15 l 5 5 A 5 5 0 0 1 95 25 Z"/>'), 'moved: every absolute coordinate, the relative l as it was');
+  const doc2 = load(src);
+  const resized = planResize(doc2, byId(doc2, 'p'), { corner: 'br', to: { x: 100, y: 40 } }, OPTS);
+  assert.ok('edits' in resized && resized.edits.length === 1, refusal(resized));
+  const doc3 = load(src);
+  const turned = planRotate(doc3, byId(doc3, 'p'), 30, OPTS);
+  assert.ok('edits' in turned && turned.edits[0].local === 'transform', refusal(turned));
+});
