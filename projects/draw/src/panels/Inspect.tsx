@@ -210,12 +210,22 @@ const SPREADS: [string, string][] = [['pad', 'Pad'], ['reflect', 'Reflect'], ['r
 /**
  * A gradient paint's section (one element): whether an edit here changes other shapes too (Make
  * unique gives this one its own copy), the stops it draws with, Spread, Units (never converted),
- * a radial gradient's fx, fy and fr, and Edit on canvas.
+ * a radial gradient's fx, fy and fr, and Edit on canvas. When a <style> rule decides the paint (it
+ * wins over the gradient the element names), the P2 notice instead of the controls.
  */
 function GradientSection({ editor, prop, info }: { editor: Editor; prop: 'fill' | 'stroke'; info: PaintInfo | null }) {
   const editing = useStore(editor.editGradient) === prop;
-  if (!info?.gradient) return null;
   const name = prop === 'fill' ? 'Fill' : 'Stroke';
+  if (info?.ruled) {
+    return (
+      <div className="draw-inspect-gradient" role="group" aria-label={`${name} gradient`}>
+        <p className="draw-inspect-note" role="status">
+          {info.ruled}
+        </p>
+      </div>
+    );
+  }
+  if (!info?.gradient) return null;
   return (
     <div className="draw-inspect-gradient" role="group" aria-label={`${name} gradient`}>
       {info.shared > 0 && (

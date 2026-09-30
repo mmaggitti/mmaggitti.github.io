@@ -521,3 +521,63 @@ test('Gloss, Gloss off, Linear and None over a selection write exactly what they
     }
   }
 });
+
+test('a <style> rule that decides the paint wins over the gradient the element names, so Inspect’s gradient section edits nothing and says why (Make unique, Spread, Add stop, Remove stop, a stop’s offset, − and +, colour and opacity, fx, Edit on canvas), and Edit on canvas shows no gradient handles; the rect beside it that no rule decides still edits the same gradient', () => {
+  const F = svg(`<style>.k { fill: url(#h) }</style>
+  <defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient><linearGradient id="h"><stop offset="0" stop-color="green"/></linearGradient></defs>
+  <rect id="r" class="k" x="10" y="10" width="50" height="50" fill="url(#g)"/>
+  <rect id="o" x="70" y="10" width="20" height="20" fill="url(#g)"/>`);
+  const e = opened(F);
+  select(e, 'o');
+  const stops = e.paintInfo('fill')!.stops.map((s) => s.id);
+  assert.equal(stops.length, 2, 'test setup: #g’s stops, read through the rect no rule decides');
+  select(e, 'r');
+  const why = RULE_SETS('fill');
+  const info = e.paintInfo('fill')!;
+  assert.deepEqual([info.gradient, info.ruled, info.stops, info.shared], [null, why, [], 0], 'no gradient: the rule’s reason instead');
+  const nothing = (what: string, act: () => void) => {
+    e.notice.set(null);
+    act();
+    assert.equal(e.source(), F, `${what} writes nothing`);
+    assert.equal(e.notice.get(), why, `${what} says why`);
+  };
+  nothing('Make unique', () => e.makeUnique('fill'));
+  nothing('Spread', () => e.setSpread('fill', 'reflect'));
+  nothing('Add stop', () => e.addStop('fill', null));
+  nothing('Remove stop', () => e.removeStop('fill', stops[1]));
+  nothing('a stop’s offset field', () => {
+    e.fieldStart({ kind: 'offset', stop: stops[0] });
+    e.fieldInput('0.3');
+    e.fieldEnd();
+  });
+  nothing('a stop’s −', () => e.stepStopOffset(stops[1], -1));
+  nothing('a stop’s +', () => e.stepStopOffset(stops[0], 1));
+  nothing('a stop’s colour', () => {
+    e.openStyleSheet('stop-color', [stops[0]]);
+    if (e.sheet.get()) {
+      e.sheetInput('#00ff00');
+      e.closeSheet();
+    }
+  });
+  nothing('a stop’s opacity slider', () => {
+    if (e.styleDrag('stop-opacity', [stops[0]])) {
+      e.styleInput('0.5');
+      e.styleDragEnd();
+    }
+  });
+  nothing('a stop’s opacity by a key', () => e.setStyle('stop-opacity', '0.5', [stops[0]]));
+  nothing('fx', () => {
+    e.fieldStart({ kind: 'gradient', prop: 'fill', name: 'fx' });
+    e.fieldInput('0.3');
+    e.fieldEnd();
+  });
+  nothing('Edit on canvas', () => e.toggleEditGradient('fill'));
+  assert.equal(e.editGradient.get(), null, 'Edit on canvas stays off');
+  e.editGradient.set('fill');
+  assert.deepEqual(e.overlayModel().handles.filter((h) => h.id.startsWith('g-')).map((h) => h.id), [], 'and even turned on, it shows no gradient handles');
+  e.editGradient.set(null);
+  // The rect beside it, whose fill no rule decides, still edits #g.
+  select(e, 'o');
+  e.setSpread('fill', 'reflect');
+  assert.equal(e.source(), F.replace('<linearGradient id="g">', '<linearGradient id="g" spreadMethod="reflect">'));
+});

@@ -198,6 +198,11 @@ export interface PaintInfo {
   fy: string | null;
   fr: string | null;
   handles: string | null; // why Edit on canvas can't show its handles, or null
+  /**
+   * The element's own paint names a gradient, but a <style> rule decides what draws: why the gradient
+   * section edits nothing (the P2 notice, shown instead of its controls). Else null.
+   */
+  ruled: string | null;
 }
 export const NO_GLOSS = 'Gloss is for rectangles, circles, ellipses, polygons, polylines and paths.';
 
@@ -1566,6 +1571,8 @@ export class Editor {
       : this.#styleIds().slice(0, 1);
     if (!ids.length || !this.#writable()) return;
     if (field.kind === 'style' && this.styleRow(field.prop, field.ids)?.disabled) return;
+    const ruled = field.kind === 'gradient' ? this.#paintRuled(field.prop) : field.kind === 'offset' ? this.#stopRuled(field.stop) : null;
+    if (ruled) return void this.notice.set(ruled);
     if (field.kind === 'gradient' && !this.paintInfo(field.prop)?.gradient) return;
     const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.name;
     this.#field = { field, ids, drag: this.#drag(`Set ${label}`), refused: [] };
@@ -1667,6 +1674,8 @@ export class Editor {
     const doc = this.#doc;
     const ids = only ? [...only] : this.#styleIds();
     if (!doc || !ids.length) return;
+    const ruled = this.#stopsRuled(prop, ids);
+    if (ruled) return void this.notice.set(ruled);
     const c = checkStyle(prop, value);
     if ('error' in c) return void this.notice.set(c.error);
     let refused: { id: NodeId; why: string }[] = [];
@@ -1684,6 +1693,8 @@ export class Editor {
     const ids = only ? [...only] : this.#styleIds();
     if (!this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return false;
     if (this.styleRow(prop, only)?.disabled) return false;
+    const ruled = this.#stopsRuled(prop, ids);
+    if (ruled) return void this.notice.set(ruled), false;
     this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
     return true;
   }
@@ -1708,6 +1719,8 @@ export class Editor {
     if (!doc || !this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return;
     const row = this.styleRow(prop, ids)!;
     if (row.disabled) return void this.notice.set(row.disabled);
+    const ruled = this.#stopsRuled(prop, ids);
+    if (ruled) return void this.notice.set(ruled);
     this.focus.set(null);
     this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
     this.sheet.set({ kind: 'style', prop, ids, text: row.value || (STYLE_INITIAL[prop] ?? '') });
@@ -1764,11 +1777,13 @@ export class Editor {
     const id = this.#styleIds()[0];
     if (!doc || id === undefined) return null;
     const own = ownPaint(doc, id, prop);
+    const why = this.#paintRuled(prop, id);
+    if (why) return { kind: 'other', gradient: null, gloss: false, shared: 0, stops: [], spread: 'pad', units: 'Box', fx: null, fy: null, fr: null, handles: null, ruled: own.gradient === null ? null : why };
     const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
     const shown = shownValue(doc, id, prop).value;
     const p = shown === null ? null : parsePaint(shown);
     const kind: PaintInfo['kind'] = r ? (r.kind === 'linearGradient' ? 'linear' : 'radial') : p?.kind === 'none' ? 'none' : p?.kind === 'color' ? 'color' : 'other';
-    const out: PaintInfo = { kind, gradient: r?.id ?? null, gloss: prop === 'fill' && glossOf(doc, id) !== null, shared: 0, stops: [], spread: 'pad', units: 'Box', fx: null, fy: null, fr: null, handles: null };
+    const out: PaintInfo = { kind, gradient: r?.id ?? null, gloss: prop === 'fill' && glossOf(doc, id) !== null, shared: 0, stops: [], spread: 'pad', units: 'Box', fx: null, fy: null, fr: null, handles: null, ruled: null };
     if (!r) return out;
     out.shared = sharedWith(gradientUsers(doc), [...r.chain], { el: id, prop }).length;
     out.stops = r.stops.map((s) => ({ id: s, offset: stopOffset(doc, s), colour: stopColour(doc, s), opacity: styleSource(doc, s, 'stop-opacity').value ?? '1' }));
@@ -1784,7 +1799,7 @@ export class Editor {
   // the canvas measured it: null when it is off, several are selected, or the paint isn't a gradient.
   #gradientView(ids: readonly NodeId[], measured: ReadonlyMap<NodeId, Measured>, prop: PaintProp | null = this.editGradient.get()): GradientView | null {
     const doc = this.#doc;
-    if (!doc || prop === null || ids.length !== 1) return null;
+    if (!doc || prop === null || ids.length !== 1 || this.#paintRuled(prop, ids[0])) return null;
     const m = measured.get(ids[0]);
     const own = ownPaint(doc, ids[0], prop);
     const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
@@ -1797,6 +1812,8 @@ export class Editor {
 
   /** Edit on canvas for `prop`: on (the gradient's handles instead of the shape's), or off again. */
   toggleEditGradient(prop: PaintProp): void {
+    const ruled = this.editGradient.get() === prop ? null : this.#paintRuled(prop);
+    if (ruled) return void this.notice.set(ruled);
     this.editGradient.set(this.editGradient.get() === prop ? null : prop);
     this.#show();
   }
@@ -1835,6 +1852,8 @@ export class Editor {
     const doc = this.#doc;
     const id = this.#styleIds()[0];
     if (!doc || id === undefined) return;
+    const ruled = this.#paintRuled(prop, id);
+    if (ruled) return void this.notice.set(ruled);
     this.#dispatch('Make unique', (apply) => {
       const r = makeUniqueCopy(doc, id, prop, apply);
       if (typeof r !== 'number') throw new TokenEditError(r.refused);
@@ -1865,12 +1884,51 @@ export class Editor {
     return !ids.length ? null : ids.every((id) => glossOf(doc, id) !== null) ? 'on' : 'off';
   }
 
-  // The first selected element's gradient for `prop`, resolved now.
+  // The first selected element's gradient for `prop`, resolved now; null, with the notice, when a
+  // <style> rule decides that paint.
   #gradientOf(prop: PaintProp): { doc: Doc; gradient: NodeId } | null {
     const doc = this.#doc;
     const id = this.#styleIds()[0];
+    const ruled = doc && id !== undefined ? this.#paintRuled(prop, id) : null;
+    if (ruled) return this.notice.set(ruled), null;
     const g = doc && id !== undefined ? ownPaint(doc, id, prop).gradient : null;
     return doc && g !== null ? { doc, gradient: g } : null;
+  }
+
+  // Why the gradient section can't edit an element's own `prop` gradient (the first selected, by
+  // default): a <style> rule decides that paint, and wins over what the element names, so an edit
+  // of that gradient would change nothing it draws (P2 edits stylesheets). Null when no rule does.
+  #paintRuled(prop: PaintProp, id: NodeId | undefined = this.#styleIds()[0]): string | null {
+    const doc = this.#doc;
+    return doc && id !== undefined ? ruleWhy(styleSource(doc, id, prop), prop) : null;
+  }
+
+  // Why a stop can't be edited through Inspect (its offset, colour or opacity): the first selected
+  // element's own gradient draws with it for a paint a <style> rule decides (#paintRuled), and none
+  // of its paints the rules leave alone does. Null otherwise.
+  #stopRuled(stop: NodeId): string | null {
+    const doc = this.#doc;
+    const id = this.#styleIds()[0];
+    if (!doc || id === undefined) return null;
+    let why: string | null = null;
+    for (const prop of ['fill', 'stroke'] as const) {
+      const g = ownPaint(doc, id, prop).gradient;
+      if (g === null || !resolveGradient(doc, g)!.stops.includes(stop)) continue;
+      const ruled = this.#paintRuled(prop, id);
+      if (!ruled) return null;
+      why ??= ruled;
+    }
+    return why;
+  }
+
+  // #stopRuled over a stop property's elements (stop-color, stop-opacity), else null.
+  #stopsRuled(prop: string, ids: readonly NodeId[]): string | null {
+    if (prop !== 'stop-color' && prop !== 'stop-opacity') return null;
+    for (const id of ids) {
+      const why = this.#stopRuled(id);
+      if (why) return why;
+    }
+    return null;
   }
 
   /** Spread (Pad, Reflect, Repeat), written where it lives in the chain, one entry. */
@@ -1886,6 +1944,8 @@ export class Editor {
   stepStopOffset(stop: NodeId, dir: 1 | -1): void {
     const doc = this.#doc;
     if (!doc || !attached(doc, stop)) return;
+    const ruled = this.#stopRuled(stop);
+    if (ruled) return void this.notice.set(ruled);
     const v = Math.min(1, Math.max(0, Number(fmt(stopOffset(doc, stop) + dir * 0.05, 4))));
     if (v !== stopOffset(doc, stop)) this.#dispatch('Set offset', (apply) => apply(offsetOp(doc, stop, v)));
   }

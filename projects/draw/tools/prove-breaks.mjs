@@ -2548,6 +2548,11 @@ const BREAKS = [
     file: 'projects/draw/src/canvas/safe-sink.ts', from: "  if (!isAnimation(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;\n  if (!animatesAttribute(node)) return true;\n", to: "  if (!animatesAttribute(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;\n",
     run: DRAW_E2E, expect: /(?=[\s\S]*an animateMotion with an href to another file moves nothing: <animateMotion> is on the canvas)(?=[\s\S]*an empty href animates the parent: <animate> is not on the canvas)(?=[\s\S]*a <set> with an empty href sets the parent: <set> is not on the canvas)/,
   },
+  {
+    id: 'B480', what: 'F10: the gradient section ignores a <style> rule that decides the paint (Inspect shows and edits the losing gradient; Edit on canvas shows its handles)',
+    file: 'projects/draw/src/editor.ts', from: '    return doc && id !== undefined ? ruleWhy(styleSource(doc, id, prop), prop) : null;', to: '    return null;',
+    run: drawTests('inspect.test.ts'), expect: /✖ a <style> rule that decides the paint wins over the gradient the element names/,
+  },
 ];
 
 const args = process.argv.slice(2);
