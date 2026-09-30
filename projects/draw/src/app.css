@@ -142,6 +142,30 @@
 .draw-arm { fill: none; stroke: #e6007e; stroke-width: 1; opacity: 0.75; }
 .draw-arm--mirror { stroke-dasharray: 3 3; }
 .draw-mirror { fill: #fff; stroke: #e6007e; stroke-width: 1.5; stroke-dasharray: 2.5 2; }
+/* An arc's ghosts and flag labels, a path's direction arrows, a donut's labels (P1-M3 S2): SVG Lab's
+   .ghost, .fl, .dir and .gt. */
+.draw-ghost { fill: none; stroke: #00a3e0; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.75; }
+.draw-flag-label {
+  fill: #006f99;
+  font: 600 var(--text-sm) / 1 var(--font-mono);
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.draw-flag-label.on { fill: #e6007e; }
+.draw-dir { fill: #00a3e0; }
+.draw-dir--in { fill: #e6007e; }
+.draw-donut-label {
+  fill: #006f99;
+  font: 700 var(--text-sm) / 1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3.5;
+  stroke-linejoin: round;
+}
 .draw-mark-label {
   fill: #006f99;
   font: 700 var(--text-sm) / 1 var(--font-ui);

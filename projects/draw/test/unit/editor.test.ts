@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { DETACHED, Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -20,6 +20,8 @@ import { layerRows } from '../../src/panels/layer-rows.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
 import { starPoints as starPointsOf } from '../../../../engine/generators/radial.ts';
+import { arcCenter, arcPoint, type ArcCenter } from '../../../../engine/path/arc.ts';
+import { donutSlices } from '../../../../engine/generators/donut.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -2123,4 +2125,131 @@ test('a letter token’s tap cycles its segment ("Set segment"), and a locked pa
   r.editor.tapToken(L3.block, L3.token);
   assert.match(r.editor.notice.get() ?? '', /Its d is set by CSS \(a <style> rule\)/);
   assert.equal(r.editor.source(), CSS);
+});
+
+// ── P1-M3 S2: arcs, holes and the donut ────────────────────────────────────────────────────────
+
+const LAB_FILE = (f: string) => readFileSync(`${HERE}../../../../engine/test/fixtures/corpus/lab/${f}`, 'utf8');
+const pathsOf = (r: Rig) => [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'path').map((n) => n.id);
+/** Host px of the midpoint of lab/arcs.svg's arc with these flags. */
+const arcMid = (r: Rig, large: boolean, sweep: boolean) => {
+  const c = arcCenter(24, 50, 30, 30, 0, large, sweep, 76, 50) as ArcCenter;
+  const [x, y] = arcPoint(c, c.t1 + c.dt / 2);
+  return hostAt(r, x, y);
+};
+
+test('a tap on a ghost arc is one "Set arc flags" entry that sets exactly its two flags (packed flags too), and the old arc becomes a ghost; a tap far from every ghost selects as ever', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs.svg');
+  r.editor.open(src);
+  const p = pathsOf(r)[0];
+  r.editor.pickTool('node');
+  r.editor.select([p]);
+  const marks = () => r.editor.overlayModel().paths!;
+  assert.deepEqual(marks().ghosts.map((g) => g.flags).sort(), ['0 0', '1 0', '1 1']);
+  assert.deepEqual(marks().flags.map((f) => f.text + (f.on ? ' (the arc)' : '')).sort(), ['0 0', '0 1 (the arc)', '1 0', '1 1']);
+  tap(r, arcMid(r, true, true), []);
+  assert.equal(r.editor.source(), src.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 1 1 76 50'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set arc flags');
+  assert.deepEqual(marks().ghosts.map((g) => g.flags).sort(), ['0 0', '0 1', '1 0'], 'the old arc is a ghost now');
+  tap(r, arcMid(r, false, false), []);
+  assert.equal(r.editor.source(), src.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 0 0 76 50'));
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one undo each');
+  tap(r, hostAt(r, 5, 95), []);
+  assert.equal(r.editor.source(), src, 'far from every ghost: nothing written');
+  assert.equal(r.editor.selection.get().size, 0, 'and the tap on empty canvas deselects');
+  const packed = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path id="a" d="M 24 50 A 30 30 0 01 76 50" fill="none" stroke="#000"/></svg>';
+  r.editor.open(packed);
+  r.editor.pickTool('node');
+  r.editor.select([idOf(r, 'a')]);
+  tap(r, arcMid(r, true, false), []);
+  assert.equal(r.editor.source(), packed.replace('0 01 76', '0 10 76'), 'packed flags rewritten in place');
+});
+
+const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
+const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z';
+
+test('Reverse: with an inner anchor chosen it turns that subpath alone (SVG Lab’s HOLE_REV), with none every subpath; one "Reverse" entry each; the inner bottom line’s arrow turns with it', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs--holes.svg');
+  r.editor.open(src);
+  const p = pathsOf(r)[0];
+  r.editor.pickTool('node');
+  r.editor.select([p]);
+  const at = hostAt(r, 50, 66);
+  // The arrow nearest (50, 66): its direction, tip minus the middle of its base.
+  const arrowX = () => {
+    const a = r.editor.overlayModel().paths!.arrows
+      .map((x) => ({ x, mid: { x: (x.points[1].x + x.points[2].x) / 2, y: (x.points[1].y + x.points[2].y) / 2 } }))
+      .sort((u, v) => Math.hypot(u.mid.x - at.x, u.mid.y - at.y) - Math.hypot(v.mid.x - at.x, v.mid.y - at.y))[0];
+    assert.ok(a.x.inner, 'an inner arrow');
+    return Math.sign(a.x.points[0].x - a.mid.x);
+  };
+  assert.equal(arrowX(), -1, 'the inner bottom line runs left before');
+  const a6 = handleAt(r, 'a6'); // the end of L 61 66, an inner anchor
+  tap(r, a6, [p]);
+  assert.equal(r.editor.chosenNode.get(), 'a6');
+  r.editor.reverse();
+  assert.equal(r.editor.source(), src.replace(HOLE_IN, HOLE_REV));
+  assert.equal(r.editor.history.get().undoLabel, 'Reverse');
+  assert.equal(arrowX(), 1, 'and right after');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  r.editor.chosenNode.set(null);
+  r.editor.reverse();
+  assert.equal(r.editor.source(), src.replace('M 14 50 A 36 36 0 1 1 86 50\n   A 36 36 0 1 1 14 50 Z', 'M 14 50 A 36 36 0 1 0 86 50\n   A 36 36 0 1 0 14 50 Z').replace(HOLE_IN, HOLE_REV), 'every subpath, in its order');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+});
+
+test('the donut: Edit as donut changes only the holder’s start tag (one entry); a slice then shows only its donut’s boundary handles, in Select and the Node tool alike, and the % labels; a boundary drag is one "Set donut values" entry whose frames regenerate the slices (SVG Lab’s rule, each value at least 1); a slice moved by M1’s drag detaches the donut with M2’s notice, and one undo restores it', () => {
+  const r = rig();
+  const lab = LAB_FILE('arcs--donut.svg');
+  const adopted = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  r.editor.open(lab);
+  r.editor.select([pathsOf(r)[0]]);
+  assert.deepEqual(r.editor.donut(), { holder: doc(r).root, values: [40, 25, 20, 15], recognized: false }, 'Edit as donut is offered');
+  r.editor.adoptDonut();
+  assert.equal(r.editor.source(), adopted);
+  assert.equal(r.editor.history.get().undoLabel, 'Edit as donut');
+  assert.equal(r.editor.donut()?.recognized, true);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id);
+  assert.deepEqual(ids(), ['donut-b0', 'donut-b1', 'donut-b2'], 'a slice: its donut’s boundaries only (no corners, ring or centre)');
+  assert.deepEqual(r.editor.overlayModel().paths!.donut.map((l) => l.text), ['40%', '25%', '20%', '15%']);
+  r.editor.pickTool('node');
+  assert.deepEqual(ids(), ['donut-b0', 'donut-b1', 'donut-b2'], 'the Node tool: no node handles on a slice either');
+  r.editor.pickTool('select');
+  const ring = (f: number) => hostAt(r, 50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI));
+  const b0 = handleAt(r, 'donut-b0');
+  assert.ok(Math.hypot(b0.x - ring(0.4).x, b0.y - ring(0.4).y) < 1e-6, 'boundary 0 at 40% of the turn');
+  r.editor.pointerDown(b0, [], { add: false });
+  for (const f of [0.45, 0.5, 0.55, 0.6, 0.65, 0.7]) r.editor.pointerDrag(ring(f));
+  assert.equal(r.editor.overlayModel().tip?.text, '64 | 1', 'the tooltip: the two values (64 is capped at the pair − 1)');
+  assert.ok(r.editor.source().includes('<!-- data: 64, 1, 20, 15 -->'), 'the frames write the comment');
+  r.editor.pointerUp(ring(0.7));
+  assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
+  assert.deepEqual(r.editor.donut()?.values, [64, 1, 20, 15]);
+  const want = donutSlices([64, 1, 20, 15], 50, 50, 28);
+  assert.deepEqual(pathsOf(r).map((id) => attr(element(doc(r), (n) => n.id === id), 'd')), want, 'the slices regenerated');
+  assert.match(want[0], / 0 1 1 /, 'the first slice the long way round');
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted, 'one entry');
+  // The clamp: boundary 1 dragged back past boundary 0 leaves value 2 at 1.
+  const b1 = handleAt(r, 'donut-b1');
+  r.editor.pointerDown(b1, [], { add: false });
+  for (const f of [0.6, 0.5, 0.4, 0.3]) r.editor.pointerDrag(ring(f));
+  r.editor.pointerUp(ring(0.3));
+  assert.deepEqual(r.editor.donut()?.values, [40, 1, 44, 15], 'each value at least 1');
+  r.editor.undo();
+  // A slice moved by M1's move (a press on it that becomes a drag): a hand edit of its d detaches.
+  const s1 = pathsOf(r)[1];
+  r.editor.select([s1]);
+  drag(r, ring(0.525), { x: ring(0.525).x + 40, y: ring(0.525).y }, [s1]);
+  assert.equal(r.editor.notice.get(), DETACHED);
+  assert.ok(!r.editor.source().includes('draw:'), 'its draw: attributes and xmlns:draw gone');
+  assert.equal(r.editor.donut()?.recognized ?? false, false);
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted, 'one undo brings the donut back');
 });

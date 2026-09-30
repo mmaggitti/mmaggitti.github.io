@@ -17,7 +17,8 @@
 // While the Pen is on (P1-M3), the bar is its own: Undo point, Close (from 3 anchors) and Done. In
 // the Node tool, for one selected path, the selection's bar gives way to the path's: Deselect, Smooth
 // (for the chosen node, when Make smooth or Make corner applies), Close or Open, Relative or
-// Absolute, and More. Each a 44 pt icon button.
+// Absolute, Reverse (the chosen node's subpath, or every subpath: S2), and More. Each a 44 pt icon
+// button.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Editor } from '../editor.ts';
@@ -47,6 +48,7 @@ const DONE = icon(<path d="M5 12.5l4.5 4.5L19 7" />);
 const SMOOTH = icon(<><path d="M3 18C6 9 18 9 21 18" /><path d="M4 11h16" /><circle cx="12" cy="11" r="1.75" /></>);
 const RELATIVE = icon(<><circle cx="6" cy="18" r="1.75" /><path d="M7.5 16.5L18 6M12 6h6v6" /></>);
 const ABSOLUTE = icon(<><path d="M4 3v17h17" /><circle cx="14" cy="10" r="1.75" /><path d="M14 10H4M14 10v10" strokeDasharray="2 2" /></>);
+const REVERSE = icon(<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4" />);
 const KIND_ICONS: Record<ShapeKind, ReactNode> = {
   rect: icon(<rect x="4" y="6" width="16" height="12" />),
   circle: icon(<circle cx="12" cy="12" r="8" />),
@@ -163,6 +165,9 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
         </button>
         <button type="button" className="draw-key draw-ctx-btn" aria-label={nodes.relative ? 'Absolute' : 'Relative'} onClick={() => editor.toggleRelative()}>
           {nodes.relative ? ABSOLUTE : RELATIVE}
+        </button>
+        <button type="button" className="draw-key draw-ctx-btn" aria-label="Reverse" onClick={() => editor.reverse()}>
+          {REVERSE}
         </button>
         <button type="button" className="draw-key draw-ctx-btn" aria-label="More" aria-haspopup="dialog" onClick={() => setMore(true)}>
           {MORE}

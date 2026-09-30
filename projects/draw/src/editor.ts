@@ -27,11 +27,15 @@
 //   element holds it, in one entry; a segment is one dispatch, a slider one drag per press, a field
 //   one drag while it has focus, and the style sheet (the Colour sheet over the selection) one drag
 //   per visit. Elements a <style> rule decides are left as they are, and one notice names them.
+// - Paths (P1-M3): the Pen and the Node tool (engine/path/nodes.ts, segments.ts); in S2 an arc's ghost
+//   arcs (a tap sets its flags), Reverse and a path's direction arrows, and the donut (engine/
+//   generators/donut.ts): Edit as donut, its values in Inspect, and its boundary handles, whose drag
+//   rewrites two numbers of its data comment while the finish hook draws the slices again.
 
-import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
+import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
-import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
+import { opInsert, opRemove, opSetAttr, opSetAttrRaw, opSetLeafRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
 import { REM_UNCONVERTIBLE } from '../../../engine/report/import-report.ts';
 import { hasRem, remToUserUnits, rootFontSize } from '../../../engine/geometry/lengths.ts';
 import { Session, type Build, type Drag } from '../../../engine/commands/session.ts';
@@ -60,7 +64,8 @@ import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
 import { MAX_GUIDES, NO_STATE, declare, hiddenGuides, isLocked, moveGuide, readState, setDrawAttr, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
 import { DRAW_NS } from '../../../engine/model/draw-ns.ts';
-import { detachGenerator, finishGenerators, generatorOf, type GeneratorKind } from '../../../engine/generators/index.ts';
+import { adoptDonut, detachGenerator, finishGenerators, generatorOf, type GeneratorKind } from '../../../engine/generators/index.ts';
+import { donutCandidateFor, donutFor, donutParts, VALUE_MAX, VALUE_MIN, type Donut } from '../../../engine/generators/donut.ts';
 import { planShapeHandle, shapeHandleLabel, shapeHandles } from '../../../engine/geometry/shape-handles.ts';
 import { insertMarkup } from '../../../engine/model/space.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
@@ -82,12 +87,12 @@ import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
 import { parsePaint } from '../../../engine/values/color.ts';
 import { elementLabel } from './panels/label.ts';
 import { pathNodes, planBendTap, planNodeDrag, type NodeKind } from '../../../engine/path/nodes.ts';
-import { closeLast, cycleSegment as cycleSegmentOf, lastClosed, makeCorner, makeSmooth, nodeType, openLast, readsRelative, toggleRelative as toggleRelativeOf } from '../../../engine/path/segments.ts';
+import { closeLast, cycleSegment as cycleSegmentOf, lastClosed, makeCorner, makeSmooth, nodeType, openLast, readsRelative, reverseSubpath, setArcFlags, subpathCount, toggleRelative as toggleRelativeOf } from '../../../engine/path/segments.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
-import { toAbsolute } from '../../../engine/path/abs.ts';
+import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
 import { cssWhy } from '../../../engine/geometry/write.ts';
 import { appendSegment, closingText, penColour, penPathMarkup, segmentInto, type PenAnchor } from './interact/pen.ts';
-import { pathMarks, penArms, type PathMarks } from './interact/path-marks.ts';
+import { NO_PATH_MARKS, arcGhosts, directionArrows, donutLabels, ghostAt, pathMarks, penArms, type ArcParams, type PathMarks } from './interact/path-marks.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
 
@@ -710,9 +715,9 @@ export class Editor {
     else if (g.draw) this.#endDraw(g, true);
     else if (g.mode === 'pending') {
       // A tap on a node handle (P1-M3): a bend curves its segment, an anchor becomes the chosen node.
-      // A tap on any other handle, or on a pill, does nothing.
+      // A tap on any other handle, or on a pill, does nothing. A tap on a ghost arc sets its flags.
       if (g.handle !== null && this.tool.get() === 'node') this.#tapNodeHandle(g.handle);
-      else if (g.handle === null && g.guide === null) this.#tap(g.target, g.add);
+      else if (g.handle === null && g.guide === null && !this.#tapGhost(g.at0)) this.#tap(g.target, g.add);
     } else if (g.mode === 'move') this.#endMove(g, true);
     else if (g.mode === 'handle') this.#endHandle(g, true);
     else if (g.mode === 'guide') this.#endGuide(g, true);
@@ -1110,6 +1115,11 @@ export class Editor {
     const m = measured.get(ids[0]);
     if (!m) return none;
     const n = doc.nodes.get(ids[0]) as ElementNode;
+    // A donut (P1-M3): a selected slice shows only its donut's boundary handles (moving or reshaping one
+    // slice would detach it), in Select and the Node tool alike; its holder, M1's handles plus them.
+    const donut = this.#donutShown(ids[0]);
+    const bounds = donut ? this.#donutHandles(donut, active) : [];
+    if (donut && donut.holder !== ids[0]) return { handles: bounds, rotGuide: null };
     const p = this.#pivots(ids[0], m);
     // The Node tool (P1-M3): a path's anchors, controls and bend handles (engine/path/nodes.ts)
     // instead of the corners, the ring and the diamond, through its own CTM; M1's centre stays (it
@@ -1129,7 +1139,7 @@ export class Editor {
     // the shape's own centre.
     const sh = shapeHandles(doc, n.id, this.geo);
     const base = handlesFor({ quad: quadOf(m.box, m.toHost), corners: sh === null && RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
-    if (!sh) return base;
+    if (!sh) return bounds.length ? { handles: [...base.handles, ...bounds], rotGuide: base.rotGuide } : base;
     const host = (q: Point): Point => {
       const [x, y] = applyM(m.toHost, q.x, q.y);
       return { x, y };
@@ -1191,13 +1201,28 @@ export class Editor {
     // The offset from the finger to the handle at the press: the handle moves by the finger's
     // movement, never jumping to it (26 pt pick radius).
     const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, node: null, grab };
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, node: null, donut: null, grab };
     if (g.handle!.startsWith('g-')) {
       // A gradient handle (Edit on canvas): raw, no snapping (as in the lab), so no targets.
       const gv = this.#gradientView([id], measured);
       if (!gv || 'refused' in gv.out) return;
       hd.gradient = { prop: gv.prop, geo: gv.geo, handle: g.handle as GradientHandleId };
       hd.drag = this.#drag(GRADIENT_LABELS[g.handle as GradientHandleId]);
+      g.hd = hd;
+      g.mode = 'handle';
+      return;
+    }
+    if (g.handle!.startsWith('donut-b')) {
+      // A donut's boundary handle (P1-M3): raw, no snapping (the lab's), in the holder's units; its
+      // frames rewrite two numbers of the data comment, and the finish hook draws the slices again.
+      const d = donutFor(doc, id);
+      const toHost = d && this.#unitsToHost(d.holder);
+      const toUnits = toHost && invert(toHost);
+      const j = Number(g.handle!.slice('donut-b'.length));
+      if (!d || !toUnits || !(j >= 0 && j < d.values.length - 1)) return;
+      hd.donut = { holder: d.holder, j, values: d.values.slice(), cx: d.cx, cy: d.cy };
+      hd.toUnits = toUnits;
+      hd.drag = this.#drag('Set donut values');
       g.hd = hd;
       g.mode = 'handle';
       return;
@@ -1272,6 +1297,23 @@ export class Editor {
     const opts = { ctx: this.geo, decimals: stepDecimals(hd.step) };
     let plan: () => Plan;
     const f = { x: g.at.x + hd.grab.x, y: g.at.y + hd.grab.y }; // where the handle goes (the grab kept)
+    if (hd.donut) {
+      // SVG Lab's boundary drag: the finger's angle as a fraction of a turn from the top, clockwise;
+      // the two neighbouring values trade, each at least 1.
+      const dn = hd.donut;
+      const [ux, uy] = applyM(hd.toUnits!, f.x, f.y);
+      let fr = (Math.atan2(uy - dn.cy, ux - dn.cx) + Math.PI / 2) / (2 * Math.PI);
+      fr = ((fr % 1) + 1) % 1;
+      const S = dn.values.reduce((a, b) => a + b, 0);
+      const before = dn.values.slice(0, dn.j).reduce((a, b) => a + b, 0);
+      const pair = dn.values[dn.j] + dn.values[dn.j + 1];
+      const c = Math.min(Math.max(Math.round(fr * S) - before, 1), pair - 1);
+      hd.tip = `${c} | ${pair - c}`;
+      g.snapLines = [];
+      hd.drag.update((apply) => apply(this.#donutValuesOp(dn.holder, new Map([[dn.j, c], [dn.j + 1, pair - c]]))));
+      this.#show();
+      return;
+    }
     if (hd.gradient) {
       const gh = hd.gradient;
       plan = () => {
@@ -1773,6 +1815,7 @@ export class Editor {
   #nodesShown(id: NodeId): ReturnType<typeof pathNodes> {
     const doc = this.#doc;
     if (!doc || this.tool.get() !== 'node' || id === doc.root || isLocked(doc, id) || this.selection.get().size !== 1) return null;
+    if (donutFor(doc, id)) return null; // a donut's slice shows its donut's boundary handles instead (S2)
     return pathNodes(doc, id);
   }
 
@@ -1784,12 +1827,136 @@ export class Editor {
       if (!m) return null;
       const [px, py] = applyM(m, pg.p.x, pg.p.y);
       const [fx, fy] = applyM(m, pg.f.x, pg.f.y);
-      return { arms: penArms({ x: px, y: py }, { x: fx, y: fy }), mirrors: [], dots: [] };
+      return { ...NO_PATH_MARKS, arms: penArms({ x: px, y: py }, { x: fx, y: fy }) };
+    }
+    if (this.#gesture?.mode === 'marquee') return null;
+    // A donut's percentage labels, while a slice or its holder is selected (S2).
+    const donut = ids.length === 1 ? this.#donutShown(ids[0]) : null;
+    if (donut) {
+      const toHost = this.#unitsToHost(donut.holder);
+      return toHost ? { ...NO_PATH_MARKS, donut: donutLabels(donut, toHost) } : null;
     }
     const nodes = ids.length === 1 ? this.#nodesShown(ids[0]) : null;
     const m = nodes && measured.get(ids[0]);
-    if (!nodes || !m || this.#gesture?.mode === 'marquee') return null;
-    return pathMarks(nodes, m.toHost);
+    if (!nodes || !m) return null;
+    const marks = pathMarks(nodes, m.toHost);
+    // S2: the arc with ghosts and its flag labels, and a path of two or more subpaths' direction arrows.
+    const abs = this.#absOf(ids[0]);
+    const arc = abs && this.#ghostArc(abs);
+    if (arc) Object.assign(marks, arcGhosts(arc, m.toHost, this.#size));
+    if (abs && subpathCount(abs) > 1) marks.arrows = directionArrows(abs, m.toHost);
+    return marks;
+  }
+
+  // A path's absolute geometry (what parses of its d), or null.
+  #absOf(id: NodeId): AbsSeg[] | null {
+    const d = this.#doc && attrValueOf(this.#doc, id, 'd');
+    return d === null || d === undefined ? null : toAbsolute(parsePath(d));
+  }
+
+  // The arc with ghosts: the A segment ending at the chosen node, else the path's first.
+  #ghostArc(abs: readonly AbsSeg[]): (ArcParams & { index: number }) | null {
+    const chosen = this.chosenNode.get();
+    const k = chosen ? Number(chosen.slice(1)) : -1;
+    const i = abs[k]?.type === 'A' ? k : abs.findIndex((s) => s.type === 'A');
+    const s = abs[i];
+    if (!s || s.type !== 'A') return null;
+    return { index: i, x0: s.x0, y0: s.y0, rx: s.rx, ry: s.ry, rot: s.rot, large: s.large, sweep: s.sweep, x: s.x, y: s.y };
+  }
+
+  // A tap on a ghost arc (the Node tool, one path; the press took no pill and no handle): its flags
+  // set in place, one entry ("Set arc flags"). False when no ghost is within 22 px.
+  #tapGhost(at: Point): boolean {
+    const id = this.tool.get() === 'node' ? this.#onePath() : null;
+    const abs = id === null ? null : this.#absOf(id);
+    const arc = abs && this.#ghostArc(abs);
+    const ghost = arc ? ghostAt(this.overlayModel().paths?.ghosts ?? [], at) : null;
+    if (id === null || !arc || !ghost) return false;
+    const [large, sweep] = ghost.flags.split(' ').map((f) => f === '1');
+    this.#pathEdit(id, 'Set arc flags', (raw) => setArcFlags(raw, arc.index, large, sweep));
+    return true;
+  }
+
+  /** Reverse (the Node tool's bar): the chosen node's subpath drawn the other way, or every subpath when none is chosen ("Reverse"). */
+  reverse(): void {
+    const id = this.#onePath();
+    if (id === null || !this.nodeBar()) return;
+    const chosen = this.chosenNode.get();
+    const sub = chosen ? (this.#absOf(id)?.[Number(chosen.slice(1))]?.sub ?? null) : null;
+    this.#pathEdit(id, 'Reverse', (raw) => reverseSubpath(raw, sub));
+  }
+
+  // ── the donut (P1-M3 S2, engine/generators/donut.ts) ─────────────────────────────────────────
+
+  // The donut a one-element selection shows its handles and labels for (a slice, or its holder), when it is one now.
+  #donutShown(id: NodeId): Donut | null {
+    const doc = this.#doc;
+    const tool = this.tool.get();
+    if (!doc || this.selection.get().size !== 1 || tool === 'pen' || tool === 'shapes') return null;
+    return donutFor(doc, id);
+  }
+
+  // An element's user units → host px: the root's through the camera, any other as the canvas measures it.
+  #unitsToHost(id: NodeId): Affine | null {
+    const box = this.#box;
+    if (id === this.#doc?.root) return box ? rootToHostMatrix(box, this.#viewport, this.#M) : null;
+    return this.#ports.canvas.measure([id]).get(id)?.toHost ?? null;
+  }
+
+  // The donut's N − 1 boundary handles (kind anchor), handle j at the end of slice j on its ring.
+  #donutHandles(d: Donut, active: string | null): Handle[] {
+    const toHost = this.#unitsToHost(d.holder);
+    if (!toHost) return [];
+    const S = d.values.reduce((a, b) => a + b, 0);
+    const out: Handle[] = [];
+    let acc = 0;
+    for (let j = 0; j < d.values.length - 1; j++) {
+      acc += d.values[j];
+      const a = -Math.PI / 2 + (acc / S) * 2 * Math.PI;
+      const [x, y] = applyM(toHost, d.cx + d.r * Math.cos(a), d.cy + d.r * Math.sin(a));
+      const id = `donut-b${j}`;
+      out.push({ id, kind: 'anchor', at: { x, y }, active: id === active });
+    }
+    return out;
+  }
+
+  // The op writing some of a donut's values into its data comment: only those numbers' characters.
+  #donutValuesOp(holder: NodeId, set: ReadonlyMap<number, number>): Op {
+    const doc = this.#doc!;
+    const parts = donutParts(doc, el(doc, holder))!;
+    const leaf = doc.nodes.get(parts.comment) as LeafNode;
+    const raw = rewriteNumbers(leaf.raw, [...set].map(([i, v]) => ({ start: parts.data.spans[i].start, end: parts.data.spans[i].end, text: String(v) })));
+    return opSetLeafRaw(doc, parts.comment, raw);
+  }
+
+  /** Inspect's Donut section: the one selected slice's or holder's donut (its values, and Detach), or Edit as donut's candidate; else null. */
+  donut(): { holder: NodeId; values: number[]; recognized: boolean } | null {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    if (!doc || ids.length !== 1) return null;
+    const d = donutFor(doc, ids[0]);
+    if (d) return { holder: d.holder, values: d.values, recognized: true };
+    const c = donutCandidateFor(doc, ids[0]);
+    return c ? { holder: c.holder, values: c.values, recognized: false } : null;
+  }
+
+  /** Edit as donut: the holder gains draw:gen="donut" and its centre and radius, and nothing else changes ("Edit as donut"). */
+  adoptDonut(): void {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    const c = doc && ids.length === 1 ? donutCandidateFor(doc, ids[0]) : null;
+    if (!doc || !c) return;
+    if (isLocked(doc, c.holder)) return void this.notice.set(LOCKED);
+    this.#dispatch('Edit as donut', (apply) => adoptDonut(doc, c, apply));
+  }
+
+  /** The Donut section's − and +: one value a step down or up, one entry ("Set value N"). */
+  stepDonutValue(index: number, dir: 1 | -1): void {
+    const d = this.donut();
+    if (!d?.recognized || index < 0 || index >= d.values.length) return;
+    const v = d.values[index] + dir;
+    if (v < VALUE_MIN || v > VALUE_MAX) return;
+    this.#dispatch(`Set value ${index + 1}`, (apply) => apply(this.#donutValuesOp(d.holder, new Map([[index, v]]))));
   }
 
   // A path whose anchors pass the cap says so once, when the Node tool shows it.
@@ -2055,11 +2222,13 @@ export class Editor {
     if (v !== now) this.#dispatch(`Set ${name}`, (apply) => apply(this.#inputOp(g.id, name, v)));
   }
 
-  /** Detach on purpose: the generator's attributes removed, the shape keeps its geometry ("Detach"). */
+  /** Detach on purpose: the generator's attributes removed, the shape (or a donut's slices) keeps its geometry ("Detach"). */
   detach(): void {
     const doc = this.#doc;
     const g = this.generated();
-    if (doc && g) this.#dispatch('Detach', (apply) => void detachGenerator(doc, g.id, apply));
+    const d = g ? null : this.donut();
+    const id = g ? g.id : d?.recognized ? d.holder : null;
+    if (doc && id !== null) this.#dispatch('Detach', (apply) => void detachGenerator(doc, id, apply));
   }
 
   /**
@@ -2072,13 +2241,14 @@ export class Editor {
       field.kind === 'input' ? [this.generated()?.id].filter((id) => id !== undefined)
       : field.kind === 'style' ? (field.ids ?? this.#styleIds())
       : field.kind === 'offset' ? [field.stop].filter((id) => this.#doc && attached(this.#doc, id))
+      : field.kind === 'donut' ? [this.donut()].flatMap((d) => (d?.recognized && field.index < d.values.length ? [d.holder] : []))
       : this.#styleIds().slice(0, 1);
     if (!ids.length || !this.#writable()) return;
     if (field.kind === 'style' && this.styleRow(field.prop, field.ids)?.disabled) return;
     const ruled = field.kind === 'gradient' ? this.#paintRuled(field.prop) : field.kind === 'offset' ? this.#stopRuled(field.stop) : null;
     if (ruled) return void this.notice.set(ruled);
     if (field.kind === 'gradient' && !this.paintInfo(field.prop)?.gradient) return;
-    const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.name;
+    const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.kind === 'donut' ? `value ${field.index + 1}` : field.name;
     this.#field = { field, ids, drag: this.#drag(`Set ${label}`), refused: [] };
   }
 
@@ -2097,6 +2267,14 @@ export class Editor {
       if (!/^(?:\d+|\d*\.\d+)$/.test(t) || Number(t) > 1) return `${JSON.stringify(text)} is not an offset from 0 to 1`;
       const doc = this.#doc!;
       f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));
+      this.#show();
+      return null;
+    }
+    if (f.field.kind === 'donut') {
+      const t = text.trim();
+      if (!/^\d+$/.test(t) || Number(t) < VALUE_MIN || Number(t) > VALUE_MAX) return `${JSON.stringify(text)} is not a whole number from ${VALUE_MIN} to ${VALUE_MAX}`;
+      const index = f.field.index;
+      f.drag.update((apply) => apply(this.#donutValuesOp(f.ids[0], new Map([[index, Number(t)]]))));
       this.#show();
       return null;
     }
@@ -3240,7 +3418,9 @@ export type Field =
   /** A stop's offset (S3): typed as 0–1, written in its own unit. */
   | { kind: 'offset'; stop: NodeId }
   /** A radial gradient's fx, fy or fr (S3), where it lives in the chain. */
-  | { kind: 'gradient'; prop: PaintProp; name: 'fx' | 'fy' | 'fr' };
+  | { kind: 'gradient'; prop: PaintProp; name: 'fx' | 'fy' | 'fr' }
+  /** A donut's value (P1-M3): a whole number from 1 to 100, written into its data comment. */
+  | { kind: 'donut'; index: number };
 interface FieldSession {
   field: Field;
   ids: NodeId[]; // the generated shape, or the selection
@@ -3303,6 +3483,7 @@ interface HandleDrag {
   shape: { id: string; role: 'position' | 'length' } | null; // a shape handle (engine/geometry/shape-handles.ts)
   gradient: { prop: PaintProp; geo: GradientGeo; handle: GradientHandleId } | null; // a gradient handle (engine/paint/handles.ts), Edit on canvas
   node: { id: string; kind: NodeKind; at0: Point } | null; // a node handle (engine/path/nodes.ts), the Node tool (P1-M3): where it was, in the path's units
+  donut: { holder: NodeId; j: number; values: number[]; cx: number; cy: number } | null; // a donut's boundary handle (P1-M3): the values when the drag began
   grab: Point; // the handle's offset from the finger at the press, host px: kept for the whole drag
 }
 // Edit on canvas: the painted element's gradient, where the canvas measured it, and its handles
