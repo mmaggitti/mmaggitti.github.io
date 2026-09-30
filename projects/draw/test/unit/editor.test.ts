@@ -16,6 +16,7 @@ import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
 import type { OverlayModel } from '../../src/interact/overlay-model.ts';
 import { measureWith } from './fakes.ts';
+import { layerRows } from '../../src/panels/layer-rows.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
 
@@ -1279,6 +1280,33 @@ test('Rename refuses a name XML can’t hold as an id, an id two elements share 
   const r = renamed(S(`<rect id="c" width="5" height="5"/><g ${aria.map((a) => `${a}="c t"`).join(' ')}/><use href="other.svg#c"/>`), 'sun');
   assert.equal(r.why, null);
   assert.equal(r.source, S(`<rect id="sun" width="5" height="5"/><g ${aria.map((a) => `${a}="sun t"`).join(' ')}/><use href="other.svg#c"/>`));
+});
+
+test('a lock on the root is not Draw’s: its shapes can still be tapped, dragged and taken by a marquee; a shape in a locked group reads locked in Layers, naming the group', () => {
+  const ROOT_LOCKED = SHAPES.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" draw:locked="true">');
+  const r = rig();
+  r.editor.open(ROOT_LOCKED);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a], 'a tap takes the shape');
+  drag(r, hostAt(r, 15, 15), hostAt(r, 18, 15), [a]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', `a drag moves it (${r.editor.notice.get()})`);
+  r.editor.undo();
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), []);
+  assert.deepEqual(sel(r), [a], 'a marquee takes it');
+  // A locked group: the shapes in it are locked by it, and Layers says so.
+  const GROUP_LOCKED = SHAPES.replace('<g id="g">', '<g id="g" draw:locked="true">');
+  const g = rig();
+  g.editor.open(GROUP_LOCKED);
+  const rows = new Map(layerRows(doc(g)).map((row) => [row.name, row]));
+  assert.deepEqual([rows.get('#g')!.locked, rows.get('#g')!.lockedBy], [true, null], 'the group holds its own lock');
+  assert.deepEqual([rows.get('#c')!.locked, rows.get('#c')!.lockedBy], [false, '#g'], 'the circle in it reads locked, by the group');
+  assert.deepEqual([rows.get('#a')!.locked, rows.get('#a')!.lockedBy], [false, null], 'a shape outside it is free');
+  assert.deepEqual([rows.get('#k')!.locked, rows.get('#k')!.lockedBy], [true, null]);
+  tap(g, hostAt(g, 70, 70), [idOf(g, 'c')]);
+  assert.deepEqual(sel(g), [], 'and a tap passes it by');
+  assert.deepEqual(layerRows(doc(r)).map((row) => row.lockedBy).filter(Boolean), [], 'the root’s lock locks no row');
 });
 
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {

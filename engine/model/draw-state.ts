@@ -48,12 +48,21 @@ const blank = (doc: Doc, id: NodeId | undefined): boolean => {
 };
 const elementKids = (doc: Doc, n: ElementNode): ElementNode[] => n.children.map((c) => doc.nodes.get(c)!).filter((c): c is ElementNode => c.kind === 'element');
 
-/** Is this element locked: draw:locked="true" on it or on an ancestor? */
-export function isLocked(doc: Doc, id: NodeId): boolean {
-  for (let n = doc.nodes.get(id); n && n.kind === 'element'; n = n.parent === null ? undefined : doc.nodes.get(n.parent)) {
-    if (el(doc, n.id).attrs.some((a) => a.ns === DRAW_NS && a.local === 'locked' && a.raw === 'true')) return true;
+/**
+ * The element whose lock holds this one: itself or its nearest ancestor with draw:locked="true", or
+ * null. Never the root: Draw never locks the root (Layers has no row for it), so a file's own root
+ * draw:locked locks nothing, or it would lock the whole canvas with no way to unlock it.
+ */
+export function lockHolder(doc: Doc, id: NodeId): NodeId | null {
+  for (let n = doc.nodes.get(id); n && n.kind === 'element' && n.id !== doc.root; n = n.parent === null ? undefined : doc.nodes.get(n.parent)) {
+    if (n.attrs.some((a) => a.ns === DRAW_NS && a.local === 'locked' && a.raw === 'true')) return n.id;
   }
-  return false;
+  return null;
+}
+
+/** Is this element locked: draw:locked="true" on it or on an ancestor below the root? */
+export function isLocked(doc: Doc, id: NodeId): boolean {
+  return lockHolder(doc, id) !== null;
 }
 
 /** The document's <draw:state>, if any (in a <metadata> child of the root). */

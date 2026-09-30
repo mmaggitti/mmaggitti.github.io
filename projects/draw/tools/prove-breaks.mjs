@@ -2035,6 +2035,11 @@ const BREAKS = [
     file: 'engine/model/draw-ns.ts', from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some(', to: '  return n.attrs.some(',
     run: engineTests('draw-state.test.ts'), expect: /✖ only Draw’s own empty <metadata> is taken away/,
   },
+  {
+    id: 'B385', what: 'F2: a draw:locked on the root locks the whole canvas again',
+    file: 'engine/model/draw-state.ts', from: "n && n.kind === 'element' && n.id !== doc.root;", to: "n && n.kind === 'element';",
+    run: drawTests('editor.test.ts'), expect: /✖ a lock on the root is not Draw’s/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
