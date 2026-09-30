@@ -61,6 +61,17 @@ test('pathNodes on the lab’s files: lab/paths.svg’s two anchors and its bend
   assert.ok(!smooth.handles.some((h) => h.at.x === 60 && h.at.y === 90), 'the implied control is never a handle');
 });
 
+test('pathNodes on lab/arcs--holes.svg, a compound path: both subpaths’ anchors (the ring’s start and its arc end, its last anchor linked to the start; the keyhole’s start and its three points), bend handles on the keyhole’s two lines and none on the arcs', () => {
+  const doc = load(lab('arcs--holes.svg'));
+  const [path] = paths(doc);
+  assert.deepEqual(pathNodes(doc, path.id)!.handles.map((h) => `${h.id} ${h.kind} ${h.at.x},${h.at.y}`), [
+    'b6 bend 58.85,54', 'b7 bend 50,66',
+    'a0 start 14,50', 'a1 anchor 86,50',
+    'a4 start 43.3,42', 'a5 anchor 56.7,42', 'a6 anchor 61,66', 'a7 anchor 39,66',
+  ]);
+  assert.equal(pathNodes(doc, path.id)!.closed, true);
+});
+
 test('pathNodes on SVG Lab’s presets (PRESETS) written as paths: the heart (closed, four C), the wave (open, two C) and the check mark (two L)', () => {
   const heart = 'M 50 34 C 50 20, 28 14, 20 28 C 12 42, 26 62, 50 84 C 74 62, 88 42, 80 28 C 72 14, 50 20, 50 34 Z';
   assert.deepEqual(ids(heart).filter((h) => / (start|anchor) /.test(h)), ['a0 start 50,34', 'a1 anchor 20,28', 'a2 anchor 50,84', 'a3 anchor 80,28']);
