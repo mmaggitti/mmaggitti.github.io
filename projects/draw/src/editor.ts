@@ -1038,7 +1038,14 @@ export class Editor {
       if (kind === 'Scale' && !p.scale) return;
       hd.pivot = kind === 'Rotate' ? p.rot : p.scale!;
       hd.a0 = kind === 'Rotate' ? rotationOf(doc, id) : scaleOf(doc, id)!;
-      hd.flip = pm.toHost[0] * pm.toHost[3] - pm.toHost[1] * pm.toHost[2] < 0 ? -1 : 1;
+      // A mirror before the rotate() it turns (the parent's, or in the list's items before it; the
+      // whole list when one will be appended) turns the written angle the other way on screen.
+      const raw = attrValueOf(doc, id, 'transform');
+      const list = raw === null ? null : parseTransform(raw);
+      const r = list ? list.items.findIndex((it) => it.fn === 'rotate') : -1;
+      let before = linear(pm.toHost);
+      for (const it of list ? (r === -1 ? list.items : list.items.slice(0, r)) : []) before = multiply(before, itemMatrix(it));
+      hd.flip = before[0] * before[3] - before[1] * before[2] < 0 ? -1 : 1;
     }
     hd.drag = this.#session.drag(kind);
     g.hd = hd;

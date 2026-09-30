@@ -90,8 +90,9 @@ export function magneticAngle(a: number): number {
   return (Math.abs(r - m) <= 4 ? m : r) + 0; // + 0: never −0, which would be written "-0"
 }
 
-/** The scale diamond's value: steps of 0.05, from 0.2 to 4. */
+/** The scale diamond's value: steps of 0.05, from 0.2 to 4 in size, keeping its sign (a mirror stays one). */
 export function scaleStep(k: number): number {
+  if (k < 0) return -scaleStep(-k);
   const s = Math.round(k / 0.05) * 0.05;
   return Math.min(4, Math.max(0.2, Number(s.toFixed(2))));
 }

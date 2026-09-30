@@ -2055,6 +2055,16 @@ const BREAKS = [
     file: 'engine/model/draw-state.ts', from: '  while (guides.length < MAX_GUIDES) {', to: '  while (guides.length < Infinity) {',
     run: engineTests('draw-state.test.ts'), expect: /✖ a state with 10⁶ guides reads its first 100 in under 50 ms/,
   },
+  {
+    id: 'B389', what: 'F9: the scale diamond drops the sign of scale() (a mirror flips the other axis and shrinks)',
+    file: 'projects/draw/src/interact/handles.ts', from: '  if (k < 0) return -scaleStep(-k);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element the scale diamond keeps the mirror/,
+  },
+  {
+    id: 'B390', what: 'F9: the ring takes its flip from the parent alone (on a mirrored list it turns against the finger)',
+    file: 'projects/draw/src/editor.ts', from: "      for (const it of list ? (r === -1 ? list.items : list.items.slice(0, r)) : []) before = multiply(before, itemMatrix(it));\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element the scale diamond keeps the mirror/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],

@@ -1358,6 +1358,45 @@ test('a corner drag gathers its snap targets once, when it starts, not on every 
   assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
 });
 
+test('on a mirrored element the scale diamond keeps the mirror, and the ring turns the shape the way the finger turns', () => {
+  const open = (t: string) => {
+    const r = rig();
+    r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <g id="g" transform="${t}"><rect x="30" y="30" width="40" height="20"/></g>\n</svg>`);
+    r.editor.snap.set(NO_SNAP);
+    r.editor.select([idOf(r, 'g')]);
+    return r;
+  };
+  const transformOf = (r: Rig) => /transform="([^"]*)"/.exec(r.editor.source())![1];
+  // The diamond, 1.5× as far from the scale's pivot (the root's origin here): the mirror stays.
+  for (const [t, want] of [['scale(-1 1)', 'scale(-1.5 1.5)'], ['scale(-1)', 'scale(-1.5)'], ['scale(1 -1)', 'scale(1.5 -1.5)']]) {
+    const r = open(t);
+    const diamond = r.editor.overlayModel().handles.find((h) => h.kind === 'scale')!;
+    const o = hostAt(r, 0, 0);
+    drag(r, diamond.at, { x: o.x + 1.5 * (diamond.at.x - o.x), y: o.y + 1.5 * (diamond.at.y - o.y) }, [], { frames: 6 });
+    assert.equal(transformOf(r), want, `the diamond on ${t}`);
+  }
+  // The ring, turned +30° by the finger about its pivot: the shape turns +30° on screen.
+  const screenAngle = (r: Rig) => {
+    const q = r.editor.overlayModel().outlines[0].quad;
+    return (Math.atan2(q[1].y - q[0].y, q[1].x - q[0].x) * 180) / Math.PI;
+  };
+  for (const t of ['rotate(0)', 'scale(-1 1) rotate(0)', 'translate(100 0) scale(-1 1)', 'matrix(-1 0 0 1 100 0)']) {
+    const r = open(t);
+    const before = screenAngle(r);
+    const model = r.editor.overlayModel();
+    const ring = model.handles.find((h) => h.kind === 'rot')!;
+    const pivot = model.rotGuide!.from;
+    const radius = Math.hypot(ring.at.x - pivot.x, ring.at.y - pivot.y);
+    const a0 = Math.atan2(ring.at.y - pivot.y, ring.at.x - pivot.x);
+    const at = (deg: number) => ({ x: pivot.x + radius * Math.cos(a0 + (deg * Math.PI) / 180), y: pivot.y + radius * Math.sin(a0 + (deg * Math.PI) / 180) });
+    r.editor.pointerDown(ring.at, [], { add: false });
+    for (let d = 5; d <= 30; d += 5) r.editor.pointerDrag(at(d));
+    r.editor.pointerUp(at(30));
+    const turned = ((screenAngle(r) - before + 540) % 360) - 180;
+    assert.ok(Math.abs(turned - 30) < 1, `the ring on ${t} turned the shape ${turned.toFixed(1)}° for the finger's 30° (${transformOf(r)})`);
+  }
+});
+
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
   const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect id="a" x="10" y="10" width="10" height="10"/>
