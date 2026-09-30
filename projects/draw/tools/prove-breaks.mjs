@@ -10,6 +10,9 @@
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
+//
+// A break edits with String.prototype.replace, so `from` may be a RegExp (an anchor that survives
+// the row or line around it changing) and `to` a replacer function.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -100,6 +103,17 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ every corpus file round-trips/,
   },
   {
+    // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
+    id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
+    file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*255 nested elements declaring (150|600) prefixes each took \d+ ms/,
+  },
+  {
+    id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
+    file: 'engine/model/doc.ts', from: '      if (uri === undefined) scope.delete(prefix);\n      else scope.set(prefix, uri);\n', to: '',
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*each resolves in its own scope/,
+  },
+  {
     id: 'B13', what: 'an attribute edit re-spaces the whole start tag',
     file: 'engine/model/doc.ts', from: 's += `${a.lead}${a.qname}', to: 's += ` ${a.qname}',
     run: XML_TESTS, expect: /✖ one attribute edit changes exactly that attribute/,
@@ -113,6 +127,13 @@ const BREAKS = [
     id: 'B15', what: 'entity expansion loses its depth limit',
     file: 'engine/xml/entities.ts', from: 'if (depth > ENTITY_DEPTH) throw', to: 'if (false) throw',
     run: XML_TESTS, expect: /✖ a deep chain of tiny entities hits the depth limit/,
+  },
+  {
+    // P1-M0 review (F1): the budget counts work as well as output, in parsing and in Edit source.
+    id: 'B300', what: 'an entity expansion costs only what it writes again (a bomb of entities that expand to nothing runs free)',
+    file: 'engine/xml/entities.ts', from: "    budget.left -= 1 + (rep.includes('&') ? rep.length : 0);\n", to: '',
+    run: ['node', ['--test', '--test-reporter=spec', '../../engine/test/xml.test.ts', '../../engine/test/fragment.test.ts'], DRAW],
+    expect: /^(?=[\s\S]*✖ an entity bomb that expands to nothing fails within the entity budget[\s\S]*an expansion to nothing is charged to the budget)(?=[\s\S]*✖ Edit source refuses an entity bomb that expands to nothing, within the budget[\s\S]*an expansion to nothing is charged to the document)/,
   },
   {
     id: 'B16', what: 'the number formatter falls back to exponent notation',
@@ -141,14 +162,16 @@ const BREAKS = [
     run: LEDGER_CHECK, expect: /svg-profile-tables\.mjs is out of date/,
   },
   {
+    // The whole row's line, whatever it holds by then (its status, tests and notes change as it is built).
     id: 'B21', what: 'an SVG element loses its ledger row',
-    file: 'engine/ledger/ledger.json', from: '{"id":"element:rect","kind":"element","name":"rect","ns":"svg","group":"shape","class":"edit","render":true,"serve":true,"phase":1,"status":"planned","lesson":["grid","shapes"]},\n', to: '',
+    file: 'engine/ledger/ledger.json', from: /^\{"id":"element:rect",[^\n]*\n/m, to: '',
     run: LEDGER_CHECK, expect: /no row for the SVG element <rect>/,
   },
   {
+    // One phase past wherever the ledger stands, whose rows are never all done while it is built.
     id: 'B22', what: 'the phase is raised before its rows are done',
-    file: 'engine/ledger/ledger.json', from: '"currentPhase": 1', to: '"currentPhase": 2',
-    run: LEDGER_CHECK, expect: /behind the current phase 2/,
+    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 1}`,
+    run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is (?:planned|partial)/,
   },
   {
     id: 'B23', what: 'the served profile stops refusing the ledger\'s active attributes',
@@ -156,6 +179,17 @@ const BREAKS = [
     run: engineTests('ledger.test.ts'), expect: /✖ the served profile refuses every SVG element and attribute the ledger does not serve/,
   },
   // P0-M2: the safe sink, the renderer and the canvas (all caught by the site e2e).
+  {
+    // P1-M0 review (F4): the DOM judges a name too; one it refuses is dropped, never thrown on.
+    id: 'B302', what: 'the sink stops asking the DOM whether it takes a name (data-😀 throws in setAttribute and fails the render)',
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: ' || !domTakesName(attr.ns, key)', to: '',
+    run: PATCH_TESTS, expect: /attribute names the DOM refuses are dropped, never thrown on\n\s+threw InvalidCharacterError/,
+  },
+  {
+    id: 'B303', what: 'the sink stops asking the DOM whether it takes a name, in the app (a file with data-😀 fails to draw; Edit source adding one blanks the canvas)', slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: ' || !domTakesName(attr.ns, key)', to: '',
+    run: SITE_E2E, expect: /data-\* names the DOM refuses: did not render \(InvalidCharacterError[\s\S]*editSourceRoundTrip: Edit source adding data-\S+: \{"broken":"[^"]*is not a valid attribute name[^}]*"takes":false\}/,
+  },
   {
     id: 'B24', what: 'the sink stops asking DOMPurify', slow: true,
     file: 'projects/draw/src/canvas/safe-sink.ts', from: '!purify?.isValidAttribute(node.local, key, out)', to: '!purify',
@@ -204,7 +238,7 @@ const BREAKS = [
   // P0-M2 review: the render policy's rules, each seen failing its own test.
   {
     id: 'B33', what: "the policy ignores an attribute scope's except list",
-    file: 'engine/policy/render-policy.ts', from: 'if (!scope || scope.except?.includes(elLocal)) return false;', to: 'if (!scope) return false;',
+    file: 'engine/policy/render-policy.ts', from: '  if (scope.except?.includes(elLocal)) return false;\n', to: '',
     run: POLICY_TESTS, expect: /✖ every rendered attribute renders on the elements in its scope/,
   },
   {
@@ -1235,6 +1269,12 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ parameter entities are recorded and never expanded/,
   },
   {
+    // P1-M0 review (F2): an unterminated declaration's scan stops at the next '<'.
+    id: 'B301', what: "an external entity's declaration is scanned to the next '>' again (quadratic over unterminated declarations)",
+    file: 'engine/xml/entities.ts', from: `(SYSTEM|PUBLIC)\\\\b((?:[^<>"']|"[^"]*"|'[^']*')*)`, to: '(SYSTEM|PUBLIC)\\\\b([^>]*)',
+    run: XML_TESTS, expect: /✖ a DOCTYPE full of unterminated entity declarations is read in linear time[\s\S]*250 KB of unterminated declarations took \d+ ms/,
+  },
+  {
     id: 'B236', what: "an edit rewrites a path's unparsed tail",
     file: 'engine/path/serialize.ts', from: "  return p.segs.map((s) => s.raw).join('') + p.tail;", to: "  return p.segs.map((s) => s.raw).join('') + p.tail.replace(/^,/, ' ');",
     run: engineTests('corpus/corpus.test.ts'), expect: /✖ a path is drawn up to its first error, and an edit before it keeps the unparsed rest byte for byte/,
@@ -1457,6 +1497,172 @@ const BREAKS = [
     id: 'B277', what: 'a DEVICE-CHECKS.md link is damaged (it no longer opens the looping drawing its row names)',
     file: 'projects/draw/DEVICE-CHECKS.md', from: 'and [one that loops](https://mmaggitti.github.io/draw/#import=TVDL', to: 'and [one that loops](https://mmaggitti.github.io/draw/#import=NY5N',
     run: drawTests('device-checks.test.ts'), expect: /✖ DEVICE-CHECKS\.md's links decode and open as their rows say/,
+  },
+  // P1-M0: the engine refuses what a browser's XML parser refuses, each at its place.
+  {
+    id: 'B278', what: 'an attribute written twice is accepted',
+    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${clip(an)} is written twice in <${clip(name)}>`, attrs };\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: an attribute written twice: parsed\n/,
+  },
+  {
+    id: 'B279', what: 'a bare & is accepted',
+    file: 'engine/xml/entities.ts', from: "if (ref === undefined) return { at: i, message: raw[i + 1] === '#' ? 'a malformed character reference' : \"a bare & (write &amp; for the character itself)\" };", to: 'if (ref === undefined) continue;',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a bare & in text: parsed\n/,
+  },
+  {
+    id: 'B280', what: '&nbsp; is accepted with no DTD (an undeclared entity stays as written)',
+    file: 'engine/xml/entities.ts', from: '    } else return { at: i, message: `the entity &${clip(ref)}; is not declared` };', to: '    }',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: &nbsp; with no DTD: parsed\n/,
+  },
+  {
+    id: 'B281', what: '&#0; is accepted (read as U+FFFD, as before P1)',
+    file: 'engine/xml/entities.ts', from: "      if (!isXmlChar(codePoint(ref.slice(1)))) return { at: i, message: `&${clip(ref)}; names a character XML doesn't allow` };\n", to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: &#0;: parsed\n/,
+  },
+  {
+    id: 'B282', what: "'--' in a comment is accepted",
+    file: 'engine/xml/lex.ts', from: "      if (dashes !== close) return fail(dashes, \"'--' inside a comment\");\n", to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: -- in a comment: parsed\n/,
+  },
+  {
+    id: 'B283', what: 'an element prefix nobody declared is accepted',
+    file: 'engine/model/doc.ts', from: '    if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${clip(prefix)} of <${clip(tag)}> is not declared`);\n', to: '',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: an unbound element prefix: parsed\n/,
+  },
+  {
+    id: 'B284', what: 'a lowercase <!doctype is accepted',
+    file: 'engine/xml/lex.ts', from: "    if (src.startsWith('<!DOCTYPE', i)) {", to: "    if (src.startsWith('<!DOCTYPE', i) || src.startsWith('<!doctype', i)) {",
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a lowercase <!doctype: parsed\n/,
+  },
+  {
+    // A form feed is refused wherever it stands (it is no XML character at all); what the old /\S/
+    // lets through outside the root is JavaScript's other whitespace: a no-break space, a late BOM.
+    id: 'B285', what: 'text outside the root is judged by the old /\\S/ again (a no-break space before the root passes)',
+    file: 'engine/xml/cst.ts', from: 'const STRAY = /[^ \\t\\r\\n]/;', to: 'const STRAY = /\\S/;',
+    run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place[\s\S]*\[ERR_ASSERTION\]: a no-break space before the root: parsed\n/,
+  },
+  {
+    id: 'B286', what: "the DOCTYPE's subset scan loses its processing-instruction skip (a ] or a quote in one breaks the DOCTYPE)",
+    file: 'engine/xml/lex.ts', from: "    } else if (src.startsWith('<?', k)) {\n      const e = src.indexOf('?>', k + 2);\n      if (e === -1) return -1;\n      k = e + 1;\n", to: '',
+    run: XML_TESTS, expect: /✖ a processing instruction in the DOCTYPE may hold \] and quotes/,
+  },
+  {
+    id: 'B287', what: 'an entity a parameter entity may declare is reported as not well-formed (it loses kind: limit)',
+    file: 'engine/xml/entities.ts', from: "which Draw doesn't expand`, kind: 'limit' };", to: "which Draw doesn't expand` };",
+    run: XML_TESTS, expect: /✖ an entity a parameter entity may declare is over Draw's limits, not malformed/,
+  },
+  {
+    id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${clip(ref)}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
+    run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
+  },
+  // P1-M0 review (F8): with several errors, the first is reported, as a browser's parser stops there.
+  {
+    id: 'B304', what: "the lexer's or the tree's error is reported before an earlier reference or namespace error again",
+    file: 'engine/model/doc.ts', from: '    return first && !first.ok ? first : { ok: false, error: parsed.error };', to: '    return { ok: false, error: parsed.error };',
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*a bare & \(line 2\), then an attribute written twice \(line 3\)/,
+  },
+  {
+    id: 'B305', what: 'the attributes a tag read before the lexer stopped inside it go unchecked',
+    file: 'engine/xml/lex.ts', from: "    if ('message' in r) return fail(r.at, r.message, r.attrs);", to: "    if ('message' in r) return fail(r.at, r.message);",
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one tag, a reference \(line 2\), then an attribute written twice \(line 4\)/,
+  },
+  {
+    id: 'B306', what: 'the text before a character XML doesn\'t allow goes unchecked',
+    file: 'engine/xml/lex.ts', from: "      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });\n", to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one text, a reference \(line 2\), then U\+0001 \(line 3\)/,
+  },
+  {
+    // P1-M0 review (F10): a stored draft the strict parser refuses is shown as source, never saved over.
+    id: 'B314', what: 'a draft shown as source is attached to be saved (the source view makes a draft of its own)',
+    file: 'projects/draw/src/workspace.ts', from: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: false });', to: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: true });',
+    run: drawTests('workspace.test.ts'), expect: /✖ a stored draft the strict parser refuses reopens as read-only source at its error[\s\S]*the source view made no draft of its own/,
+  },
+  // P1-M0 review (F9): an entity chain is named once; a long name is cut in a message.
+  {
+    id: 'B312', what: "an entity chain's message repeats its sentence at every level again (about 800 characters at depth 8)",
+    file: 'engine/xml/entities.ts', from: '  const out: Fault | null = below && { ...below, chain: [name, ...below.chain] };', to: '  const out: Fault | null = below && { ...below, chain: [name], cause: faultMessage(below) };',
+    run: XML_TESTS, expect: /✖ an entity chain is named once in a message, by its ends/,
+  },
+  {
+    id: 'B313', what: 'a message holds a long name whole again (a 1 MB name makes a 1 MB message)',
+    file: 'engine/xml/lex.ts', from: "export const clip = (name: string): string => (name.length > 40 ? `${name.slice(0, 39).replace(/[\\uD800-\\uDBFF]$/, '')}…` : name);", to: 'export const clip = (name: string): string => name;',
+    run: XML_TESTS, expect: /✖ a message cuts a long name to about 40 characters[\s\S]*a colon out of place: a message of \d+ characters/,
+  },
+  // P1-M0 review: one name pattern for entities (F6), the first declaration binds (F7), an unparsed entity is never referenced (F9).
+  {
+    id: 'B309', what: "an entity's declaration takes ASCII names only again (a declared &é; reads as undeclared)",
+    file: 'engine/xml/entities.ts', from: '(%\\\\s+)?(${NAME_PATTERN})', to: '(%\\\\s+)?([A-Za-z_:][\\\\w.:-]*)',
+    run: XML_TESTS, expect: /✖ an entity name may hold any character a name may, declared, referenced and expanded alike/,
+  },
+  {
+    id: 'B310', what: 'the last declaration of an entity binds again (fill="&c;" reads blue where a browser draws red)',
+    file: 'engine/xml/entities.ts', from: '    if (m[1] ? table.parameter.has(name) : table.internal.has(name) || table.external.has(name)) continue;\n', to: '',
+    run: XML_TESTS, expect: /✖ an entity declared twice keeps its first declaration/,
+  },
+  {
+    id: 'B311', what: 'a reference to an unparsed (NDATA) entity is accepted in text',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.unparsed.has(ref)) {\n      return { at: i, message: `the entity &${clip(ref)}; is unparsed (declared NDATA): no reference may name it` };\n", to: '',
+    run: XML_TESTS, expect: /✖ a reference to an unparsed \(NDATA\) entity is refused[\s\S]*<text>&logo;<\/text>: parsed/,
+  },
+  {
+    // Edit source parses its text with the document's DOCTYPE and namespaces in scope.
+    id: 'B295', what: "Edit source parses without the document's DOCTYPE (the entities it declares are out of scope)",
+    file: 'engine/model/fragment.ts', from: "const head = `${doctype && doctype.kind === 'doctype' ? doctype.raw : ''}<${WRAPPER}", to: 'const head = `<${WRAPPER}',
+    run: engineTests('fragment.test.ts'), expect: /✖ Edit source refuses what a browser refuses, at its place in the text, with the document in scope/,
+  },
+  {
+    id: 'B288', what: 'the parser tree check compares no corpus file', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, file] of corpus.entries()) {', to: '    for (const [i, file] of corpus.slice(0, 0).entries()) {',
+    run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: compared 0 of \d+ corpus files/,
+  },
+  {
+    id: 'B289', what: "the engine's canonical tree takes an attribute's raw text for its value (lab/transform.svg's transform spans lines)", slow: true,
+    file: 'projects/draw/test/probe-helpers/xml-canon.mjs', from: 'const attrs = n.attrs.map((a) => [a.ns, a.local, a.prefix, decodeAttr(a.raw, doc.entities)]).sort(byNsLocal);', to: 'const attrs = n.attrs.map((a) => [a.ns, a.local, a.prefix, a.raw]).sort(byNsLocal);',
+    run: SITE_E2E, expect: /corpusTreesMatchTheBrowsersParser: \d+ of \d+ corpus files parse to different trees in the engine and the browser \([^)]*lab\/transform\.svg/,
+  },
+  {
+    id: 'B291', what: 'the parser probe loop is skipped', slow: true,
+    file: 'projects/draw/test/e2e.mjs', from: '    for (const [i, probe] of PROBES.entries()) {', to: '    for (const [i, probe] of PROBES.slice(0, 0).entries()) {',
+    run: SITE_E2E, expect: /theEngineRefusesWhatTheBrowserRefuses: checked 0 of \d+ probes/,
+  },
+  // P1-M0: the ledger's citations and the canvas's pattern rows.
+  {
+    id: 'B290', what: "a ledger row's note names an e2e check the row doesn't cite",
+    file: 'engine/ledger/ledger.json', from: ',"projects/draw/test/e2e.mjs#theLedgerLoadsOnlyForSupport"]', to: ']',
+    run: LEDGER_CHECK, expect: /feature:support-tab: its note names the e2e check theLedgerLoadsOnlyForSupport but the row does not cite it/,
+  },
+  {
+    id: 'B292', what: 'data-* stops rendering (the canvas ignores the pattern rows again)',
+    file: 'engine/policy/render-policy.ts', from: '  if (!scope) return attrNs === null && (elNs === NS.svg ? RENDER_SVG_ATTRIBUTE_PATTERNS : elNs === NS.xhtml ? RENDER_XHTML_ATTRIBUTE_PATTERNS : []).some((re) => re.test(attrLocal));\n', to: '  if (!scope) return false;\n',
+    run: POLICY_TESTS, expect: /✖ data-\* \(a pattern row\): rendered on every element, kept byte for byte, served/,
+  },
+  {
+    // The policy draws the pattern rows; the sink's second judge must agree, or they never land.
+    id: 'B294', what: "DOMPurify's second opinion refuses data-* (a pattern row the policy draws never reaches the canvas)", slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '  SANITIZE_DOM: false,\n', to: '  SANITIZE_DOM: false,\n  ALLOW_DATA_ATTR: false,\n',
+    run: SITE_E2E, expect: /without data-state or aria-label: the pattern rows \(data-\*, aria-\*\) must pass both judges/,
+  },
+  // P1-M0: SVG Lab goals closed early, each reached with Draw's own tools on the lab's file.
+  {
+    id: 'B296', what: 'zoom stops at 4× the fitted drawing',
+    file: 'projects/draw/src/canvas/viewport.ts', from: 'Math.min(Math.max(MAX_SCALE, fitScale * MAX_SCALE_FACTOR), ', to: 'Math.min(fitScale * 4, ',
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Zoom to 8×" \(vector\)/,
+  },
+  {
+    id: 'B297', what: "a tap on a colour token opens no Color sheet",
+    file: 'projects/draw/src/editor.ts', from: "      case 'color':\n        return this.#openSheet({ kind: 'color', ref, token: t });\n", to: "      case 'color':\n        return;\n",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Change a color" \(vector\)/,
+  },
+  {
+    id: 'B298', what: "stroke-linejoin's keywords lose bevel",
+    file: 'engine/code/tokens.ts', from: "'stroke-linejoin': ['miter', 'round', 'bevel', 'miter-clip', 'arcs'],", to: "'stroke-linejoin': ['miter', 'round', 'miter-clip', 'arcs'],",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Bevel corners" \(style\)/,
+  },
+  {
+    id: 'B299', what: 'a tap on a text run opens no Text sheet',
+    file: 'projects/draw/src/editor.ts', from: "      case 'text':\n        return this.#openSheet({ kind: 'text', ref, token: t });\n", to: "      case 'text':\n        return;\n",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Write your own title" \(access\)/,
   },
 ];
 

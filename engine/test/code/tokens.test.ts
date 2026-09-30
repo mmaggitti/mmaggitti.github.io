@@ -305,8 +305,9 @@ test('entity safety: a value written partly or wholly as a reference gets no tok
   const doc = load(
     '<rect fill="&#x23;2a9d8f" stroke="&accent;" x="1&#48;" y="&#49;" width="2&#32;" style="fill:&accent;;stroke:red" opacity="0&#46;5"/>' +
       '<path d="M1&#46;5 2 L3 4"/><polygon points="1,2&#32;3,4"/><circle fill="rgb(1,&#50;,3)" stroke="url(#a&#98;c)"/>' +
-      '<text>Tom &amp; Jerry &unknown; end&#33;</text><title>a & b</title><style>a &gt; b { fill: &accent; ; stroke: #abc }</style>',
-    '<!DOCTYPE svg [<!ENTITY accent "#e76f51">]>',
+      '<text>Tom &amp; Jerry &unknown; end&#33;</text><title>a &amp; b</title><style>a &gt; b { fill: &accent; ; stroke: #abc }</style>',
+    // &unknown; is external: it stays as written (never fetched), as an undeclared one no longer parses.
+    '<!DOCTYPE svg [<!ENTITY accent "#e76f51"><!ENTITY unknown SYSTEM "unknown.xml">]>',
   );
   assert.deepEqual(attr(doc, 'rect', 'fill'), []);
   assert.deepEqual(attr(doc, 'rect', 'stroke'), []);

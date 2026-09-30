@@ -6,8 +6,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseDoc, descendants, serialize, NS, type Attr, type Doc, type ElementNode } from '../../model/doc.ts';
-import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS, type AttrScope } from '../../policy/tables.ts';
-import { cssAllowed as profileCssAllowed } from '../../../scripts/lib/svg-profile.mjs';
+import { RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS, type AttrScope } from '../../policy/tables.ts';
+import { decodeAttr } from '../../xml/entities.ts';
+import { checkSvg, cssAllowed as profileCssAllowed } from '../../../scripts/lib/svg-profile.mjs';
 import {
   attributeRenders, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue, smilTargetAllowed,
   urlAllowed, URL_ATTRIBUTES,
@@ -119,6 +120,34 @@ test('attributes the ledger does not render are refused, patterns (aria-*, data-
       assert.ok(!attributeRenders(elNs, e, ns, local), `${r.id} renders on <${e}>`);
     }
   }
+});
+
+// A pattern row stands for every name it matches, so the kept-row tests (which look for names) pass
+// it by; this one proves it: drawn with no namespace on every element the canvas draws (so a
+// <style> rule on [data-…] matches, as in the file on its own), its value as written, kept byte for
+// byte, and allowed in a served file.
+test('data-* (a pattern row): rendered on every element, kept byte for byte, served', () => {
+  const row = ledger.rows.find((r) => r.id === 'attribute:data-*');
+  assert.ok(row && row.render && row.on?.includes('*'), 'the row renders on every element');
+  const pattern = RENDER_SVG_ATTRIBUTE_PATTERNS.find((re) => re.test('data-x'));
+  assert.ok(pattern, 'the generated tables hold the pattern');
+  for (const name of ['data-a', 'data-slot', 'data-x.y', 'data-über']) assert.ok(pattern.test(name), name);
+  for (const name of ['data-', 'data', 'xdata-a', 'data-a b']) assert.ok(!pattern.test(name), name);
+  for (const e of RENDER_SVG_ELEMENTS) assert.ok(attributeRenders(NS.svg, e, null, 'data-x'), `data-x on <${e}>`);
+  for (const ns of [NS.xlink, NS.xml, OTHER_NS]) assert.ok(!attributeRenders(NS.svg, 'g', ns, 'data-x'), `data-x in ${ns}`);
+  assert.equal(valueOf(svg('<g data-x="a &amp; b"/>'), 'g'), 'a &amp; b', 'the value, unchanged');
+  // The corpus file that holds them: drawn as they read, and written back byte for byte.
+  const src = readFileSync(new URL('../fixtures/corpus/tools/edge-entity-references.svg', import.meta.url), 'utf8');
+  const doc = parse(src);
+  const g = [...descendants(doc, doc.root)].find((n): n is ElementNode => n.kind === 'element' && n.attrs.some((a) => a.local.startsWith('data-')))!;
+  assert.deepEqual(g.attrs.map((a) => a.local), ['data-a', 'data-b']);
+  for (const a of g.attrs) {
+    const value = decodeAttr(a.raw, doc.entities);
+    assert.equal(renderValue(g, a, value), value, `${a.local} is drawn as it reads`);
+  }
+  g.tagDirty = true;
+  assert.equal(serialize(doc), src, 'kept byte for byte, its tag rebuilt');
+  assert.deepEqual(checkSvg('<svg xmlns="http://www.w3.org/2000/svg"><g data-x="1"/></svg>'), [], 'served');
 });
 
 test('event handlers and xml:base never render, in any case or namespace', () => {

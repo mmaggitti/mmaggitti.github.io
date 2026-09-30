@@ -13,6 +13,7 @@
 
 import { NS, el, findAttr, attrValue, type Doc, type ElementNode, type LeafNode, type NodeId } from '../model/doc.ts';
 import { decode, newBudget } from '../xml/entities.ts';
+import { NAME_PATTERN } from '../xml/lex.ts';
 import { parseColor, parsePaint, type Color } from '../values/color.ts';
 import { decodeFragment } from '../values/url.ts';
 import { argSpans, isFlag, parsePath } from '../path/parse.ts';
@@ -172,7 +173,7 @@ interface Src {
   bad: Uint8Array | null;
 }
 
-const REF = /&(#x[0-9a-fA-F]+|#\d+|[A-Za-z_:][\w.:-]*);/y;
+const REF = new RegExp(`&(#x[0-9a-fA-F]+|#\\d+|${NAME_PATTERN});`, 'y');
 
 function decodedSrc(doc: Doc, raw: string, attr: boolean): Src {
   if (!raw.includes('&')) return { raw, s: raw, map: null, bad: null };

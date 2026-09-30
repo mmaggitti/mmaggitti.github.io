@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { parseDoc, serialize, serializeNode, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { parseFragment } from '../model/fragment.ts';
+import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
 
@@ -82,6 +83,27 @@ test('every element of every corpus file survives a round trip through Edit sour
   assert.ok(n > 300, `only ${n} elements`);
 });
 
+// The document declares a bomb of entities that expand to nothing and never uses it, so it opens;
+// Edit source then uses it. Expanding costs work as well as output, so the text is refused within
+// the document's budget, fast, and a refused text spends nothing (it used to take 34 s here).
+test('Edit source refuses an entity bomb that expands to nothing, within the budget', () => {
+  let subset = '<!ENTITY e0 "">';
+  for (let d = 1; d <= 8; d++) subset += `<!ENTITY e${d} "${`&e${d - 1};`.repeat(10)}">`;
+  const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><g/></svg>`);
+  assert.ok(r.ok);
+  const doc = r.doc;
+  assert.ok(parseFragment(doc, doc.root, '<text>&e1;</text>').ok);
+  assert.ok(doc.budget.left < ENTITY_BUDGET, 'an expansion to nothing is charged to the document');
+  const left = doc.budget.left;
+  const t0 = performance.now();
+  const f = parseFragment(doc, doc.root, '<text>&e8;</text>');
+  const ms = performance.now() - t0;
+  assert.ok(!f.ok, 'parsed');
+  assert.match(f.error.message, /entity expansion over 1000000 characters/);
+  assert.ok(ms < 1000, `took ${ms.toFixed(0)} ms`);
+  assert.equal(doc.budget.left, left, 'a refused text spends nothing');
+});
+
 // Put what a fragment parses to at the end of `scope`, as Edit source would (one transaction).
 function insertAll(doc: Doc, scope: NodeId, nodes: NodeId[]): void {
   const at = el(doc, scope).children.length;
@@ -89,7 +111,8 @@ function insertAll(doc: Doc, scope: NodeId, nodes: NodeId[]): void {
 }
 
 test('Edit source spends what the document has left of its limits, so the file always opens again', () => {
-  // Entities: the file spends 600,000 of its 1,000,000 on open; each &d; costs 40,000 more.
+  // Entities: the file spends 644,445 of its 1,000,000 on open (what each expansion writes, plus one
+  // for it and the references it reads); each &d; costs 44,441 more.
   const ten = (n: string) => `&${n};`.repeat(10);
   const subset = `<!ENTITY a "aaaaaaaaaa"><!ENTITY b "${ten('a')}"><!ENTITY c "${ten('b')}"><!ENTITY d "${ten('c')}"><!ENTITY e "${ten('d')}"><!ENTITY f "&e;">`;
   const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><desc>&f;</desc></svg>`);
@@ -104,7 +127,7 @@ test('Edit source spends what the document has left of its limits, so the file a
     }
     insertAll(doc, doc.root, f.nodes);
   }
-  assert.equal(fitted, 10, 'ten fit in what the document had left, and the eleventh is refused');
+  assert.equal(fitted, 8, 'eight fit in what the document had left, and the ninth is refused');
   const again = parseDoc(serialize(doc));
   assert.ok(again.ok, `the saved file reopens: ${!again.ok && again.error.message}`);
   // Depth: from where the text goes in, not from the fragment's own top.
@@ -139,6 +162,31 @@ test('Edit source spends what the document has left of its limits, so the file a
   assert.ok(small.ok, 'exactly 20 MB fits');
   insertAll(big.doc, desc, small.nodes);
   assert.ok(parseDoc(serialize(big.doc)).ok, 'and the saved file reopens');
+});
+
+// Edit source parses with the same engine, so it refuses what a browser refuses (xml.test.ts has
+// every rule), each at its place in the edited text, and what the document declares still counts.
+test('Edit source refuses what a browser refuses, at its place in the text, with the document in scope', () => {
+  const r = parseDoc(`<!DOCTYPE svg [<!ENTITY brand "Draw">]>${SRC}`);
+  assert.ok(r.ok);
+  const doc = r.doc;
+  const before = serialize(doc);
+  for (const [text, at, message] of [
+    ['<text>Fish & chips</text>', 11, /a bare &/],
+    ['<text>a&nbsp;b</text>', 7, /the entity &nbsp; is not declared/],
+    ['<rect x="1" x="2"/>', 12, /attribute x is written twice in <rect>/],
+    ['<p:g/>', 1, /the prefix p of <p:g> is not declared/],
+    ['<g><!-- a -- b --></g>', 10, /'--' inside a comment/],
+    ['<g xmlns:p=""/>', 3, /xmlns:p is empty/],
+  ] as const) {
+    const f = parseFragment(doc, doc.root, text);
+    assert.ok(!f.ok, text);
+    assert.equal(f.error.at, at, `${text}: ${f.error.message}`);
+    assert.match(f.error.message, message, text);
+  }
+  // The root's xmlns:q and the DOCTYPE's &brand; are in scope, as they are where the text lands.
+  assert.ok(parseFragment(doc, doc.root, '<use q:href="#a"><title>by &brand;</title></use>').ok);
+  assert.equal(serialize(doc), before, 'a refused edit changes nothing');
 });
 
 test('Edit source cannot bring in a DOCTYPE or an XML declaration (a browser refuses either there)', () => {

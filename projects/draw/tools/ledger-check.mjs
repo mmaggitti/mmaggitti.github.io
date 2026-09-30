@@ -31,6 +31,8 @@
 //   check, `projects/draw/test/e2e.mjs#<function>`, a function of e2e.mjs that run() calls through
 //   check(), and with --e2e-evidence it passed in every call and asserted something, in a complete
 //   run newer than the e2e, its helpers (projects/draw/test/ outside unit/) and the built page;
+// - citations: an e2e check a row's note or reason names (e2e.mjs runs it through check()) is one
+//   the row cites, so what the note says it proves is held to the evidence too;
 // - the phase gate: every row of a phase before meta.currentPhase is done or superseded. Raising
 //   currentPhase is the phase exit; 9 means the ledger is closed.
 //
@@ -167,6 +169,11 @@ function checkRows(meta, rows, lessons) {
         else if (!checked.has(name)) fail(`${r.id}: ${E2E_FILE}#${name} is not run through check() in run(), so it is never evidence`);
       } else if (!TEST_FILES.some((re) => re.test(file))) fail(`${r.id}: ${file} is not a unit-test file the build runs, nor ${E2E_FILE}`);
       else if (!existsSync(resolve(ROOT, file))) fail(`${r.id}: test file ${file} does not exist`);
+    }
+    for (const field of ['note', 'reason']) {
+      if (typeof r[field] !== 'string') continue;
+      const named = new Set([...r[field].matchAll(/[A-Za-z_$][\w$]*/g)].map((m) => m[0]).filter((w) => e2eChecks().checked.has(w)));
+      for (const name of named) if (!(r.tests ?? []).includes(`${E2E_FILE}#${name}`)) fail(`${r.id}: its ${field} names the e2e check ${name} but the row does not cite it`);
     }
 
     if (r.phase < meta.currentPhase && r.status !== 'done' && r.status !== 'superseded') {

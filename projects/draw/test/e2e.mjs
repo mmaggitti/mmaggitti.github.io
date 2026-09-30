@@ -30,15 +30,22 @@
 // the canvas on wide screens, and a render error caught and drawn again. The P0-M5 review adds: a
 // tag's close never alone on a line in Tidy, Play from the top and Pause holding the frame, no
 // theme flash on load, the legend verb first with chip samples, Enter closing the Number sheet,
-// and Export and the legend over a file shown as source. Every check that passes in every call,
-// having asserted something, is a line of the support ledger's e2e evidence (EVIDENCE, below).
+// and Export and the legend over a file shown as source. P1-M0 holds the engine's parser to the
+// browser's own: every corpus file parses in both to the same canonical tree (xml-canon.mjs, after
+// its KNOWN differences), and probe by probe, what the browser refuses the engine refuses, and what
+// the engine refuses as not well-formed the browser refuses too. The canvas draws the ledger's
+// pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do. The
+// P1-M0 review adds: a data-* name the DOM refuses is dropped, never thrown on, in a file and in Edit
+// source; and six more parser probes (entity names, an entity declared twice, an unparsed entity).
+// Every check that passes in every call, having asserted something, is a line of the support
+// ledger's e2e evidence (EVIDENCE, below).
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROFILE_VERSION } from '../../../scripts/lib/svg-profile.mjs';
-import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
+import { RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTE_PATTERNS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
 import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
 import { detentHeights } from '../src/detents.ts';
@@ -46,6 +53,7 @@ import { encodeImport } from '../src/platform/files.ts';
 import { parseDoc } from '../../../engine/model/doc.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { decodePng } from './probe-helpers/png.mjs';
+import { browserCanon, canonDiffs, engineCanon, PROBES } from './probe-helpers/xml-canon.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const TAP_MIN = 44;
@@ -54,12 +62,14 @@ const CORPUS = join(HERE, '../../../engine/test/fixtures/corpus');
 const SAMPLE = readFileSync(join(HERE, '../src/canvas/sample.svg'), 'utf8');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XHTML_NS = 'http://www.w3.org/1999/xhtml';
-// The generated tables, as the page checks them (Maps travel as entry lists).
+// The generated tables, as the page checks them (Maps travel as entry lists, patterns as sources).
 const TABLES = {
   svgElements: [...RENDER_SVG_ELEMENTS],
   xhtmlElements: [...RENDER_XHTML_ELEMENTS],
   svgAttributes: [...RENDER_SVG_ATTRIBUTES],
   xhtmlAttributes: [...RENDER_XHTML_ATTRIBUTES],
+  svgPatterns: RENDER_SVG_ATTRIBUTE_PATTERNS.map((re) => re.source),
+  xhtmlPatterns: RENDER_XHTML_ATTRIBUTE_PATTERNS.map((re) => re.source),
 };
 
 // The ledger's e2e evidence: one line per check that passed, in this run and this engine. A ledger
@@ -164,6 +174,9 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theCodeDocksBesideTheCanvasOnWideScreens);
   await check(aRenderErrorIsCaughtAndRedrawn);
   for (const height of [956, 796]) await check(phoneRulesOnTheCodeTools, height);
+  // P1-M0: the engine's parser against the browser's.
+  await check(corpusTreesMatchTheBrowsersParser);
+  await check(theEngineRefusesWhatTheBrowserRefuses);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), { complete: true, engine, calls }];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -317,7 +330,9 @@ async function corpusStaysInert(browser, origin) {
 
 // Ordinary content at the policy's edges, and its fate. The ledger renders three attributes that
 // DOMPurify refuses: a data: image on feImage, and SMIL from/to. An id that names a document
-// property (title) is kept: DOMPurify's SANITIZE_DOM is off. The policy refuses the rest: a <style>
+// property (title) is kept: DOMPurify's SANITIZE_DOM is off. So are a data-* and an aria-*
+// attribute (pattern rows, drawn from P1-M0): both judges let them through, so a [data-…] selector
+// matches on the canvas as it does in the file on its own. The policy refuses the rest: a <style>
 // with a url() to another file, the same in a style attribute, an image and a <use> pointing
 // outside the document, a <set> of an attribute the tables don't render (cursor), and an animation
 // of r on a rect (r renders on circles, not rects). An animation of r whose href names a circle
@@ -325,7 +340,7 @@ async function corpusStaysInert(browser, origin) {
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const EDGES = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
   <style>.far { fill: url(other.svg#a) }</style>
-  <rect id="title" class="near" width="10" height="10"/>
+  <rect id="title" class="near" data-state="on" aria-label="near" width="10" height="10"/>
   <filter id="f"><feImage width="10" href="data:image/png;base64,${PNG}"/></filter>
   <circle r="5"><animate attributeName="opacity" from="1" to="0.5" dur="1s"/><set attributeName="cursor" to="crosshair"/></circle>
   <rect width="10" height="10" style="fill: url(https://example.com/x.png)"/>
@@ -360,7 +375,8 @@ async function policyEdges(browser, origin) {
       purified: { feImage: 'width', animate: 'attributeName dur' },
       policy: { style: null, 'rect:not(.near)': 'height width', image: 'height width', use: 'width', set: null, 'rect > animate': null, 'g > animate': 'attributeName dur href values' },
     };
-    must(r.kept === 'class height id width', `the canvas has <rect id="title"> as [${r.kept}], not [class height id width]: is DOMPurify dropping ordinary ids again (SANITIZE_DOM)?`);
+    must(/\bdata-state\b/.test(r.kept) && /\baria-label\b/.test(r.kept), `the canvas has <rect id="title"> as [${r.kept}], without data-state or aria-label: the pattern rows (data-*, aria-*) must pass both judges, the policy and DOMPurify`);
+    must(r.kept === 'aria-label class data-state height id width', `the canvas has <rect id="title"> as [${r.kept}], not [aria-label class data-state height id width]: is DOMPurify dropping ordinary ids again (SANITIZE_DOM)?`);
     for (const [sel, got] of Object.entries(r.purified)) {
       must(got === want.purified[sel], `DOMPurify refuses part of ${sel}, but the canvas has [${got}], not [${want.purified[sel]}]: is the sink still asking DOMPurify?`);
     }
@@ -377,10 +393,10 @@ async function policyEdges(browser, origin) {
 const svgDoc = (body, attrs = '') => `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"${attrs}>${body}</svg>`;
 const ANIMATE_WIDTH = '<animate href="#t" attributeName="width" values="1;2" dur="1s"/>';
 const MORE_EDGES = [
-  // An attribute written twice (browsers refuse such a file; the engine doesn't yet): never drawn,
-  // whether the canvas refuses the element or, later, the parser refuses the file.
-  { label: 'fill written twice', text: svgDoc('<rect width="10" height="10" fill="red" fill="blue"/>'), absent: 'rect', skipped: 1, orUnparsed: true },
-  { label: 'attributeName written twice', text: svgDoc('<rect width="10" height="10"><animate attributeName="opacity" attributeName="width" values="1;2" dur="1s"/></rect>'), absent: 'animate', skipped: 1, orUnparsed: true },
+  // An attribute written twice: browsers refuse such a file, and so does Draw's parser, so it never
+  // reaches the canvas (which would refuse the element too: hasDuplicateAttrs).
+  { label: 'fill written twice', text: svgDoc('<rect width="10" height="10" fill="red" fill="blue"/>'), unparsed: 'attribute fill is written twice in <rect>' },
+  { label: 'attributeName written twice', text: svgDoc('<rect width="10" height="10"><animate attributeName="opacity" attributeName="width" values="1;2" dur="1s"/></rect>'), unparsed: 'attribute attributeName is written twice in <animate>' },
   // SMIL is judged against what the browser animates: through the href the canvas keeps, every
   // element the fragment can name (drawn or not), never xml:id, and never "some element".
   { label: 'a dropped href leaves xlink:href to decide', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" xlink:href="#t" attributeName="width" values="1;2" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animate', skipped: 1 },
@@ -394,6 +410,11 @@ const MORE_EDGES = [
   { label: "Illustrator's <switch> shows its artwork, not its private data", text: readFileSync(join(CORPUS, 'tools', 'illustrator-cs6-entities-pgf.svg'), 'utf8'), absent: 'switch > foreignObject', firstInSwitch: 'g' },
   // Ids that happen to name document properties keep working.
   { label: 'ids named blur and close', text: svgDoc('<filter id="blur"><feGaussianBlur stdDeviation="6"/></filter><symbol id="close" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol><use href="#close" width="20" height="20"/><rect width="10" height="10" filter="url(#blur)"/>'), ids: ['blur', 'close'], draws: 'use', skipped: 0 },
+  // A data-* name the pattern and DOMPurify admit but the DOM refuses to create (data-😀, data-⁰x in
+  // Chromium: setAttribute throws on them) is dropped and counted like any other; the element still
+  // draws. Each engine's DOM judges its own names (WebKit's rule is unverified), so the canvas must
+  // hold exactly the ones it takes; Chromium's refusals are pinned, so the case can't go vacuous.
+  { label: 'data-* names the DOM refuses', text: svgDoc('<rect width="10" height="10" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/>'), attrs: { rect: 'data-a height width' }, dom: { sel: 'rect', names: ['data-\u{1F600}', 'data-\u2070x'], refusedIn: { chromium: 2 } }, skipped: 0 },
   // The document's own CSS can't size the root away from the host.
   { label: 'a root sized by its own CSS', text: svgDoc('<style>svg { width: 48px; height: 48px }</style><rect width="10" height="10"/>', ' style="width: 24px; height: 24px"'), fills: true, skipped: 0 },
   // A size that overflows once converted still renders; it just gets no viewBox.
@@ -404,9 +425,10 @@ const MORE_EDGES = [
 ];
 
 async function moreEdges(browser, origin) {
+  const engine = browser.browserType().name();
   await withPage(browser, origin, 956, async (page, errors, context) => {
     const quiet = watch(page, context, origin);
-    const problems = await page.evaluate((cases) => cases.flatMap((c) => {
+    const problems = await page.evaluate(({ cases, engine }) => cases.flatMap((c) => {
       const out = [];
       let stats;
       try {
@@ -421,8 +443,22 @@ async function moreEdges(browser, origin) {
         if (stats.ok || !stats.error?.includes(c.refused)) out.push(`the canvas reports ${JSON.stringify(stats)}, not a refused root (${c.refused})`);
         return out.map((m) => `${c.label}: ${m}`);
       }
-      if (!stats.ok) return c.orUnparsed && stats.rendered === 0 && stats.skippedElements === 0 ? [] : [`${c.label}: did not render (${stats.error})`];
+      if (c.unparsed) return !stats.ok && stats.error === c.unparsed && stats.rendered === 0 ? [] : [`${c.label}: the canvas reports ${JSON.stringify(stats)}, not the parser's refusal (${c.unparsed})`];
+      if (!stats.ok) return [`${c.label}: did not render (${stats.error})`];
       if (c.skipped !== undefined && stats.skippedElements !== c.skipped) out.push(`skipped ${stats.skippedElements} element(s), not ${c.skipped}`);
+      const attrs = { ...c.attrs };
+      if (c.dom) {
+        // Names only this engine's DOM can judge: drawn where it takes them, dropped and counted where not.
+        const takes = (n) => { try { document.createAttribute(n); return true; } catch { return false; } };
+        const refused = c.dom.names.filter((n) => !takes(n)).length;
+        attrs[c.dom.sel] = [...attrs[c.dom.sel].split(' '), ...c.dom.names.filter(takes)].sort().join(' ');
+        if (stats.droppedAttributes !== refused) out.push(`dropped ${stats.droppedAttributes} attribute(s), not the ${refused} the DOM refuses`);
+        if (c.dom.refusedIn[engine] !== undefined && refused !== c.dom.refusedIn[engine]) out.push(`${engine}'s DOM refuses ${refused} of the names, not ${c.dom.refusedIn[engine]}: the case no longer tests the guard`);
+      }
+      for (const [sel, want] of Object.entries(attrs)) {
+        const got = q(sel) ? [...q(sel).attributes].map((a) => a.name).sort().join(' ') : null;
+        if (got !== want) out.push(`<${sel}> is on the canvas as [${got}], not [${want}]`);
+      }
       if (c.absent && q(c.absent)) out.push(`<${c.absent}> is on the canvas`);
       if (c.present && !q(c.present)) out.push(`<${c.present}> is not on the canvas`);
       if (c.target && q('animate')?.targetElement?.localName !== c.target) out.push(`the animation drives <${q('animate')?.targetElement?.localName}>, not <${c.target}>`);
@@ -435,7 +471,7 @@ async function moreEdges(browser, origin) {
       }
       if (c.noViewBox && q('svg')?.hasAttribute('viewBox')) out.push(`the root got viewBox="${q('svg').getAttribute('viewBox')}"`);
       return out.map((m) => `${c.label}: ${m}`);
-    }), MORE_EDGES);
+    }), { cases: MORE_EDGES, engine });
     must(problems.length === 0, `the canvas's edges:\n${problems.join('\n')}`);
     await quiet('more edges');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
@@ -1040,6 +1076,7 @@ async function sheetsRefuseWhatTheyCantWrite(browser, origin) {
 // transaction (one undo restores it byte for byte); markup that doesn't parse says where and
 // changes nothing.
 async function editSourceRoundTrip(browser, origin) {
+  const engine = browser.browserType().name();
   await withPage(browser, origin, 956, async (page, errors) => {
     // A tap on the root's end tag selects it, and Edit source, which can't replace the root, is not offered.
     await showCode(page);
@@ -1074,6 +1111,31 @@ async function editSourceRoundTrip(browser, origin) {
     await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
     must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'one undo did not restore the element byte for byte');
     must(await page.locator('.draw-sel').textContent() === 'nothing selected', 'the element the undo took out is still selected');
+    // A name the DOM refuses to create (data-😀: the data-* pattern admits it) is kept in the file and
+    // left off the canvas, which goes on drawing: it must never blank mid-edit (P1-M0 review, F4).
+    await page.touchscreen.tap(c.x, c.y);
+    await page.locator('.draw-action').tap();
+    await area.fill('<circle cx="212" cy="134" r="42" fill="#ffd166" data-\u{1F600}="1"/>');
+    await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const odd = await page.evaluate(() => {
+      const c = document.querySelector('.draw-host').shadowRoot.querySelector('circle');
+      let takes = true; // this engine's DOM judges the name (Chromium refuses it; WebKit's rule is unverified)
+      try {
+        document.createAttribute('data-\u{1F600}');
+      } catch {
+        takes = false;
+      }
+      return {
+        broken: document.querySelector('.draw-broken')?.textContent ?? null,
+        circle: c ? [...c.attributes].map((a) => a.name).sort().join(' ') : null,
+        kept: window.drawTest.source().includes('data-\u{1F600}="1"'),
+        takes,
+      };
+    });
+    const want = odd.takes ? 'cx cy data-\u{1F600} fill r' : 'cx cy fill r';
+    must(odd.broken === null && odd.circle === want && odd.kept, `Edit source adding data-\u{1F600}: ${JSON.stringify(odd)}, not the circle drawn as [${want}] with the name kept in the file`);
+    must(engine !== 'chromium' || !odd.takes, "Chromium's DOM takes data-\u{1F600} now: the Edit source case no longer tests the guard");
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
@@ -2470,9 +2532,11 @@ async function readOnlyCodeIsPlainText(browser, origin) {
 // A file that isn't well-formed opens as read-only source, through the one importer: nothing is
 // drawn and nothing loads, the code holds its text exactly with the failing line and character
 // marked (in view), no token edits it, and it becomes no draft. The canvas and the ContextBar say
-// where it fails; Files is the way on, and the drawing before it reopens from there.
+// where it fails; Files is the way on, and the drawing before it reopens from there. A file only
+// strict well-formedness refuses (a bare &) opens as source the same way.
 async function aMalformedFileOpensAsReadOnlySource(browser, origin) {
   const BAD = `<svg xmlns="${SVG_NS}" viewBox="0 0 10 10">\n  <rect width="1" height="1">\n</svg>\n`;
+  const STRICT = `<svg xmlns="${SVG_NS}" viewBox="0 0 10 10">\n  <text>Fish & chips</text>\n</svg>\n`;
   await withPage(browser, origin, 956, async (page, errors, context) => {
     const quiet = watch(page, context, origin);
     await pickFile(page, 'sunset.svg', Buffer.from(SAMPLE));
@@ -2520,6 +2584,22 @@ async function aMalformedFileOpensAsReadOnlySource(browser, origin) {
     await closeModal(page);
     const rules = await page.evaluate(rulesNow, TAP_MIN);
     must(rules.small.length === 0 && rules.sw <= rules.cw && rules.sh <= rules.ch, `the source view breaks the phone rules: ${JSON.stringify({ small: rules.small, sw: rules.sw, sh: rules.sh })}`);
+    // A file only strict well-formedness refuses (a bare &, which browsers refuse too) is source in
+    // the same way, marked where the browser's parser stops.
+    await openFilesMenu(page);
+    await page.locator('.draw-modal input[type="file"]').setInputFiles({ name: 'fish.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(STRICT) });
+    await until('the strict file shows as source', async () => (await page.locator('.draw-code').textContent()) === STRICT);
+    await twoFrames(page);
+    const strict = await page.evaluate(() => ({
+      drawn: document.querySelector('.draw-host').shadowRoot.childElementCount,
+      mark: document.querySelector('.draw-code .cv-error')?.textContent ?? null,
+      line: document.querySelector('.draw-code .cv-error-line')?.textContent ?? null,
+      over: document.querySelector('.draw-unparsed')?.textContent ?? '',
+      name: document.querySelector('.draw-name').textContent,
+    }));
+    must(strict.drawn === 0 && strict.name === 'fish', `the strict file was drawn (${strict.drawn}), or is named ${strict.name}`);
+    must(strict.line === '  <text>Fish & chips</text>' && strict.mark === '&', `the mark is on ${JSON.stringify(strict.mark)} of the line ${JSON.stringify(strict.line)}, not the bare & on line 2`);
+    must(strict.over.includes('Line 2, column 14: a bare & (write &amp; for the character itself).'), `the canvas says ${JSON.stringify(strict.over)}`);
     await page.locator('.draw-source-files').tap();
     await page.locator('.draw-draft').first().waitFor();
     const names = await page.locator('.draw-draft-name').allTextContents();
@@ -2880,19 +2960,75 @@ async function phoneRulesOnTheCodeTools(browser, origin, height) {
   must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
 }
 
+// P1-M0: Draw's parser against the browser's. Every corpus file parses in both to the same
+// canonical tree: elements, attributes and their values as read, text, comments and processing
+// instructions (probe-helpers/xml-canon.mjs; KNOWN there lists where the two differ on purpose, and
+// why). At least 250 files must be compared, and up to 10 differences are shown, by file and path.
+async function corpusTreesMatchTheBrowsersParser(browser, origin) {
+  const corpus = corpusFiles();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const theirs = await page.evaluate(browserCanon, { texts: corpus.map((f) => f.text) });
+    const differ = [];
+    const shown = [];
+    let compared = 0;
+    for (const [i, file] of corpus.entries()) {
+      const diffs = canonDiffs(engineCanon(file.text), theirs[i]);
+      compared++;
+      if (!diffs.length) continue;
+      differ.push(file.name);
+      for (const d of diffs) if (shown.length < 10) shown.push(`${file.name} ${d}`);
+    }
+    must(compared >= 250, `compared ${compared} of ${corpus.length} corpus files`);
+    must(differ.length === 0, `${differ.length} of ${compared} corpus files parse to different trees in the engine and the browser (${differ.join(', ')}); the first ${shown.length} difference(s):\n${shown.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// P1-M0: what the browser's parser refuses (a parsererror in what DOMParser returns, in the
+// namespace that '<' shows), Draw's parser refuses, and what Draw's parser refuses as not
+// well-formed, the browser refuses too (a refusal over Draw's limits may be well-formed). Each
+// probe also says what both give, the browser's verdict per engine, so a verdict that moves is named.
+async function theEngineRefusesWhatTheBrowserRefuses(browser, origin) {
+  const engine = browser.browserType().name();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const ns = await page.evaluate(() => new DOMParser().parseFromString('<', 'text/xml').getElementsByTagName('parsererror')[0]?.namespaceURI ?? null);
+    must(ns !== null, `DOMParser puts no parsererror in what it makes of '<', so a refusal can't be told from a tree`);
+    const theirs = await page.evaluate(browserCanon, { texts: PROBES.map((p) => p.text) });
+    const problems = [];
+    let checked = 0;
+    for (const [i, probe] of PROBES.entries()) {
+      checked++;
+      const mine = engineCanon(probe.text);
+      const draw = mine.refused ? (mine.kind === 'limit' ? 'limit' : 'refuse') : 'accept';
+      const verdict = theirs[i].refused ? 'refuse' : 'accept';
+      const why = (r) => (r.refused ? ` (${r.message})` : '');
+      if (verdict === 'refuse' && draw === 'accept') problems.push(`${probe.label}: ${engine} refuses it, but Draw's parser accepts it`);
+      if (draw === 'refuse' && verdict === 'accept') problems.push(`${probe.label}: Draw's parser refuses it as not well-formed${why(mine)}, but ${engine} accepts it`);
+      if (draw !== probe.draw) problems.push(`${probe.label}: Draw's parser gives ${draw}, not ${probe.draw} as the probe table says${why(mine)}`);
+      if (verdict !== probe.browser[engine]) problems.push(`${probe.label}: ${engine} gives ${verdict}, not ${probe.browser[engine]} as the probe table says${why(theirs[i])}`);
+    }
+    must(checked > 0 && checked === PROBES.length, `checked ${checked} of ${PROBES.length} probes`);
+    must(problems.length === 0, `Draw's parser and ${engine}'s disagree:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
 // Runs in the page: open each file through drawTest, then read what reached the shadow root.
 async function renderEach({ files, tables }) {
   const SVG = 'http://www.w3.org/2000/svg', XHTML = 'http://www.w3.org/1999/xhtml';
   const XLINK = 'http://www.w3.org/1999/xlink', XML = 'http://www.w3.org/XML/1998/namespace';
   const elements = { [SVG]: new Set(tables.svgElements), [XHTML]: new Set(tables.xhtmlElements) };
   const attributes = { [SVG]: new Map(tables.svgAttributes), [XHTML]: new Map(tables.xhtmlAttributes) };
+  const patterns = { [SVG]: tables.svgPatterns.map((s) => new RegExp(s)), [XHTML]: tables.xhtmlPatterns.map((s) => new RegExp(s)) };
   const ACTIVE = new Set(['script', 'iframe', 'object', 'embed', 'audio', 'video', 'canvas']);
   const ANIMATIONS = new Set(['animate', 'set', 'animateTransform', 'animateColor']);
   const LOCAL_URL = /^(#|data:image\/(png|jpeg|gif|webp)[;,])/i;
   const keyOf = (a) => (a.namespaceURI === null ? a.localName : a.namespaceURI === XLINK ? `xlink:${a.localName}` : a.namespaceURI === XML ? `xml:${a.localName}` : null);
+  // A key with no row may match a pattern row (data-*, aria-*), which has no namespace (so no prefix).
   const renders = (el, key) => {
     const scope = attributes[el.namespaceURI]?.get(key);
-    return !!scope && !scope.except?.includes(el.localName) && (scope.on === '*' || scope.on.includes(el.localName));
+    if (!scope) return !key.includes(':') && !!patterns[el.namespaceURI]?.some((re) => re.test(key));
+    return !scope.except?.includes(el.localName) && (scope.on === '*' || scope.on.includes(el.localName));
   };
   const inForeignObject = (el) => {
     for (let p = el.parentElement; p; p = p.parentElement) if (p.namespaceURI === SVG && p.localName === 'foreignObject') return true;

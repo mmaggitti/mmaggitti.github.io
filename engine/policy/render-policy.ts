@@ -9,7 +9,9 @@
 
 import { NS, type Attr, type ElementNode } from '../model/doc.ts';
 import { decodeFragment } from '../values/url.ts';
-import { RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from './tables.ts';
+import {
+  RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTE_PATTERNS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS,
+} from './tables.ts';
 import { cssAllowed } from '../../scripts/lib/svg-profile.mjs';
 
 // One CSS rule for the canvas and the served profile, so a file that previews also serves.
@@ -70,7 +72,9 @@ export function attributeRenders(elNs: string | null, elLocal: string, attrNs: s
   const table = elNs === NS.svg ? RENDER_SVG_ATTRIBUTES : elNs === NS.xhtml ? RENDER_XHTML_ATTRIBUTES : null;
   const key = attrKey(attrNs, attrLocal);
   const scope = table && key !== null ? table.get(key) : undefined;
-  if (!scope || scope.except?.includes(elLocal)) return false;
+  // A name no row lists may match a pattern row (data-*, aria-*): with no namespace, on any element.
+  if (!scope) return attrNs === null && (elNs === NS.svg ? RENDER_SVG_ATTRIBUTE_PATTERNS : elNs === NS.xhtml ? RENDER_XHTML_ATTRIBUTE_PATTERNS : []).some((re) => re.test(attrLocal));
+  if (scope.except?.includes(elLocal)) return false;
   return scope.on === '*' || scope.on.includes(elLocal);
 }
 

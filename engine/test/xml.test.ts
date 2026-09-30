@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { lex } from '../xml/lex.ts';
 import { parseCst, serializeCst } from '../xml/cst.ts';
-import { decode, readEntityTable, EntityBudgetError, newBudget } from '../xml/entities.ts';
+import { decode, readEntityTable, EntityBudgetError, EntityWellFormednessError, newBudget, ENTITY_BUDGET } from '../xml/entities.ts';
 import { parseDoc, serialize, el, setAttr, removeAttr, attrValue, href, textContent, NS, descendants } from '../model/doc.ts';
 
 const CORPUS = new URL('./fixtures/corpus/', import.meta.url).pathname;
@@ -72,6 +72,36 @@ test('namespaces resolve by URI, not prefix', () => {
   assert.equal(el(r.doc, nodes[3].id).local, 'g');
 });
 
+// An element's namespace declarations hold for it and what it holds, and no further: the one map in
+// scope is set on the way in and put back on the way out. It used to be copied for every element
+// that declares one: 255 nested elements declaring 150 prefixes each took 1.4 s, 600 each 7 s.
+test('namespace declarations hold for their element only, at no cost per element', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:p="urn:outer">';
+  const r = parseDoc(`${svg}<g xmlns:p="urn:inner" xmlns="urn:x"><p:a/><b/></g><p:c/><d/></svg>`);
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const ns = Object.fromEntries([...descendants(r.doc, r.doc.root)].flatMap((n) => (n.kind === 'element' ? [[n.local, n.ns]] : [])));
+  assert.deepEqual(ns, { svg: NS.svg, g: 'urn:x', a: 'urn:inner', b: 'urn:x', c: 'urn:outer', d: NS.svg }, 'each resolves in its own scope');
+  const out = parseDoc(`${svg}<g xmlns:q="urn:q"/><q:e/></svg>`);
+  assert.ok(!out.ok && out.error.message === 'the prefix q of <q:e> is not declared', 'a declaration ends with its element');
+  for (const [k, limit] of [[150, 1000], [600, 1500]]) {
+    let open = '', close = '';
+    for (let d = 0; d < 255; d++) {
+      let x = '';
+      for (let j = 0; j < k; j++) x += ` xmlns:q${d}_${j}="urn:${d}"`;
+      open += `<g${x}>`;
+      close += '</g>';
+    }
+    const src = `<svg xmlns="http://www.w3.org/2000/svg">${open}<q254_0:rect q0_0:k="1"/>${close}</svg>`;
+    const t0 = performance.now();
+    const deep = parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(deep.ok, !deep.ok ? deep.error.message : '');
+    const rect = [...descendants(deep.doc, deep.doc.root)].find((n) => n.kind === 'element' && n.local === 'rect');
+    assert.ok(rect?.kind === 'element' && rect.ns === 'urn:254' && rect.attrs[0].ns === 'urn:0', 'the innermost declaration, and one from the top');
+    assert.ok(ms < limit, `255 nested elements declaring ${k} prefixes each took ${ms.toFixed(0)} ms`);
+  }
+});
+
 test('entities: predefined and numeric decode; internal expand; external never', () => {
   const t = readEntityTable('<!ENTITY ns_svg "http://www.w3.org/2000/svg"><!ENTITY ext SYSTEM "http://evil.example/x"><!ENTITY % p "x">');
   assert.equal(decode('&ns_svg;', t), 'http://www.w3.org/2000/svg');
@@ -82,9 +112,72 @@ test('entities: predefined and numeric decode; internal expand; external never',
   assert.ok(t.parameter.has('p'));
 });
 
-// A browser's XML parser expands a parameter entity at declaration level in the internal subset,
-// which can declare more entities. Draw records them and never expands one, so nothing a
-// parameter entity declares ever reaches a value; its references stay as written.
+// An entity's name is a name like any other (the lexer's pattern): declared, referenced and
+// expanded alike, non-ASCII letters and the middle dot included. A declared &é; used to be refused
+// as undeclared, a file Chromium opens (P1-M0 review, F6).
+test('an entity name may hold any character a name may, declared, referenced and expanded alike', () => {
+  const t = readEntityTable('<!ENTITY é "x"><!ENTITY café "red"><!ENTITY a·b "&é;y">');
+  assert.deepEqual([...t.internal.keys()], ['é', 'café', 'a·b']);
+  assert.equal(decode('&é;', t), 'x');
+  assert.equal(decode('&a·b;', t), 'xy');
+  const r = parseDoc('<!DOCTYPE svg [<!ENTITY é "x"><!ENTITY café "red">]><svg xmlns="http://www.w3.org/2000/svg"><text>&é;</text><rect fill="&café;"/></svg>');
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const rect = [...descendants(r.doc, r.doc.root)].find((n) => n.kind === 'element' && n.local === 'rect')!;
+  assert.equal(attrValue(r.doc, el(r.doc, rect.id), null, 'fill'), 'red');
+  assert.equal(textContent(r.doc, r.doc.root), 'x');
+  const undeclared = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"><text>&é;</text></svg>');
+  assert.ok(!undeclared.ok && undeclared.error.message === 'the entity &é; is not declared', 'one never declared is still refused');
+});
+
+// XML binds an entity's first declaration and ignores later ones, which a browser does too, so the
+// canvas draws what the file shows on its own. General entities (internal or external) share names;
+// parameter entities have their own (P1-M0 review, F7).
+test('an entity declared twice keeps its first declaration', () => {
+  const doc = (subset: string, body: string) => parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`);
+  const fill = (subset: string) => {
+    const r = doc(subset, '<rect fill="&c;"/>');
+    if (!r.ok) return `refused: ${r.error.message}`;
+    const rect = el(r.doc, el(r.doc, r.doc.root).children[0]);
+    return attrValue(r.doc, rect, null, 'fill');
+  };
+  assert.equal(fill('<!ENTITY c "red"><!ENTITY c "blue">'), 'red');
+  assert.equal(fill('<!ENTITY c "red"><!ENTITY c SYSTEM "c.txt">'), 'red', 'an external declaration after an internal one is ignored');
+  assert.equal(fill('<!ENTITY c SYSTEM "c.txt"><!ENTITY c "red">'), "refused: the external entity &c; can't be used in an attribute value", 'and an internal one after an external one');
+  assert.equal(fill('<!ENTITY % c "blue"><!ENTITY c "red">'), 'red', 'a parameter entity is no general entity of its name');
+  // The checks read the first too: well-formed first, then not, opens; the other way round doesn't.
+  assert.ok(doc('<!ENTITY a "x"><!ENTITY a "&#38;">', '<text>&a;</text>').ok, 'the first is well-formed');
+  const bad = doc('<!ENTITY a "&#38;"><!ENTITY a "x">', '<text>&a;</text>');
+  assert.ok(!bad.ok && /&a; expands to text that isn't well-formed: a bare &/.test(bad.error.message), 'the first is not');
+});
+
+// An unparsed entity (declared NDATA: a file that isn't XML, such as an image) may be named only
+// by an attribute of type ENTITY, which Draw doesn't read; a reference to one is not well-formed
+// anywhere (XML's Parsed Entity rule), and Chromium refuses it (P1-M0 review, F9).
+test('a reference to an unparsed (NDATA) entity is refused, in text, in a value and through another entity', () => {
+  const subset = '<!NOTATION gif SYSTEM "image/gif"><!ENTITY logo SYSTEM "logo.gif" NDATA gif><!ENTITY pub PUBLIC "-//x//y" "a.gif" NDATA gif><!ENTITY w "&logo;">';
+  const t = readEntityTable(subset);
+  assert.deepEqual([[...t.external], [...t.unparsed]], [['logo', 'pub'], ['logo', 'pub']], 'an unparsed entity is an external one too (listed, never fetched)');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const [body, at, message] of [
+    ['<text>&logo;</text>', '&logo;', /^the entity &logo; is unparsed \(declared NDATA\): no reference may name it$/],
+    ['<text>&pub;</text>', '&pub;', /^the entity &pub; is unparsed/],
+    ['<g id="&logo;"/>', '&logo;', /^the entity &logo; is unparsed/],
+    ['<text>&w;</text>', '&w;', /^the entity &w; expands to text that isn't well-formed: the entity &logo; is unparsed/],
+  ] as const) {
+    const src = `<!DOCTYPE svg [${subset}]>${svg}${body}</svg>`;
+    const r = parseDoc(src);
+    assert.ok(!r.ok, `${body}: parsed`);
+    assert.equal(r.error.kind, undefined, body);
+    assert.equal(r.error.at, src.indexOf(at, src.indexOf('<svg')), body);
+    assert.match(r.error.message, message, body);
+  }
+  assert.ok(parseDoc(`<!DOCTYPE svg [${subset}]>${svg}<text>x</text></svg>`).ok, 'declared and never referenced: well-formed');
+});
+
+// XML lets a parameter entity in the internal subset declare more entities. Draw records them and
+// never expands one (neither do browsers: they refuse such a DOCTYPE), so nothing a parameter
+// entity declares ever reaches a value; a reference to an entity one may declare is over Draw's
+// limits (the next test), and a parameter entity is no general entity of the same name.
 test('parameter entities are recorded and never expanded: in the DOCTYPE, in text or in values', () => {
   const src = `<!DOCTYPE svg [
   <!ENTITY % decl "<!ENTITY name 'Draw'>">
@@ -94,21 +187,75 @@ test('parameter entities are recorded and never expanded: in the DOCTYPE, in tex
   %extra;
   <!ENTITY brand "Draw">
 ]>
-<svg xmlns="http://www.w3.org/2000/svg"><text>&name; by &brand;</text><rect fill="&fill;"/><rect fill="%fill;"/></svg>`;
+<svg xmlns="http://www.w3.org/2000/svg"><text>Made by &brand;</text><rect fill="%fill;"/></svg>`;
   const r = parseDoc(src);
   assert.ok(r.ok, !r.ok ? r.error.message : '');
   const { entities } = r.doc;
   assert.deepEqual([...entities.parameter].sort(), ['decl', 'extra', 'fill'], 'recorded');
+  assert.ok(entities.hasPERefs, '%decl; and %extra; are references');
   assert.deepEqual([...entities.internal.keys()], ['brand'], 'what %decl; would declare is never declared');
   assert.deepEqual([...entities.external], [], 'an external parameter entity is not a general one either');
-  const [text, rect, rect2] = [...descendants(r.doc, r.doc.root)].filter((n) => n.kind === 'element').slice(1).map((n) => el(r.doc, n.id));
-  assert.equal(textContent(r.doc, text.id), '&name; by Draw', 'a general reference to what %decl; declares stays as written');
-  assert.equal(attrValue(r.doc, rect, null, 'fill'), '&fill;', 'a parameter entity is not a general entity of the same name');
-  assert.equal(attrValue(r.doc, rect2, null, 'fill'), '%fill;', 'outside the DTD, % is only text');
+  const [text, rect] = [...descendants(r.doc, r.doc.root)].filter((n) => n.kind === 'element').slice(1).map((n) => el(r.doc, n.id));
+  assert.equal(textContent(r.doc, text.id), 'Made by Draw');
+  assert.equal(attrValue(r.doc, rect, null, 'fill'), '%fill;', 'outside the DTD, % is only text');
   const unresolved = new Set<string>();
-  assert.equal(decode('&decl;&extra;', entities, newBudget(), 0, unresolved), '&decl;&extra;');
+  assert.equal(decode('&decl;&extra;', entities, newBudget(), 0, unresolved), '&decl;&extra;', 'a parameter entity is not a general entity of the same name');
   assert.deepEqual([...unresolved].sort(), ['decl', 'extra']);
   assert.equal(serialize(r.doc), src, 'the DOCTYPE and every reference are kept byte for byte');
+  for (const [from, to] of [['Made by &brand;', '&name;'], ['fill="%fill;"', 'fill="&fill;"']]) {
+    const refused = parseDoc(src.replace(from, to));
+    assert.ok(!refused.ok && refused.error.kind === 'limit', `${to}: what %decl; would declare, or a parameter entity's name, is never a general entity`);
+  }
+});
+
+test("an entity a parameter entity may declare is over Draw's limits, not malformed", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  const subset = `<!DOCTYPE svg [<!ENTITY % decl "<!ENTITY name 'Draw'>"> %decl;]>`;
+  for (const body of ['<text>by &name;</text>', '<g id="&name;"/>']) {
+    const src = `${subset}${svg}${body}</svg>`;
+    const r = parseDoc(src);
+    assert.ok(!r.ok, body);
+    assert.equal(r.error.kind, 'limit', body);
+    assert.equal(r.error.at, src.indexOf('&name;'), body);
+    assert.match(r.error.message, /&name; is not declared; it may be declared by a parameter entity, which Draw doesn't expand/);
+  }
+  // Only a reference counts: a parameter entity declared and never referenced, or %decl; inside a
+  // literal or a comment, declares nothing, so &name; is simply not declared.
+  for (const doctype of [`<!DOCTYPE svg [<!ENTITY % decl "<!ENTITY name 'Draw'>">]>`, `<!DOCTYPE svg [<!ENTITY a "%decl;"><!-- %decl; --><?pi %decl;?>]>`]) {
+    const src = `${doctype}${svg}<text>&name;</text></svg>`;
+    const r = parseDoc(src);
+    assert.ok(!r.ok && r.error.kind === undefined && r.error.at === src.indexOf('&name;'), doctype);
+    assert.equal(readEntityTable(doctype.slice(15, -2)).hasPERefs, false, doctype);
+  }
+});
+
+// Under a DOCTYPE that names an XHTML DTD (XHTML_DTDS), browsers supply HTML's named references
+// themselves, so &nbsp; is well-formed to them there; Draw neither reads DTDs nor knows HTML's
+// references, so such a file is over its limits. Under any other DOCTYPE, &nbsp; is not declared,
+// and browsers refuse it (e2e theEngineRefusesWhatTheBrowserRefuses has both).
+test("an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const doctype of [
+    '<!DOCTYPE svg PUBLIC "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN" "http://www.w3.org/2002/04/xhtml-math-svg/xhtml-math-svg.dtd">',
+    "<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'xhtml1-strict.dtd' [<!ENTITY brand 'Draw'>]>",
+  ]) {
+    for (const body of ['<text>a&nbsp;b</text>', '<g id="&copy;"/>']) {
+      const src = `${doctype}${svg}${body}</svg>`;
+      const r = parseDoc(src);
+      assert.ok(!r.ok, `${doctype} ${body}`);
+      assert.equal(r.error.kind, 'limit', body);
+      assert.equal(r.error.at, src.indexOf('&', doctype.length), body);
+      assert.match(r.error.message, /is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read/);
+    }
+    const ok = parseDoc(`${doctype}${svg}<text>&lt;&#160;${doctype.includes('brand') ? '&brand;' : ''}</text></svg>`);
+    assert.ok(ok.ok, 'what the document declares, the predefined entities and character references read as ever');
+  }
+  // Any other DOCTYPE supplies nothing, the SVG DTD's included: &nbsp; there is not declared.
+  const src = `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">${svg}<text>&nbsp;</text></svg>`;
+  const r = parseDoc(src);
+  assert.ok(!r.ok);
+  assert.equal(r.error.kind, undefined);
+  assert.equal(r.error.at, src.indexOf('&nbsp;'));
 });
 
 test('a billion-laughs document fails within the entity budget', () => {
@@ -116,6 +263,27 @@ test('a billion-laughs document fails within the entity budget', () => {
   for (let i = 1; i <= 9; i++) subset += `<!ENTITY lol${i} "${`&lol${i === 1 ? '' : i - 1};`.repeat(10)}">`;
   const t = readEntityTable(subset);
   assert.throws(() => decode('&lol9;', t), EntityBudgetError);
+});
+
+// An expansion that makes nothing still costs (one for it, and the replacement text it reads for
+// references), so a bomb of empty entities fails as fast as one that makes text. It used to run
+// fan^depth expansions without spending anything: 34 s for this 535-byte file.
+test('an entity bomb that expands to nothing fails within the entity budget', () => {
+  let subset = '<!ENTITY e0 "">';
+  for (let d = 1; d <= 8; d++) subset += `<!ENTITY e${d} "${`&e${d - 1};`.repeat(10)}">`;
+  const budget = newBudget();
+  assert.equal(decode('&e1;', readEntityTable(subset), budget), '');
+  assert.ok(budget.left < ENTITY_BUDGET, 'an expansion to nothing is charged to the budget');
+  for (const body of ['<text>&e8;</text>', '<g id="&e8;"/>']) {
+    const src = `<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+    const t0 = performance.now();
+    const r = parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(!r.ok, `${body}: parsed`);
+    assert.equal(r.error.kind, 'limit', body);
+    assert.match(r.error.message, /entity expansion over 1000000 characters/, body);
+    assert.ok(ms < 1000, `${body}: took ${ms.toFixed(0)} ms`);
+  }
 });
 
 // The billion laughs above nests 10 deep, so the depth limit alone stops it. Each limit gets its
@@ -224,10 +392,125 @@ test('a DOCTYPE outside the prolog, or an XML declaration after the start, is re
 });
 
 test('malformed input is an error with a position, never a throw', () => {
-  for (const bad of ['', '<', '<svg', '<svg a=1/>', '<svg></g>', '<svg/><svg/>', 'x<svg/>', '<svg><!-- x', '<svg a="1" a2></svg>', '<svg>\u0000</svg']) {
+  const strict = ['<svg a="1" a="2"/>', '<svg>&</svg>', '<svg>&nbsp;</svg>', '<svg>&#0;</svg>', '<svg><!-- a -- b --></svg>', '<a:svg/>', '<!doctype svg><svg/>', '\f<svg/>', '<svg>]]></svg>', '<svg xmlns:p=""/>', '<svg x:="1"/>'];
+  for (const bad of ['', '<', '<svg', '<svg a=1/>', '<svg></g>', '<svg/><svg/>', 'x<svg/>', '<svg><!-- x', '<svg a="1" a2></svg>', '<svg>\u0000</svg', ...strict]) {
     const r = parseDoc(bad);
     assert.equal(r.ok, false, JSON.stringify(bad));
+    assert.ok(r.error.at >= 0 && r.error.at <= bad.length, JSON.stringify(bad));
   }
+});
+
+// What a browser's XML parser refuses, Draw's refuses: each case is not well-formed (no kind), and
+// fails where the browser's does. The browsers' own verdicts are checked in e2e
+// theEngineRefusesWhatTheBrowserRefuses.
+test('strict well-formedness: what a browser refuses, Draw refuses, each with its place', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  const ns = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:a="urn:x" xmlns:b="urn:x">';
+  const ext = '<!DOCTYPE svg [<!ENTITY ext SYSTEM "ext.xml">]>';
+  const bad = (entity: string) => `<!DOCTYPE svg [${entity}]>`;
+  const cases: [label: string, src: string, at: (src: string) => number, message: RegExp][] = [
+    ['an attribute written twice', `${svg}<rect fill="red" fill="blue"/></svg>`, (s) => s.lastIndexOf('fill'), /attribute fill is written twice in <rect>/],
+    ['two prefixes of one namespace', `${ns}<rect a:k="1" b:k="2"/></svg>`, (s) => s.indexOf('b:k'), /a:k and b:k of <rect> are one attribute/],
+    ['a bare & in text', `${svg}<text>Fish & chips</text></svg>`, (s) => s.indexOf('&'), /a bare &/],
+    ['a bare & in a value', `${svg}<g id="a & b"/></svg>`, (s) => s.indexOf('&'), /a bare &/],
+    ['a reference without ;', `${svg}<text>&amp chips</text></svg>`, (s) => s.indexOf('&'), /&amp has no closing ;/],
+    ['&#0;', `${svg}<text>a&#0;</text></svg>`, (s) => s.indexOf('&'), /&#0; names a character XML doesn't allow/],
+    ['&#x1F; in a value', `${svg}<g id="&#x1F;"/></svg>`, (s) => s.indexOf('&'), /&#x1F;/],
+    ['a surrogate', `${svg}<g id="a&#xD800;"/></svg>`, (s) => s.indexOf('&'), /&#xD800;/],
+    ['&#xFFFE;', `${svg}<text>&#xFFFE;</text></svg>`, (s) => s.indexOf('&'), /&#xFFFE;/],
+    ['past U+10FFFF', `${svg}<text>&#1114112;</text></svg>`, (s) => s.indexOf('&'), /&#1114112;/],
+    ['&nbsp; with no DTD', `${svg}<text>a&nbsp;b</text></svg>`, (s) => s.indexOf('&'), /the entity &nbsp; is not declared/],
+    ['&nbsp; with an external DTD', `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">${svg}<text>&nbsp;</text></svg>`, (s) => s.indexOf('&nbsp;'), /&nbsp; is not declared/],
+    ['an undeclared entity in a value', `${bad('<!ENTITY a "x">')}${svg}<g id="&b;"/></svg>`, (s) => s.indexOf('&b;'), /&b; is not declared/],
+    ['an external entity in a value', `${ext}${svg}<g id="&ext;"/></svg>`, (s) => s.indexOf('&ext;'), /the external entity &ext; can't be used in an attribute value/],
+    ['an entity that expands to a bare &', `${bad('<!ENTITY a "x &#38; y">')}${svg}<text>&a;</text></svg>`, (s) => s.indexOf('&a;'), /&a; expands to text that isn't well-formed: a bare &/],
+    ['an entity that expands to &#0;', `${bad('<!ENTITY a "&#38;#0;">')}${svg}<g id="&a;"/></svg>`, (s) => s.indexOf('&a;'), /&a; expands to text that isn't well-formed: &#0;/],
+    ['an entity that refers to itself', `${bad('<!ENTITY a "&b;"><!ENTITY b "&a;">')}${svg}<text>&a;</text></svg>`, (s) => s.indexOf('&a;', 60), /&a; refers to itself/],
+    ['an entity that brings ]]> into text', `${bad('<!ENTITY a "x]]>">')}${svg}<text>&a;</text></svg>`, (s) => s.indexOf('&a;'), /]]>/],
+    ['-- in a comment', `${svg}<!-- a -- b --></svg>`, (s) => s.indexOf('--', s.indexOf('<!--') + 4), /'--' inside a comment/],
+    ['a comment that ends in ---', `<!-- a --->${svg}</svg>`, () => 7, /'--' inside a comment/],
+    ['a lowercase <!doctype', `<!doctype svg>${svg}</svg>`, () => 0, /capitals/],
+    // A form feed is no XML character at all, so it is refused as one, wherever it stands.
+    ['a form feed before the root', `\f${svg}</svg>`, () => 0, /the character U\+000C is not allowed in XML/],
+    ['a no-break space before the root', `\u{A0}${svg}</svg>`, () => 0, /text outside the root/],
+    ['a no-break space after the root', `${svg}</svg>\n\u{A0}`, (s) => s.length - 1, /text outside the root/],
+    ['a BOM that is not first', ` \u{FEFF}${svg}</svg>`, () => 1, /text outside the root/],
+    ['an unbound element prefix', `${svg}<p:g/></svg>`, (s) => s.indexOf('p:g'), /the prefix p of <p:g> is not declared/],
+    ['an unbound attribute prefix', `${svg}<g p:k="1"/></svg>`, (s) => s.indexOf('p:k'), /the prefix p of attribute p:k is not declared/],
+    ['xmlns:p=""', `${svg}<g xmlns:p=""/></svg>`, (s) => s.indexOf('xmlns:p'), /xmlns:p is empty/],
+    ['xml bound elsewhere', `${svg}<g xmlns:xml="urn:x"/></svg>`, (s) => s.indexOf('xmlns:xml'), /the prefix xml is bound to/],
+    ['another prefix for the XML namespace', `${svg}<g xmlns:p="http://www.w3.org/XML/1998/namespace"/></svg>`, (s) => s.indexOf('xmlns:p'), /only the prefix xml may name/],
+    ['the xmlns prefix declared', `${svg}<g xmlns:xmlns="urn:x"/></svg>`, (s) => s.indexOf('xmlns:xmlns'), /the prefix xmlns is reserved/],
+    ['a prefix for the xmlns namespace', `${svg}<g xmlns:p="http://www.w3.org/2000/xmlns/"/></svg>`, (s) => s.indexOf('xmlns:p'), /no prefix may name/],
+    ['a leading colon', `${svg}<:g/></svg>`, (s) => s.indexOf(':g'), /:g is not a valid name/],
+    ['a trailing colon', `${svg}<g k:="1"/></svg>`, (s) => s.indexOf('k:'), /k: is not a valid name/],
+    ['two colons', `${ns}<a:b:c/></svg>`, (s) => s.indexOf('a:b:c'), /a:b:c is not a valid name/],
+    ['a local name that starts with a digit', `${ns}<a:1b/></svg>`, (s) => s.indexOf('a:1b'), /a:1b is not a valid name/],
+    ['U+0001 in text', `${svg}<text>a\x01</text></svg>`, (s) => s.indexOf('\x01'), /the character U\+0001 is not allowed in XML/],
+    ['U+FFFE in a value', `${svg}<g id="\u{FFFE}"/></svg>`, (s) => s.indexOf('\u{FFFE}'), /U\+FFFE/],
+    ['a lone surrogate in a comment', `${svg}<!-- \u{D800} --></svg>`, (s) => s.indexOf('\u{D800}'), /U\+D800/],
+    [']]> in text', `${svg}<text>a ]]> b</text></svg>`, (s) => s.indexOf(']]>'), /']]>' in text/],
+  ];
+  for (const [label, src, at, message] of cases) {
+    const r = parseDoc(src);
+    assert.ok(!r.ok, `${label}: parsed`);
+    assert.equal(r.error.kind, undefined, `${label}: ${r.error.message} is not a limit`);
+    assert.equal(r.error.at, at(src), `${label}: ${r.error.message}`);
+    assert.match(r.error.message, message, label);
+  }
+  // decode refuses to expand such an entity too, wherever it is called from.
+  assert.throws(() => decode('&a;', readEntityTable('<!ENTITY a "x &#38; y">')), EntityWellFormednessError);
+  // What is well-formed stays so: -, ]] and > where they are allowed, the xml prefix, and xml bound to its own namespace.
+  for (const src of [`${svg}<!-- a - b --><text id="a]]>b" xml:lang="en">a ]] > b &#x9;&#xA;&#xD;</text></svg>`, `${svg}<g xmlns:xml="http://www.w3.org/XML/1998/namespace" xml:space="preserve"/></svg>`, `\u{FEFF}${svg}</svg>`]) {
+    const r = parseDoc(src);
+    assert.ok(r.ok, !r.ok ? `${r.error.message} in ${JSON.stringify(src)}` : '');
+  }
+});
+
+// A chain of entities is named once, by its ends; each level used to repeat the sentence, about
+// 800 characters at depth 8 in the source view's overlay (P1-M0 review, F9).
+test('an entity chain is named once in a message, by its ends', () => {
+  let subset = '<!ENTITY c0 "a &#38; b">';
+  for (let k = 1; k <= 8; k++) subset += `<!ENTITY c${k} "&c${k - 1};">`;
+  const message = (use: string) => {
+    const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><text>${use}</text></svg>`);
+    return r.ok ? 'parsed' : r.error.message;
+  };
+  const bare = "a bare & (write &amp; for the character itself)";
+  assert.equal(message('&c8;'), `the entity &c8; (through &c7; … &c0;) expands to text that isn't well-formed: ${bare}`);
+  assert.ok(message('&c8;').length < 200, `${message('&c8;').length} characters at depth 8`);
+  assert.equal(message('&c1;'), `the entity &c1; (through &c0;) expands to text that isn't well-formed: ${bare}`);
+  assert.equal(message('&c0;'), `the entity &c0; expands to text that isn't well-formed: ${bare}`);
+});
+
+// Names in messages are cut to about 40 characters: a 1 MB name used to make a 1 MB message, which
+// the source view and the import report show (P1-M0 review, F9).
+test('a message cuts a long name to about 40 characters', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  const long = 'a'.repeat(1_000_000);
+  for (const [label, src, message] of [
+    ['a colon out of place', `${svg}<a${':b'.repeat(500_000)}/></svg>`, /^a[:b]{38}… is not a valid name: a colon must stand once, between two names$/],
+    ['a reference without ;', `${svg}<text>&${long}</text></svg>`, /^the reference &a{39}… has no closing ;$/],
+    ['an attribute written twice', `${svg}<g ${long}="1" ${long}="2"/></svg>`, /^attribute a{39}… is written twice in <g>$/],
+    ['an undeclared entity', `${svg}<text>&${long};</text></svg>`, /^the entity &a{39}…; is not declared$/],
+    ['an unbound prefix', `${svg}<${long}:g/></svg>`, /^the prefix a{39}… of <a{39}…> is not declared$/],
+  ] as const) {
+    const r = parseDoc(src);
+    assert.ok(!r.ok, `${label}: parsed`);
+    assert.ok(r.error.message.length < 200, `${label}: a message of ${r.error.message.length} characters`);
+    assert.match(r.error.message, message, label);
+  }
+});
+
+test('a processing instruction in the DOCTYPE may hold ] and quotes', () => {
+  const src = `<!DOCTYPE svg [\n  <?draw a ] b ' c " d?>\n  <!-- ] ' -->\n  <!ENTITY e "ok">\n  <?draw <!ENTITY x "no"> ?>\n]>\n<svg xmlns="http://www.w3.org/2000/svg"><text>&e;</text></svg>`;
+  const r = parseDoc(src);
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  assert.equal(textContent(r.doc, r.doc.root), 'ok');
+  assert.deepEqual([...r.doc.entities.internal.keys()], ['e'], 'an <!ENTITY> inside a processing instruction declares nothing');
+  assert.equal(serialize(r.doc), src);
+  const x = parseDoc(src.replace('&e;', '&x;'));
+  assert.ok(!x.ok && /&x; is not declared/.test(x.error.message));
 });
 
 test('text content decodes entities and CDATA', () => {
@@ -236,6 +519,19 @@ test('text content decodes entities and CDATA', () => {
   const text = [...descendants(r.doc, r.doc.root)].find((n) => n.kind === 'element' && n.local === 'text')!;
   assert.equal(textContent(r.doc, text.id), 'a & b <c> ');
   assert.equal(attrValue(r.doc, el(r.doc, r.doc.root), null, 'x'), null);
+});
+
+// Declarations that never close used to send the entity-declaration scan on to the end of the
+// subset from every one: quadratic (1 MB took about 100 s). Refused or not, it is linear now.
+test('a DOCTYPE full of unterminated entity declarations is read in linear time', () => {
+  const unit = '<!ENTITY a SYSTEM ';
+  for (const kb of [250, 1000]) {
+    const src = `<!DOCTYPE svg [${unit.repeat(Math.ceil((kb * 1000) / unit.length))}]><svg xmlns="http://www.w3.org/2000/svg"/>`;
+    const t0 = performance.now();
+    parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 2000, `${kb} KB of unterminated declarations took ${ms.toFixed(0)} ms`);
+  }
 });
 
 test('lexing is linear: a 5 MB file parses in well under a second', () => {

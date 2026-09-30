@@ -4,8 +4,9 @@
 // retargets an animation; a subtree moved into a foreignObject. And a render that throws keeps the
 // previous drawing. P0-M3 adds the camera (the view as the root's viewBox), an attribute put back
 // in the middle of the list (an undo), a value edit that must be exactly one attribute mutation
-// (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The real Renderer
-// is bundled from source (test/harness/entry.ts) and driven directly.
+// (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The P1-M0 review
+// adds attribute names the DOM refuses (dropped, never thrown on). The real Renderer is bundled
+// from source (test/harness/entry.ts) and driven directly.
 //
 // Run by test/e2e.mjs on the /draw/ page (Chromium here, WebKit in CI), or alone, quickly:
 //   node test/renderer-patch.mjs
@@ -31,7 +32,7 @@ export default async function rendererPatch({ browser, origin }) {
     const page = await context.newPage();
     if (origin) await page.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
     await page.evaluate(code);
-    const results = await page.evaluate(cases);
+    const results = await page.evaluate(cases, browser.browserType().name());
     const failed = results.filter((r) => r.problems.length);
     if (failed.length) {
       throw new Error(`keyed patching differs from a fresh render in ${failed.length} of ${results.length} case(s):\n${failed.map((r) => `${r.label}\n    ${r.problems.join('\n    ')}`).join('\n')}`);
@@ -42,7 +43,7 @@ export default async function rendererPatch({ browser, origin }) {
 }
 
 // Runs in the page.
-function cases() {
+function cases(engine) {
   const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, Renderer, sinkReady } = window.drawHarness;
   const SVG = 'http://www.w3.org/2000/svg';
   const host = () => {
@@ -80,7 +81,7 @@ function cases() {
     return { r, root, doc: parsed.doc };
   };
   const byId = (doc, id) => [...doc.nodes.values()].find((n) => n.kind === 'element' && n.attrs.some((a) => a.local === 'id' && a.raw === id));
-  // Model moves, as M3's commands will make them.
+  // Model moves, made by hand as engine/commands' opRemove and opInsert make them.
   const detach = (doc, node) => {
     const p = el(doc, node.parent);
     p.children = p.children.filter((c) => c !== node.id);
@@ -271,6 +272,32 @@ function cases() {
     if (r.idFor(old) !== undefined) problems.push('a node taken off the canvas still maps to its NodeId');
     if (r.idFor(root.host) !== undefined || r.idFor(null) !== undefined) problems.push('something not drawn maps to a NodeId');
     results.push({ label: 'idFor maps drawn nodes back to their NodeIds', problems });
+  }
+  // P1-M0 review (F4): names the data-* pattern and DOMPurify admit but the DOM refuses to create
+  // (data-😀, data-⁰x in Chromium) are dropped and counted, never thrown on: in a render, and in a
+  // patch that adds one (Edit source, mid-edit), which must not take the drawing away.
+  {
+    const problems = [];
+    try {
+      // Each engine's DOM judges its own names (Chromium refuses both; WebKit's rule is unverified).
+      const odd = ['data-\u{1F600}', 'data-\u2070x'];
+      const takes = (n) => { try { document.createAttribute(n); return true; } catch { return false; } };
+      const want = ['data-a', 'height', 'width', ...odd.filter(takes)].sort().join(' ');
+      const refused = odd.filter((n) => !takes(n)).length;
+      if (engine === 'chromium' && refused !== 2) problems.push(`Chromium's DOM refuses ${refused} of the names, not 2: the case no longer tests the guard`);
+      const { r, root, doc } = setup(`<svg xmlns="${SVG}" viewBox="0 0 100 100"><rect width="5" height="5" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/><circle id="c1" r="3"/></svg>`);
+      const drawn = [...(root.querySelector('rect')?.attributes ?? [])].map((a) => a.name).sort().join(' ');
+      if (drawn !== want) problems.push(`the rect is drawn as [${drawn}], not [${want}]`);
+      if (r.stats().droppedAttributes !== refused) problems.push(`stats ${JSON.stringify(r.stats())}, not ${refused} dropped attribute(s)`);
+      const circle = byId(doc, 'c1');
+      setAttr(doc, circle.id, null, 'data-\u200Cx', '1');
+      r.patchAttributes(circle.id);
+      if (!root.querySelector('circle#c1')) problems.push('a patch that adds data-\u200Cx took the circle off the canvas');
+      check('...and a patch that adds one equals a fresh render', r, root, doc);
+    } catch (e) {
+      problems.push(`threw ${e}`);
+    }
+    results.push({ label: 'attribute names the DOM refuses are dropped, never thrown on', problems });
   }
   // A render that throws leaves the drawing as it was (here: a model missing a child).
   {
