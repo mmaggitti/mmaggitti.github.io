@@ -1997,7 +1997,7 @@ const BREAKS = [
   {
     id: 'B375', what: 'F5: the CSS sheet cache is keyed on doc.version again (a move of k shapes reads every <style> k times)',
     file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
-    run: drawTests('editor.test.ts'), expect: /✖ a command over a large selection takes linear time/,
+    run: drawTests('large-selection.test.ts'), expect: /✖ a command over a large selection takes linear time/,
   },
   {
     id: 'B376', what: 'F5: a <style> that comes into the document is not noticed (a stale sheet)',
@@ -2013,6 +2013,11 @@ const BREAKS = [
     id: 'B379', what: 'F4: Group nests a shape past the depth the parser opens (a working copy that no longer opens)',
     file: 'projects/draw/src/interact/structure.ts', from: "  if (depthOf(doc, p!) + 1 + Math.max(0, ...ids.map((id) => height(doc, id))) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ Group refuses to nest a shape past the depth the parser opens/,
+  },
+  {
+    id: 'B380', what: 'F7: an id may hold a character XML can’t (U+FFFE, a lone surrogate): Rename writes a file that no longer opens',
+    file: 'engine/code/edit.ts', from: "  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;\n  return ID.test(text)", to: '  return ID.test(text)',
+    run: drawTests('editor.test.ts'), expect: /✖ Rename refuses a name XML can’t hold as an id/,
   },
   // P1-M1 review fixes, slow.
   {

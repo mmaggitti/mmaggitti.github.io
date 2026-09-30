@@ -51,9 +51,9 @@ import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
 import { DRAW_NS, NO_STATE, declare, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
-import { cssSets } from '../../../engine/geometry/css.ts';
+import { cssSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
-import { ID } from '../../../engine/code/edit.ts';
+import { idError } from '../../../engine/code/edit.ts';
 import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
 import { itemMatrix, parseTransform } from '../../../engine/values/transform.ts';
 import { fmt } from '../../../engine/values/number-format.ts';
@@ -1246,7 +1246,12 @@ export class Editor {
     if (locked && this.selection.get().has(id)) this.#show(); // its handles go
   }
 
-  /** Rename an element's id, and every reference to it in the document ("Rename"); the reason it can't, or null. */
+  /**
+   * Rename an element's id, and every reference to it in the document ("Rename"); the reason it
+   * can't, or null. Refused: a name XML can't hold as an id, one another element has, an id two
+   * elements share (which one the references mean is the file's to settle), and an id a <style> rule
+   * names (Draw doesn't rewrite CSS, and the rule would stop matching).
+   */
   rename(id: NodeId, next: string): string | null {
     const doc = this.#doc;
     const n = doc?.nodes.get(id);
@@ -1254,8 +1259,11 @@ export class Editor {
     if (this.readOnly.get()) return READ_ONLY;
     const was = attrValue(doc, n, null, 'id');
     if (next === was) return null;
-    if (!ID.test(next)) return `${JSON.stringify(next)} is not an id`;
+    const bad = idError(next);
+    if (bad) return bad;
     if (idsInUse(doc).has(next)) return `Another element already has the id "${next}".`;
+    if (was !== null && (buildRefIndex(doc).ids.get(was)?.length ?? 0) > 1) return 'Another element has this id; fix the duplicate in the code first.';
+    if (was !== null && styleNamesId(doc, was)) return `A <style> rule uses #${was}; rename it in the code.`;
     const ok = this.#dispatch('Rename', (apply) => {
       if (was === null) apply(opSetAttr(doc, id, null, 'id', next));
       else renameIdsIn(doc, doc.root, new Map([[was, next]]), apply);

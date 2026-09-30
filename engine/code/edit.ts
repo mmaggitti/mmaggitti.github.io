@@ -14,6 +14,7 @@
 
 import { el, findAttr, setAttrRaw, setLeafRaw, type Doc, type NodeId } from '../model/doc.ts';
 import { escape } from '../xml/entities.ts';
+import { NAME_PATTERN } from '../xml/lex.ts';
 import { fmt } from '../values/number-format.ts';
 import { parseColor } from '../values/color.ts';
 import { tokenizeAttrRaw, tokenizeLeafRaw, tokenizeText, type AttrRef, type NumberToken, type Token } from './tokens.ts';
@@ -27,8 +28,15 @@ const NUMBER = /^-?(?:\d+|\d*\.\d+)$/; // plain decimal: no exponent, no leading
 // A character outside XML 1.0's Char: no escape can write one (&#1; is refused too), so a browser
 // would refuse the whole file.
 const NOT_XML_CHAR = /[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
-/** An XML id, as the Text sheet and Rename take it. */
-export const ID = /^[A-Za-z_À-￿][\w.\-·À-￿]*$/;
+/** An XML id, as the Text sheet and Rename take it: the lexer's name rule without a colon (Namespaces in XML). */
+export const ID = new RegExp(`^${NAME_PATTERN.replaceAll(':', '')}$`);
+
+/** Why `text` can't be an id, or null: a name the lexer reads, with no colon and no character XML can't hold (U+FFFE, a lone surrogate). */
+export function idError(text: string): string | null {
+  const bad = NOT_XML_CHAR.exec(text);
+  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
+  return ID.test(text) ? null : `${JSON.stringify(text)} is not an id`;
+}
 
 /** Why `text` can't replace this token, or null when it can. */
 export function tokenTextError(token: Token, text: string): string | null {
@@ -48,7 +56,7 @@ export function tokenTextError(token: Token, text: string): string | null {
     case 'enum':
       return token.options.includes(text) ? null : `${JSON.stringify(text)} is not one of ${token.options.join(', ')}`;
     case 'ref':
-      return ID.test(text) ? null : `${JSON.stringify(text)} is not an id`;
+      return idError(text);
     case 'text':
       return null;
   }

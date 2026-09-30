@@ -75,6 +75,23 @@ export function cssSets(doc: Doc, id: NodeId, prop: string): CssSource {
   return 'no';
 }
 
+/**
+ * Does a <style> in the document name this id: an id selector (#c, escapes read) or a url(#c)? Read
+ * conservatively (inside strings too), so a Rename that would leave a rule behind is refused.
+ */
+export function styleNamesId(doc: Doc, id: string): boolean {
+  for (const n of descendants(doc, doc.root)) {
+    if (n.kind !== 'element' || n.local !== 'style' || (n.ns !== NS.svg && n.ns !== NS.xhtml)) continue;
+    for (const m of stripComments(textContent(doc, n.id)).matchAll(/#((?:\\[0-9A-Fa-f]{1,6}[ \t\r\n\f]?|\\[^\r\n\f0-9A-Fa-f]|[\w-]|[^\x00-\x7F])+)/g)) {
+      if (unescapeCss(m[1]) === id) return true;
+    }
+  }
+  return false;
+}
+
+// A CSS identifier's escapes read: \31  (hex, with its one optional space) and \. (the character).
+const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\(.)/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : ch!));
+
 // ── the document's sheets, read again only when what its <style> elements say may have changed ──
 
 interface Rule {

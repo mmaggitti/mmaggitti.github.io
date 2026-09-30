@@ -15,7 +15,7 @@ import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewp
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
 import type { OverlayModel } from '../../src/interact/overlay-model.ts';
-import { fakeEditor, measureWith } from './fakes.ts';
+import { measureWith } from './fakes.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
 
@@ -1204,6 +1204,50 @@ test('Layers: Hide writes display="none" and Show gives the bytes back; Lock wri
   assert.equal(r.editor.history.get().undoLabel, 'Rename', 'the refusals recorded nothing');
 });
 
+test('Rename refuses a name XML can’t hold as an id, an id two elements share and an id a <style> rule names; every ARIA id reference follows it, and every file it writes re-parses', () => {
+  const S = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
+  const renamed = (text: string, to: string, nth = 0) => {
+    const r = rig();
+    assert.ok(r.editor.open(text).ok);
+    const e = [...descendants(doc(r), doc(r).root)].filter((n) => n.kind === 'element' && n.attrs.some((a) => a.local === 'id' && a.raw === 'c'))[nth];
+    const why = r.editor.rename(e.id, to);
+    const back = parseDoc(r.editor.source());
+    assert.ok(back.ok, `rename to ${JSON.stringify(to)}: the file no longer parses (${back.ok ? '' : back.error.message})`);
+    return { why, source: r.editor.source(), entries: r.editor.history.get().canUndo };
+  };
+  const one = S('<rect id="c" width="5" height="5"/>');
+  // Characters XML can't hold anywhere (U+FFFE, U+FFFF, lone surrogates): refused, nothing written.
+  for (const [to, code] of [['a\uFFFE', 'FFFE'], ['a\uFFFF', 'FFFF'], ['a\uD800', 'D800'], ['b\uDFFF', 'DFFF']]) {
+    const r = renamed(one, to);
+    assert.equal(r.why, `XML can't hold the character U+${code}`, JSON.stringify(to));
+    assert.equal(r.source, one);
+    assert.equal(r.entries, false);
+  }
+  // Names the lexer reads are fine, astral ones included; a colon or a leading digit is not a name.
+  for (const to of ['é', 'a·b', '\u{1F600}', 'a\uFDD0']) assert.equal(renamed(one, to).why, null, JSON.stringify(to));
+  for (const to of ['x:y', '1abc', 'a b', '']) assert.equal(renamed(one, to).why, `${JSON.stringify(to)} is not an id`);
+  // Two elements share the id: which one a reference means is the file's to settle.
+  const twice = S('<rect id="c" width="5" height="5"/><circle id="c" r="3"/><use href="#c"/>');
+  for (const nth of [0, 1]) {
+    const r = renamed(twice, 'sun', nth);
+    assert.equal(r.why, 'Another element has this id; fix the duplicate in the code first.');
+    assert.equal(r.source, twice);
+  }
+  // A <style> rule names it (by #c, escaped, or url(#c)): renaming would change how it looks.
+  for (const css of ['#c { fill: red }', '.x { fill: url(#c) }', '#\\63 { fill: red }', 'rect#c, g { fill: red }']) {
+    const text = S(`<style>${css}</style><rect id="c" width="5" height="5"/>`);
+    const r = renamed(text, 'sun');
+    assert.equal(r.why, 'A <style> rule uses #c; rename it in the code.', css);
+    assert.equal(r.source, text);
+  }
+  assert.equal(renamed(S('<style>#cc { fill: red } /* #c */</style><rect id="c" width="5" height="5"/>'), 'sun').why, null, 'another id, and a comment, are not a rule for #c');
+  // Every ARIA attribute that holds ids follows; a reference into another file doesn't.
+  const aria = ['aria-activedescendant', 'aria-controls', 'aria-describedby', 'aria-details', 'aria-errormessage', 'aria-flowto', 'aria-labelledby', 'aria-owns'];
+  const r = renamed(S(`<rect id="c" width="5" height="5"/><g ${aria.map((a) => `${a}="c t"`).join(' ')}/><use href="other.svg#c"/>`), 'sun');
+  assert.equal(r.why, null);
+  assert.equal(r.source, S(`<rect id="sun" width="5" height="5"/><g ${aria.map((a) => `${a}="sun t"`).join(' ')}/><use href="other.svg#c"/>`));
+});
+
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
   const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect id="a" x="10" y="10" width="10" height="10"/>
@@ -1263,64 +1307,5 @@ test('no raw items: every rendered element, use, image, foreignObject and text i
       r.editor.nudge(1, 0);
       r.editor.nudgeEnd();
     }, (s) => s === RAW.replace(nudged[name][0], nudged[name][1]));
-  }
-});
-
-// ── P1-M1 review fix (F5): a command over a large selection costs time in proportion to it ───────
-
-/** An editor on `n` rects in a grid, every one selected. */
-function manySelected(n: number): Editor {
-  const side = Math.ceil(Math.sqrt(n));
-  const cell = 100 / side;
-  const at = (v: number) => (v * cell).toFixed(2);
-  const rects = Array.from({ length: n }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n');
-  const e = fakeEditor();
-  assert.ok(e.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n${rects}\n</svg>`).ok);
-  e.selectAll();
-  assert.equal(e.selection.get().size, n, 'test setup: Select all took every rect');
-  return e;
-}
-
-// Each command, what it records, and a limit over 4,000 shapes that the quadratic code missed by far
-// more than 5× (a drag took about 30 s there, Align about 280 s); Delete and Group are held to the
-// ratio alone.
-const LARGE: [string, string, (e: Editor) => void, number | null][] = [
-  ['a drag of them all', 'Move', (e) => {
-    const { box, viewport, M } = e.rootBox;
-    const k = box!.width / viewport.width;
-    const at = { x: box!.left + k * M[4], y: box!.top + k * M[5] };
-    e.pointerDown(at, [[...e.selection.get()][0]], { add: false });
-    for (let i = 1; i <= 4; i++) e.pointerDrag({ x: at.x + 10 * i, y: at.y + 3 * i });
-    e.pointerUp({ x: at.x + 40, y: at.y + 12 });
-  }, 6000],
-  ['a held arrow', 'Nudge', (e) => {
-    for (let i = 0; i < 3; i++) e.nudge(1, 0);
-    e.nudgeEnd();
-  }, 4000],
-  ['Align left', 'Align left', (e) => e.align('left'), 5000],
-  ['Duplicate', 'Duplicate', (e) => e.duplicate(), 10000],
-  ['Delete', 'Delete', (e) => e.delete(), null],
-  ['Group', 'Group', (e) => e.group(), null],
-];
-
-test('a command over a large selection takes linear time: a drag, a held arrow, Align, Duplicate, Delete and Group over 4,000 shapes cost less than 6× what they cost over 1,000', () => {
-  const cost = (n: number, label: string, act: (e: Editor) => void): number => {
-    const e = manySelected(n);
-    const t = performance.now();
-    act(e);
-    const ms = performance.now() - t;
-    assert.equal(e.history.get().undoLabel, label, `test setup: ${label} did something over ${n} shapes (${e.notice.get()})`);
-    return ms;
-  };
-  for (const [, label, act] of LARGE) cost(200, label, act); // warm the engine up
-  for (const [what, label, act, limit] of LARGE) {
-    let small = cost(1000, label, act);
-    let big = cost(4000, label, act);
-    if (big >= 6 * small) {
-      small = Math.min(small, cost(1000, label, act)); // once more, against a pause of the runner's
-      big = Math.min(big, cost(4000, label, act));
-    }
-    assert.ok(big < 6 * small, `${what}: ${small.toFixed(0)} ms over 1,000 shapes, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4)`);
-    if (limit !== null) assert.ok(big < limit, `${what}: ${big.toFixed(0)} ms over 4,000 shapes (the limit is ${limit})`);
   }
 });

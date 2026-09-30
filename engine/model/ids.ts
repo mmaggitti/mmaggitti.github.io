@@ -5,13 +5,13 @@
 //   `taken` doesn't hold, so one batch can reserve several. A batch reads the ids in use once
 //   (idsInUse) and passes them in, so it doesn't walk the document once per id.
 // - renameIdsIn: inside one subtree only, every mapped id and every reference refs.ts indexes to a
-//   mapped id (url(#…) in any attribute, style="" included; href and xlink:href="#…"; aria id
-//   lists; SMIL begin and end "id.event" values). Only the id's own characters change, as
+//   mapped id (url(#…) in any attribute, style="" included; href and xlink:href="#…"; every ARIA
+//   id reference, refs.ts's ARIA_IDREFS; SMIL begin and end "id.event" values). Only the id's own characters change, as
 //   undoable attribute ops, so references outside the subtree keep pointing at the originals.
 //   A value written with entity references is rewritten whole instead (escaped as setAttr does).
 
 import { NS, descendants, type Attr, type Doc, type ElementNode, type NodeId } from './doc.ts';
-import { buildRefIndex } from './refs.ts';
+import { ARIA_IDREFS, buildRefIndex } from './refs.ts';
 import { decodeAttr } from '../xml/entities.ts';
 import { decodeFragment } from '../values/url.ts';
 import { opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
@@ -46,7 +46,7 @@ function renamed(a: Attr, value: string, map: ReadonlyMap<string, string>): stri
     const v = text.trim();
     const to = v.startsWith('#') ? map.get(decodeFragment(v.slice(1))) : undefined;
     if (to !== undefined) out = `${text.slice(0, lead)}#${to}${text.slice(lead + v.length)}`;
-  } else if (a.ns === null && (a.local === 'aria-labelledby' || a.local === 'aria-describedby')) {
+  } else if (a.ns === null && ARIA_IDREFS.has(a.local)) {
     const next = text.replace(/[^ \t\n\r]+/g, (id) => map.get(id) ?? id);
     if (next !== text) out = next;
   } else if (a.ns === null && (a.local === 'begin' || a.local === 'end')) {
