@@ -408,6 +408,9 @@ const MORE_EDGES = [
   { label: "Illustrator's <switch> shows its artwork, not its private data", text: readFileSync(join(CORPUS, 'tools', 'illustrator-cs6-entities-pgf.svg'), 'utf8'), absent: 'switch > foreignObject', firstInSwitch: 'g' },
   // Ids that happen to name document properties keep working.
   { label: 'ids named blur and close', text: svgDoc('<filter id="blur"><feGaussianBlur stdDeviation="6"/></filter><symbol id="close" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol><use href="#close" width="20" height="20"/><rect width="10" height="10" filter="url(#blur)"/>'), ids: ['blur', 'close'], draws: 'use', skipped: 0 },
+  // A data-* name the pattern and DOMPurify admit but the DOM refuses to create (data-😀, data-⁰x:
+  // setAttribute throws on them) is dropped and counted like any other; the element still draws.
+  { label: 'data-* names the DOM refuses', text: svgDoc('<rect width="10" height="10" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/>'), attrs: { rect: 'data-a height width' }, dropped: 2, skipped: 0 },
   // The document's own CSS can't size the root away from the host.
   { label: 'a root sized by its own CSS', text: svgDoc('<style>svg { width: 48px; height: 48px }</style><rect width="10" height="10"/>', ' style="width: 24px; height: 24px"'), fills: true, skipped: 0 },
   // A size that overflows once converted still renders; it just gets no viewBox.
@@ -438,6 +441,11 @@ async function moreEdges(browser, origin) {
       if (c.unparsed) return !stats.ok && stats.error === c.unparsed && stats.rendered === 0 ? [] : [`${c.label}: the canvas reports ${JSON.stringify(stats)}, not the parser's refusal (${c.unparsed})`];
       if (!stats.ok) return [`${c.label}: did not render (${stats.error})`];
       if (c.skipped !== undefined && stats.skippedElements !== c.skipped) out.push(`skipped ${stats.skippedElements} element(s), not ${c.skipped}`);
+      if (c.dropped !== undefined && stats.droppedAttributes !== c.dropped) out.push(`dropped ${stats.droppedAttributes} attribute(s), not ${c.dropped}`);
+      for (const [sel, want] of Object.entries(c.attrs ?? {})) {
+        const got = q(sel) ? [...q(sel).attributes].map((a) => a.name).sort().join(' ') : null;
+        if (got !== want) out.push(`<${sel}> is on the canvas as [${got}], not [${want}]`);
+      }
       if (c.absent && q(c.absent)) out.push(`<${c.absent}> is on the canvas`);
       if (c.present && !q(c.present)) out.push(`<${c.present}> is not on the canvas`);
       if (c.target && q('animate')?.targetElement?.localName !== c.target) out.push(`the animation drives <${q('animate')?.targetElement?.localName}>, not <${c.target}>`);
@@ -1089,6 +1097,22 @@ async function editSourceRoundTrip(browser, origin) {
     await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
     must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'one undo did not restore the element byte for byte');
     must(await page.locator('.draw-sel').textContent() === 'nothing selected', 'the element the undo took out is still selected');
+    // A name the DOM refuses to create (data-😀: the data-* pattern admits it) is kept in the file and
+    // left off the canvas, which goes on drawing: it must never blank mid-edit (P1-M0 review, F4).
+    await page.touchscreen.tap(c.x, c.y);
+    await page.locator('.draw-action').tap();
+    await area.fill('<circle cx="212" cy="134" r="42" fill="#ffd166" data-\u{1F600}="1"/>');
+    await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const odd = await page.evaluate(() => {
+      const c = document.querySelector('.draw-host').shadowRoot.querySelector('circle');
+      return {
+        broken: document.querySelector('.draw-broken')?.textContent ?? null,
+        circle: c ? [...c.attributes].map((a) => a.name).sort().join(' ') : null,
+        kept: window.drawTest.source().includes('data-\u{1F600}="1"'),
+      };
+    });
+    must(odd.broken === null && odd.circle === 'cx cy fill r' && odd.kept, `Edit source adding data-\u{1F600}: ${JSON.stringify(odd)}, not the circle drawn as [cx cy fill r] with the name kept in the file`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

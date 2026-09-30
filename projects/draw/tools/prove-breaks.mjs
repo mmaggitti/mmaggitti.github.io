@@ -169,6 +169,17 @@ const BREAKS = [
   },
   // P0-M2: the safe sink, the renderer and the canvas (all caught by the site e2e).
   {
+    // P1-M0 review (F4): the DOM judges a name too; one it refuses is dropped, never thrown on.
+    id: 'B302', what: 'the sink stops asking the DOM whether it takes a name (data-😀 throws in setAttribute and fails the render)',
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: ' || !domTakesName(attr.ns, key)', to: '',
+    run: PATCH_TESTS, expect: /attribute names the DOM refuses are dropped, never thrown on\n\s+threw InvalidCharacterError/,
+  },
+  {
+    id: 'B303', what: 'the sink stops asking the DOM whether it takes a name, in the app (a file with data-😀 fails to draw; Edit source adding one blanks the canvas)', slow: true,
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: ' || !domTakesName(attr.ns, key)', to: '',
+    run: SITE_E2E, expect: /data-\* names the DOM refuses: did not render \(InvalidCharacterError[\s\S]*editSourceRoundTrip: Edit source adding data-\S+: \{"broken":"[^"]*is not a valid attribute name/,
+  },
+  {
     id: 'B24', what: 'the sink stops asking DOMPurify', slow: true,
     file: 'projects/draw/src/canvas/safe-sink.ts', from: '!purify?.isValidAttribute(node.local, key, out)', to: '!purify',
     run: SITE_E2E, expect: /is the sink still asking DOMPurify/,

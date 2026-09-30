@@ -6,7 +6,8 @@
 // - the render policy (engine/policy/render-policy.ts, built from the support ledger): which
 //   elements, which attributes, which URLs and which CSS;
 // - DOMPurify's isValidAttribute, a second opinion from a different codebase. Both must agree.
-// Without a working DOMPurify the sink renders nothing: it fails closed.
+// Without a working DOMPurify the sink renders nothing: it fails closed. An attribute whose name the
+// DOM itself refuses to create is dropped too (domTakesName), never thrown on.
 //
 // Values are the engine's decoded values (what a browser's parser would have produced), text goes
 // in as text nodes, and comments, processing instructions, the DOCTYPE and CDATA markers never
@@ -73,13 +74,36 @@ interface Judged {
   value: string;
 }
 
-// Queue one attribute if the policy renders it and DOMPurify agrees; the value is never changed.
+// Queue one attribute if the policy renders it, the DOM takes its name and DOMPurify agrees; the
+// value is never changed.
 function set(plan: Judged[], node: ElementNode, attr: Pick<Attr, 'ns' | 'local'>, value: string): boolean {
   const key = attrKey(attr.ns, attr.local);
   const out = key === null ? null : renderValue(node, attr as Attr, value);
-  if (out === null || key === null || !purify?.isValidAttribute(node.local, key, out)) return false;
+  if (out === null || key === null || !domTakesName(attr.ns, key) || !purify?.isValidAttribute(node.local, key, out)) return false;
   plan.push({ ns: attr.ns, local: attr.local, key, value: out });
   return true;
+}
+
+// The DOM judges a name too: the data-* pattern and DOMPurify admit names a browser's DOM refuses
+// to create (Chromium: data-😀, data-⁰x), and setAttribute would throw, failing the whole render.
+// Such an attribute is dropped and counted like any other the judges refuse, so one odd name never
+// costs the file or blanks the canvas mid-edit. Asked the way write() sets it (by name, or by
+// namespace and qualified name), once per name.
+const domNames = new Map<string, boolean>();
+function domTakesName(ns: string | null, key: string): boolean {
+  const k = keyOf(ns, key);
+  let ok = domNames.get(k);
+  if (ok === undefined) {
+    try {
+      if (ns === null) document.createAttribute(key);
+      else document.createAttributeNS(ns, key);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    domNames.set(k, ok);
+  }
+  return ok;
 }
 
 const keyOf = (ns: string | null, local: string) => `${ns ?? ''} ${local}`;
