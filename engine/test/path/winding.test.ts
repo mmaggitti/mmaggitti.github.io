@@ -1,12 +1,14 @@
 // engine/path/winding: the fill's inside-ness under nonzero and evenodd, by exact crossing counts on
-// lines and on curves flattened to 0.01 units; the keyhole of lab/arcs--holes.svg, the holes goal.
+// lines and on curves flattened to 0.01 units; the keyhole of lab/arcs--holes.svg, the holes goal;
+// and (S3) the booleans' score of a result against its inputs.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parsePath } from '../../path/parse.ts';
 import { toAbsolute } from '../../path/abs.ts';
-import { crossingsOf, insideAt, polygons, windingAt } from '../../path/winding.ts';
+import { booleanScore, crossingsOf, insideAt, opHolds, polygons, windingAt, type BoolOp } from '../../path/winding.ts';
+import type { AbsSeg } from '../../path/abs.ts';
 import { reverseSubpath } from '../../path/segments.ts';
 
 const abs = (d: string) => toAbsolute(parsePath(d));
@@ -96,4 +98,42 @@ test('lab/arcs--holes.svg, the keyhole: (50, 55) is empty under evenodd, filled 
   const rev = reverseSubpath(d, 1);
   assert.deepEqual(inside(rev, 50, 55), NEITHER, 'the inner reversed: a hole under nonzero too');
   assert.deepEqual(inside(rev, 50, 20), BOTH);
+});
+
+// ── the boolean score (P1-M3 S3) ────────────────────────────────────────────────────────────────
+
+const sq = (x: number, y: number, s: number, ccw = false): AbsSeg[] => abs(ccw ? `M ${x} ${y} V ${y + s} H ${x + s} V ${y} Z` : `M ${x} ${y} H ${x + s} V ${y + s} H ${x} Z`);
+
+test('opHolds: what each operation says of a point, from whether each input (the bottom first) holds it', () => {
+  const cases: [boolean[], Record<BoolOp, boolean>][] = [
+    [[true, false], { union: true, difference: true, intersection: false, exclusion: true }],
+    [[false, true], { union: true, difference: false, intersection: false, exclusion: true }],
+    [[true, true], { union: true, difference: false, intersection: true, exclusion: false }],
+    [[false, false], { union: false, difference: false, intersection: false, exclusion: false }],
+    [[true, true, true], { union: true, difference: false, intersection: true, exclusion: true }],
+  ];
+  for (const [inside, want] of cases) for (const op of Object.keys(want) as BoolOp[]) assert.equal(opHolds(op, inside), want[op], `${op} of ${inside}`);
+});
+
+test('booleanScore: a right result misses nothing under either rule; a wrong one misses its share; samples near an input’s outline are left out', () => {
+  const a = { abs: sq(0, 0, 60), rule: 'nonzero' as const };
+  const b = { abs: sq(40, 40, 60), rule: 'nonzero' as const };
+  const union = abs('M 0 0 H 60 V 40 H 100 V 100 H 40 V 60 H 0 Z');
+  const right = booleanScore([a, b], 'union', union, 64, 0.005);
+  assert.deepEqual([right.nonzero, right.evenodd], [0, 0]);
+  const all = booleanScore([a, b], 'union', union, 64, 0);
+  assert.equal(all.counted, 64 * 64, 'no skip: every sample counts');
+  assert.ok(right.counted < all.counted, 'with a skip, samples near the outlines are left out');
+  // The bottom alone for a union misses b’s own part: 3,200 of the box’s 10,000 square units.
+  const wrong = booleanScore([a, b], 'union', a.abs, 64, 0.005);
+  assert.ok(Math.abs(wrong.nonzero - 0.32) < 0.03 && Math.abs(wrong.evenodd - 0.32) < 0.03, `${JSON.stringify(wrong)}`);
+  // A hole written the same way round as its outline: right under evenodd, wrong under nonzero.
+  const ring = [...sq(0, 0, 100), ...sq(25, 25, 50)];
+  const inner = { abs: sq(25, 25, 50), rule: 'nonzero' as const };
+  const s = booleanScore([{ abs: sq(0, 0, 100), rule: 'nonzero' }, inner], 'difference', ring, 64, 0.005);
+  assert.equal(s.evenodd, 0);
+  assert.ok(Math.abs(s.nonzero - 0.25) < 0.03, `${JSON.stringify(s)}`);
+  // Each input’s own rule: under evenodd, the doubled square (a figure written twice) holds nothing.
+  const twice = { abs: [...sq(0, 0, 50), ...sq(0, 0, 50)], rule: 'evenodd' as const };
+  assert.deepEqual(booleanScore([twice, { abs: sq(25, 25, 50), rule: 'nonzero' }], 'union', sq(25, 25, 50), 32, 0.005).nonzero, 0);
 });
