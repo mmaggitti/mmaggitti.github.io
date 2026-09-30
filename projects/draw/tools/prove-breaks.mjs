@@ -2521,6 +2521,12 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '  undeclareIfUnused(doc, apply);\n', to: '',
     run: DRAW_E2E, expect: /glossAndMakeUnique: Gloss off did not give the file back/,
   },
+  // P1-M2 fix (the review's findings): quick unless marked, each slow one naming its checks.
+  {
+    id: 'B475', what: 'F8: Gloss and Linear put each shape’s gradient in with a fragment parse of its own (which reads the whole document), so a command over many shapes is quadratic again',
+    file: 'engine/paint/gradients.ts', from: '  if (!markups.length) return [];\n', to: '  if (!markups.length) return [];\n  if (markups.length > 1) return markups.flatMap((m) => insertGradients(doc, [m], apply));\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a large selection take linear time/,
+  },
 ];
 
 const args = process.argv.slice(2);

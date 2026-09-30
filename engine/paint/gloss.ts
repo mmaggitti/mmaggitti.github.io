@@ -1,6 +1,6 @@
 // Gloss (P1-M2): SVG Lab's Create gloss (L1746-1751, L1892, L2120-2125). On: the fill becomes a
 // radial gradient from white to the shape's own colour, <radialGradient id="gloss-N" cx="0.35"
-// cy="0.3" r="0.8" draw:made="true">, in defs (paint/gradients.ts insertGradient). Off: the fill is
+// cy="0.3" r="0.8" draw:made="true">, in defs (paint/gradients.ts insertGradients). Off: the fill is
 // the end stop's colour as written again, and the gradient goes when Draw made it and nothing else
 // uses it, with a Draw-made <defs> left empty and Draw's namespace when nothing of Draw's is left:
 // on then off gives the file back byte for byte.
@@ -14,9 +14,9 @@ import type { Op } from '../commands/ops.ts';
 import { parseColor } from '../values/color.ts';
 import { numberedIds } from '../model/ids.ts';
 import { styleSource } from '../style/where.ts';
-import { planStyle, type StyleCtx } from '../style/write.ts';
+import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
-import { dropUnused, gradientMarkup, idMap, insertGradient, resolveGradient, stopColour, LAB_B } from './gradients.ts';
+import { dropUnused, gradientMarkup, idMap, insertGradients, resolveGradient, stopColour, LAB_B } from './gradients.ts';
 
 type Apply = (op: Op) => void;
 
@@ -47,10 +47,16 @@ export function glossColour(doc: Doc, id: NodeId): string {
   return c && c.kind === 'color' ? v! : LAB_B;
 }
 
-/** Gloss on for each element (document order): a gloss-N each, N rising, one transaction. Returns the refusals. */
+/**
+ * Gloss on for each element (document order): a gloss-N each, N rising, one transaction. Returns the
+ * refusals. Every element is read before anything is written, and the gradients go in with one
+ * fragment parse, so a Gloss over many shapes stays linear.
+ */
 export function glossOn(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
   const next = numberedIds(doc);
   const refused: { id: NodeId; why: string }[] = [];
+  const plans: StylePlan[] = [];
+  const markups: ((draw: string) => string)[] = [];
   for (const id of ids) {
     const gid = next('gloss');
     const colour = glossColour(doc, id);
@@ -59,16 +65,22 @@ export function glossOn(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply: 
       refused.push(plan.refused[0]);
       continue;
     }
-    insertGradient(doc, (draw) => gradientMarkup(doc, 'radialGradient', gid, GLOSS_ATTRS, [['0', '#ffffff'], ['1', colour]], draw), apply);
-    applyPlan(doc, plan, apply);
+    markups.push((draw) => gradientMarkup(doc, 'radialGradient', gid, GLOSS_ATTRS, [['0', '#ffffff'], ['1', colour]], draw));
+    plans.push(plan);
   }
+  insertGradients(doc, markups, apply);
+  for (const plan of plans) applyPlan(doc, plan, apply);
   return refused;
 }
 
-/** Gloss off for each element: its fill the end stop's colour as written, and the gradient gone when Draw made it and nothing else uses it. */
+/**
+ * Gloss off for each element: its fill the end stop's colour as written, and the gradient gone when
+ * Draw made it and nothing else uses it. Every element is read before anything is written.
+ */
 export function glossOff(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
   const refused: { id: NodeId; why: string }[] = [];
   const dropped: NodeId[] = [];
+  const plans: StylePlan[] = [];
   for (const id of ids) {
     const g = glossOf(doc, id);
     if (g === null) continue;
@@ -79,9 +91,10 @@ export function glossOff(doc: Doc, ids: readonly NodeId[], ctx: StyleCtx, apply:
       refused.push(plan.refused[0]);
       continue;
     }
-    applyPlan(doc, plan, apply);
+    plans.push(plan);
     dropped.push(g);
   }
+  for (const plan of plans) applyPlan(doc, plan, apply);
   dropUnused(doc, dropped, apply);
   return refused;
 }

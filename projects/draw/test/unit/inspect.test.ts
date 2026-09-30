@@ -432,3 +432,92 @@ test('Edit on canvas: the gradient’s handles instead of the shape’s, with it
   select(e, 'a');
   assert.equal(e.editGradient.get(), null, 'a new selection ends it');
 });
+
+// Gloss, Gloss off, Linear and None over a large selection read every shape before writing, and put
+// every new gradient in with one fragment parse (which reads the whole document), so they cost time
+// in proportion to the selection. Measured in node over 1,000 and 4,000 rects: Gloss about 0.12 and
+// 0.27 s, Gloss off 0.12 and 0.25 s, Linear 0.09 and 0.34 s, None 0.06 and 0.17 s; with a fragment
+// parse and an id map per shape, 1.5 and 37 s, 0.6 and 12 s, 1.7 and 39 s, 0.6 and 13 s.
+test('Gloss, Gloss off, Linear and None over a large selection take linear time: over 4,000 rects each costs under 6× what it costs over 1,000, and under 2 s', () => {
+  const rects = (n: number, fill: (i: number) => string) => Array.from({ length: n }, (_, i) => `<rect x="${(i % 100) * 10}" y="${Math.floor(i / 100) * 10}" width="8" height="8" fill="${fill(i)}"/>`).join('\n  ');
+  const box = (n: number) => `0 0 1000 ${Math.ceil(n / 100) * 10}`;
+  const plain = (n: number) => svg(rects(n, () => '#e76f51'), box(n));
+  const gloss = (i: number) => `<radialGradient id="gloss-${i + 1}" cx="0.35" cy="0.3" r="0.8" draw:made="true"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e76f51"/></radialGradient>`;
+  const glossed = (n: number) => svg(`<defs draw:made="true">${Array.from({ length: n }, (_, i) => gloss(i)).join('')}</defs>\n  ${rects(n, (i) => `url(#gloss-${i + 1})`)}`, box(n)).replace('<svg ', '<svg xmlns:draw="https://mmaggitti.github.io/draw/ns" ');
+  const acts: [string, string, (n: number) => string, (e: Editor) => void][] = [
+    ['Gloss', 'Gloss', plain, (e) => e.toggleGloss()],
+    ['Gloss off', 'Gloss off', glossed, (e) => e.toggleGloss()],
+    ['Linear', 'Set fill', plain, (e) => e.setPaintKind('fill', 'linear')],
+    ['None', 'Set fill', glossed, (e) => e.setPaintKind('fill', 'none')],
+  ];
+  const LIMIT = 2000;
+  const cost = (n: number, file: (n: number) => string, label: string, act: (e: Editor) => void): number => {
+    const e = opened(file(n));
+    e.selectAll();
+    assert.equal(e.selection.get().size, n, 'test setup: Select all took every rect');
+    const t = performance.now();
+    act(e);
+    const ms = performance.now() - t;
+    assert.equal(e.history.get().undoLabel, label, `test setup: ${label} did something over ${n} rects (${e.notice.get()})`);
+    return ms;
+  };
+  for (const [, label, file, act] of acts) cost(200, file, label, act); // warm the engine up
+  for (const [what, label, file, act] of acts) {
+    // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest
+    // run of each size counts. A quadratic command costs over a second at 1,000 already, so then
+    // 4,000 isn't waited for.
+    let small = Infinity;
+    let big = Infinity;
+    for (let run = 0; run < 3; run++) {
+      small = Math.min(small, cost(1000, file, label, act));
+      if (small >= LIMIT / 4) continue;
+      big = Math.min(big, cost(4000, file, label, act));
+      if (big < 6 * small && big < LIMIT) break;
+    }
+    assert.ok(small < LIMIT / 4, `${what}: ${small.toFixed(0)} ms over 1,000 rects (the limit is ${LIMIT / 4})`);
+    assert.ok(big < 6 * small, `${what}: ${small.toFixed(0)} ms over 1,000 rects, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
+    assert.ok(big < LIMIT, `${what}: ${big.toFixed(0)} ms over 4,000 rects (the limit is ${LIMIT})`);
+  }
+});
+
+test('Gloss, Gloss off, Linear and None over a selection write exactly what they write one shape at a time: five shapes with a mix of fills (a colour attribute, a colour in style="", none, no fill, a gradient), in a file with its own <defs> and in one without', () => {
+  const SHAPES = [
+    '<rect id="s1" x="5" y="5" width="20" height="20" fill="#e76f51"/>',
+    '<circle id="s2" cx="50" cy="15" r="10" style="stroke: #264653; fill: #2a9d8f"/>',
+    '<ellipse id="s3" cx="80" cy="15" rx="12" ry="6"/>',
+    '<path id="s4" d="M5 40H25V60Z" fill="none"/>',
+    '<polygon id="s5" points="40,40 60,40 50,60" fill="url(#g)"/>',
+  ].join('\n  ');
+  const G = '<linearGradient id="g"><stop offset="0" stop-color="#e9c46a"/><stop offset="1" stop-color="#f4a261"/></linearGradient>';
+  const files = [svg(`<defs>\n    ${G}\n  </defs>\n  ${SHAPES}`), svg(`${SHAPES}\n  ${G}`)];
+  const ids = ['s1', 's2', 's3', 's4', 's5'];
+  const commands: [string, (e: Editor) => void][] = [
+    ['Gloss', (e) => e.toggleGloss()],
+    ['Linear', (e) => e.setPaintKind('fill', 'linear')],
+    ['Radial', (e) => e.setPaintKind('fill', 'radial')],
+  ];
+  for (const file of files) {
+    for (const [what, act] of commands) {
+      const all = opened(file);
+      select(all, ...ids);
+      act(all);
+      const one = opened(file);
+      for (const id of ids) {
+        select(one, id);
+        act(one);
+      }
+      assert.equal(all.source(), one.source(), `${what}: over the selection as one shape at a time`);
+      assert.notEqual(all.source(), file, `test setup: ${what} wrote something`);
+      // And back: Gloss off, or None, over the selection and one shape at a time, from there.
+      const back: [string, (e: Editor) => void] = what === 'Gloss' ? ['Gloss off', (e) => e.toggleGloss()] : ['None', (e) => e.setPaintKind('fill', 'none')];
+      select(all, ...ids);
+      back[1](all);
+      for (const id of ids) {
+        select(one, id);
+        back[1](one);
+      }
+      assert.equal(all.source(), one.source(), `${back[0]} after ${what}: over the selection as one shape at a time`);
+      assert.equal(all.history.get().undoLabel, back[0] === 'Gloss off' ? 'Gloss off' : 'Set fill');
+    }
+  }
+});

@@ -69,17 +69,27 @@ export function insertion(doc: Doc, where: Where): Insertion {
  * markup doesn't parse there (a limit of the document's reached).
  */
 export function insertMarkup(doc: Doc, where: Where, markup: string, apply: (op: Op) => void): NodeId {
+  return insertMarkups(doc, where, [markup], apply)[0];
+}
+
+/**
+ * Several elements' markup, in order, where `where` says: each after the one before it, with the
+ * whitespace the insertion rule gives the first (as inserting them one by one gives each), all in
+ * one fragment parse, so a command over many shapes stays linear (parseFragment reads the whole
+ * document). The new elements' NodeIds, in order. Refused (TokenEditError) as insertMarkup is.
+ */
+export function insertMarkups(doc: Doc, where: Where, markups: readonly string[], apply: (op: Op) => void): NodeId[] {
   const at = insertion(doc, where);
-  const made = parseFragment(doc, at.parent, at.lead + markup + at.trail);
+  const made = parseFragment(doc, at.parent, markups.map((m) => at.lead + m + at.trail).join(''));
   if (!made.ok) throw new TokenEditError(made.error.message);
   let index = at.index;
-  let element: NodeId | null = null;
+  const elements: NodeId[] = [];
   for (const id of made.nodes) {
     apply(opInsert(doc, id, at.parent, index++));
-    if (element === null && doc.nodes.get(id)?.kind === 'element') element = id;
+    if (doc.nodes.get(id)?.kind === 'element') elements.push(id);
   }
-  if (element === null) throw new TokenEditError('there is no element to insert');
-  return element;
+  if (!elements.length) throw new TokenEditError('there is no element to insert');
+  return elements;
 }
 
 /** Remove `id` and the whitespace-only text just before it. */

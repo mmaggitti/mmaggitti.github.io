@@ -26,10 +26,10 @@ import { opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
 import { buildRefIndex } from '../model/refs.ts';
 import { declare, undeclareIfUnused } from '../model/draw-state.ts';
 import { isDrawMadeEmpty, isDrawMadeGradient } from '../model/draw-ns.ts';
-import { insertMarkup, removeWithSpace } from '../model/space.ts';
+import { insertMarkup, insertMarkups, removeWithSpace } from '../model/space.ts';
 import { numberedIds } from '../model/ids.ts';
 import { shownValue, styleSource } from '../style/where.ts';
-import { planStyle, type StyleCtx } from '../style/write.ts';
+import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
 
 type Apply = (op: Op) => void;
@@ -227,23 +227,26 @@ export function rootDefs(doc: Doc): ElementNode | null {
 }
 
 /**
- * Put a gradient's markup (made by `markup` from the file's SVG prefix and Draw's) into the root's
- * first <defs>, as its last element child, or, with none, into a <defs draw:made="true"> Draw makes
- * before the root's first element child that isn't title, desc or metadata (last when there is
- * none), by the insertion rule. Declares Draw's namespace first. Returns the gradient's NodeId.
+ * Put gradients' markup (each made by its `markups` entry from Draw's prefix) into the root's first
+ * <defs>, as its last element children in order, or, with none, into a <defs draw:made="true"> Draw
+ * makes before the root's first element child that isn't title, desc or metadata (last when there
+ * is none), by the insertion rule. Declares Draw's namespace first. All of them in one fragment
+ * parse (which reads the whole document), so a command over many shapes stays linear. Returns the
+ * gradients' NodeIds, in order.
  */
-export function insertGradient(doc: Doc, markup: (draw: string) => string, apply: Apply): NodeId {
+export function insertGradients(doc: Doc, markups: readonly ((draw: string) => string)[], apply: Apply): NodeId[] {
+  if (!markups.length) return [];
   const draw = declare(doc, apply);
   const defs = rootDefs(doc);
-  if (defs) return insertMarkup(doc, { last: defs.id }, markup(draw), apply);
+  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)), apply);
   const root = el(doc, doc.root);
   const first = root.children.find((c) => {
     const n = doc.nodes.get(c);
     return n?.kind === 'element' && !(n.ns === NS.svg && (n.local === 'title' || n.local === 'desc' || n.local === 'metadata'));
   });
   const d = qn(doc, 'defs');
-  const made = insertMarkup(doc, first === undefined ? { last: root.id } : { before: first }, `<${d} ${draw}:made="true">${markup(draw)}</${d}>`, apply);
-  return el(doc, made).children[0];
+  const made = insertMarkup(doc, first === undefined ? { last: root.id } : { before: first }, `<${d} ${draw}:made="true">${markups.map((m) => m(draw)).join('')}</${d}>`, apply);
+  return [...el(doc, made).children];
 }
 
 /** A gradient's markup, one line, as SVG Lab writes one: `attrs` after its id, then draw:made, then its stops. */
@@ -276,11 +279,15 @@ export function newStops(doc: Doc, id: NodeId, prop: PaintProp): [string, string
  * Give each element's `prop` a new gradient of `kind`: one per element, ids `linear-N` or `radial-N`
  * rising in document order, written where the paint lives (a fallback after an old url kept). The
  * gradients it stops using go when Draw made them and nothing uses them. Returns the refusals.
+ * Every element is read before anything is written (one id map), and the new gradients go in with
+ * one fragment parse, so it stays linear over many shapes.
  */
 export function setGradientPaint(doc: Doc, ids: readonly NodeId[], prop: PaintProp, kind: GradientKind, ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
   const next = numberedIds(doc);
   const refused: { id: NodeId; why: string }[] = [];
   const dropped: NodeId[] = [];
+  const plans: StylePlan[] = [];
+  const markups: ((draw: string) => string)[] = [];
   for (const e of ids) {
     const own = ownPaint(doc, e, prop);
     const stops = newStops(doc, e, prop);
@@ -290,10 +297,12 @@ export function setGradientPaint(doc: Doc, ids: readonly NodeId[], prop: PaintPr
       refused.push(plan.refused[0]);
       continue;
     }
-    insertGradient(doc, (draw) => gradientMarkup(doc, kind, gid, NEW_ATTRS[kind], [['0', stops[0]], ['1', stops[1]]], draw), apply);
-    applyPlan(doc, plan, apply);
+    markups.push((draw) => gradientMarkup(doc, kind, gid, NEW_ATTRS[kind], [['0', stops[0]], ['1', stops[1]]], draw));
+    plans.push(plan);
     if (own.gradient !== null) dropped.push(own.gradient);
   }
+  insertGradients(doc, markups, apply);
+  for (const plan of plans) applyPlan(doc, plan, apply);
   dropUnused(doc, dropped, apply);
   return refused;
 }
@@ -301,19 +310,22 @@ export function setGradientPaint(doc: Doc, ids: readonly NodeId[], prop: PaintPr
 /**
  * The paint back to a colour or none: `value` for each element (for Colour, the caller passes the
  * gradient's first stop colour as written), and the Draw-made gradients nothing uses any more
- * taken away. Returns the refusals.
+ * taken away. Returns the refusals. Every element (and `value`) is read before anything is
+ * written, so it stays linear over many shapes.
  */
 export function setPlainPaint(doc: Doc, ids: readonly NodeId[], prop: PaintProp, value: (id: NodeId) => string, ctx: StyleCtx, apply: Apply): { id: NodeId; why: string }[] {
   const refused: { id: NodeId; why: string }[] = [];
   const dropped: NodeId[] = [];
+  const plans: StylePlan[] = [];
   for (const e of ids) {
     const own = ownPaint(doc, e, prop);
     const plan = planStyle(doc, [e], prop, value(e), ctx);
     refused.push(...plan.refused);
     if (plan.refused.length) continue;
-    applyPlan(doc, plan, apply);
+    plans.push(plan);
     if (own.gradient !== null) dropped.push(own.gradient);
   }
+  for (const plan of plans) applyPlan(doc, plan, apply);
   dropUnused(doc, dropped, apply);
   return refused;
 }
@@ -332,14 +344,20 @@ export function dropUnused(doc: Doc, ids: readonly NodeId[], apply: Apply): void
   if (!ids.length) return;
   const refs = buildRefIndex(doc).refs;
   const holders = new Set<NodeId>();
+  const gone: NodeId[] = [];
   for (const g of new Set(ids)) {
     const n = doc.nodes.get(g);
     if (!isGradient(n) || !isDrawMadeGradient(doc, n) || n.parent === null) continue;
     const own = attrValue(doc, n, null, 'id');
     if (own !== null && (refs.get(own)?.length ?? 0) > 0) continue;
     holders.add(n.parent);
-    removeWithSpace(doc, g, apply);
+    gone.push(g);
   }
+  // Last first (M1's rule for many removals): each leaves from the end of what is left, so taking
+  // 4,000 gradients out of one <defs> searches and shifts nothing.
+  const at = new Map<NodeId, number>();
+  for (const h of holders) el(doc, h).children.forEach((c, i) => at.set(c, i));
+  for (const g of gone.sort((a, b) => at.get(b)! - at.get(a)!)) removeWithSpace(doc, g, apply);
   for (const h of holders) {
     const n = doc.nodes.get(h);
     if (n?.kind === 'element' && n.parent !== null && isDrawMadeEmpty(doc, n)) removeWithSpace(doc, h, apply);
