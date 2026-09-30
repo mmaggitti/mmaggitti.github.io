@@ -2,8 +2,9 @@
 // nothing, manual timers, a lock table standing in for Web Locks, and small document helpers.
 
 import { readdirSync, readFileSync } from 'node:fs';
-import { descendants, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { attrValue, descendants, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { localBounds } from '../../../../engine/geometry/bounds.ts';
+import { inlineDecl } from '../../../../engine/geometry/css.ts';
 import { inDrawnTree, lineage, placement, userCtm } from '../../../../engine/geometry/ctm.ts';
 import { multiply } from '../../../../engine/values/affine.ts';
 import { Editor, type EditorPorts, type Measured } from '../../src/editor.ts';
@@ -43,9 +44,19 @@ export function measureWith(editor: Editor, ids: readonly NodeId[], referenced =
         m = p && m && multiply(m, p);
       }
     }
-    if (b && m) out.set(id, { box: b, toHost: multiply(toHost, m) });
+    if (b && m) out.set(id, { box: b, toHost: multiply(toHost, m), hidden: visibilityHides(doc, id) });
   }
   return out;
+}
+
+// visibility as the browser computes it from the file (inherited; the nearest attribute or style=""
+// decides): hidden or collapse hides.
+function visibilityHides(doc: Doc, id: NodeId): boolean {
+  for (const n of lineage(doc, id).reverse()) {
+    const v = (inlineDecl(doc, n.id, 'visibility') ?? attrValue(doc, n, null, 'visibility'))?.trim().toLowerCase();
+    if (v && v !== 'inherit') return v === 'hidden' || v === 'collapse';
+  }
+  return false;
 }
 
 const bound = new WeakMap<EditorPorts, Editor>();

@@ -123,9 +123,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
   - `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
     `dangerouslySetInnerHTML`, `srcdoc`, `eval` and `new Function` anywhere;
-  - DOM writes outside the sink and the overlay: namespaced elements and attributes, markup
-    parsing and stylesheet writes (`dom-write`). Plain elements and text (`dom-text`) are also
-    allowed in `src/codeview/`, which shows the source as text and never as markup;
+  - DOM writes outside the sink and the overlay folder (`src/canvas/overlay/`): namespaced
+    elements and attributes, markup parsing and stylesheet writes (`dom-write`). Plain elements
+    and text (`dom-text`) are also allowed in `src/codeview/`, which shows the source as text and
+    never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
   - file, clipboard, drag-and-drop, share, Web Locks and history APIs outside `src/platform/`
     (`file-api`);

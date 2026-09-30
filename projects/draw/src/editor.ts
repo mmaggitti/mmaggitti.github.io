@@ -65,6 +65,8 @@ import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refO
 export interface Measured {
   box: Rect;
   toHost: Affine;
+  /** Hidden by visibility (hidden or collapse): drawn as nothing, so marquees and Select all pass it by, as a tap does. */
+  hidden?: boolean;
 }
 
 export interface CanvasPort {
@@ -747,7 +749,7 @@ export class Editor {
     const parent = doc.nodes.get(id)!.parent!;
     const m = this.#ports.canvas.measure([doc.root, parent]);
     const root = m.get(doc.root)?.toHost ?? (this.#box ? rootToHostMatrix(this.#box, this.#viewport, this.#M) : null);
-    const p = m.get(parent)?.toHost;
+    const p = parent === doc.root ? root : m.get(parent)?.toHost;
     const inv = p && invert(linear(p));
     if (!root || !inv) return null;
     const [x, y] = applyM(multiply(inv, linear(root)), d.x, d.y);
@@ -878,7 +880,7 @@ export class Editor {
     if (!root || !rootInv) return null;
     const toParent = new Map<NodeId, Affine | null>();
     for (const p of parents) {
-      const m = measured.get(p)?.toHost;
+      const m = p === doc.root ? root : measured.get(p)?.toHost; // the root's own units are the camera's, measured or not
       toParent.set(p, m ? multiply(invert(linear(m)) ?? [0, 0, 0, 0, 0, 0], linear(root)) : null);
     }
     const px = Math.sqrt(Math.abs(root[0] * root[3] - root[1] * root[2]));
@@ -1381,7 +1383,7 @@ export class Editor {
   }
 
   // The leaf shapes a marquee can take (not a container, not a text's own parts), rendered,
-  // displayed and not locked, whose screen box lies inside `r` (host px; null: anywhere).
+  // displayed, visible and not locked, whose screen box lies inside `r` (host px; null: anywhere).
   #leaves(r: Rect | null): NodeId[] {
     const doc = this.#doc!;
     const ids = [...this.#elements()].filter((id) => {
@@ -1391,7 +1393,7 @@ export class Editor {
     const measured = this.#ports.canvas.measure(ids);
     return ids.filter((id) => {
       const m = measured.get(id);
-      if (!m) return false;
+      if (!m || m.hidden) return false;
       if (!r) return true;
       const b = unionBox([quadOf(m.box, m.toHost)])!;
       return b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.width <= r.x + r.width + 0.5 && b.y + b.height <= r.y + r.height + 0.5;

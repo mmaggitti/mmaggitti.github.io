@@ -1808,7 +1808,7 @@ const BREAKS = [
   },
   {
     id: 'B339', what: 'a hold-drag on a shape moves it', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
-    file: 'projects/draw/src/editor.ts', from: '    if (held || g.target === null) {', to: '    if (g.target === null) {',
+    file: 'projects/draw/src/editor.ts', from: '    if (held || g.target === null || g.onLocked) {', to: '    if (g.target === null || g.onLocked) {',
     run: DRAW_E2E, expect: /aMarqueeSelectsWhatItEncloses: a hold-drag from B (drew no marquee|moved it)/,
   },
   {
@@ -1912,6 +1912,83 @@ const BREAKS = [
     id: 'B359', what: "a guide's pill moves it by half the drag", slow: true, checks: ['movesSnapToGuidesShapesAndTheGrid'],
     file: 'projects/draw/src/editor.ts', from: '    const [rx, ry] = applyM(inv, g.at.x, g.at.y);\n    const at = toStep(', to: '    const [rx, ry] = applyM(inv, (g.at.x + g.at0.x) / 2, (g.at.y + g.at0.y) / 2);\n    const at = toStep(',
     run: DRAW_E2E, expect: /movesSnapToGuidesShapesAndTheGrid: the pill did not drag the guide to 45/,
+  },
+  // P1-M1 S4: structure, Layers, rem and Draw's own state.
+  {
+    id: 'B360', what: 'the copy keeps draw:locked',
+    file: 'projects/draw/src/interact/structure.ts', from: "      for (const n of descendants(doc, copy)) if (n.kind === 'element' && findAttr(n, DRAW_NS, 'locked')) apply(opSetAttr(doc, n.id, DRAW_NS, 'locked', null));\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Duplicate: the copy follows its original/,
+  },
+  {
+    id: 'B361', what: 'duplicate renames ids across the whole document (outside references move to the copy)',
+    file: 'projects/draw/src/interact/structure.ts', from: '      renameIdsIn(doc, copy, map, apply);\n', to: '      renameIdsIn(doc, copy, map, apply);\n      renameIdsIn(doc, doc.root, map, apply);\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Duplicate: the copy follows its original/,
+  },
+  {
+    id: 'B362', what: "ungroup doesn't refuse opacity",
+    file: 'projects/draw/src/interact/structure.ts', from: "(a.local === 'id' || a.local === 'transform')", to: "(a.local === 'id' || a.local === 'transform' || a.local === 'opacity')",
+    run: drawTests('editor.test.ts'), expect: /✖ Group puts the selection in a new <g>/,
+  },
+  {
+    id: 'B363', what: 'grouping across parents is allowed',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (ids.some((id) => doc.nodes.get(id)!.parent !== p)) return 'Group needs shapes with the same parent.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Group puts the selection in a new <g>/,
+  },
+  {
+    id: 'B364', what: 'Hide writes visibility instead',
+    file: 'projects/draw/src/editor.ts', from: "apply(opSetAttr(doc, id, null, 'display', hidden ? 'none' : null))", to: "apply(opSetAttr(doc, id, null, 'visibility', hidden ? 'hidden' : null))",
+    run: drawTests('editor.test.ts'), expect: /✖ Layers: Hide writes display="none"/,
+  },
+  {
+    id: 'B365', what: 'the rem report misses rem in style=""',
+    file: 'engine/report/import-report.ts', from: '      for (const a of n.attrs) attributes += countRem(a.raw);', to: "      for (const a of n.attrs) if (a.local !== 'style') attributes += countRem(a.raw);",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ rem lengths in attributes and style="" are counted/,
+  },
+  {
+    id: 'B366', what: 'distribute keeps unequal gaps',
+    file: 'projects/draw/src/interact/align.ts', from: '    const d = at - lo(boxes[i]);', to: '    const d = 0 * (at - lo(boxes[i]));',
+    run: drawTests('align.test.ts'), expect: /✖ align deltas: each box to the target/,
+  },
+  {
+    id: 'B367', what: 'Rename leaves a reference behind',
+    file: 'projects/draw/src/editor.ts', from: '      else renameIdsIn(doc, doc.root, new Map([[was, next]]), apply);', to: "      else apply(opSetAttr(doc, id, null, 'id', next));",
+    run: drawTests('editor.test.ts'), expect: /✖ Layers: Hide writes display="none"/,
+  },
+  {
+    id: 'B373', what: 'a marquee takes a shape visibility hides',
+    file: 'projects/draw/src/editor.ts', from: '      if (!m || m.hidden) return false;', to: '      if (!m) return false;',
+    run: drawTests('editor.test.ts'), expect: /✖ a marquee and Select all pass by a shape visibility hides/,
+  },
+  {
+    id: 'B374', what: "a move in the root's own units needs the root measured (a file with text: nothing moves)",
+    file: 'projects/draw/src/editor.ts', from: "      const m = p === doc.root ? root : measured.get(p)?.toHost; // the root's own units are the camera's, measured or not", to: '      const m = measured.get(p)?.toHost;',
+    run: drawTests('editor.test.ts'), expect: /✖ no raw items:/,
+  },
+  // P1-M1 S4, slow.
+  {
+    id: 'B368', what: "the copy keeps the original's ids", slow: true, checks: ['duplicateGetsFreshIdsAndItsOwnReferences'],
+    file: 'projects/draw/src/interact/structure.ts', from: '          const now = freshId(doc, was, taken);', to: '          const now = was;',
+    run: DRAW_E2E, expect: /duplicateGetsFreshIdsAndItsOwnReferences: the copy's ids are not fresh/,
+  },
+  {
+    id: 'B369', what: "ungroup drops the group's transform", slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!t || gValue === null || !gValue.trim()) continue;', to: '    continue;',
+    run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup did not push translate\(10 5\) rotate\(15\) into each child/,
+  },
+  {
+    id: 'B370', what: 'a locked shape takes taps', slow: true, checks: ['layersHideAndLockShapes'],
+    file: 'projects/draw/src/editor.ts', from: '    const target = targets.find((t) => !isLocked(doc, t)) ?? null;', to: '    const target = targets[0] ?? null;',
+    run: DRAW_E2E, expect: /layersHideAndLockShapes: a tap on the locked disc took <circle#disc>, not the sky under it/,
+  },
+  {
+    id: 'B371', what: 'As-is keeps <draw:state>', slow: true, checks: ['drawStateStaysOutOfAsIsAndClean'],
+    file: 'projects/draw/src/export/svg.ts', from: "  const text = clean ? clean.text : kind === 'as-is' ? stripDrawState(doc) : serialize(doc);", to: '  const text = clean ? clean.text : serialize(doc);',
+    run: DRAW_E2E, expect: /drawStateStaysOutOfAsIsAndClean: the As-is export holds draw:/,
+  },
+  {
+    id: 'B372', what: 'a ContextBar button shrinks under 44', slow: true, checks: ['phoneRulesOnTheSelectionTools'],
+    file: 'projects/draw/src/app.css', from: '.draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }', to: '.draw-ctx-btn { display: inline-grid; place-items: center; width: 2.5rem; min-width: 0; padding: 0; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheSelectionTools \(956\): 440×956:\n\s+one selected: Deselect is 30×44/,
   },
 ];
 

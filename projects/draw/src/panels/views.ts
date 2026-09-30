@@ -56,7 +56,8 @@ export class Views {
   }
 
   // Each drawn graphics element's getBBox, and its getScreenCTM less the host's offset: its own
-  // units → host px. An element with no box (not rendered, in <defs>) is left out.
+  // units → host px, and whether visibility hides it. An element with no box (not rendered, in
+  // <defs>) is left out.
   #measure(ids: readonly NodeId[]): Map<NodeId, Measured> {
     const out = new Map<NodeId, Measured>();
     if (!this.renderer || !this.host || !ids.length) return out;
@@ -73,7 +74,8 @@ export class Views {
       }
       const m = g.getScreenCTM();
       if (!m) continue;
-      out.set(id, { box: { x: b.x, y: b.y, width: b.width, height: b.height }, toHost: [m.a, m.b, m.c, m.d, m.e - h.left, m.f - h.top] });
+      const hidden = getComputedStyle(g).visibility !== 'visible';
+      out.set(id, { box: { x: b.x, y: b.y, width: b.width, height: b.height }, toHost: [m.a, m.b, m.c, m.d, m.e - h.left, m.f - h.top], hidden });
     }
     return out;
   }

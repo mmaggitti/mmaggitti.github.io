@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1332 rows: 1022 planned, 3 partial, 305 done, 2 superseded.
+Current phase: **P1**. 1332 rows: 1010 planned, 3 partial, 317 done, 2 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -10,21 +10,21 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| element | 188 | 160 | 1 | 27 | 0 |
-| attribute | 386 | 260 | 0 | 126 | 0 |
+| element | 188 | 159 | 1 | 28 | 0 |
+| attribute | 386 | 257 | 0 | 129 | 0 |
 | property | 48 | 33 | 0 | 15 | 0 |
-| value | 85 | 64 | 0 | 21 | 0 |
+| value | 85 | 63 | 0 | 22 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
-| namespace | 21 | 11 | 2 | 8 | 0 |
-| capability | 480 | 416 | 0 | 62 | 2 |
-| feature | 101 | 78 | 0 | 23 | 0 |
+| namespace | 21 | 10 | 2 | 9 | 0 |
+| capability | 480 | 414 | 0 | 64 | 2 |
+| feature | 101 | 74 | 0 | 27 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 319 | 259 | 0 | 59 | 1 |
+| P1 | 319 | 247 | 0 | 71 | 1 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
@@ -57,7 +57,7 @@ Each lesson's capabilities and the phases that deliver them.
 | 1 | Transform | Groups and transforms | P1 | 11 | 11 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P3, P4, P5 | 50 | 6 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 8 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 0 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |

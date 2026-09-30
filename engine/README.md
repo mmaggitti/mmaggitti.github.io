@@ -19,6 +19,9 @@ Tests live in `engine/test/` and run in Draw's build (`npm run test:unit` in `pr
 |---|---|
 | `xml/` | Lossless lexer and CST: tokens tile the source, so `serialize(parse(x)) === x`. What a browser's XML parser refuses, it refuses, at the same place (the first, when a file has several). Entity expansion is capped at 1 MB and depth 8, the work of expanding counted with the output. |
 | `model/` | The document over the CST: stable NodeIds, namespaces resolved by URI, edits that change only their own bytes. `refs.ts` indexes ids and every reference to them. |
+| `model/ids.ts` | Fresh ids (`freshId`, reserved across a batch) and renaming ids with every reference to them inside a subtree (`renameIdsIn`): Duplicate and Rename. |
+| `model/draw-state.ts` | Draw's own state in the file (`draw-ns.ts`: its namespace): guides and the grid step in one `<draw:state>` in the file's single `<metadata>`, locks as `draw:locked`, declared once on the root; `stripDrawState` gives the file back without it, byte for byte (As-is and Copy). |
+| `geometry/` | Where things are, without a DOM: lengths in user units (`lengths.ts`), the CSS that can move or size an element (`css.ts`), each element's transform to the root (`ctm.ts`, `transform-origin` and `transform-box` included), exact bounds (`bounds.ts`), thin-shape hits (`hit.ts`), and the write policy: what a move, resize, rotate or scale writes, number by number, or why it can't (`write.ts`). |
 | `values/` | Numbers as Draw writes them (`fmt`: no exponents, no dotted runs), lengths, CSS Color 4, paint, viewBox and preserveAspectRatio, affine matrices, transform lists. |
 | `path/` | Path data: a lossless parser (text after an error is kept), edits that touch one number, absolute form, arcs, exact bounds and nearest point. |
 | `model/fragment.ts` | Edit source: markup parsed into an existing document, with the namespaces and entities in scope there, within what the document has left of its limits. |
@@ -73,6 +76,14 @@ list, so a change in WebKit shows):
 - WebKit refuses a processing instruction holding `]` inside the internal subset, which XML allows
   and Chromium accepts;
 - WebKit keeps a CR before an LF inside a CDATA section, where XML turns every CR LF into LF.
+
+Fixed in P1-M1:
+- the canvas's zoom and pan are the rendered root's own box (its CSS size and offset), never its
+  `viewBox`: P0's camera was the root's `viewBox`, so a `%` length in the drawing (draw.io's
+  `<rect width="100%" height="100%">` background) was resolved against the camera and changed size
+  under zoom (e2e `percentLengthsKeepTheirSizeUnderZoom`). `geometry/ctm.ts` composes the root's
+  viewport transform into every CTM, so the engine and the canvas agree on where things are
+  (e2e `geometryMatchesTheBrowser`).
 
 Fixed in P1-M0:
 - well-formedness is as strict as a browser's (ledger row `syntax:strict-well-formedness`), so such

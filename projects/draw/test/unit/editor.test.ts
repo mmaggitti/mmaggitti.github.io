@@ -1153,3 +1153,65 @@ test('Layers: Hide writes display="none" and Show gives the bytes back; Lock wri
   assert.equal(r.editor.rename(rect, 'sun'), 'Another element already has the id "sun".');
   assert.equal(r.editor.history.get().undoLabel, 'Rename', 'the refusals recorded nothing');
 });
+
+test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
+  const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="h" x="30" y="10" width="10" height="10" visibility="hidden"/>
+  <g visibility="hidden"><rect id="gh" x="50" y="10" width="10" height="10"/><rect id="gv" x="70" y="10" width="10" height="10" style="visibility: visible"/></g>
+</svg>`;
+  const r = rig();
+  r.editor.open(V);
+  r.editor.snap.set(NO_SNAP);
+  drag(r, hostAt(r, 5, 5), hostAt(r, 95, 30), []);
+  assert.deepEqual(sel(r), [idOf(r, 'a'), idOf(r, 'gv')].sort(), 'the marquee takes what draws: not h, nor gh under its hidden group');
+  r.editor.selectAll();
+  assert.deepEqual(sel(r), [idOf(r, 'a'), idOf(r, 'gv')].sort(), 'Select all likewise');
+  r.editor.setHidden(idOf(r, 'a'), true);
+  assert.equal(r.editor.source(), V.replace('<rect id="a" x="10" y="10" width="10" height="10"/>', '<rect id="a" x="10" y="10" width="10" height="10" display="none"/>'), 'Hide writes display, never visibility');
+});
+
+test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (text by a translate), one entry each', () => {
+  const RAW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><circle id="dot" r="4"/></defs>
+  <use id="u" href="#dot" x="10" y="10"/>
+  <image id="i" x="20" y="20" width="10" height="10" href="data:image/png;base64,iVBORw0KGgo="/>
+  <foreignObject id="f" x="40" y="40" width="20" height="10"><div xmlns="http://www.w3.org/1999/xhtml">hi</div></foreignObject>
+  <text id="t" x="60" y="80">Hi</text>
+</svg>`;
+  const nudged: Record<string, [string, string]> = {
+    u: ['<use id="u" href="#dot" x="10" y="10"/>', '<use id="u" href="#dot" x="11" y="10"/>'],
+    i: ['<image id="i" x="20"', '<image id="i" x="21"'],
+    f: ['<foreignObject id="f" x="40"', '<foreignObject id="f" x="41"'],
+    t: ['<text id="t" x="60" y="80">', '<text id="t" x="60" y="80" transform="translate(1 0)">'],
+  };
+  const copied: Record<string, string> = {
+    u: '<use id="u-2" href="#dot" x="15" y="15"/>',
+    i: '<image id="i-2" x="25" y="25"',
+    f: '<foreignObject id="f-2" x="45" y="45"',
+    t: '<text id="t-2" x="60" y="80" transform="translate(5 5)">',
+  };
+  for (const name of ['u', 'i', 'f', 't']) {
+    const r = rig();
+    r.editor.open(RAW);
+    const id = idOf(r, name);
+    tap(r, hostAt(r, 50, 50), [id]);
+    assert.deepEqual(sel(r), [id], `${name}: a tap on it selects it`);
+    const step = (label: string, act: () => void, ok: (src: string) => boolean) => {
+      act();
+      const src = r.editor.source();
+      assert.equal(r.editor.history.get().undoLabel, label, `${name}: ${label} is one entry (${r.editor.notice.get()})`);
+      assert.ok(ok(src), `${name}: ${label}:\n${src}`);
+      r.editor.undo();
+      assert.equal(r.editor.source(), RAW, `${name}: ${label} undone`);
+      r.editor.select([id]);
+    };
+    step('Duplicate', () => r.editor.duplicate(), (s) => s.includes(copied[name]));
+    step('Send back', () => r.editor.back(), (s) => s !== RAW && s.replace(/\s/g, '').length === RAW.replace(/\s/g, '').length);
+    step('Delete', () => r.editor.delete(), (s) => !s.includes(`id="${name}"`));
+    step('Nudge', () => {
+      r.editor.nudge(1, 0);
+      r.editor.nudgeEnd();
+    }, (s) => s === RAW.replace(nudged[name][0], nudged[name][1]));
+  }
+});
