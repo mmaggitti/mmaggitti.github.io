@@ -6202,7 +6202,7 @@ async function theLetterCycleAndRelativeKeepTheRestOfThePath(browser, origin) {
 }
 
 // At 956 and 796 tall: the ToolRail's Pen and Node at least 44 × 44; the Pen's bar (Undo point,
-// Close, Done) and the Node tool's bar (Deselect, Smooth, Close, Relative, More) each inside the
+// Close, Done) and the Node tool's bar (Deselect, Smooth, Close, Relative, Reverse, More) each inside the
 // 440 pt bar, every button at least 44 × 44, in order without overlap, in the bottom thumb zone and
 // above the home indicator; no sideways scroll and every tap target and field as the phone rules
 // say; and a press 20 pt from a node handle takes it.
@@ -6248,7 +6248,7 @@ async function phoneRulesOnThePenAndNodeTools(browser, origin, height) {
     must(a1, 'test setup: the wave has no middle anchor handle');
     await page.touchscreen.tap(a1.x, a1.y);
     await page.waitForTimeout(50);
-    await bar('the Node tool', ['Deselect', 'Smooth', 'Close', 'Relative', 'More']);
+    await bar('the Node tool', ['Deselect', 'Smooth', 'Close', 'Relative', 'Reverse', 'More']);
     // A press 20 pt from the middle anchor takes it: the drag moves that anchor (the grab kept).
     await snapOff(page);
     const k = await page.evaluate(unitPx);
