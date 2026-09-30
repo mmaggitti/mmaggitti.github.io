@@ -50,7 +50,7 @@ import { duplicate, group, groupRefusal, groupsOf, remove, restack, ungroup, ung
 import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
-import { DRAW_NS, MAX_GUIDES, NO_STATE, declare, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { DRAW_NS, MAX_GUIDES, NO_STATE, declare, hiddenGuides, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
 import { cssSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
 import { idError } from '../../../engine/code/edit.ts';
@@ -1286,6 +1286,11 @@ export class Editor {
   /** The guides and the grid step the file keeps. */
   get drawState(): DrawState {
     return this.#doc ? readState(this.#doc) : NO_STATE;
+  }
+
+  /** How many guides the file lists past those Draw shows (the Snap sheet says so). */
+  get hiddenGuides(): number {
+    return this.#doc ? hiddenGuides(this.#doc) : 0;
   }
 
   /** Add a guide through the artboard's centre (v: at its centre x; h: at its centre y). */

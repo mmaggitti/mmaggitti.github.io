@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDoc, serialize, type Doc } from '../model/doc.ts';
 import { DEFAULT_LIMITS } from '../xml/cst.ts';
 import { Session } from '../commands/session.ts';
-import { DRAW_NS, MAX_GUIDES, moveGuide, readState, stripDrawState, writeState, type DrawState } from '../model/draw-state.ts';
+import { DRAW_NS, MAX_GUIDES, hiddenGuides, moveGuide, readState, stripDrawState, writeState, type DrawState } from '../model/draw-state.ts';
 import { cleanExport } from '../export/clean.ts';
 
 const CORPUS = fileURLToPath(new URL('./fixtures/corpus/', import.meta.url));
@@ -165,7 +165,7 @@ test('a state with 10⁶ guides reads its first 100 in under 50 ms, once per ver
   assert.ok(ms < 50, `reading the state took ${ms.toFixed(0)} ms`);
   assert.equal(s.guides.length, MAX_GUIDES);
   assert.deepEqual(s.guides.slice(0, 3), [{ axis: 'v', at: 0 }, { axis: 'h', at: 1 }, { axis: 'v', at: 2 }]);
-  assert.equal(s.more, 1e6 - MAX_GUIDES);
+  assert.equal(hiddenGuides(doc), 1e6 - MAX_GUIDES, 'the rest, counted only when asked (the Snap sheet)');
   assert.equal(readState(doc), s, 'kept for the version: the next read costs nothing');
   const guides = () => /guides="([^"]*)"/.exec(serialize(session.doc))![1];
   const session = new Session(doc);

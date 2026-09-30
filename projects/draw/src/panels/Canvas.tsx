@@ -137,6 +137,7 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
   const snap = useStore(editor.snap);
   useStore(editor.version);
   const state = editor.drawState;
+  const more = editor.hiddenGuides;
   const [step, setStep] = useState(state.grid === null ? '' : String(state.grid));
   // The Grid step field is one history entry while it is typed in: it ends on a blur, or when the
   // sheet closes (Done, the dim, Escape) with the field still focused.
@@ -202,9 +203,9 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
             Remove all guides
           </button>
         )}
-        {!!state.more && (
+        {more > 0 && (
           <p className="draw-subhead draw-snap-more">
-            {state.more} more guide{state.more === 1 ? '' : 's'} in the file {state.more === 1 ? 'isn’t' : 'aren’t'} shown.
+            {more} more guide{more === 1 ? '' : 's'} in the file {more === 1 ? 'isn’t' : 'aren’t'} shown.
           </p>
         )}
       </div>

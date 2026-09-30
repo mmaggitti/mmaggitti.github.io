@@ -38,8 +38,7 @@ export interface Guide {
 }
 export interface DrawState {
   grid: number | null; // the chosen grid step, or null (automatic)
-  guides: Guide[]; // the first MAX_GUIDES the file lists
-  more?: number; // guides the file lists past those: never read or drawn, kept as they are
+  guides: Guide[]; // the first MAX_GUIDES the file lists (hiddenGuides counts the rest)
 }
 export const NO_STATE: DrawState = { grid: null, guides: [] };
 
@@ -93,12 +92,27 @@ export function readState(doc: Doc): DrawState {
     const g = attrValue(doc, s, null, 'grid');
     const grid = g === null ? null : Number(g);
     const raw = findAttr(s, null, 'guides')?.raw ?? '';
-    const scan = scanGuides(raw);
-    const more = Math.floor(words(raw, scan.end) / 2);
-    state = { grid: grid !== null && Number.isFinite(grid) && grid > 0 ? grid : null, guides: scan.guides, ...(more ? { more } : {}) };
+    state = { grid: grid !== null && Number.isFinite(grid) && grid > 0 ? grid : null, guides: scanGuides(raw).guides };
   }
   read.set(doc, { version: doc.version, state });
   return state;
+}
+
+const hidden = new WeakMap<Doc, { version: number; count: number }>();
+
+/**
+ * How many guides the file lists past the first MAX_GUIDES: never read or drawn, kept as they are.
+ * Counted only when asked (the Snap sheet says so), once per version: a scan of the whole attribute,
+ * which readState, asked on every frame, never makes.
+ */
+export function hiddenGuides(doc: Doc): number {
+  const hit = hidden.get(doc);
+  if (hit && hit.version === doc.version) return hit.count;
+  const s = stateElement(doc);
+  const raw = (s && findAttr(s, null, 'guides')?.raw) || '';
+  const count = raw ? Math.floor(words(raw, scanGuides(raw).end) / 2) : 0;
+  hidden.set(doc, { version: doc.version, count });
+  return count;
 }
 
 const isSep = (c: number) => c === 32 || c === 9 || c === 10 || c === 13 || c === 44; // whitespace and ','
