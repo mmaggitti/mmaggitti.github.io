@@ -71,6 +71,7 @@ import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
+import { geometryKnown } from './probe-helpers/geometry-known.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const TAP_MIN = 44;
@@ -3784,6 +3785,7 @@ const GEOMETRY_PROBES = [
 // path with an error in its data, which the engine reads up to where every browser stops
 // (engine/path/parse.ts) while Blink and WebKit draw on past a comma before a command.
 async function geometryMatchesTheBrowser(browser, origin) {
+  const engine = browser.browserType().name();
   const files = [...corpusFiles().filter((f) => !ANIMATES.test(f.text)), ...GEOMETRY_PROBES.map(([name, text]) => ({ name: `probe: ${name}`, text }))];
   await withPage(browser, origin, 956, async (page, errors) => {
     const remPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
@@ -3815,8 +3817,10 @@ async function geometryMatchesTheBrowser(browser, origin) {
         if (!b || !r) return;
         const n = doc.nodes.get(id);
         if (n.local === 'path' && parsePath(attrValue(doc, n, null, 'd') ?? '').error) return void known++;
-        here++;
         const mine = [r.x, r.y, r.x + r.width, r.y + r.height];
+        // GEOMETRY_KNOWN (probe-helpers/geometry-known.mjs): WebKit's foreignObject box, and elements whose size stops them rendering.
+        if (geometryKnown(engine, n.local, mine, b)) return void known++;
+        here++;
         if (mine.some((v, i) => Math.abs(v - b[i]) > 0.5)) differ.push(`${f.name} ${path}: engine ${box(mine)}, browser ${box(b)}`);
       });
       compared += here;
