@@ -2128,6 +2128,17 @@ const BREAKS = [
     file: 'projects/draw/src/interact/structure.ts', from: "  if (attrValue(doc, n, null, 'transform')?.trim()) {\n    const pushed", to: '  if (false) {\n    const pushed',
     run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when a use, an href or a url\(#…\) refers to a child/,
   },
+  // P1-M1, CI run 34: the geometry check's known WebKit differences stay narrow (probe-helpers/geometry-known.mjs).
+  {
+    id: 'B407', what: "the geometry check excuses a foreignObject's position in every engine, not just WebKit",
+    file: 'projects/draw/test/probe-helpers/geometry-known.mjs', from: "if (engine === 'webkit' && local === 'foreignObject'", to: "if (local === 'foreignObject'",
+    run: drawTests('geometry-known.test.ts'), expect: /✖ the geometry check's known differences are narrow[\s\S]*Chromium is held to the position/,
+  },
+  {
+    id: 'B408', what: 'the geometry check excuses any flat box, a line that draws included',
+    file: 'projects/draw/test/probe-helpers/geometry-known.mjs', from: "if (DISABLED_WHEN_EMPTY.has(local) && (w === 0 || h === 0)) return 'zero-size';", to: "if (w === 0 || h === 0) return 'zero-size';",
+    run: drawTests('geometry-known.test.ts'), expect: /✖ the geometry check's known differences are narrow[\s\S]*a flat line still draws/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame over 2,000 shapes costs far more than 4× one over 500)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
