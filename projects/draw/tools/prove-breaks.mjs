@@ -7,6 +7,10 @@
 //   node tools/prove-breaks.mjs           every break (the e2e ones rebuild the site: slow)
 //   node tools/prove-breaks.mjs --quick   only the breaks caught without a site build
 //   node tools/prove-breaks.mjs B3 B5     just these
+//   node tools/prove-breaks.mjs --dry [--quick] [B3 …]
+//                                         check that each chosen break (default: every one) still
+//                                         applies, without running any: a stale anchor otherwise
+//                                         shows only when someone runs that break. Writes nothing.
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
@@ -1716,12 +1720,62 @@ const BREAKS = [
     file: 'engine/model/ids.ts', from: "  } else if (text.includes('url(')) {", to: "  } else if (text.includes('url(') && a.local !== 'style') {",
     run: engineTests('ids.test.ts'), expect: /✖ renameIdsIn rewrites ids and references inside the subtree only/,
   },
+  // P1-M1 S2: selection, move, the paper, the camera box, per-node routing.
+  {
+    // Leans on B275's anchor: two spaces keep valid TypeScript but take the text B275 edits away.
+    id: 'B325', what: "the dry run misses a stale anchor (it plants a second space in SLOP, B275's anchor)",
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'export const SLOP = 5;', to: 'export const SLOP =  5;',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +STALE/,
+  },
 ];
 
 const args = process.argv.slice(2);
 const quick = args.includes('--quick');
+const dry = args.includes('--dry');
 const only = args.filter((a) => /^B\d+$/.test(a));
 const chosen = BREAKS.filter((b) => (only.length ? only.includes(b.id) : !(quick && b.slow)));
+
+/** The broken file's text: the original with the break applied (the real run and the dry run share this). */
+function applyBreak(b, original) {
+  return b.append != null ? original + b.append : original.replace(b.from, b.to);
+}
+
+// ── the dry run: does every chosen break still apply? ─────────────────────────────────────────
+if (dry) {
+  const problems = [];
+  const ids = new Map();
+  for (const b of BREAKS) ids.set(b.id, (ids.get(b.id) ?? 0) + 1);
+  for (const b of chosen) {
+    const say = (kind, text) => problems.push(`${b.id.padEnd(5)} ${kind.padEnd(8)} ${text}`);
+    if (ids.get(b.id) > 1) say('DUP', 'the id is used by another break');
+    const missing = [];
+    if (!Array.isArray(b.run)) missing.push('run');
+    if (!(b.expect instanceof RegExp)) missing.push('an expect RegExp');
+    const edits = b.file && (b.append != null || (b.from != null && b.to != null));
+    const creates = b.create && b.content != null;
+    if (!edits && !creates) missing.push('file with from/to or append, or create with content');
+    if (missing.length) {
+      say('BAD', `no ${missing.join(', no ')}`);
+      continue;
+    }
+    if (b.create && existsSync(join(REPO, b.create))) say('TAKEN', `${b.create}: the path already exists`);
+    if (!b.file) continue;
+    const path = join(REPO, b.file);
+    if (!existsSync(path)) {
+      say('MISSING', `${b.file}: no such file`);
+      continue;
+    }
+    const original = readFileSync(path, 'utf8');
+    if (applyBreak(b, original) !== original) continue;
+    const found = b.from instanceof RegExp ? new RegExp(b.from.source, b.from.flags.replace(/[gy]/g, '')).test(original) : original.includes(b.from);
+    if (found) say('NOOP', `${b.file}: the anchor is there but replacing it changes nothing`);
+    else say('STALE', `${b.file}: the anchor is not in the file`);
+  }
+  for (const p of problems) console.log(p);
+  const bad = new Set(problems.map((p) => p.split(' ')[0])).size;
+  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
+  process.exit(bad ? 1 : 0);
+}
 
 let undetected = 0;
 for (const b of chosen) {
@@ -1735,7 +1789,7 @@ for (const b of chosen) {
   let caught = false;
   try {
     if (file) {
-      const next = b.append != null ? original + b.append : original.replace(b.from, b.to);
+      const next = applyBreak(b, original);
       if (next === original) throw new Error(`${b.id}: the break did not apply (anchor not found)`);
       writeFileSync(file, next);
     }
