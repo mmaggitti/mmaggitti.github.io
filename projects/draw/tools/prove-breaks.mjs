@@ -2574,6 +2574,11 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: "      if (a.local !== 'id' || a.ns !== null) continue;", to: "      if (a.local !== 'id' || (a.ns !== null && a.ns !== NS.xml)) continue;",
     run: engineTests('paint/gradients.test.ts'), expect: /✖ the gradient editor resolves a plain id only/,
   },
+  {
+    id: 'B485', what: 'F6: the finish hook descends into moved nodes again (Group detaches a stale generated shape it only moved)',
+    file: 'engine/generators/index.ts', from: '    for (const c of n.children) if (fresh.get(c) !== false) add(c);', to: '    for (const c of n.children) add(c);',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: Group moves a stale generated shape/,
+  },
 ];
 
 const args = process.argv.slice(2);

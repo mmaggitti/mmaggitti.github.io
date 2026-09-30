@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { attrValue, descendants, parseDoc, serialize, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
-import { opSetAttr, opSetAttrRaw } from '../../commands/ops.ts';
+import { opInsert, opRemove, opSetAttr, opSetAttrRaw } from '../../commands/ops.ts';
+import { parseFragment } from '../../model/fragment.ts';
 import { Session } from '../../commands/session.ts';
 import { DRAW_NS } from '../../model/draw-ns.ts';
 import { finishGenerators, generatorOf } from '../../generators/index.ts';
@@ -153,4 +154,34 @@ test('the finish hook: a move rewrites only draw:cx, draw:cy and the geometry, a
   const w = session(two);
   w.s.dispatch('Edit', (apply) => apply(opSetAttr(two, tp.id, DRAW_NS, 'tips', null)));
   assert.equal(serialize(two), svg(`<polygon points="${STAR}" fill="#e76f51" stroke="none"/>\n  <rect width="5" height="5" draw:locked="true"/>`));
+});
+
+test('the finish hook: Group moves a stale generated shape (valid inputs, points another tool reformatted) into a new <g> and leaves it exactly as it is, draw:* and points byte for byte, detaching nothing (so no notice); a stale one that arrives inside a new <g> is new, and detaches', () => {
+  const stale = STAR_EL.replace(`points="${STAR}"`, `points="${STAR.replaceAll(' ', '  ')}"`);
+  const F = svg(`${stale}\n  <rect id="r" width="5" height="5"/>`);
+  const doc = load(F);
+  assert.equal(generatorOf(doc, first(doc, 'polygon').id), null, 'test setup: stale, so plain');
+  const { s, detached } = session(doc);
+  // Group, as structure.ts does it: a new <g> where the shape was, and the shape moved into it.
+  s.dispatch('Group', (apply) => {
+    const star = first(doc, 'polygon').id;
+    const parent = doc.nodes.get(star)!.parent!;
+    const at = (doc.nodes.get(parent) as ElementNode).children.indexOf(star);
+    const made = parseFragment(doc, parent, '<g></g>');
+    assert.ok(made.ok);
+    apply(opRemove(doc, star));
+    apply(opInsert(doc, made.nodes[0], parent, at));
+    apply(opInsert(doc, star, made.nodes[0], 0));
+  });
+  assert.equal(serialize(doc), F.replace(stale, `<g>${stale}</g>`), 'the stale star as it was, inside the <g>');
+  assert.deepEqual(detached, [[]], 'nothing detached: no notice');
+  s.undo();
+  assert.equal(serialize(doc), F);
+  // The same stale star arriving inside a new <g> (Edit source, a paste) is new: it detaches.
+  s.dispatch('Insert', (apply) => {
+    const made = parseFragment(doc, doc.root, `<g>${stale}</g>`);
+    assert.ok(made.ok);
+    apply(opInsert(doc, made.nodes[0], doc.root, (doc.nodes.get(doc.root) as ElementNode).children.length));
+  });
+  assert.equal(detached[detached.length - 1].length, 1, 'the new stale star detaches');
 });

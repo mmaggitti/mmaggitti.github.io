@@ -13,7 +13,7 @@
 //   shape is regenerated (its inputs changed) or detached (its geometry was edited by hand, or its
 //   inputs no longer read), in the same transaction as the edit, so no editing path can miss it.
 
-import { NS, attrValue, descendants, findAttr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { NS, attrValue, findAttr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { DRAW_NS } from '../model/draw-ns.ts';
 import { dropDrawAttrs, undeclareIfUnused } from '../model/draw-state.ts';
 import { opSetAttr, type Op } from '../commands/ops.ts';
@@ -123,7 +123,8 @@ const attached = (doc: Doc, id: NodeId): boolean => {
  *
  * Candidates are the elements an attribute op touched, and every element a place op newly put in
  * the document (its subtree too: the Shapes tool, Edit source, Duplicate). A node that only moved
- * (a remove and then an insert: z-order, Group, Ungroup) is not a candidate. A candidate whose
+ * (a remove and then an insert: z-order, Group, Ungroup), even into a new <g>, is not a candidate,
+ * and nor is its subtree. A candidate whose
  * draw:gen names its element's generator is looked at only if the ops touched its draw:gen or an
  * input, or its geometry, or it is new: a fill, a lock or a rename never looks at the generator,
  * so a stale shape from another tool is left exactly as it is. Then:
@@ -143,8 +144,16 @@ export function finishGenerators(doc: Doc, ops: readonly Op[], apply: (op: Op) =
       else if (op.ns === null) t.plain.add(op.local);
     } else if (op.kind === 'place' && !fresh.has(op.id)) fresh.set(op.id, op.before === null && op.after !== null);
   }
+  // Each element a place op newly put in the document, and its subtree; not a node whose first place
+  // op here took it out (it only moved: z-order, Group, Ungroup), nor its subtree, even under a new <g>.
   const inserted = new Set<NodeId>();
-  for (const [id, isNew] of fresh) if (isNew && attached(doc, id)) for (const d of descendants(doc, id)) if (d.kind === 'element') inserted.add(d.id);
+  const add = (id: NodeId): void => {
+    const n = doc.nodes.get(id);
+    if (n?.kind !== 'element' || inserted.has(id)) return;
+    inserted.add(id);
+    for (const c of n.children) if (fresh.get(c) !== false) add(c);
+  };
+  for (const [id, isNew] of fresh) if (isNew && attached(doc, id)) add(id);
   const detached: NodeId[] = [];
   for (const id of new Set([...touched.keys(), ...inserted])) {
     const n = doc.nodes.get(id);
