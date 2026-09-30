@@ -1578,6 +1578,17 @@ const BREAKS = [
     file: 'projects/draw/src/workspace.ts', from: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: false });', to: '    await this.autosave.attach({ text: () => r.source.text, id: null, name: r.name, create: true });',
     run: drawTests('workspace.test.ts'), expect: /✖ a stored draft the strict parser refuses reopens as read-only source at its error[\s\S]*the source view made no draft of its own/,
   },
+  // P1-M0, CI run 32: WebKit's known XML parser differences are named narrowly (probe-helpers/xml-canon.mjs).
+  {
+    id: 'B315', what: "the canon's line-end rule accepts any text difference, not only a CR kept before an LF",
+    file: 'projects/draw/test/probe-helpers/xml-canon.mjs', from: "browser.includes('\\r\\n') && browser.replace(/\\r\\n/g, '\\n') === engine;", to: 'true;',
+    run: drawTests('xml-canon.test.ts'), expect: /✖ the canon's line-end rule/,
+  },
+  {
+    id: 'B316', what: "a probe's known WebKit defect excuses every engine's refusal",
+    file: 'projects/draw/test/probe-helpers/xml-canon.mjs', from: 'const excused = probe.knownDefect?.[engine];', to: 'const excused = probe.knownDefect;',
+    run: drawTests('xml-canon.test.ts'), expect: /✖ a probe's known browser defect/,
+  },
   // P1-M0 review (F9): an entity chain is named once; a long name is cut in a message.
   {
     id: 'B312', what: "an entity chain's message repeats its sentence at every level again (about 800 characters at depth 8)",

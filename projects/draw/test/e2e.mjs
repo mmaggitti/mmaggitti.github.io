@@ -53,7 +53,7 @@ import { encodeImport } from '../src/platform/files.ts';
 import { parseDoc } from '../../../engine/model/doc.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { decodePng } from './probe-helpers/png.mjs';
-import { browserCanon, canonDiffs, engineCanon, PROBES } from './probe-helpers/xml-canon.mjs';
+import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 
 const PHONE = { deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const TAP_MIN = 44;
@@ -2998,14 +2998,7 @@ async function theEngineRefusesWhatTheBrowserRefuses(browser, origin) {
     let checked = 0;
     for (const [i, probe] of PROBES.entries()) {
       checked++;
-      const mine = engineCanon(probe.text);
-      const draw = mine.refused ? (mine.kind === 'limit' ? 'limit' : 'refuse') : 'accept';
-      const verdict = theirs[i].refused ? 'refuse' : 'accept';
-      const why = (r) => (r.refused ? ` (${r.message})` : '');
-      if (verdict === 'refuse' && draw === 'accept') problems.push(`${probe.label}: ${engine} refuses it, but Draw's parser accepts it`);
-      if (draw === 'refuse' && verdict === 'accept') problems.push(`${probe.label}: Draw's parser refuses it as not well-formed${why(mine)}, but ${engine} accepts it`);
-      if (draw !== probe.draw) problems.push(`${probe.label}: Draw's parser gives ${draw}, not ${probe.draw} as the probe table says${why(mine)}`);
-      if (verdict !== probe.browser[engine]) problems.push(`${probe.label}: ${engine} gives ${verdict}, not ${probe.browser[engine]} as the probe table says${why(theirs[i])}`);
+      problems.push(...probeProblems(probe, engine, engineCanon(probe.text), theirs[i]));
     }
     must(checked > 0 && checked === PROBES.length, `checked ${checked} of ${PROBES.length} probes`);
     must(problems.length === 0, `Draw's parser and ${engine}'s disagree:\n${problems.join('\n')}`);

@@ -68,6 +68,12 @@ The other way round, one file browsers accept is refused, as over Draw's limits 
 as source that isn't well-formed): an HTML entity such as `&nbsp;` under a DOCTYPE that names an
 XHTML DTD, which browsers supply themselves and Draw doesn't know.
 
+Where WebKit itself departs from XML, Draw follows XML (CI run 32; the e2e names each in its KNOWN
+list, so a change in WebKit shows):
+- WebKit refuses a processing instruction holding `]` inside the internal subset, which XML allows
+  and Chromium accepts;
+- WebKit keeps a CR before an LF inside a CDATA section, where XML turns every CR LF into LF.
+
 Fixed in P1-M0:
 - well-formedness is as strict as a browser's (ledger row `syntax:strict-well-formedness`), so such
   a file opens as read-only source, marked where the browser's parser stops. Each is refused at its
