@@ -2051,7 +2051,8 @@ const BREAKS = [
   },
   {
     id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
-    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#nudge',
+    // P1-M3: re-planted on the guard that now names the Pen's drag too, the same fault.
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge',
     run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
   },
   {

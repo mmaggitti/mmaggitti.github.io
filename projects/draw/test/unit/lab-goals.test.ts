@@ -12,6 +12,10 @@ import type { ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { bind, corpus, fakePorts } from './fakes.ts';
 import { dashPresets, paintKinds } from '../../src/style-edit.ts';
 import { colorChoices, styleSlot, PALETTE } from '../../src/color-choices.ts';
+import { parsePath } from '../../../../engine/path/parse.ts';
+import { toAbsolute } from '../../../../engine/path/abs.ts';
+import { lastClosed } from '../../../../engine/path/segments.ts';
+import { tokenizeAttr } from '../../../../engine/code/tokens.ts';
 
 interface Rig {
   editor: Editor;
@@ -30,6 +34,13 @@ function open(name: string): Rig {
       for (const b of blocks) listing.set(b.key, b);
     },
     patch: (b) => void (listing.has(b.key) && listing.set(b.key, b)),
+    // A node placed (Edit source) or taken away: its blocks come and go (P1-M3's pasted path).
+    place: (placements) => {
+      for (const p of placements) for (const b of p.blocks) listing.set(b.key, b);
+    },
+    remove: (keys) => {
+      for (const k of keys) listing.delete(k);
+    },
   };
   const editor = bind(ports, new Editor(ports));
   const file = corpus(name);
@@ -546,4 +557,227 @@ test('lab/style.svg’s gradient stops (gradient-stops): their offsets step by 0
   r.editor.closeSheet();
   assert.equal(r.editor.source(), made.replace('stop-color="#e9c46a"', 'stop-color="#264653"'));
   assert.equal(r.editor.history.get().undoLabel, 'Set stop-color');
+});
+
+// ── P1-M3 S1: the Paths, Create and Arcs (smooth) goals the Pen and the Node tool reach ─────────
+
+const dOf = (r: Rig) => attrValue(doc(r), element(r, 'path'), null, 'd')!;
+const rawD = (r: Rig) => element(r, 'path').attrs.find((a) => a.local === 'd')!.raw;
+/** A tap on the canvas at a root point. */
+function tapAt(r: Rig, x: number, y: number) {
+  const at = hostOf(r, x, y);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+}
+/** A tap on a handle where the overlay draws it. */
+function tapHandle(r: Rig, id: string) {
+  const at = handleAt(r, id);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+}
+
+test('lab/paths.svg, the Paths lesson in order: the Pen continues the path from its end, three taps add three points ("Add 3 points"); Done; the first segment’s bend handle dragged ("Bend a line"); Close ("Close it with Z"); Inspect’s Fill ("Fill it"); one entry each, only the intended bytes', () => {
+  const r = open('lab/paths.svg');
+  const path = element(r, 'path');
+  r.editor.select([path.id]);
+  r.editor.pickTool('pen');
+  tapHandle(r, 'pen-end');
+  assert.equal(r.editor.source(), r.file, 'taking the end writes nothing');
+  let added = 0;
+  for (const [x, y] of [[70, 70], [80, 30], [40, 20]]) {
+    tapAt(r, x, y);
+    assert.equal(r.editor.history.get().undoLabel, 'Add point');
+    added++;
+  }
+  assert.ok(added >= 3, 'the goal: added >= 3');
+  assert.equal(rawD(r), 'M 20 75\n   L 50 30 L 70 70 L 80 30 L 40 20', 'each tap appends " L x y" after the last segment');
+  r.editor.penDone();
+  assert.equal(r.editor.tool.get(), 'node', 'Done: the Node tool shows the path');
+  // Bend a line: the first segment's bend handle, dragged to (40, 45).
+  gesture(r, handleAt(r, 'b1'), hostOf(r, 40, 45));
+  assert.equal(r.editor.history.get().undoLabel, 'Bend');
+  assert.ok(parsePath(dOf(r)).segs.some((s) => s.cmd !== 'M' && s.cmd.toUpperCase() !== 'L'), 'the goal: a segment that isn’t L');
+  assert.equal(rawD(r), 'M 20 75\n   Q 45 38 50 30 L 70 70 L 80 30 L 40 20', '2·(40, 45) − (35, 52.5), rounded');
+  // Close it with Z.
+  r.editor.toggleClosed();
+  assert.equal(r.editor.history.get().undoLabel, 'Close path');
+  assert.ok(lastClosed(parsePath(dOf(r))), 'the goal: closed');
+  // Fill it: Inspect's fill (the Colour sheet over the selection).
+  sheetSets(r, 'fill', PALETTE[5]);
+  assert.equal(r.editor.history.get().undoLabel, 'Set fill');
+  assert.ok(lastClosed(parsePath(dOf(r))) && attrValue(doc(r), path, null, 'fill') !== 'none', 'the goal: closed and filled');
+  assert.equal(r.editor.source(), edited(edited(r.file, 'd="M 20 75\n   L 50 30"', 'd="M 20 75\n   Q 45 38 50 30 L 70 70 L 80 30 L 40 20 Z"'), 'fill="none"', 'fill="#e76f51"'), 'only d and fill changed');
+});
+
+test('lab/paths.svg: the path’s numbers are named as SVG Lab’s dParts names them, and the Number sheet opens on "point 1 x" (point-tokens); its L letter cycles (segment-type-cycle)', () => {
+  const r = open('lab/paths.svg');
+  const path = element(r, 'path');
+  const x = token(r, path.id, 'number', 'd=');
+  r.editor.tapToken(x.block, x.token);
+  r.editor.openNumberSheet();
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'number' && sheet.token.label === 'point 1 x', 'the sheet’s title is the token’s label');
+  r.editor.closeSheet();
+  const labels = tokenizeAttr(doc(r), path.id, { ns: null, local: 'd' }).map((t) => (t.kind === 'number' ? t.label : t.text));
+  assert.deepEqual(labels, ['point 1 x', 'point 1 y', 'L', 'point 2 x', 'point 2 y']);
+  const L = token(r, path.id, 'enum', 'd=');
+  r.editor.tapToken(L.block, L.token);
+  assert.equal(rawD(r), 'M 20 75\n   Q 49 62 50 30', 'L → Q, the lab’s setSeg');
+  oneEntry(r, 'Set segment');
+});
+
+test('lab/paths.svg: fill or none, stroke or none and width 0–40 by tokens and Inspect (fill-stroke); cap and join by their keyword tokens and Inspect’s Cap and Join (cap-join); one entry each', () => {
+  const r = open('lab/paths.svg');
+  const path = element(r, 'path');
+  r.editor.select([path.id]);
+  const fill = token(r, path.id, 'color', 'fill=');
+  r.editor.tapToken(fill.block, fill.token);
+  assert.ok('text' in r.editor.sheetInput('#2a9d8f'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(r.file, 'fill="none"', 'fill="#2a9d8f"'), 'the fill token');
+  oneEntry(r, 'Set fill');
+  r.editor.undo();
+  r.editor.setStyle('stroke', 'none');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke="#264653"', 'stroke="none"'), 'Inspect: stroke none');
+  oneStyleEntry(r, 'Set stroke', r.file);
+  setNumber(r, path.id, 'stroke-width=', '40');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="3"', 'stroke-width="40"'), 'the width token, to the lab’s 40');
+  r.editor.undo();
+  r.editor.fieldStart({ kind: 'style', prop: 'stroke-width' });
+  assert.equal(r.editor.fieldInput('0'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="3"', 'stroke-width="0"'), 'Inspect’s width field, to the lab’s 0');
+  oneStyleEntry(r, 'Set stroke-width', r.file);
+  const cap = token(r, path.id, 'enum', 'stroke-linecap=');
+  r.editor.tapToken(cap.block, cap.token);
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-linecap="round"', 'stroke-linecap="square"'), 'the cap token cycles');
+  r.editor.undo();
+  r.editor.setStyle('stroke-linejoin', 'bevel');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-linejoin="round"', 'stroke-linejoin="bevel"'), 'Inspect’s Join');
+  oneStyleEntry(r, 'Set stroke-linejoin', r.file);
+});
+
+test('SVG Lab’s presets (PRESETS: Heart, Wave, Check mark) reached with Draw’s tools on a 100-unit file: the Pen draws each preset’s anchors, the Node tool drags its controls to the preset’s numbers, and the d reads as exactly the preset (presets)', () => {
+  const preset = {
+    heart: 'M 50 34 C 50 20, 28 14, 20 28 C 12 42, 26 62, 50 84 C 74 62, 88 42, 80 28 C 72 14, 50 20, 50 34 Z',
+    wave: 'M 10 50 C 25 22, 35 22, 50 50 C 65 78, 75 78, 90 50',
+    check: 'M 22 52 L 42 72 L 80 30',
+  };
+  const same = (d: string, want: string) => assert.deepEqual(toAbsolute(parsePath(d)).map(({ cmd: _c, sub: _s, ...g }) => g), toAbsolute(parsePath(want)).map(({ cmd: _c, sub: _s, ...g }) => g));
+  const drag = (r: Rig, a: [number, number], b: [number, number]) => gesture(r, hostOf(r, ...a), hostOf(r, ...b));
+  // Check mark: three taps.
+  let r = open('lab/create.svg');
+  r.editor.snap.set({ grid: false, guides: false, shapes: false, artboard: false });
+  r.editor.pickTool('pen');
+  for (const [x, y] of [[22, 52], [42, 72], [80, 30]]) tapAt(r, x, y);
+  r.editor.penDone();
+  same(dOf(r), preset.check);
+  // Wave: three drags, each point's out-handle the next C's first control (its in-handle the C's second).
+  r = open('lab/create.svg');
+  r.editor.snap.set({ grid: false, guides: false, shapes: false, artboard: false });
+  r.editor.pickTool('pen');
+  drag(r, [10, 50], [25, 22]);
+  drag(r, [50, 50], [65, 78]); // in-handle 2·(50, 50) − (65, 78) = (35, 22)
+  drag(r, [90, 50], [105, 22]); // in-handle (75, 78)
+  r.editor.penDone();
+  same(dOf(r), preset.wave);
+  // Heart: four drags, Close (the start's in-handle its reflection), then the Node tool drags the two corner controls.
+  r = open('lab/create.svg');
+  r.editor.snap.set({ grid: false, guides: false, shapes: false, artboard: false });
+  r.editor.pickTool('pen');
+  drag(r, [50, 34], [50, 20]);
+  drag(r, [20, 28], [12, 42]); // in (28, 14)
+  drag(r, [50, 84], [74, 106]); // in (26, 62)
+  drag(r, [80, 28], [72, 14]); // in (88, 42)
+  r.editor.penClose();
+  assert.equal(r.editor.tool.get(), 'node');
+  gesture(r, handleAt(r, 'c3.1'), hostOf(r, 74, 62)); // the bottom point is a corner
+  gesture(r, handleAt(r, 'c4'), hostOf(r, 50, 20)); // and so is the top
+  same(dOf(r), preset.heart);
+  assert.ok(lastClosed(parsePath(dOf(r))), 'closed, with four C');
+});
+
+test('lab/create.svg: the Pen’s drag makes a curve, a path with a Q or C (goal "Draw a curve")', () => {
+  const r = open('lab/create.svg');
+  r.editor.pickTool('pen');
+  tapAt(r, 20, 80);
+  gesture(r, hostOf(r, 50, 20), hostOf(r, 60, 10));
+  r.editor.penDone();
+  assert.ok(parsePath(dOf(r)).segs.some((s) => 'QC'.includes(s.cmd.toUpperCase())), 'the goal: a Q or a C');
+  assert.equal(r.editor.source(), r.file.replace('\n</svg>', '\n  <path d="M 20 80 Q 40 30 50 20" fill="none" stroke="#264653" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>\n</svg>'));
+  oneEntry(r, 'Draw path');
+});
+
+test('lab/arcs--smooth.svg: Make corner then Make smooth on the middle node give the file back byte for byte, and the letter cycle plus Make smooth reaches the lab’s T form, "M Q T" (smooth-family); the node handles and the mirror guide (smooth-handles)', () => {
+  const r = open('lab/arcs--smooth.svg');
+  const path = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([path.id]);
+  assert.deepEqual(r.editor.overlayModel().handles.map((h) => h.id), ['center', 'c1.1', 'c1', 'c2', 'a0', 'a1', 'a2'], 'the start, middle and end anchors and the controls');
+  assert.equal(r.editor.overlayModel().paths!.dots.length, 1, 'the S’s mirror dot');
+  tapHandle(r, 'a1');
+  assert.equal(r.editor.nodeBar()!.smooth, 'smooth');
+  r.editor.toggleSmooth();
+  assert.equal(rawD(r), 'M 10 55\n   C 22 20, 40 20, 50 55\n   C 60 90, 78 90, 90 55');
+  assert.equal(r.editor.history.get().undoLabel, 'Make corner');
+  r.editor.toggleSmooth();
+  assert.equal(r.editor.source(), r.file, 'Make smooth: the file back byte for byte');
+  // The T form: the letters cycled to Q and Q, then Make smooth.
+  const cycle = (k: number) => r.editor.cycleSegment(path.id, k);
+  cycle(1); // C → L (the S written out as C)
+  cycle(1); // L → Q
+  cycle(2); // C → L
+  cycle(2); // L → Q
+  assert.equal(parsePath(dOf(r)).segs.map((s) => s.cmd).join(' '), 'M Q Q');
+  tapHandle(r, 'a1');
+  assert.equal(r.editor.nodeBar()!.smooth, 'corner');
+  r.editor.toggleSmooth();
+  assert.equal(parsePath(dOf(r)).segs.map((s) => s.cmd).join(' '), 'M Q T', 'the lab’s T family');
+});
+
+test('lab/arcs--smooth.svg: Make relative writes the lab’s relative spelling exactly (goal "Go relative"); the stroke and width by tokens and Inspect (smooth-stroke)', () => {
+  const r = open('lab/arcs--smooth.svg');
+  const path = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([path.id]);
+  r.editor.toggleRelative();
+  assert.equal(r.editor.source(), edited(r.file, 'M 10 55\n   C 22 20, 40 20, 50 55\n   S 78 90, 90 55', 'm 10 55\n   c 12 -35, 30 -35, 40 0\n   s 28 35, 40 0'));
+  oneEntry(r, 'Make relative');
+  assert.equal(r.editor.nodeBar()!.relative, true, 'the goal: relative');
+  r.editor.undo();
+  sheetSets(r, 'stroke', PALETTE[5]);
+  assert.equal(r.editor.source(), edited(r.file, 'stroke="#264653"', 'stroke="#e76f51"'));
+  oneStyleEntry(r, 'Set stroke', r.file);
+  setNumber(r, path.id, 'stroke-width=', '12');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="3"', 'stroke-width="12"'), 'the lab’s width 1–12');
+});
+
+test('Edit source takes a pasted path of every command, letter-less, packed and relative, and the Node tool and the tokens edit all of it (Draw keeps it all editable; nothing becomes raw)', () => {
+  const r = open('lab/paths.svg');
+  const path = element(r, 'path');
+  r.editor.select([path.id]);
+  const d = 'M0 0 10 10h5v5c1 1 2 2 3 3s1 1 2 2q1 1 2 2t2 2a5 5 0 0110 10z m 5 5 l 1 1 2 2';
+  assert.equal(r.editor.applySource(path.id, `<path d="${d}" fill="none" stroke="#000"/>`), null);
+  const pasted = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([pasted.id]);
+  const handles = r.editor.overlayModel().handles.map((h) => h.id);
+  const anchors = toAbsolute(parsePath(d)).filter((s) => s.type !== 'Z').length;
+  assert.equal(handles.filter((h) => /^a\d/.test(h)).length, anchors, 'every anchor of every command has a handle');
+  // The letter tokens (c, q, l) cycle.
+  const letters = tokenizeAttr(doc(r), pasted.id, { ns: null, local: 'd' }).filter((t) => t.kind === 'enum' && t.segment !== undefined).map((t) => t.text);
+  assert.deepEqual(letters, ['c', 'q', 'l']);
+  // An anchor of the letter-less L, the packed arc's end and the second subpath's l: each dragged, one entry.
+  for (const id of ['a1', 'a8', 'a11']) {
+    const before = dOf(r);
+    const at = handleAt(r, id);
+    gesture(r, at, { x: at.x + 8, y: at.y + 4 });
+    assert.notEqual(dOf(r), before, `${id} moved`);
+    assert.equal(r.editor.history.get().undoLabel, 'Move point');
+  }
+  assert.ok(/h5/.test(d) && /l[-\d.]+ [-\d.]+v5/.test(rawD(r)), 'the h after the moved point left its row: it became an l');
+  // The arc's packed flags cycle as tokens.
+  const flag = token(r, pasted.id, 'enum', 'a5');
+  r.editor.tapToken(flag.block, flag.token);
+  assert.equal(r.editor.history.get().undoLabel, 'Set d');
 });

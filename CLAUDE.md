@@ -145,6 +145,9 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Generated shapes** (polygon, star, spiral) keep their inputs in `draw:*` attributes; the Session's
   `finish` hook regenerates a shape whose inputs changed and detaches one whose geometry was edited by
   hand, in the same transaction.
+- **Paths (P1-M3).** The Pen and the Node tool write `d` through `engine/path/segments.ts`: numbers
+  rewritten in place (`rewriteNumbers`' glue rule), one segment's text at a time, never the whole
+  attribute.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
