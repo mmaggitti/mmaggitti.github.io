@@ -1926,6 +1926,14 @@ test('generated shapes: the Tips field, typed "12", draws 24 points after each k
   assert.equal(r.editor.source(), F.replace(STAR5(), STAR5().replace(starPointsOf(50, 50, 20, 0.4, 5), starPointsOf(50, 50, 20, 0.4, 12)).replace('draw:tips="5"', 'draw:tips="12"')));
   r.editor.undo();
   assert.equal(r.editor.source(), F, 'one undo gives back the 5-tip star');
+  // Keystrokes that each read: the Inner field typed 0.6, then 0.65, is still one entry.
+  r.editor.fieldStart({ kind: 'input', name: 'inner' });
+  for (const text of ['0', '0.', '0.6', '0.65']) r.editor.fieldInput(text);
+  r.editor.fieldEnd();
+  assert.ok(r.editor.source().includes('draw:inner="0.65"'), `the Inner field wrote ${r.editor.source()}`);
+  assert.equal(r.editor.history.get().undoLabel, 'Set inner');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, 'one undo gives back the inner radius from before the field: typing in it was one entry');
   r.editor.stepInput('tips', 1);
   r.editor.stepInput('inner', -1);
   assert.equal(r.editor.history.get().undoLabel, 'Set inner');

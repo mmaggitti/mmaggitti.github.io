@@ -265,3 +265,117 @@ test('the house\'s transform tokens scrub, and its three children\'s fills chang
   }
   assert.deepEqual(kids.map((k) => attrValue(doc(r), k, null, 'fill')), ['#111111', '#222222', '#333333']);
 });
+
+// ── P1-M2 S1: the Shapes, Create and Vector goals the Shapes tool and shape handles reach ──────────
+
+/** A tap with the Shapes tool at a root point. */
+function place(r: Rig, kind: 'rect' | 'circle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'spiral', x: number, y: number) {
+  r.editor.pickTool('shapes');
+  r.editor.pickShape(kind);
+  const at = hostOf(r, x, y);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+}
+
+test('lab/shapes.svg: the rect’s x, y, width, height and rx tokens each step and scrub, one entry each and only their bytes, and the Number sheet takes the lab’s ranges (x, y −50–150, width and height 0–200, rx 0–100), which the artboard-scaled slider spans', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  assert.equal(r.editor.extent(), 100, 'the slider spans −100 to 200 on the 100-unit board');
+  for (const [attr, was, lo, hi] of [['x', '20', '-50', '150'], ['y', '25', '-50', '150'], ['width', '60', '0', '200'], ['height', '50', '0', '200'], ['rx', '0', '0', '100']] as const) {
+    const t = token(r, rect.id, 'number', `${attr}=`);
+    r.editor.tapToken(t.block, t.token);
+    r.editor.stepFocus(1);
+    assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${Number(was) + 1}"`), `${attr}: a step`);
+    oneEntry(r, r.editor.history.get().undoLabel!);
+    r.editor.undo();
+    const s = token(r, rect.id, 'number', `${attr}=`);
+    r.editor.scrubStart(s.block, s.token);
+    r.editor.scrub(3);
+    r.editor.scrubEnd(true);
+    assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${Number(was) + 3}"`), `${attr}: a scrub`);
+    oneEntry(r, r.editor.history.get().undoLabel!);
+    r.editor.undo();
+    for (const v of [lo, hi]) {
+      setNumber(r, rect.id, `${attr}=`, v);
+      assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${v}"`), `${attr}: the Number sheet takes ${v}`);
+      r.editor.undo();
+    }
+  }
+  assert.equal(r.editor.source(), r.file);
+});
+
+test('lab goal "Round the corners" (shapes): the rx token’s Number sheet sets 6, one entry', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  setNumber(r, rect.id, 'rx=', '6');
+  assert.ok(num(r, rect, 'rx') >= 6, 'the goal: rx >= 6');
+  assert.equal(r.editor.source(), edited(r.file, 'rx="0"', 'rx="6"'));
+  oneEntry(r, r.editor.history.get().undoLabel!);
+});
+
+test('lab goal "Ellipse into a circle" (shapes): the Shapes tool places an ellipse, and its ry handle dragged level with rx makes it round; the ellipse selected, one entry each', () => {
+  const r = open('lab/shapes.svg');
+  place(r, 'ellipse', 50, 50);
+  const e = element(r, 'ellipse');
+  assert.deepEqual([...r.editor.selection.get()], [e.id], 'the new ellipse is selected');
+  assert.equal(r.editor.history.get().undoLabel, 'Add ellipse');
+  const placed = r.editor.source();
+  assert.equal(placed, edited(r.file, '\n</svg>', '\n  <ellipse cx="50" cy="50" rx="26" ry="14" fill="#e76f51" stroke="none"/>\n</svg>'));
+  gesture(r, handleAt(r, 'ry'), hostOf(r, 50, 50 + 26.3));
+  assert.ok(near(num(r, e, 'rx'), num(r, e, 'ry'), 0.5), `the goal: rx ${num(r, e, 'rx')} ≈ ry ${num(r, e, 'ry')}`);
+  assert.deepEqual([...r.editor.selection.get()], [e.id], 'the ellipse is still selected (the lab’s cur)');
+  assert.equal(r.editor.source(), placed.replace('ry="14"', 'ry="26"'), 'only ry changed');
+  assert.equal(r.editor.history.get().undoLabel, 'Set ry');
+  r.editor.undo();
+  assert.equal(r.editor.source(), placed);
+});
+
+test('lab goal "Add 3 shapes" (create): three taps with the Shapes tool on lab/create.svg leave three shapes, three entries', () => {
+  const r = open('lab/create.svg');
+  place(r, 'rect', 30, 30);
+  place(r, 'circle', 70, 30);
+  place(r, 'line', 50, 70);
+  const items = [...descendants(doc(r), doc(r).root)].filter((n) => n.kind === 'element' && n.id !== doc(r).root);
+  assert.equal(items.length, 3, 'the goal: items.length >= 3');
+  const labels = [];
+  while (r.editor.history.get().canUndo) {
+    labels.push(r.editor.history.get().undoLabel);
+    r.editor.undo();
+  }
+  assert.deepEqual(labels, ['Add line', 'Add circle', 'Add rectangle'], 'three entries, one per shape');
+  assert.equal(r.editor.source(), r.file);
+});
+
+test('lab/vector.svg: the circle’s r token steps and its Number sheet reaches 10 and 50 (circle-radius); a two-finger pan moves the view and never the file (pan); a vertex handle on the star, a plain polygon, moves one pair (star-polygon)', () => {
+  const r = open('lab/vector.svg');
+  const circle = element(r, 'circle');
+  const t = token(r, circle.id, 'number', 'r=');
+  r.editor.tapToken(t.block, t.token);
+  r.editor.stepFocus(-1);
+  assert.equal(r.editor.source(), edited(r.file, 'r="42"', 'r="41"'));
+  oneEntry(r, r.editor.history.get().undoLabel!);
+  r.editor.undo();
+  for (const v of ['10', '50']) {
+    setNumber(r, circle.id, 'r=', v);
+    assert.equal(num(r, circle, 'r'), Number(v));
+    r.editor.undo();
+  }
+  // Pan: two fingers moved together 60 pt right and 30 down.
+  const was = r.editor.view;
+  r.editor.navStart();
+  r.editor.navigate({ x: 150, y: 200 }, { x: 250, y: 200 }, { x: 210, y: 230 }, { x: 310, y: 230 });
+  r.editor.navEnd();
+  const now = r.editor.view;
+  assert.ok(now.cx !== was.cx && now.cy !== was.cy && Math.abs(now.scale - was.scale) < 1e-9, `the view panned: ${JSON.stringify(was)} → ${JSON.stringify(now)}`);
+  assert.equal(r.editor.source(), r.file, 'a pan never touches the file');
+  r.editor.fitToScreen();
+  // The star's second point, a vertex handle, dragged 3 units right and 2 up.
+  const star = element(r, 'polygon');
+  r.editor.select([star.id]);
+  assert.ok(r.editor.overlayModel().handles.some((h) => h.id === 'v9'), 'a handle per vertex (10)');
+  const v1 = handleAt(r, 'v1');
+  const k = hostOf(r, 1, 0).x - hostOf(r, 0, 0).x;
+  gesture(r, v1, { x: v1.x + 3 * k, y: v1.y - 2 * k });
+  assert.equal(r.editor.source(), edited(r.file, '50,23 57,43 79,44', '50,23 60,41 79,44'), 'only that pair');
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+});

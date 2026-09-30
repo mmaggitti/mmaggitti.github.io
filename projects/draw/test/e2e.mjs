@@ -67,6 +67,7 @@ import { detentHeights } from '../src/detents.ts';
 import { encodeImport } from '../src/platform/files.ts';
 import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
+import { starPoints } from '../../../engine/generators/radial.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
@@ -226,6 +227,10 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(aFilesOwnCssCantMoveItsDrawing);
   // P1-M2: shapes, style and colour.
   await check(aForeignObjectIsOutlinedWhereItDraws);
+  await check(aTapPlacesTheLabsDefaultScaledToTheArtboard);
+  await check(aDragDrawsTheShapeWithSnapping);
+  await check(shapeHandlesEditTheLabsShapes);
+  await check(generatorsRegenerateAndDetach);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -4538,6 +4543,17 @@ async function layersHideAndLockShapes(browser, origin) {
   });
 }
 
+// The Export sheet's `kind` (working: Save to Files, as-is, clean), downloaded, as text.
+async function exportFile(page, kind) {
+  await page.locator('.draw-export').tap();
+  const go = page.locator(`.draw-export-go[data-kind="${kind}"]`);
+  await go.waitFor();
+  const [download] = await Promise.all([page.waitForEvent('download'), go.tap()]);
+  const bytes = readFileSync(await download.path());
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+  return bytes.toString('utf8');
+}
+
 // Draw's own state stays out of As-is, Copy and Clean: after a guide and a lock, Save to Files holds
 // <draw:state, draw:locked and xmlns:draw; the As-is export's bytes and the Copy text hold no draw:
 // at all and are the file as opened; Clean holds no Draw namespace and no Draw-made <metadata>, and
@@ -4550,15 +4566,7 @@ async function drawStateStaysOutOfAsIsAndClean(browser, origin) {
       window.__copied = [];
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void window.__copied.push(t) } });
     });
-    const exportAs = async (kind) => {
-      await page.locator('.draw-export').tap();
-      const go = page.locator(`.draw-export-go[data-kind="${kind}"]`);
-      await go.waitFor();
-      const [download] = await Promise.all([page.waitForEvent('download'), go.tap()]);
-      const bytes = readFileSync(await download.path());
-      await page.locator('.draw-modal').waitFor({ state: 'detached' });
-      return bytes.toString('utf8');
-    };
+    const exportAs = (kind) => exportFile(page, kind);
     await pickFile(page, 'state.svg', Buffer.from(SNAP_DOC));
     await closeModal(page);
     await page.locator('.draw-snap-btn').tap();
@@ -4733,6 +4741,402 @@ async function aForeignObjectIsOutlinedWhereItDraws(browser, origin) {
       const centre = (await page.evaluate(handlesNow)).find((h) => h.id === 'center');
       must(centre && Math.hypot(centre.x - (r.fo.x + r.fo.width / 2), centre.y - (r.fo.y + r.fo.height / 2)) <= 1, `${as}: its centre handle is at ${JSON.stringify(centre)}, not the centre of ${rect(r.fo)}`);
     }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M2 S1: the Shapes tool, shape handles and generators ─────────────────────────────────────
+
+const LAB_CREATE = () => readFileSync(join(CORPUS, 'lab/create.svg'), 'utf8');
+// Runs in the page: the drawn root's getScreenCTM scale (px a unit).
+const unitPx = () => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a;
+
+// The Shapes tool on, with `kind` chosen (its ContextBar button).
+async function shapesTool(page, kind) {
+  if ((await page.locator('.draw-shapes-tool').getAttribute('aria-pressed')) !== 'true') await page.locator('.draw-shapes-tool').tap();
+  await page.locator(`.draw-shape-kind[aria-label="${kind}"]`).tap();
+}
+// A tap with the Shapes tool at the screen point of a root point: that screen point.
+async function shapesTap(page, kind, x, y) {
+  await shapesTool(page, kind);
+  const p = await page.evaluate(screenPoint, { x, y });
+  await page.touchscreen.tap(p.x, p.y);
+  await page.waitForTimeout(50);
+  return p;
+}
+const selectTool = (page) => page.locator('.draw-tool', { hasText: /^Select$/ });
+
+// lab/create.svg (an empty 100-unit board). The Shapes button is at least 44 × 44 and pressed once
+// picked; the ContextBar then holds the seven kinds and Cancel, each at least 44 × 44, in order,
+// without overlap, inside the 48 pt bar at 440 pt. A Rectangle tap at the screen point of (50, 50)
+// adds exactly the lab's rect centred there before the file's closing line break, drawn centred on
+// the tap (± 1 px) and 40 × 30 units, selected, with Select back, as one "Add rectangle" that one
+// undo takes back byte for byte. Circle, Ellipse and Line follow the lab's colour cycle, each drawn
+// where the tap was (the line's ends at the tap ± (24, −18) units). On a 24 × 24 board the rect is
+// 10 × 7. A Star writes its five inputs and the root's xmlns:draw, and the polygon the browser draws
+// is within 0.01 of the generator's points computed here (engines' trig can differ in the last bit).
+async function aTapPlacesTheLabsDefaultScaledToTheArtboard(browser, origin) {
+  const F = LAB_CREATE();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await page.locator('.draw-shapes-tool').tap();
+    const bar = await page.evaluate(() => {
+      const tool = document.querySelector('.draw-shapes-tool');
+      const ctx = document.querySelector('.draw-context');
+      const de = document.documentElement;
+      return {
+        tool: { pressed: tool.getAttribute('aria-pressed'), ...tool.getBoundingClientRect().toJSON() },
+        ctx: ctx.getBoundingClientRect().toJSON(),
+        buttons: [...ctx.querySelectorAll('.draw-ctx-btn')].map((b) => ({ name: b.getAttribute('aria-label'), pressed: b.getAttribute('aria-pressed'), ...b.getBoundingClientRect().toJSON() })),
+        group: ctx.querySelector('[role="group"][aria-label="Shape"]')?.querySelectorAll('.draw-shape-kind').length ?? 0,
+        sideways: de.scrollWidth - de.clientWidth,
+      };
+    });
+    must(bar.tool.pressed === 'true' && bar.tool.width >= 43.5 && bar.tool.height >= 43.5, `the Shapes button is ${Math.round(bar.tool.width)}×${Math.round(bar.tool.height)}, pressed ${bar.tool.pressed}`);
+    const names = bar.buttons.map((b) => b.name);
+    must(JSON.stringify(names) === JSON.stringify(['Rectangle', 'Circle', 'Ellipse', 'Line', 'Polygon', 'Star', 'Spiral', 'Cancel']) && bar.group === 7, `the ContextBar holds ${JSON.stringify(names)} (${bar.group} in the Shape group)`);
+    for (const b of bar.buttons) must(b.width >= 43.5 && b.height >= 43.5 && b.left >= bar.ctx.left - 0.5 && b.right <= bar.ctx.right + 0.5, `${b.name} is ${Math.round(b.width)}×${Math.round(b.height)} at ${Math.round(b.left)}–${Math.round(b.right)}, outside the bar or under 44`);
+    must(bar.buttons.every((b, i) => i === 0 || b.left >= bar.buttons[i - 1].right - 0.5), 'the kind buttons overlap');
+    must(bar.buttons[0].pressed === 'true' && bar.buttons.slice(1, 7).every((b) => b.pressed === 'false'), 'Rectangle is not the one pressed');
+    must(Math.abs(bar.ctx.height - 48) <= 0.5 && bar.sideways <= 0, `the bar is ${bar.ctx.height} high, and the page scrolls sideways by ${bar.sideways}`);
+    // Rectangle at (50, 50).
+    const at = await shapesTap(page, 'Rectangle', 50, 50);
+    must(await source(page) === F.replace('\n</svg>', '\n  <rect x="30" y="35" width="40" height="30" rx="0" fill="#e76f51" stroke="none"/>\n</svg>'), `the rect is not exactly the lab's, centred on (50, 50):\n${await source(page)}`);
+    const drawn = (sel) => page.evaluate((s) => {
+      const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+      return { ...svg.querySelector(s).getBoundingClientRect().toJSON(), k: svg.getScreenCTM().a };
+    }, sel);
+    const r = await drawn('rect');
+    must(Math.abs(r.x + r.width / 2 - at.x) <= 1 && Math.abs(r.y + r.height / 2 - at.y) <= 1, `the rect is drawn centred at (${r.x + r.width / 2}, ${r.y + r.height / 2}), not on the tap (${at.x}, ${at.y})`);
+    must(Math.abs(r.width / r.k - 40) < 0.1 && Math.abs(r.height / r.k - 30) < 0.1, `the rect is drawn ${(r.width / r.k).toFixed(2)} × ${(r.height / r.k).toFixed(2)} units`);
+    must(await label(page) === '<rect>', `the new rect is not selected: ${await label(page)}`);
+    must(await page.locator('.draw-shapes-tool').getAttribute('aria-pressed') === 'false' && await selectTool(page).getAttribute('aria-pressed') === 'true', 'Select is not back after the tap');
+    must(await undo.getAttribute('aria-label') === 'Undo Add rectangle', `the entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), 'one undo did not give the file back, or the tap was more than one entry');
+    // Circle, Ellipse, Line: the colour cycle goes on, each drawn where the tap was.
+    for (const [kind, sel, markup, w, h] of [
+      ['Circle', 'circle', '<circle cx="50" cy="50" r="18" fill="#2a9d8f" stroke="none"/>', 36, 36],
+      ['Ellipse', 'ellipse', '<ellipse cx="50" cy="50" rx="26" ry="14" fill="#e9c46a" stroke="none"/>', 52, 28],
+      ['Line', 'line', '<line x1="26" y1="68" x2="74" y2="32" stroke="#f4a261" stroke-width="4" stroke-linecap="round"/>', null, null],
+    ]) {
+      const p = await shapesTap(page, kind, 50, 50);
+      must(await source(page) === F.replace('\n</svg>', `\n  ${markup}\n</svg>`), `${kind}:\n${await source(page)}`);
+      if (w !== null) {
+        const b = await drawn(sel);
+        must(Math.abs(b.x + b.width / 2 - p.x) <= 1 && Math.abs(b.y + b.height / 2 - p.y) <= 1 && Math.abs(b.width / b.k - w) < 0.1 && Math.abs(b.height / b.k - h) < 0.1, `${kind} is drawn ${JSON.stringify(b)}, not ${w} × ${h} units on the tap`);
+      } else {
+        const ends = await page.evaluate(() => {
+          const l = document.querySelector('.draw-host').shadowRoot.querySelector('line');
+          const m = l.getScreenCTM();
+          return [[l.x1.baseVal.value, l.y1.baseVal.value], [l.x2.baseVal.value, l.y2.baseVal.value]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m)).map((q) => ({ x: q.x, y: q.y, k: m.a }));
+        });
+        const k = ends[0].k;
+        must(Math.hypot(ends[0].x - (p.x - 24 * k), ends[0].y - (p.y + 18 * k)) <= 1 && Math.hypot(ends[1].x - (p.x + 24 * k), ends[1].y - (p.y - 18 * k)) <= 1, `the line's ends are drawn at ${JSON.stringify(ends)}, not the tap ± (24, −18) units`);
+      }
+      must(await undo.getAttribute('aria-label') === `Undo Add ${sel}`, `${kind}: the entry is ${await undo.getAttribute('aria-label')}`);
+      await undo.tap();
+    }
+    // A 24 × 24 board: k = 0.24.
+    const ICON = `<svg xmlns="${SVG_NS}" viewBox="0 0 24 24">\n</svg>\n`;
+    must((await page.evaluate((t) => window.drawTest.render(t), ICON)).ok, 'test setup: the icon board did not open');
+    await twoFrames(page);
+    await shapesTap(page, 'Rectangle', 12, 12);
+    must(/<rect x="7" y="9" width="10" height="7" rx="0"/.test(await source(page)), `on a 24 × 24 board the rect is not 10 × 7:\n${await source(page)}`);
+    // A star: its five inputs, xmlns:draw, and the polygon drawn from them.
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open again');
+    await twoFrames(page);
+    await shapesTap(page, 'Star', 50, 50);
+    const src = await source(page);
+    must(src.includes(`xmlns:draw="${DRAW_NS_URI}"`) && src.includes('draw:gen="star" draw:cx="50" draw:cy="50" draw:r="20" draw:inner="0.4" draw:tips="5"'), `the star's inputs:\n${src}`);
+    const pts = await page.evaluate(() => [...document.querySelector('.draw-host').shadowRoot.querySelector('polygon').points].map((q) => [q.x, q.y]));
+    const want = starPoints(50, 50, 20, 0.4, 5).split(' ').map((q) => q.split(',').map(Number));
+    must(pts.length === 10 && pts.every(([x, y], i) => Math.abs(x - want[i][0]) <= 0.01 && Math.abs(y - want[i][1]) <= 0.01), `the drawn star's points ${JSON.stringify(pts)} are not the generator's ${JSON.stringify(want)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const GUIDE_40 = `<svg xmlns="${SVG_NS}" xmlns:draw="${DRAW_NS_URI}" viewBox="0 0 100 100">\n  <metadata><draw:state version="1" guides="v 40"/></metadata>\n</svg>\n`;
+
+// A finger drawing with the Shapes tool, then a second finger joining mid-drag (Chromium: a CDP
+// touchStart that adds a second point; WebKit: a synthetic pointerdown with pointerId 2), then both lift.
+async function drawThenSecondFinger(browser, page, a, b) {
+  const mid = (i) => ({ x: a.x + ((b.x - a.x) * i) / 4, y: a.y + ((b.y - a.y) * i) / 4 });
+  if (chromium(browser)) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...a, id: 1 }] });
+    for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...mid(i), id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...b, id: 1 }, { x: b.x + 60, y: b.y + 40, id: 2 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.evaluate(({ a, b }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (type, id, p) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+      fire('pointerdown', 1, a);
+      for (let i = 1; i <= 4; i++) fire('pointermove', 1, { x: a.x + ((b.x - a.x) * i) / 4, y: a.y + ((b.y - a.y) * i) / 4 });
+      fire('pointerdown', 2, { x: b.x + 60, y: b.y + 40 });
+      fire('pointerup', 1, b);
+      fire('pointerup', 2, { x: b.x + 60, y: b.y + 40 });
+    }, { a, b });
+  }
+  await page.waitForTimeout(50);
+}
+
+// With a vertical guide at x 40 (kept in the file's Draw state), a Rectangle drag from the screen
+// point of (38.6, 20.2) to (70.3, 45.8) snaps its start to the guide and the rest to whole units: it
+// writes x 40, y 20, width 30, height 26, drawn spanning those points (± 1 px), with the tooltip
+// "30 × 26" 42 pt above the finger during the drag; from the other corner, the same box. A Circle drag
+// from (50, 50) to (50, 70) writes r 20 ("r 20"); a Spiral drag writes draw:r; a Line drag both ends;
+// each one entry. Every drawn element other than the new one keeps its identity through a drag (a
+// WeakSet: nothing redrawn). A second finger mid-drag cancels it: the file as it was, no entry.
+async function aDragDrawsTheShapeWithSnapping(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), GUIDE_40)).ok, 'test setup: the guided board did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const drawShape = async (kind, from, to, each = async () => {}) => {
+      await shapesTool(page, kind);
+      const a = await page.evaluate(screenPoint, from);
+      const b = await page.evaluate(screenPoint, to);
+      await dragOnCanvas(page, 'mouse', a, { x: b.x - a.x, y: b.y - a.y }, 8, each);
+      await page.waitForTimeout(50);
+    };
+    const RECT = '<rect x="40" y="20" width="30" height="26" rx="0" fill="COLOUR" stroke="none"/>';
+    await page.evaluate(() => {
+      window.__drawn = new WeakSet(document.querySelector('.draw-host').shadowRoot.querySelectorAll('*'));
+    });
+    let during = null;
+    await drawShape('Rectangle', { x: 38.6, y: 20.2 }, { x: 70.3, y: 45.8 }, async (i) => {
+      if (i < 8) return;
+      during = await page.evaluate(() => {
+        const t = document.querySelector('.draw-tip');
+        return { text: t && !t.hidden ? t.textContent : null, bottom: t?.getBoundingClientRect().bottom ?? null };
+      });
+    });
+    const finger = await page.evaluate(screenPoint, { x: 70.3, y: 45.8 });
+    must(await source(page) === GUIDE_40.replace('\n</svg>', `\n  ${RECT.replace('COLOUR', '#e76f51')}\n</svg>`), `the drag from (38.6, 20.2) to (70.3, 45.8) did not snap to the guide and whole units:\n${await source(page)}`);
+    must(during?.text === '30 × 26', `during the drag the tooltip read ${JSON.stringify(during?.text)}, not "30 × 26"`);
+    must(Math.abs(finger.y - during.bottom - 42) <= 2, `the tooltip's bottom edge is ${(finger.y - during.bottom).toFixed(1)} px above the finger, not 42`);
+    const box = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('rect').getBoundingClientRect().toJSON());
+    const [p, q] = [await page.evaluate(screenPoint, { x: 40, y: 20 }), await page.evaluate(screenPoint, { x: 70, y: 46 })];
+    must(Math.abs(box.x - p.x) <= 1 && Math.abs(box.y - p.y) <= 1 && Math.abs(box.right - q.x) <= 1 && Math.abs(box.bottom - q.y) <= 1, `the rect is drawn ${rect(box)}, not from (40, 20) to (70, 46)`);
+    const fresh = await page.evaluate(() => [...document.querySelector('.draw-host').shadowRoot.querySelectorAll('*')].filter((n) => !window.__drawn.has(n)).map((n) => n.localName));
+    must(JSON.stringify(fresh) === JSON.stringify(['rect']), `the drag drew more than the new rect afresh: ${JSON.stringify(fresh)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add rectangle', `the entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === GUIDE_40 && await undo.isDisabled(), 'one undo did not give the file back');
+    await drawShape('Rectangle', { x: 70.3, y: 45.8 }, { x: 38.6, y: 20.2 });
+    must(await source(page) === GUIDE_40.replace('\n</svg>', `\n  ${RECT.replace('COLOUR', '#2a9d8f')}\n</svg>`), `from the other corner, not the same box:\n${await source(page)}`);
+    await undo.tap();
+    let circleTip = null;
+    await drawShape('Circle', { x: 50, y: 50 }, { x: 50, y: 70 }, async (i) => {
+      if (i === 8) circleTip = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    must((await source(page)).includes('<circle cx="50" cy="50" r="20" fill="#e9c46a" stroke="none"/>') && circleTip === 'r 20', `a circle drag from (50, 50) to (50, 70): tooltip ${JSON.stringify(circleTip)}\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add circle', 'the circle is not one entry');
+    await undo.tap();
+    await drawShape('Spiral', { x: 30, y: 30 }, { x: 30, y: 45 });
+    must(/<path d="M 30 30 C [^"]+" fill="none" stroke="#f4a261" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" draw:gen="spiral" draw:cx="30" draw:cy="30" draw:r="15" draw:turns="3"\/>/.test(await source(page)), `the spiral drag:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add spiral', 'the spiral is not one entry');
+    await undo.tap();
+    await drawShape('Line', { x: 10.2, y: 80.3 }, { x: 60.4, y: 85.2 });
+    must((await source(page)).includes('<line x1="10" y1="80" x2="60" y2="85" stroke="#b56576" stroke-width="4" stroke-linecap="round"/>'), `the line drag:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add line', 'the line is not one entry');
+    await undo.tap();
+    must(await source(page) === GUIDE_40, 'test setup: the draws were not all undone');
+    // A second finger mid-drag cancels the draw.
+    await shapesTool(page, 'Rectangle');
+    await drawThenSecondFinger(browser, page, await page.evaluate(screenPoint, { x: 20, y: 60 }), await page.evaluate(screenPoint, { x: 60, y: 90 }));
+    must(await source(page) === GUIDE_40, `a second finger did not cancel the draw:\n${await source(page)}`);
+    must(await undo.isDisabled(), 'a cancelled draw left a history entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const HANDLE_SHAPES = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <circle cx="30" cy="30" r="10" fill="#2a9d8f"/>
+  <ellipse cx="70" cy="30" rx="20" ry="10" fill="#e9c46a" transform="rotate(30 70 30)"/>
+  <line x1="10" y1="80" x2="40" y2="70" stroke="#264653" stroke-width="3"/>
+  <polygon points="60,60 90,65 80,90" fill="#e76f51"/>
+  <text x="12" y="52" font-size="8">Hi</text>
+</svg>
+`;
+
+// The shape handles of SVG Lab's KITS, where they draw and what a drag writes. The circle's radius
+// handle is drawn at the screen point of (40, 30) (± 1 px) and it has no corner handles; dragged to
+// (45, 30) it writes r="15" and nothing else, the tooltip reading "r 15". The rotated ellipse's rx
+// handle is drawn at its own (90, 30) through its transform, and a drag along its own axis changes
+// only rx. A line's end lands on the snapped point (the artboard's centre in x, whole units in y); a
+// polygon's vertex moves only its pair; lab/vector.svg's star (a plain polygon) moves one vertex; a
+// <text>'s centre handle moves it by a translate (SVG Lab's text position handle). One entry each.
+async function shapeHandlesEditTheLabsShapes(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const F = HANDLE_SHAPES;
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const handle = async (id) => (await page.evaluate(handlesNow)).find((h) => h.id === id);
+    const drag = async (id, to, each = async () => {}) => {
+      const h = await handle(id);
+      must(h, `test setup: no ${id} handle (${(await page.evaluate(handlesNow)).map((x) => x.id)})`);
+      await dragOnCanvas(page, 'mouse', h, { x: to.x - h.x, y: to.y - h.y }, 8, each);
+      await page.waitForTimeout(50);
+    };
+    const oneEntry = async (label, after) => {
+      must(await undo.getAttribute('aria-label') === `Undo ${label}`, `the entry is ${await undo.getAttribute('aria-label')}, not ${label}`);
+      await undo.tap();
+      must(await source(page) === after, `one undo did not give the file back:\n${await source(page)}`);
+    };
+    await openAndSelect(page, F, 'circle');
+    must(await label(page) === '<circle>', `test setup: the tap selected ${await label(page)}`);
+    const hs = await page.evaluate(handlesNow);
+    const r = hs.find((h) => h.id === 'r');
+    const at = await page.evaluate(screenPoint, { x: 40, y: 30 });
+    must(r && Math.hypot(r.x - at.x, r.y - at.y) <= 1, `the circle's radius handle is at ${JSON.stringify(r)}, not the screen point of (40, 30) ${JSON.stringify(at)}`);
+    must(!hs.some((h) => ['tl', 'tr', 'br', 'bl'].includes(h.id)), `the circle has corner handles: ${hs.map((h) => h.id)}`);
+    let tipText = null;
+    await drag('r', await page.evaluate(screenPoint, { x: 45, y: 30 }), async (i) => {
+      if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    must(await source(page) === F.replace('r="10"', 'r="15"'), `the radius drag to (45, 30):\n${await source(page)}`);
+    must(tipText === 'r 15', `the tooltip read ${JSON.stringify(tipText)}, not "r 15"`);
+    await oneEntry('Set r', F);
+    // The rotated ellipse: rx along its own axis.
+    const c = await page.evaluate(drawnCentre, 'ellipse');
+    await page.touchscreen.tap(c.x, c.y);
+    await page.waitForTimeout(50);
+    const rx = await handle('rx');
+    const own = await page.evaluate(elementPoint, { sel: 'ellipse', x: 90, y: 30 });
+    must(rx && Math.hypot(rx.x - own.x, rx.y - own.y) <= 1, `the ellipse's rx handle is at ${JSON.stringify(rx)}, not its own (90, 30) through its transform ${JSON.stringify(own)}`);
+    await drag('rx', await page.evaluate(elementPoint, { sel: 'ellipse', x: 95, y: 30 }));
+    must(await source(page) === F.replace('rx="20"', 'rx="25"'), `the rx drag along its own axis:\n${await source(page)}`);
+    await oneEntry('Set rx', F);
+    // The line's end, snapped.
+    const l = await page.evaluate(drawnCentre, 'line');
+    await page.touchscreen.tap(l.x, l.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<line>', `test setup: the tap selected ${await label(page)}`);
+    await drag('p2', await page.evaluate(screenPoint, { x: 49.3, y: 71.6 }));
+    must(await source(page) === F.replace('x2="40" y2="70"', 'x2="50" y2="72"'), `the line's end did not land on the snapped point (50, 72):\n${await source(page)}`);
+    await oneEntry('Move end', F);
+    // The polygon's third vertex.
+    const g = await page.evaluate(drawnCentre, 'polygon');
+    await page.touchscreen.tap(g.x, g.y);
+    await page.waitForTimeout(50);
+    await drag('v2', await page.evaluate(screenPoint, { x: 83, y: 94 }));
+    must(await source(page) === F.replace('points="60,60 90,65 80,90"', 'points="60,60 90,65 83,94"'), `the vertex drag moved more than its pair:\n${await source(page)}`);
+    await oneEntry('Move point', F);
+    // The text's centre handle (with snapping off: whole units).
+    await snapOff(page);
+    const t = await page.evaluate(drawnCentre, 'text');
+    await page.touchscreen.tap(t.x, t.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<text>', `test setup: the tap selected ${await label(page)}`);
+    const centre = await handle('center');
+    const k = await page.evaluate(unitPx);
+    await drag('center', { x: centre.x + 6 * k, y: centre.y + 4 * k });
+    must(/^<text x="12" y="52" font-size="8" transform="translate\((5|6|7) (3|4|5)\)">Hi<\/text>$/m.test((await source(page)).split('\n').find((x) => x.includes('<text')).trim()), `the text's centre handle did not move it by a translate:\n${await source(page)}`);
+    await oneEntry('Move', F);
+    // lab/vector.svg's star: a plain polygon, one vertex.
+    const V = readFileSync(join(CORPUS, 'lab/vector.svg'), 'utf8');
+    await openAndSelect(page, V, 'polygon');
+    must(await label(page) === '<polygon>', `test setup: the tap on the star selected ${await label(page)}`);
+    await drag('v1', await page.evaluate(screenPoint, { x: 60, y: 41 }));
+    must(await source(page) === V.replace('50,23 57,43 79,44', '50,23 60,41 79,44'), `the star's vertex drag:\n${await source(page)}`);
+    await oneEntry('Move point', V);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A star placed with the Shapes tool is generated: Inspect's Generator section, Tips + makes it 6
+// tips (12 points drawn, draw:tips="6", one "Set tips"); its radius handle dragged outward grows
+// draw:r and draws the first tip under the finger (± 1 px); a move changes only draw:cx, draw:cy
+// and the points, and it stays generated. A scrub of a points number in the code drops every draw:
+// input (and the root's xmlns:draw, nothing else being Draw's) in that one entry, the Generator
+// section goes and the notice says so; undo brings the inputs and the points back byte for byte.
+// Detach does the same on purpose. A spiral's Turns field typed 3 → 4 draws more segments (24 → 32),
+// as one entry. The As-is export holds no draw: and Save to Files keeps the inputs.
+async function generatorsRegenerateAndDetach(browser, origin) {
+  const F = LAB_CREATE();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+    });
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open');
+    await twoFrames(page);
+    await snapOff(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await shapesTap(page, 'Star', 50, 50);
+    const placed = await source(page);
+    must(placed.includes('draw:tips="5"'), `test setup: no star:\n${placed}`);
+    await page.locator('.draw-handle').tap();
+    await page.locator('.draw-tabs button', { hasText: 'Inspect' }).tap();
+    const gen = page.locator('section[aria-label="Generator"]');
+    must(await gen.count() === 1 && (await gen.locator('.draw-subhead').textContent()) === 'Star', 'Inspect shows no Star generator');
+    await gen.locator('[aria-label="Increase Tips"]').tap();
+    const points = () => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('polygon').points.length);
+    must(await points() === 12 && (await source(page)).includes('draw:tips="6"'), `Tips + did not draw 12 points with draw:tips="6" (${await points()})`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set tips', `the entry is ${await undo.getAttribute('aria-label')}`);
+    // The radius handle, dragged outward to (50, 25): the first tip under the finger.
+    const r = (await page.evaluate(handlesNow)).find((h) => h.id === 'r');
+    must(r, 'the star has no radius handle');
+    const to = await page.evaluate(screenPoint, { x: 50, y: 25 });
+    await dragOnCanvas(page, 'mouse', r, { x: to.x - r.x, y: to.y - r.y }, 8);
+    must((await source(page)).includes('draw:r="25"'), `the radius drag did not write draw:r="25":\n${await source(page)}`);
+    const tip = await page.evaluate(() => {
+      const poly = document.querySelector('.draw-host').shadowRoot.querySelector('polygon');
+      const q = new DOMPoint(poly.points[0].x, poly.points[0].y).matrixTransform(poly.getScreenCTM());
+      return { x: q.x, y: q.y };
+    });
+    must(Math.hypot(tip.x - to.x, tip.y - to.y) <= 1, `the first tip is drawn at ${JSON.stringify(tip)}, not under the finger ${JSON.stringify(to)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set r', 'the radius drag is not one "Set r"');
+    // A move: only draw:cx, draw:cy and the points.
+    const before = await source(page);
+    const c = (await page.evaluate(handlesNow)).find((h) => h.id === 'center');
+    const k = await page.evaluate(unitPx);
+    await dragOnCanvas(page, 'mouse', c, { x: 7 * k, y: -3 * k }, 8);
+    const moved = await source(page);
+    const strip = (s) => s.replace(/points="[^"]*"/, '').replace(/draw:cx="[^"]*" draw:cy="[^"]*"/, '');
+    must(moved !== before && strip(moved) === strip(before) && moved.includes('draw:cx="57" draw:cy="47"'), `the move changed more than draw:cx, draw:cy and the points:\n${moved}`);
+    must(await gen.count() === 1, 'the moved star is no longer generated');
+    // A scrub of a points number in the code: plain, in that one entry.
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    const token = page.locator('.cv-block', { hasText: '<polygon' }).locator('.cv-number').first();
+    await scrubToken(page, token, 3);
+    const plain = await source(page);
+    must(!plain.includes('draw:'), `the scrub left draw: behind:\n${plain}`);
+    must((await toast(page)) === 'It’s a plain shape now: its generator inputs were dropped.', `the notice read ${JSON.stringify(await toast(page))}`);
+    await page.locator('.draw-tabs button', { hasText: 'Inspect' }).tap();
+    must(await gen.count() === 0, 'the Generator section stayed on a plain shape');
+    await undo.tap();
+    must(await source(page) === moved, 'one undo did not bring the inputs and the points back byte for byte');
+    must(await gen.count() === 1, 'the Generator section did not come back');
+    await page.locator('section[aria-label="Generator"] .ds-btn', { hasText: 'Detach' }).tap();
+    must(!(await source(page)).includes('draw:') && await undo.getAttribute('aria-label') === 'Undo Detach', `Detach:\n${await source(page)}`);
+    await undo.tap();
+    must(await source(page) === moved, 'undo after Detach');
+    // The exports: As-is holds no draw:, Save to Files keeps the inputs.
+    const asIs = await exportFile(page, 'as-is');
+    must(!asIs.includes('draw:') && /<polygon points="[^"]+" fill="#e76f51" stroke="none"\/>/.test(asIs), `the As-is export:\n${asIs}`);
+    const working = await exportFile(page, 'working');
+    must(working === moved, 'Save to Files is not the working copy with its inputs');
+    // A spiral: Turns typed 4.
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open again');
+    await twoFrames(page);
+    await shapesTap(page, 'Spiral', 50, 50);
+    const segs = () => page.evaluate(() => (document.querySelector('.draw-host').shadowRoot.querySelector('path').getAttribute('d').match(/ C /g) ?? []).length);
+    must(await segs() === 24, `a 3-turn spiral draws ${await segs()} segments, not 24`);
+    await page.locator('.draw-tabs button', { hasText: 'Inspect' }).tap();
+    const turns = page.locator('section[aria-label="Generator"] input[aria-label="Turns"]');
+    await turns.tap();
+    await turns.fill('4');
+    await turns.press('Enter');
+    await page.waitForTimeout(50);
+    must(await segs() === 32 && (await source(page)).includes('draw:turns="4"'), `Turns 4 draws ${await segs()} segments, not 32`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set turns', `typing 4 is ${await undo.getAttribute('aria-label')}, not one "Set turns"`);
+    await undo.tap();
+    must(await segs() === 24, 'one undo did not give the 3-turn spiral back');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

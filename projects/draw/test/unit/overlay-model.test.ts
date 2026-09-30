@@ -157,3 +157,23 @@ test('the seven handle styles are SVG Lab’s: its sizes (squares, circles, the 
   assert.deepEqual(rule('.draw-hd.on'), { fill: '#ffe600' }, 'the dragged one yellow');
   assert.deepEqual(rule('.draw-hd-dot'), { fill: '#00a3e0' });
 });
+
+// P1-M2 S1: shape handles are ordinary handles in the model: a circle's radius handle (anchor), a
+// star's inner point (ctrl), drawn before the centre, so a press on a tiny shape where they coincide
+// takes the centre (drawn last); the Shapes tool's drag tooltips ("W × H", "r N") sit as every tip.
+test('shape handles in the model: a radius (anchor) and an inner point (ctrl) are drawn at the lab’s sizes before the centre, a press takes the nearest within 26 px and a tie the centre, and a draw’s tooltip sits 42 px above the finger', () => {
+  const handles = [
+    { id: 'r', kind: 'anchor' as HandleKind, at: { x: 110, y: 100 }, active: false },
+    { id: 'inner', kind: 'ctrl' as HandleKind, at: { x: 104, y: 88 }, active: false },
+    { id: 'center', kind: 'center' as HandleKind, at: { x: 100, y: 100 }, active: false },
+  ];
+  assert.equal(pickHandle(handles, { x: 112, y: 101 })?.id, 'r', 'the radius handle, nearest');
+  assert.equal(pickHandle(handles, { x: 104, y: 87 })?.id, 'inner');
+  assert.equal(pickHandle(handles, { x: 105, y: 100 })?.id, 'center', 'a tie between the radius and the centre goes to the centre, drawn last');
+  assert.equal(pickHandle(handles, { x: 140, y: 100 }), null, 'nothing beyond 26 px');
+  assert.deepEqual([HANDLE.anchor[1], HANDLE.ctrl[0], HANDLE.ctrl[1]], [5.5, 'circle', 6], 'SVG Lab’s anchor square and control circle');
+  for (const text of ['30 × 26', 'r 20', 'x 40, y 60']) {
+    const t = tip(text, { x: 200, y: 150 });
+    assert.equal(tipBox(t, 60, 20, 400).top, 150 - 42 - 20, `${text}: 42 px above the finger`);
+  }
+});

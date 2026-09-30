@@ -2191,6 +2191,114 @@ const BREAKS = [
     file: 'projects/draw/src/panels/views.ts', from: "        if (g.localName === 'foreignObject' && g.namespaceURI === SVG_NS) {", to: '        if (false) {',
     run: DRAW_E2E, expect: /aForeignObjectIsOutlinedWhereItDraws: with WebKit's getBBox: the foreignObject's outline .* is not on it/,
   },
+  // P1-M2 S1: the Shapes tool, shape handles and generators (quick).
+  {
+    id: 'B413', what: 'the star’s inner points take the tips’ angles',
+    file: 'engine/generators/radial.ts', from: 'at(cx, cy, r * inner, t + 180 / tips)', to: 'at(cx, cy, r * inner, t)',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ each generator writes exactly its points or path for fixed inputs/,
+  },
+  {
+    id: 'B414', what: 'the spiral’s controls are Δ/2 along the tangent, not Δ/3 (not a cubic Hermite)',
+    file: 'engine/generators/spiral.ts', from: '    const h = dt / 3;', to: '    const h = dt / 2;',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ each generator writes exactly its points or path for fixed inputs/,
+  },
+  {
+    id: 'B415', what: 'the finish hook redraws a shape whose geometry was edited by hand, instead of detaching it',
+    file: 'engine/generators/index.ts', from: '    if (expected !== null && inputsTouched && !geometryTouched) {', to: '    if (expected !== null) {',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: an input edit regenerates and a geometry edit detaches/,
+  },
+  {
+    id: 'B416', what: 'the finish hook’s ops are applied but not recorded with the transaction (one undo leaves them behind)',
+    file: 'engine/commands/session.ts', from: 'if (this.finish) this.finish(this.doc, ops.slice(), (op) => ops.push(op));', to: 'if (this.finish) this.finish(this.doc, ops.slice(), () => {});',
+    run: engineTests('commands/commands.test.ts'), expect: /✖ the finish hook: its ops join the transaction and the drag frame/,
+  },
+  {
+    id: 'B417', what: 'planMove moves a generated shape’s points, not its inputs (the hook then detaches it)',
+    file: 'engine/geometry/write.ts', from: '  if (generatorOf(doc, id)) {', to: '  if (false) {',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: a move rewrites only draw:cx, draw:cy and the geometry/,
+  },
+  {
+    id: 'B418', what: 'a radius (or rx, ry) handle has no minimum: dragged onto the centre it writes 0',
+    file: 'engine/geometry/shape-handles.ts', from: '  const length = (d: number) => Math.max(1, onStep(d, opts.step));', to: '  const length = (d: number) => onStep(d, opts.step);',
+    run: engineTests('geometry/shape-handles.test.ts'), expect: /✖ a drag writes the lab’s numbers/,
+  },
+  {
+    id: 'B419', what: 'a vertex drag writes the whole points list again (its separators and precision lost)',
+    file: 'engine/geometry/shape-handles.ts', from: '      return next.length ? one(rewrite(doc, n, \'points\', a.raw, next)) : { edits };',
+    to: "      return one({ id: n.id, ns: null, local: 'points', raw: tokens.map((t, j) => (j === 2 * i ? fmt(to.x, 2) : j === 2 * i + 1 ? fmt(to.y, 2) : fmt(t.value, 2))).join(' '), add: false });",
+    run: engineTests('geometry/shape-handles.test.ts'), expect: /✖ over every corpus circle, ellipse, line, polygon and polyline, a handle moved by \(3, −2\) changes exactly the number tokens it owns/,
+  },
+  {
+    id: 'B420', what: 'the Shapes tool ignores the artboard’s size (k is always 1)',
+    file: 'projects/draw/src/interact/shapes-tool.ts', from: '(board && board.width > 0 && board.height > 0 ? Math.min(board.width, board.height) / 100 : 1)', to: '1',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ on a 24 × 24 artboard \(k = 0\.24\) a tap places a 10 × 7 rect/,
+  },
+  {
+    id: 'B421', what: 'the colour cycle restarts for every shape',
+    file: 'projects/draw/src/editor.ts', from: '    this.#shapes++;\n', to: '',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
+  },
+  {
+    id: 'B422', what: 'a new shape in an empty root goes after the root’s closing whitespace, not before it',
+    file: 'engine/model/space.ts', from: "  return { parent: p.id, index: p.children.length - 1, lead: /[\\r\\n]/.test(w) ? `${w}  ` : '', trail: '' };", to: "  return { parent: p.id, index: p.children.length, lead: '', trail: '' };",
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
+  },
+  {
+    id: 'B423', what: 'the ry handle writes rx',
+    file: 'engine/geometry/shape-handles.ts', from: "      return one(lengthEdit(doc, n, 'ry', 'y', { to: length(Math.abs(to.y - centre!.y)) }, opts));", to: "      return one(lengthEdit(doc, n, 'rx', 'x', { to: length(Math.abs(to.y - centre!.y)) }, opts));",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Ellipse into a circle" \(shapes\)/,
+  },
+  {
+    id: 'B424', what: 'a draw gathers its snap targets on every frame (every shape measured again)',
+    file: 'projects/draw/src/editor.ts', from: '    const b = this.#snapRoot(g.at, d.targets, d.step);', to: '    const b = this.#snapRoot(g.at, this.#snapTargets([]), d.step);',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a drag gathers its snap targets once, when it starts/,
+  },
+  {
+    id: 'B425', what: 'a shape handle’s drag gathers its snap targets on every frame',
+    file: 'projects/draw/src/editor.ts', from: "      if (shape.role === 'position') to = this.#cornerPoint(g, hd, f);", to: "      if (shape.role === 'position') to = this.#cornerPoint(g, { ...hd, targets: this.#snapTargets([hd.id]) }, f);",
+    run: drawTests('editor.test.ts'), expect: /✖ a shape-handle drag gathers its snap targets once/,
+  },
+  {
+    id: 'B426', what: 'shape handles are placed through the parent’s matrix, not the element’s own (a mirrored element’s radius handle on the wrong side)',
+    file: 'projects/draw/src/editor.ts', from: '      const [x, y] = applyM(m.toHost, q.x, q.y);', to: '      const [x, y] = applyM(this.#ports.canvas.measure([n.parent!]).get(n.parent!)?.toHost ?? rootToHostMatrix(this.#box!, this.#viewport, this.#M), q.x, q.y);',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element, and inside a mirrored group, a radius or end handle stays under the finger/,
+  },
+  {
+    id: 'B427', what: 'each keystroke that reads in a Generator field is its own history entry (Inner typed 0.6, then 0.65, makes two)',
+    file: 'projects/draw/src/editor.ts', from: '    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));\n', to: '    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));\n    this.fieldEnd();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ generated shapes: the Tips field, typed "12"/,
+  },
+  {
+    id: 'B428', what: 'a handle grabbed off its centre jumps to the finger again (decision 1: every handle keeps the grab)',
+    file: 'projects/draw/src/editor.ts', from: '    const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };', to: '    const grab = { x: 0, y: 0 };',
+    run: drawTests('editor.test.ts'), expect: /✖ a handle drag keeps the grab/,
+  },
+  {
+    id: 'B429', what: 'M1’s resize corners still show on a circle (and every shape-handle kind)',
+    file: 'projects/draw/src/editor.ts', from: 'corners: sh === null && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
+    run: drawTests('editor.test.ts'), expect: /✖ the overlay gives circles, ellipses, lines, polygons, polylines and generated shapes their own handles and no corners/,
+  },
+  // P1-M2 S1 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B430', what: 'a Shapes tap places at the canvas’s top-left, not under the finger', slow: true, checks: ['aTapPlacesTheLabsDefaultScaledToTheArtboard'],
+    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
+    run: DRAW_E2E, expect: /aTapPlacesTheLabsDefaultScaledToTheArtboard: the rect is not exactly the lab's, centred on \(50, 50\)/,
+  },
+  {
+    id: 'B431', what: 'a draw ignores the snap targets (the guide at x 40 isn’t taken)', slow: true, checks: ['aDragDrawsTheShapeWithSnapping'],
+    file: 'projects/draw/src/editor.ts', from: '      d.targets = this.#snapTargets([]);', to: '      d.targets = null;',
+    run: DRAW_E2E, expect: /aDragDrawsTheShapeWithSnapping: the drag from \(38\.6, 20\.2\) to \(70\.3, 45\.8\) did not snap/,
+  },
+  {
+    id: 'B432', what: 'shape handles are placed through the root’s matrix: the rotated ellipse’s rx handle ignores its transform', slow: true, checks: ['shapeHandlesEditTheLabsShapes'],
+    file: 'projects/draw/src/editor.ts', from: '      const [x, y] = applyM(m.toHost, q.x, q.y);', to: '      const [x, y] = applyM(rootToHostMatrix(this.#box!, this.#viewport, this.#M), q.x, q.y);',
+    run: DRAW_E2E, expect: /shapeHandlesEditTheLabsShapes: the ellipse's rx handle is at .* not its own \(90, 30\) through its transform/,
+  },
+  {
+    id: 'B433', what: 'an Inspect input edit doesn’t redraw the generated shape (the hook leaves the old points)', slow: true, checks: ['generatorsRegenerateAndDetach'],
+    file: 'engine/generators/index.ts', from: '      apply(opSetAttr(doc, id, null, g.attr, expected));\n', to: '',
+    run: DRAW_E2E, expect: /generatorsRegenerateAndDetach: Tips \+ did not draw 12 points/,
+  },
 ];
 
 const args = process.argv.slice(2);
