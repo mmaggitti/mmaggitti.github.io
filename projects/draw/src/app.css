@@ -308,6 +308,17 @@
 }
 .draw-empty { margin: 0; padding: var(--space-4); }
 .draw-attrs { margin: var(--space-3); }
+/* Inspect (P1-M2): sections of 44 pt rows above the attribute list. */
+.draw-inspect { padding: 0 var(--space-3) var(--space-3); }
+.draw-inspect > .draw-subhead { margin-left: 0; }
+.draw-inspect .draw-attrs { margin: var(--space-2) 0 0; }
+.draw-inspect-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-inspect-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-inspect-name { flex: 1 1 6rem; min-width: 0; font-size: var(--text-md); }
+.draw-inspect-row .draw-stepper { flex: 0 1 auto; min-width: 0; }
+.draw-inspect-field { width: 7rem; flex: 0 1 7rem; }
+.draw-inspect-btn { min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-inspect-error { flex: 1 0 100%; margin: 0; color: var(--text-muted); }
 
 /* Over the code: the legend, Tidy and Copy, kept in view while the code scrolls. */
 .draw-code-bar {
@@ -454,6 +465,8 @@
 .draw-ctx-btn svg { width: 1.5rem; height: 1.5rem; }
 .draw-ctx-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .draw-ctx-btn:disabled { color: var(--text-muted); opacity: 0.5; }
+/* The Shapes tool's kind picker: seven 44 pt buttons spaced as the bar spaces Cancel after them. */
+.draw-shape-kinds { display: flex; gap: var(--space-2); flex: 0 0 auto; }
 /* The More sheet: one full-width row per command, at least 44 pt tall. */
 .draw-more { display: flex; flex-direction: column; gap: var(--space-2); }
 .draw-more .ds-btn { flex: 0 0 auto; width: 100%; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; }

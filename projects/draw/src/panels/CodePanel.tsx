@@ -10,8 +10,6 @@
 // full height instead. A file open as read-only source shows its text here, at the error.
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { decodeAttr } from '../../../../engine/xml/entities.ts';
-import type { ElementNode } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../editor.ts';
 import { CodeView } from '../codeview/code-view.ts';
 import { detentHeights, dragHeight, nextDetent, settle, TAP_SLOP, type Detent, type Heights } from '../detents.ts';
@@ -22,6 +20,7 @@ import { useStore } from './store.ts';
 import { Support } from './Support.tsx';
 import { Guard } from './Guard.tsx';
 import { Layers } from './Layers.tsx';
+import { Inspect } from './Inspect.tsx';
 import type { Views } from './views.ts';
 
 const HANDLE_LABEL: Record<Detent, string> = { peek: 'Show the code', half: 'Expand the code', full: 'Collapse the code' };
@@ -238,30 +237,5 @@ function SelectionLabel({ editor }: { editor: Editor }) {
     <span className="draw-sel ds-mono" aria-live="polite">
       {label ?? 'nothing selected'}
     </span>
-  );
-}
-
-/** P0's Inspect tab: the selected element's attributes, as the file has them. */
-function Inspect({ editor }: { editor: Editor }) {
-  const selection = useStore(editor.selection);
-  useStore(editor.version);
-  const doc = editor.doc;
-  const id = [...selection][0];
-  const n = doc && id !== undefined ? doc.nodes.get(id) : undefined;
-  if (!doc || !n || n.kind !== 'element') return <p className="draw-empty ds-muted">Select something to see its attributes.</p>;
-  const node = n as ElementNode;
-  return (
-    <dl className="ds-list draw-attrs">
-      <div className="ds-row">
-        <dt>element</dt>
-        <dd className="ds-mono">{elementLabel(doc, id)}</dd>
-      </div>
-      {node.attrs.map((a, i) => (
-        <div className="ds-row" key={`${i}:${a.qname}`}>
-          <dt className="ds-mono">{a.qname}</dt>
-          <dd className="ds-mono">{decodeAttr(a.raw, doc.entities)}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
