@@ -19,16 +19,20 @@
 //   the code and undo carry on. Each later change tries a whole drawing again.
 // - Every token takes the keyboard: Enter or Space does what a tap does (a number opens its sheet),
 //   and the arrow keys step a number, one history entry each.
+// - The Shapes tool (P1-M2): with it on, a tap places SVG Lab's default shape and a drag draws one,
+//   snapped as a dragged corner is; the new shape is selected and the tool returns to Select.
+// - Generated shapes (engine/generators/): the Session's finish hook regenerates or detaches them in
+//   the same transaction as the edit, and a notice says when one became a plain shape.
 
 import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
-import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type ChangeSet } from '../../../engine/commands/ops.ts';
+import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
 import { REM_UNCONVERTIBLE } from '../../../engine/report/import-report.ts';
 import { hasRem, remToUserUnits, rootFontSize } from '../../../engine/geometry/lengths.ts';
 import { Session, type Build, type Drag } from '../../../engine/commands/session.ts';
 import { blockFor, blocksOf, codeBlocks, endBlockFor, type Block, type BlockToken } from '../../../engine/code/blocks.ts';
-import { TokenEditError, type TokenTarget } from '../../../engine/code/edit.ts';
+import { TokenEditError, rewriteNumbers, type TokenTarget } from '../../../engine/code/edit.ts';
 import type { ColorToken, NumberToken, TextToken, Token } from '../../../engine/code/tokens.ts';
 import { createStore, type Store } from './panels/store.ts';
 import { attached, route, type Route } from './routing.ts';
@@ -50,7 +54,12 @@ import { duplicate, group, groupRefusal, groupsOf, remove, restack, ungroup, ung
 import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
-import { DRAW_NS, MAX_GUIDES, NO_STATE, declare, hiddenGuides, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { MAX_GUIDES, NO_STATE, declare, hiddenGuides, isLocked, moveGuide, readState, setDrawAttr, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { DRAW_NS } from '../../../engine/model/draw-ns.ts';
+import { detachGenerator, finishGenerators, generatorOf, type GeneratorKind } from '../../../engine/generators/index.ts';
+import { planShapeHandle, shapeHandleLabel, shapeHandles } from '../../../engine/geometry/shape-handles.ts';
+import { insertMarkup } from '../../../engine/model/space.ts';
+import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
 import { cssSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
 import { idError } from '../../../engine/code/edit.ts';
@@ -183,6 +192,13 @@ export class Editor {
   readonly selectMore: Store<boolean> = createStore(false);
   /** What moves and handles snap to (the Snap sheet's toggles, a device preference). */
   readonly snap: Store<SnapPrefs> = createStore<SnapPrefs>(SNAP_ALL);
+  /** The tool: Select, or Shapes (a tap places, a drag draws); Select again after each shape. */
+  readonly tool: Store<Tool> = createStore<Tool>('select');
+  /** The Shapes tool's kind, kept for the session (never in the file or storage). */
+  readonly shapeKind: Store<ShapeKind> = createStore<ShapeKind>('rect');
+  #shapes = 0; // shapes placed or drawn since the document opened: the colour cycle's n
+  #detached: NodeId[] = []; // what the finish hook detached in the latest run (the notice, after a commit)
+  #field: FieldSession | null = null; // an Inspect field being typed in: one entry while it has focus
   #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
   #stepDrag: { drag: Drag; from: DrawState } | null = null; // the Snap sheet's Grid step field, while it is being typed in
 
@@ -262,6 +278,7 @@ export class Editor {
     } else doc = input;
     this.#endLive(false);
     this.#stepDrag = null; // the field's entry belonged to the document that is closing
+    this.#field = null;
     const canvas = this.#ports.canvas;
     try {
       canvas.render(doc);
@@ -270,7 +287,10 @@ export class Editor {
     }
     this.#doc = doc;
     this.canvasError.set(null);
-    this.#session = new Session(doc);
+    this.#session = new Session(doc, { finish: (d, ops, apply) => void (this.#detached = finishGenerators(d, ops, apply)) });
+    this.#detached = [];
+    this.#shapes = 0;
+    this.tool.set('select');
     this.#wire(this.#session);
     this.#board = artboard(doc);
     this.#size = this.#ports.hostSize();
@@ -554,16 +574,22 @@ export class Editor {
    */
   pointerDown(at: Point, hits: readonly NodeId[], mods: { add: boolean }): void {
     const doc = this.#doc;
-    if (!doc || this.#live || this.#gesture || this.#nudge) return;
+    if (!doc || this.#live || this.#gesture || this.#nudge || this.#field) return;
+    // The Shapes tool: every one-finger gesture places or draws, never selects or moves.
+    if (this.tool.get() === 'shapes') {
+      if (!this.#writable()) return;
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null } };
+      return;
+    }
     const all = this.#withThin(at, hits);
     const targets = all.map((id) => selectionTarget(doc, id)).filter((t): t is NodeId => t !== null);
     const target = targets.find((t) => !isLocked(doc, t)) ?? null;
     // A guide's pill, then a handle within 26 px, take the press before any shape does.
     const model = this.overlayModel();
     const pill = pickPill(model.guides, at);
-    const handle = pill === null ? pickHandle(model.handles, at)?.id ?? null : null;
+    const picked = pill === null ? pickHandle(model.handles, at) : null;
     const onLocked = targets.length > 0 && isLocked(doc, targets[0]);
-    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle, hd: null, snapLines: [], guide: pill, gd: null };
+    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -571,6 +597,7 @@ export class Editor {
     const g = this.#gesture;
     if (!g || !this.#doc) return;
     g.at = at;
+    if (g.draw) return this.#drawFrame(g);
     if (g.mode === 'pending') this.#startDrag(g, held);
     if (g.mode === 'move') this.#moveFrame(g);
     else if (g.mode === 'handle') this.#handleFrame(g);
@@ -584,7 +611,8 @@ export class Editor {
     if (!g) return;
     g.at = at;
     this.#gesture = null;
-    if (g.mode === 'pending') {
+    if (g.draw) this.#endDraw(g, true);
+    else if (g.mode === 'pending') {
       if (g.handle === null && g.guide === null) this.#tap(g.target, g.add); // a tap on a handle or a pill does nothing in M1
     } else if (g.mode === 'move') this.#endMove(g, true);
     else if (g.mode === 'handle') this.#endHandle(g, true);
@@ -598,7 +626,8 @@ export class Editor {
     const g = this.#gesture;
     if (!g) return;
     this.#gesture = null;
-    if (g.mode === 'move') this.#endMove(g, false);
+    if (g.draw) this.#endDraw(g, false);
+    else if (g.mode === 'move') this.#endMove(g, false);
     else if (g.mode === 'handle') this.#endHandle(g, false);
     else if (g.mode === 'guide') this.#endGuide(g, false);
     this.#show();
@@ -606,14 +635,15 @@ export class Editor {
 
   /** Is a pointer gesture, a scrub or a nudge under way (Escape cancels one)? */
   get busy(): boolean {
-    return !!this.#live || !!this.#gesture?.move || !!this.#gesture?.hd || !!this.#gesture?.gd || !!this.#nudge;
+    return !!this.#live || !!this.#gesture?.move || !!this.#gesture?.hd || !!this.#gesture?.gd || !!this.#gesture?.draw?.drag || !!this.#nudge || !!this.#field;
   }
 
-  /** Escape: cancel a live drag if one is running, else deselect. */
+  /** Escape: cancel a live drag if one is running, else leave the Shapes tool, else deselect. */
   escape(): void {
     if (this.#gesture) return this.pointerCancel();
     if (this.#live) return this.#endLive(false);
     if (this.#nudge) return this.nudgeEnd(false);
+    if (this.tool.get() === 'shapes') return this.pickTool('select');
     this.deselect();
   }
 
@@ -903,7 +933,7 @@ export class Editor {
       if (u && inv) box = rectInRoot(inv, u);
     }
     const targets = step === undefined ? this.#snapTargets(ids) : null;
-    return { drag: this.#session.drag(label), ids, toParent, rootInv, step: step ?? snapStep(px), delta: null, refused: null, box, centre: false, targets, px };
+    return { drag: this.#drag(label), ids, toParent, rootInv, step: step ?? snapStep(px), delta: null, refused: null, box, centre: false, targets, px };
   }
 
   // The delta from where the pointer went down (so the slop's first 5 px count), in root units,
@@ -959,7 +989,7 @@ export class Editor {
     const doc = this.#doc!;
     const g = this.#gesture;
     const none = { handles: [], rotGuide: null };
-    if (g?.mode === 'marquee' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
+    if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
     const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
     if (ids.length > 1) {
       const u = unionBox(quads);
@@ -969,7 +999,19 @@ export class Editor {
     if (!m) return none;
     const n = doc.nodes.get(ids[0]) as ElementNode;
     const p = this.#pivots(ids[0], m);
-    return handlesFor({ quad: quadOf(m.box, m.toHost), corners: RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
+    // Circles, ellipses, lines, polygons, polylines and generated shapes: their own handles (engine/
+    // geometry/shape-handles.ts) instead of the corners, placed through their own CTM; the centre on
+    // the shape's own centre.
+    const sh = shapeHandles(doc, n.id, this.geo);
+    const base = handlesFor({ quad: quadOf(m.box, m.toHost), corners: sh === null && RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
+    if (!sh) return base;
+    const host = (q: Point): Point => {
+      const [x, y] = applyM(m.toHost, q.x, q.y);
+      return { x, y };
+    };
+    const centre = sh.find((h) => h.kind === 'center');
+    const own: Handle[] = sh.filter((h) => h.kind !== 'center').map((h) => ({ id: h.id, kind: h.kind, at: host(h.at), active: h.id === active }));
+    return { handles: [...own, ...base.handles.map((h) => (h.id === 'center' && centre ? { ...h, at: host(centre.at) } : h))], rotGuide: base.rotGuide };
   }
 
   // The rotation pivot (an existing rotate()'s own centre, through the list's items before it;
@@ -1020,8 +1062,25 @@ export class Editor {
     const m = measured.get(id);
     const pm = measured.get(parent);
     if (!m || !pm) return;
-    const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : 'Resize';
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null };
+    const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : CORNERS.has(g.handle!) ? 'Resize' : 'Shape';
+    // The offset from the finger to the handle at the press: the handle moves by the finger's
+    // movement, never jumping to it (26 pt pick radius).
+    const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, grab };
+    if (kind === 'Shape') {
+      const sh = shapeHandles(doc, id, this.geo)?.find((h) => h.id === g.handle);
+      const toUnits = invert(m.toHost);
+      if (!sh || !toUnits) return;
+      hd.shape = { id: sh.id, role: sh.role };
+      hd.toUnits = toUnits;
+      const [a, b, c, d] = toUnits;
+      hd.step = snapStep(1 / Math.sqrt(Math.abs(a * d - b * c)));
+      if (sh.role === 'position') hd.targets = this.#snapTargets([id]); // once for the drag
+      hd.drag = this.#drag(shapeHandleLabel(sh.id));
+      g.hd = hd;
+      g.mode = 'handle';
+      return;
+    }
     if (kind === 'Resize') {
       hd.corner = g.handle as Corner;
       hd.uniform = movesBy(doc, id) === 'translate' || n.local === 'use';
@@ -1049,7 +1108,7 @@ export class Editor {
       for (const it of list ? (r === -1 ? list.items : list.items.slice(0, r)) : []) before = multiply(before, itemMatrix(it));
       hd.flip = before[0] * before[3] - before[1] * before[2] < 0 ? -1 : 1;
     }
-    hd.drag = this.#session.drag(kind);
+    hd.drag = this.#drag(kind);
     g.hd = hd;
     g.mode = 'handle';
   }
@@ -1060,8 +1119,19 @@ export class Editor {
     const doc = this.#doc!;
     const opts = { ctx: this.geo, decimals: stepDecimals(hd.step) };
     let plan: () => Plan;
-    if (hd.corner) {
-      const to = this.#cornerPoint(g, hd);
+    const f = { x: g.at.x + hd.grab.x, y: g.at.y + hd.grab.y }; // where the handle goes (the grab kept)
+    if (hd.shape) {
+      const shape = hd.shape;
+      let to: Point;
+      if (shape.role === 'position') to = this.#cornerPoint(g, hd, f);
+      else {
+        const [ux, uy] = applyM(hd.toUnits!, f.x, f.y);
+        to = { x: ux, y: uy };
+        g.snapLines = [];
+      }
+      plan = () => planShapeHandle(doc, hd.id, shape.id, to, { ...opts, step: hd.step });
+    } else if (hd.corner) {
+      const to = this.#cornerPoint(g, hd, f);
       plan = () => planResize(doc, hd.id, { corner: hd.corner!, to, box: hd.box ?? undefined }, opts);
     } else if (hd.handle === 'rot') {
       const turn = (Math.atan2(g.at.y - hd.pivot.y, g.at.x - hd.pivot.x) - Math.atan2(g.at0.y - hd.pivot.y, g.at0.x - hd.pivot.x)) * (180 / Math.PI);
@@ -1080,14 +1150,16 @@ export class Editor {
       else applyPlan(doc, p, apply);
     });
     if (hd.corner) hd.tip = this.#sizeTip(hd);
+    if (hd.shape) hd.tip = shapeHandles(doc, hd.id, this.geo)?.find((h) => h.id === hd.shape!.id)?.tip ?? null;
     if (hd.refused && this.notice.get() !== hd.refused) this.notice.set(hd.refused);
     this.#show();
   }
 
-  // Where a dragged corner goes, in the units it is written in: a target within 8 px takes it (in
-  // root units), else it is rounded to the snap step there.
-  #cornerPoint(g: Gesture, hd: HandleDrag): Point {
-    const [ux, uy] = applyM(hd.toUnits!, g.at.x, g.at.y);
+  // Where a dragged corner (or a position handle) goes, in the units it is written in, for the point
+  // `at` (host px: the finger plus the grab offset): a target within 8 px takes it (in root units),
+  // else it is rounded to the snap step there.
+  #cornerPoint(g: Gesture, hd: HandleDrag, at: Point): Point {
+    const [ux, uy] = applyM(hd.toUnits!, at.x, at.y);
     let to = { x: toStep(ux, hd.step), y: toStep(uy, hd.step) };
     g.snapLines = [];
     const box = this.#box;
@@ -1095,7 +1167,7 @@ export class Editor {
     const inv = toHost && invert(toHost);
     const targets = hd.targets;
     if (!toHost || !inv || !targets) return to;
-    const [rx, ry] = applyM(inv, g.at.x, g.at.y);
+    const [rx, ry] = applyM(inv, at.x, at.y);
     const tol = SNAP_PX / Math.sqrt(Math.abs(toHost[0] * toHost[3]));
     const sx = snapAxis([rx], 0, targets.x, targets.grid, tol);
     const sy = snapAxis([ry], 0, targets.y, targets.grid, tol);
@@ -1200,6 +1272,231 @@ export class Editor {
     return out;
   }
 
+  // ── the Shapes tool and generated shapes (P1-M2) ───────────────────────────────────────────
+
+  /** Pick a tool: Shapes (a tap places, a drag draws) or Select. The Shapes tool says how it works. */
+  pickTool(tool: Tool): void {
+    if (tool === 'shapes' && (!this.#doc || this.readOnly.get())) return;
+    if (this.#gesture) this.pointerCancel();
+    if (this.tool.get() === tool) return;
+    this.tool.set(tool);
+    if (tool === 'shapes') {
+      this.focus.set(null);
+      this.notice.set('Tap to place, or drag to draw.');
+    }
+    this.#show();
+  }
+
+  /** The kind the Shapes tool places. */
+  pickShape(kind: ShapeKind): void {
+    this.shapeKind.set(kind);
+  }
+
+  // A drag on the Session whose commit shows the notice when the finish hook made a generated shape
+  // plain in its last frame, and whose cancel forgets that.
+  #drag(label: string): Drag {
+    const d = this.#session!.drag(label);
+    return {
+      update: (build) => d.update(build),
+      commit: () => {
+        d.commit();
+        this.#noteDetached();
+      },
+      cancel: () => {
+        d.cancel();
+        this.#detached = [];
+      },
+    };
+  }
+
+  // After a transaction (or a drag's commit): one notice when a generated shape became plain.
+  #noteDetached(): void {
+    if (this.#detached.length) this.notice.set(DETACHED);
+    this.#detached = [];
+  }
+
+  // The snap step in the root's user units at this zoom.
+  #rootStep(): number {
+    const box = this.#box;
+    if (!box) return 1;
+    const m = rootToHostMatrix(box, this.#viewport, this.#M);
+    return snapStep(Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])));
+  }
+
+  // A host point in the root's user units, snapped as a dragged corner is: a target within 8 px on
+  // screen takes each axis, else it is rounded to the step. `targets` null: the step alone.
+  #snapRoot(at: Point, targets: SnapTargets | null, step: number): { p: Point; lines: Line[] } {
+    const box = this.#box;
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = toHost && invert(toHost);
+    if (!toHost || !inv) return { p: { x: 0, y: 0 }, lines: [] };
+    const [rx, ry] = applyM(inv, at.x, at.y);
+    const tol = SNAP_PX / Math.sqrt(Math.abs(toHost[0] * toHost[3]));
+    const sx = targets && snapAxis([rx], 0, targets.x, targets.grid, tol);
+    const sy = targets && snapAxis([ry], 0, targets.y, targets.grid, tol);
+    return { p: { x: sx ? sx.at : toStep(rx, step), y: sy ? sy.at : toStep(ry, step) }, lines: this.#snapLines(sx?.at ?? null, sy?.at ?? null) };
+  }
+
+  // The new shape's markup, built inside the transaction (a generated one declares Draw's namespace
+  // first, for its prefix), put last among the root's element children by the insertion rule.
+  #addShape(apply: (op: Op) => void, kind: ShapeKind, step: number, markupFor: (c: ShapeCtx) => string): NodeId {
+    const doc = this.#doc!;
+    const draw = kind === 'polygon' || kind === 'star' || kind === 'spiral' ? declare(doc, apply) : 'draw';
+    const c: ShapeCtx = { k: boardScale(this.#board), step, svg: el(doc, doc.root).prefix, draw, colour: shapeColour(this.#shapes) };
+    return insertMarkup(doc, { last: doc.root }, markupFor(c), apply);
+  }
+
+  // A drag with the Shapes tool: the snap targets gathered once when it starts; each frame inserts
+  // the shape afresh from the document as it was before the drag, from the snapped start to the
+  // snapped finger. One entry when it lifts; a cancel restores the file and adds nothing.
+  #drawFrame(g: Gesture): void {
+    const d = g.draw!;
+    if (g.mode === 'pending') {
+      if (!this.#session) return;
+      g.mode = 'draw';
+      d.targets = this.#snapTargets([]);
+      d.a = this.#snapRoot(g.at0, d.targets, d.step).p;
+      d.drag = this.#drag(SHAPE_LABELS[d.kind]);
+    }
+    const drag = d.drag;
+    const a = d.a;
+    if (g.mode !== 'draw' || !drag || !a) return;
+    const b = this.#snapRoot(g.at, d.targets, d.step);
+    g.snapLines = b.lines;
+    let tipText: string | null = null;
+    try {
+      drag.update((apply) => {
+        d.id = this.#addShape(apply, d.kind, d.step, (c) => {
+          const made = drawMarkup(d.kind, a, b.p, c);
+          tipText = made.tip;
+          return made.markup;
+        });
+      });
+    } catch (e) {
+      if (!(e instanceof TokenEditError)) throw e;
+      this.notice.set(e.message);
+    }
+    d.tip = tipText;
+    this.#show();
+  }
+
+  // The end of a Shapes gesture: a tap places the lab's default at the snapped point; a drag keeps
+  // what it drew. Either way the new shape is selected and the tool returns to Select.
+  #endDraw(g: Gesture, commit: boolean): void {
+    const d = g.draw!;
+    if (g.mode === 'pending') {
+      if (!commit) return;
+      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;
+      let id: NodeId | null = null;
+      if (this.#dispatch(SHAPE_LABELS[d.kind], (apply) => (id = this.#addShape(apply, d.kind, d.step, (c) => placeMarkup(d.kind, p, c))))) this.#placed(id!);
+      return;
+    }
+    const drag = d.drag;
+    if (!drag) return;
+    d.drag = null;
+    if (commit) drag.commit();
+    else drag.cancel();
+    this.#bump();
+    this.#changed();
+    if (commit && d.id !== null && attached(this.#doc!, d.id)) this.#placed(d.id);
+  }
+
+  // A shape was placed or drawn: the colour cycle moves on, it is selected, and Select is back.
+  #placed(id: NodeId): void {
+    this.#shapes++;
+    this.tool.set('select');
+    this.focus.set(null);
+    this.select([id]);
+  }
+
+  /** The one selected element's generator, when it is a generated shape now (Inspect's Generator section). */
+  generated(): { id: NodeId; kind: GeneratorKind; label: string; inputs: { name: string; text: string; integer: boolean }[] } | null {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    if (!doc || ids.length !== 1) return null;
+    const g = generatorOf(doc, ids[0]);
+    if (!g) return null;
+    const n = el(doc, ids[0]);
+    return { id: ids[0], kind: g.kind, label: g.generator.label, inputs: g.generator.inputs.map((i) => ({ name: i.name, text: attrValue(doc, n, DRAW_NS, i.name)!.trim(), integer: !!i.integer })) };
+  }
+
+  // The op that writes a generator input: only its number's characters (the whole value when it is
+  // written with a reference); the finish hook then draws the shape again from it.
+  #inputOp(id: NodeId, name: string, v: number): Op {
+    const doc = this.#doc!;
+    const n = el(doc, id);
+    const a = n.attrs.find((x) => x.ns === DRAW_NS && x.local === name)!;
+    const text = fmt(v, INPUT_UI[name]?.integer ? 0 : 2);
+    const m = /-?(?:\d*\.\d+|\d+)/.exec(a.raw);
+    return m && !a.raw.includes('&') ? opSetAttrRaw(doc, id, DRAW_NS, name, rewriteNumbers(a.raw, [{ start: m.index, end: m.index + m[0].length, text }])) : opSetAttr(doc, id, DRAW_NS, name, text);
+  }
+
+  // A value for an input, or why it isn't one: a plain decimal the generator takes, in the field's range.
+  #inputValue(name: string, text: string): number | string {
+    const g = this.generated();
+    const input = g && generatorOf(this.#doc!, g.id)!.generator.inputs.find((i) => i.name === name);
+    const ui = INPUT_UI[name];
+    if (!g || !input || !ui) return 'Nothing generated is selected';
+    const t = text.trim();
+    if (!/^-?(?:\d+|\d*\.\d+)$/.test(t)) return `${JSON.stringify(text)} is not a number`;
+    const v = Number(t);
+    if (!input.valid(v) || v < ui.min || v > ui.max) return `${ui.label} takes ${ui.integer ? 'whole numbers' : 'numbers'}${Number.isFinite(ui.min) ? ` from ${fmt(ui.min, 2)}` : ''}${Number.isFinite(ui.max) ? ` to ${fmt(ui.max, 2)}` : ''}`;
+    return v;
+  }
+
+  /** The Generator section's − and +: one input a step down or up, one entry ("Set tips"). */
+  stepInput(name: string, dir: 1 | -1): void {
+    const g = this.generated();
+    const ui = INPUT_UI[name];
+    if (!g || !ui) return;
+    const step = ui.step === 'snap' ? this.#rootStep() : ui.step;
+    const now = generatorOf(this.#doc!, g.id)!.inputs[name];
+    const next = Math.min(ui.max, Math.max(ui.min, Number(fmt(now + dir * step, 4))));
+    const v = this.#inputValue(name, fmt(next, 4));
+    if (typeof v === 'string') return void this.notice.set(v);
+    if (v !== now) this.#dispatch(`Set ${name}`, (apply) => apply(this.#inputOp(g.id, name, v)));
+  }
+
+  /** Detach on purpose: the generator's attributes removed, the shape keeps its geometry ("Detach"). */
+  detach(): void {
+    const doc = this.#doc;
+    const g = this.generated();
+    if (doc && g) this.#dispatch('Detach', (apply) => void detachGenerator(doc, g.id, apply));
+  }
+
+  /**
+   * An Inspect field took focus: what is typed there, until it lets go (Done, Enter, the dim, Escape
+   * or a blur), is one history entry, written live as each keystroke that reads is typed.
+   */
+  fieldStart(field: Field): void {
+    const g = this.generated();
+    if (!this.#session || this.#field || this.#stepDrag || this.#live || this.#gesture || this.#nudge || !g || !this.#writable()) return;
+    this.#field = { field, id: g.id, drag: this.#drag(`Set ${field.name}`) };
+  }
+
+  /** Text typed in the focused field: written into its entry when it reads as a value; else why not (the last good value stays). */
+  fieldInput(text: string): string | null {
+    const f = this.#field;
+    if (!f) return 'No field is being edited';
+    const v = this.#inputValue(f.field.name, text);
+    if (typeof v === 'string') return v;
+    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));
+    this.#show();
+    return null;
+  }
+
+  /** The field let go: its one entry kept (or, `commit` false, undone). */
+  fieldEnd(commit = true): void {
+    const f = this.#field;
+    if (!f) return;
+    this.#field = null;
+    if (commit) f.drag.commit();
+    else f.drag.cancel();
+    this.#bump();
+    this.#changed();
+    this.#show();
+  }
+
   // ── rem (decision 13) ────────────────────────────────────────────────────────────────────────
 
   /**
@@ -1244,15 +1541,7 @@ export class Editor {
     if (!doc || n?.kind !== 'element' || id === doc.root) return;
     const has = n.attrs.some((a) => a.ns === DRAW_NS && a.local === 'locked');
     if (has === locked) return;
-    this.#dispatch(locked ? 'Lock' : 'Unlock', (apply) => {
-      if (locked) {
-        const p = declare(doc, apply);
-        apply(opSetAttr(doc, id, DRAW_NS, 'locked', 'true', `${p}:locked`));
-      } else {
-        apply(opSetAttr(doc, id, DRAW_NS, 'locked', null));
-        undeclareIfUnused(doc, apply);
-      }
-    });
+    this.#dispatch(locked ? 'Lock' : 'Unlock', (apply) => setDrawAttr(doc, id, 'locked', locked ? 'true' : null, apply));
     if (locked && this.selection.get().has(id)) this.#show(); // its handles go
   }
 
@@ -1321,7 +1610,7 @@ export class Editor {
   gridStepStart(): void {
     const doc = this.#doc;
     if (!doc || !this.#session || this.#stepDrag || this.#live || this.#gesture || this.#nudge || !this.#writable()) return;
-    this.#stepDrag = { drag: this.#session.drag('Set grid step'), from: readState(doc) };
+    this.#stepDrag = { drag: this.#drag('Set grid step'), from: readState(doc) };
   }
 
   /** A step typed in the field (null: automatic), written live into the field's one entry; a value that isn't a step is left out. */
@@ -1378,7 +1667,7 @@ export class Editor {
     const box = this.#box;
     if (!box) return;
     const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
-    g.gd = { drag: this.#session.drag('Move guide'), step: snapStep(Math.abs(toHost[0])), tip: null };
+    g.gd = { drag: this.#drag('Move guide'), step: snapStep(Math.abs(toHost[0])), tip: null };
     g.mode = 'guide';
   }
 
@@ -1482,6 +1771,7 @@ export class Editor {
       return;
     }
     model.snapLines = g.snapLines;
+    if (g.mode === 'draw' && g.draw?.tip) model.tip = tip(g.draw.tip, g.at);
     if (g.mode === 'handle' && g.hd?.tip) model.tip = tip(g.hd.tip, g.at);
     if (g.mode === 'guide' && g.gd?.tip) model.tip = tip(g.gd.tip, g.at);
     const m = g.move;
@@ -1535,9 +1825,10 @@ export class Editor {
    * second finger on a panel can't write into the middle of it.
    */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge || this.#stepDrag || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge || this.#stepDrag || this.#field || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
+      this.#noteDetached();
       return true;
     } catch (e) {
       if (!(e instanceof TokenEditError)) throw e;
@@ -1652,7 +1943,7 @@ export class Editor {
     const own = elementOf(doc, hit.ref.node);
     if (own !== null) this.select([own]);
     this.focus.set({ ref: hit.ref, token: t }); // the Scrub strip follows the number being scrubbed
-    this.#live = { drag: this.#session.drag(labelFor('Scrub', t)), ref: hit.ref, token: t, last: null };
+    this.#live = { drag: this.#drag(labelFor('Scrub', t)), ref: hit.ref, token: t, last: null };
   }
 
   scrub(steps: number): void {
@@ -1667,7 +1958,7 @@ export class Editor {
 
   #openSheet(sheet: TokenSheet): void {
     if (!this.#session || this.#live || this.#nudge || !this.#writable()) return;
-    this.#live = { drag: this.#session.drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
+    this.#live = { drag: this.#drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
     this.sheet.set(sheet);
     this.#bump();
   }
@@ -1768,6 +2059,7 @@ export class Editor {
         apply(opRemove(doc, node));
         made.forEach((id, i) => apply(opInsert(doc, id, parent, index + i)));
       });
+      this.#noteDetached();
     } catch (e) {
       for (const id of made) forget(doc, id);
       return { message: e instanceof Error ? e.message : String(e), at: 0, line: 1, column: 1 };
@@ -1803,6 +2095,8 @@ export class Editor {
   showSource(text: string, at: number): void {
     this.#endLive(false);
     this.#stepDrag = null;
+    this.#field = null;
+    this.tool.set('select');
     this.#doc = null;
     this.#session = null;
     this.#blocks = new Map();
@@ -1921,6 +2215,18 @@ export class Editor {
 
 /** Screen px within which a tap takes a thin shape (plus half its stroke): SVG Lab's hitThin. */
 export const THIN_PX = 22;
+/** The tools the ToolRail offers now. */
+export type Tool = 'select' | 'shapes';
+/** The notice when an edit makes a generated shape plain. */
+export const DETACHED = 'It’s a plain shape now: its generator inputs were dropped.';
+/** An Inspect field that is one history entry while it is typed in (S1: a generator input). */
+export type Field = { kind: 'input'; name: string };
+interface FieldSession {
+  field: Field;
+  id: NodeId;
+  drag: Drag;
+}
+const CORNERS = new Set(['tl', 'tr', 'br', 'bl']);
 const SLOP_PX = 5; // a marquee under this in either direction takes nothing
 export const LOCKED = 'It’s locked. Unlock it in Layers first.';
 const CONTAINERS = new Set(['g', 'a', 'switch', 'svg']);
@@ -1945,9 +2251,11 @@ interface Gesture {
   target: NodeId | null; // what a tap selects: the topmost hit's selectable element that isn't locked
   onLocked: boolean; // the topmost hit is locked: a drag from it is a marquee
   add: boolean; // Select more, or ⇧/⌘ on the press
-  mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'none';
+  mode: 'pending' | 'move' | 'marquee' | 'handle' | 'guide' | 'draw' | 'none';
   move: MoveState | null;
   handle: string | null; // the handle the press took (handles.ts), if any
+  handleAt: Point | null; // where that handle was, host px (the grab offset)
+  draw: DrawGesture | null; // the Shapes tool's gesture
   hd: HandleDrag | null; // a resize, rotate or scale drag
   guide: number | null; // the guide whose pill the press took, by index
   gd: { drag: Drag; step: number; tip: string | null } | null; // a guide's drag
@@ -1969,7 +2277,19 @@ interface HandleDrag {
   local: Rect | null; // the element's own box at the start (rotate's pivot for text and use)
   tip: string | null;
   refused: string | null;
-  targets: SnapTargets | null; // a corner's snap targets, gathered once when the drag starts
+  targets: SnapTargets | null; // a corner's or a position handle's snap targets, gathered once when the drag starts
+  shape: { id: string; role: 'position' | 'length' } | null; // a shape handle (engine/geometry/shape-handles.ts)
+  grab: Point; // the handle's offset from the finger at the press, host px: kept for the whole drag
+}
+// The Shapes tool's gesture: a tap places, a drag draws.
+interface DrawGesture {
+  kind: ShapeKind;
+  step: number; // the snap step in root units, at the press
+  targets: SnapTargets | null; // gathered once, when the drag starts
+  a: Point | null; // the snapped start, root units
+  drag: Drag | null;
+  id: NodeId | null; // the shape the last frame inserted
+  tip: string | null;
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
@@ -2002,8 +2322,10 @@ function pickPill(guides: OverlayModel['guides'], at: Point): number | null {
   }
   return best;
 }
-// Elements a corner resizes (§5.3's table): geometry, nested svg, and g, use and text by a uniform scale.
-const RESIZABLE = new Set(['rect', 'image', 'foreignObject', 'svg', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'g', 'use', 'text', 'a', 'switch']);
+// Elements the overlay gives resize corners (§5.3's table): rect, image, foreignObject, nested svg and
+// path, and g, use and text by a uniform scale. Circles, ellipses, lines, polygons, polylines and
+// generated shapes take their own shape handles instead (P1-M2); planResize still covers them.
+const RESIZABLE = new Set(['rect', 'image', 'foreignObject', 'svg', 'path', 'g', 'use', 'text', 'a', 'switch']);
 /** The box around a host-px rectangle's corners through `inv` (host px → some units). */
 function rectInRoot(inv: Affine, r: Rect): Rect {
   const pts = [[r.x, r.y], [r.x + r.width, r.y], [r.x + r.width, r.y + r.height], [r.x, r.y + r.height]].map(([x, y]) => applyM(inv, x, y));

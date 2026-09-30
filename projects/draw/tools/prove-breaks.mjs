@@ -2042,7 +2042,7 @@ const BREAKS = [
   },
   {
     id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
-    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge', to: 'this.#gesture?.move || this.#nudge',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#nudge',
     run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
   },
   {
