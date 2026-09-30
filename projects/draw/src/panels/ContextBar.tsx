@@ -6,8 +6,8 @@
 // The selection's actions at 440 pt (P1-M1): the label, then six 44 pt icon buttons: Deselect,
 // Select more (a toggle), Bring forward, Send back, Delete and More. With only the root selected
 // (from the code), Forward, Back and Delete are disabled. Edit source doesn't fit beside them, so
-// it lives in the More sheet, with Duplicate, Group, Ungroup, Select group, Select all, Align (six
-// ways) and Distribute (two).
+// it lives in the More sheet, with Fill… and Stroke… (the Colour sheet over the selection, P1-M2),
+// Duplicate, Group, Ungroup, Select group, Select all, Align (six ways) and Distribute (two).
 //
 // While the Shapes tool is on (P1-M2), the bar is its kind picker instead: seven 44 pt icon buttons
 // (Rectangle, Circle, Ellipse, Line, Polygon, Star, Spiral), the chosen one pressed, then Cancel,
@@ -172,6 +172,8 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
             Edit source
           </button>
         )}
+        {row('Fill…', () => editor.openStyleSheet('fill'))}
+        {row('Stroke…', () => editor.openStyleSheet('stroke'))}
         {row('Duplicate', () => editor.duplicate())}
         {row('Group', () => editor.group())}
         {row('Ungroup', () => editor.ungroup())}
