@@ -171,7 +171,7 @@ const urlCache = new WeakMap<Doc, { styleVersion: number; refs: Map<string, Node
 const SHEET_URL = /url\(\s*(?:"#((?:\\[^]|[^"\\])*)|'#((?:\\[^]|[^'\\])*)|#((?:\\[^]|[^\s"'()\\])+))/gi;
 
 // A CSS identifier's escapes read: \31  (hex, with its one optional space) and \. (the character).
-const unescapeCss =(s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\(.)/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : ch!));
+const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\(.)/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : ch!));
 
 // ── the document's sheets, read again only when what its <style> elements say may have changed ──
 
