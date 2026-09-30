@@ -166,7 +166,18 @@ export const KNOWN = [
     id: 'subset-comments',
     why: 'the browser lists the comments and processing instructions inside the DOCTYPE’s internal subset as document children after the doctype (Chromium does: tools/edge-entity-references.svg); Draw keeps them inside the DOCTYPE, whose subset is never compared, so either order is accepted',
   },
+  {
+    id: 'cdata-line-ends',
+    why: 'WebKit keeps a CR before an LF inside a CDATA section, where XML turns every CR LF into LF before parsing (tools/illustrator-cs6-entities-pgf.svg in CI run 32, with the libxml2 of Playwright’s Linux WebKit); Chromium normalizes, as the engine does, so a text run that differs from the engine’s only by those CRs is accepted',
+  },
+  {
+    id: 'webkit-subset-pi',
+    why: 'WebKit ends the DOCTYPE’s internal subset at a ] inside a processing instruction and refuses the file (CI run 32); XML allows a ] there and Chromium accepts it, so Draw follows XML and the probe names WebKit’s refusal as its known defect',
+  },
 ];
+
+// KNOWN (cdata-line-ends): the browser kept a CR before an LF that XML, and the engine, normalize.
+const onlyLineEnds = (engine, browser) => browser.includes('\r\n') && browser.replace(/\r\n/g, '\n') === engine;
 
 /**
  * Every difference between an engine canon and a browser canon, as "path: engine …, browser …",
@@ -215,7 +226,7 @@ export function canonDiffs(engine, browser) {
         break; // the rest are out of step
       }
       if ('t' in x) {
-        if (x.t !== y.t && x.t.replace(external, '') !== y.t) say(at, x.t, y.t);
+        if (x.t !== y.t && x.t.replace(external, '') !== y.t && !onlyLineEnds(x.t, y.t)) say(at, x.t, y.t);
       } else if ('c' in x || 'pi' in x) {
         if (JSON.stringify(x) !== JSON.stringify(y)) say(at, x, y);
       } else element(x, y, at);
@@ -231,7 +242,7 @@ export function canonDiffs(engine, browser) {
  * the parser's, per engine. Chromium's were read in the cloud container; WebKit's are the same by
  * prediction (both engines parse XML with libxml2, refuse on any error it reports, and share the
  * handlers that matter here: entities, the XHTML DTDs, namespaces), and CI's WebKit run holds them
- * to it.
+ * to it. Where it showed otherwise, the probe says so, with the engine's known defect (KNOWN).
  */
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg">';
 const XHTML_DOCTYPE = '<!DOCTYPE svg PUBLIC "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN" "http://www.w3.org/2002/04/xhtml-math-svg/xhtml-math-svg.dtd">';
@@ -262,7 +273,12 @@ export const PROBES = [
   refused('a name that starts with a colon', '<:g/>'),
   refused('U+0001 in text', '<text>a\u{1}b</text>'),
   refused(']]> in text', '<text>a ]]> b</text>'),
-  accepted('a processing instruction with ] and \' in the DOCTYPE', `<!DOCTYPE svg [<?draw a ] b ' c?><!ENTITY e "x">]>${SVG}<text>&e;</text></svg>`),
+  // KNOWN (webkit-subset-pi): WebKit refuses this one (CI run 32); XML allows it, and Chromium accepts it.
+  {
+    ...accepted('a processing instruction with ] and \' in the DOCTYPE', `<!DOCTYPE svg [<?draw a ] b ' c?><!ENTITY e "x">]>${SVG}<text>&e;</text></svg>`),
+    browser: { chromium: 'accept', webkit: 'refuse' },
+    knownDefect: { webkit: 'webkit-subset-pi' },
+  },
   accepted('declared entities, in text and values', `<!DOCTYPE svg [<!ENTITY a "x"><!ENTITY b "&a;y">]>${SVG}<text id="&b;">&b; &amp; &lt;</text></svg>`),
   accepted('&#x9;&#xA;&#xD;', '<text id="&#x9;&#xA;&#xD;">&#x9;&#xA;&#xD;</text>'),
   accepted('- in a comment', '<!-- a - b -->'),
@@ -281,3 +297,22 @@ export const PROBES = [
   // Browsers supply HTML's named references under an XHTML DOCTYPE; Draw doesn't read DTDs.
   { label: 'an HTML entity under an XHTML DOCTYPE', text: `${XHTML_DOCTYPE}${SVG}<text>a&nbsp;b</text></svg>`, draw: 'limit', browser: both('accept') },
 ];
+
+/**
+ * What is wrong with one probe's verdicts, the engine's (`mine`, from engineCanon) and one browser's
+ * (`theirs`, from browserCanon), against the rule and the probe table. A browser's refusal the engine
+ * doesn't share is excused only where the probe names that engine's known defect (KNOWN), and the
+ * browser's verdict is still held to the table, so a defect that gets fixed is named.
+ */
+export function probeProblems(probe, engine, mine, theirs) {
+  const problems = [];
+  const draw = mine.refused ? (mine.kind === 'limit' ? 'limit' : 'refuse') : 'accept';
+  const verdict = theirs.refused ? 'refuse' : 'accept';
+  const why = (r) => (r.refused ? ` (${r.message})` : '');
+  const excused = probe.knownDefect?.[engine];
+  if (verdict === 'refuse' && draw === 'accept' && !excused) problems.push(`${probe.label}: ${engine} refuses it, but Draw's parser accepts it`);
+  if (draw === 'refuse' && verdict === 'accept') problems.push(`${probe.label}: Draw's parser refuses it as not well-formed${why(mine)}, but ${engine} accepts it`);
+  if (draw !== probe.draw) problems.push(`${probe.label}: Draw's parser gives ${draw}, not ${probe.draw} as the probe table says${why(mine)}`);
+  if (verdict !== probe.browser[engine]) problems.push(`${probe.label}: ${engine} gives ${verdict}, not ${probe.browser[engine]} as the probe table says${why(theirs)}`);
+  return problems;
+}
