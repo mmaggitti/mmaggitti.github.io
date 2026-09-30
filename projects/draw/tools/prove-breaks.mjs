@@ -2609,6 +2609,11 @@ const BREAKS = [
     file: 'projects/draw/src/style-edit.ts', from: "  return !row.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv]] : [...JOINS];", to: '  return [...JOINS];',
     run: drawTests('inspect.test.ts'), expect: /✖ what Inspect’s rows show for the finer cases/,
   },
+  {
+    id: 'B492', what: 'N7: Make unique copies the ids inside the gradient verbatim again (the copy’s stop can take #s1 from the original)',
+    file: 'engine/paint/gradients.ts', from: '  renameIdsIn(doc, copy, fresh, apply);\n', to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique gives each id inside the copy a fresh one/,
+  },
 ];
 
 const args = process.argv.slice(2);

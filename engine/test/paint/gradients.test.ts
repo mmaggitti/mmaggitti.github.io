@@ -12,6 +12,7 @@ import { attrValue, descendants, parseDoc, serialize, type Doc, type ElementNode
 import { Session } from '../../commands/session.ts';
 import type { Op } from '../../commands/ops.ts';
 import { stripDrawState } from '../../model/draw-state.ts';
+import { buildRefIndex } from '../../model/refs.ts';
 import { cleanExport } from '../../export/clean.ts';
 import { planStyle } from '../../style/write.ts';
 import { applyPlan } from '../../geometry/write.ts';
@@ -403,4 +404,24 @@ test('corpus property: Gloss on then off, and Linear then Colour, over every glo
   }
   assert.deepEqual(problems, []);
   assert.ok(exact > 300, `test setup: ${exact} round trips on a colour fill over the corpus`);
+});
+
+test('Make unique gives each id inside the copy a fresh one (as Duplicate does), and the references inside the copy follow it: #s1 still names the original’s stop, which a <set> outside animates, and the copy’s stop is s1-2; one undo gives the file back', () => {
+  const F = `<svg ${SVG} viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="b" xlink:href="#a" x1="0" y1="0" x2="1" y2="0"/>
+    <linearGradient id="a"><stop id="s1" offset="0" stop-color="red"/><stop id="s2" offset="1" stop-color="blue"><animate href="#s2" attributeName="stop-color" values="blue;navy" dur="1s"/></stop></linearGradient>
+    <set href="#s1" attributeName="stop-color" to="lime"/>
+  </defs>
+  <rect id="p" width="40" height="40" fill="url(#b)"/>
+  <rect id="q" x="50" width="40" height="40" fill="url(#b)"/>
+</svg>`;
+  const s = run(F, 'Make unique', (doc, apply) => assert.equal(typeof makeUnique(doc, byId(doc, 'p'), 'fill', apply), 'number'));
+  const text = serialize(s.doc);
+  assert.ok(text.includes('<linearGradient id="linear-1" x1="0" y1="0" x2="1" y2="0" draw:made="true"><stop id="s1-2" offset="0" stop-color="red"/><stop id="s2-2" offset="1" stop-color="blue"><animate href="#s2-2" attributeName="stop-color" values="blue;navy" dur="1s"/></stop></linearGradient>'), text);
+  const index = buildRefIndex(s.doc);
+  const parentId = (n: NodeId) => attrValue(s.doc, s.doc.nodes.get(s.doc.nodes.get(n)!.parent!) as ElementNode, null, 'id');
+  assert.deepEqual(index.ids.get('s1')?.map(parentId), ['a'], '#s1 is the original’s stop alone, which the <set> outside still animates');
+  assert.deepEqual(index.ids.get('s1-2')?.map(parentId), ['linear-1']);
+  assert.ok(text.includes('<set href="#s1" attributeName="stop-color" to="lime"/>') && text.includes('<animate href="#s2" attributeName="stop-color" values="blue;navy" dur="1s"/></stop></linearGradient>\n    <set'), 'references outside the copy, and the original’s own, are as they were');
 });

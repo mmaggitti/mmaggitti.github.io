@@ -18,7 +18,7 @@
 //   exactly "true". Draw takes a gradient away only when nothing refers to it any more and it holds
 //   only stops and whitespace, and its <defs> when nothing but whitespace is left in it.
 
-import { NS, attrValue, el, findAttr, serializeNode, type Attr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { NS, attrValue, descendants, el, findAttr, serializeNode, type Attr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { decodeAttr, escape } from '../xml/entities.ts';
 import { decodeFragment } from '../values/url.ts';
 import { parseColor, parsePaint } from '../values/color.ts';
@@ -27,7 +27,7 @@ import { buildRefIndex } from '../model/refs.ts';
 import { declare, undeclareIfUnused } from '../model/draw-state.ts';
 import { isDrawMadeEmpty, isDrawMadeGradient } from '../model/draw-ns.ts';
 import { insertMarkup, insertMarkups, removeWithSpace } from '../model/space.ts';
-import { numberedIds } from '../model/ids.ts';
+import { freshId, idsInUse, numberedIds, renameIdsIn } from '../model/ids.ts';
 import { rawSpelling, shownValue, styleSource } from '../style/where.ts';
 import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
@@ -448,14 +448,18 @@ export function dropUnused(doc: Doc, ids: readonly NodeId[], apply: Apply): void
  * right after that gradient: the same element type, a fresh `linear-N` or `radial-N`, draw:made,
  * and every attribute the chain resolves (but id, href and xlink:href) copied as written from the
  * element it comes from, in the order x1 y1 x2 y2 or cx cy r fx fy fr, then gradientUnits,
- * gradientTransform, spreadMethod; its content the stops' element's, first stop to last, byte for
- * byte. Then only this paint is re-pointed where it lives: the id's characters inside url(#…).
+ * gradientTransform, spreadMethod; its content the stops' element's, first stop to last, as
+ * written but for the ids inside it: each gets a fresh one (id, id-2, …, as Duplicate gives its
+ * copies, the ids in use read once), and the references inside the copy follow, while those
+ * outside it keep pointing at the original. Then only this paint is re-pointed where it lives: the
+ * id's characters inside url(#…).
  */
 export function makeUnique(doc: Doc, id: NodeId, prop: PaintProp, apply: Apply): NodeId | { refused: string } {
   const own = ownPaint(doc, id, prop);
   if (own.gradient === null || own.url === null) return { refused: `Its ${prop} is not a gradient.` };
   const r = resolveGradient(doc, own.gradient)!;
-  const gid = numberedIds(doc)(r.kind === 'linearGradient' ? 'linear' : 'radial');
+  const used = idsInUse(doc);
+  const gid = numberedIds(doc, used)(r.kind === 'linearGradient' ? 'linear' : 'radial');
   const parts: string[] = [];
   for (const name of [...GEOMETRY[r.kind], ...SHARED]) {
     const a = r.attrs.get(name);
@@ -474,6 +478,20 @@ export function makeUnique(doc: Doc, id: NodeId, prop: PaintProp, apply: Apply):
   const draw = declare(doc, apply);
   const q = qn(doc, r.kind);
   const copy = insertMarkup(doc, { after: r.id }, `<${q} id="${gid}"${parts.map((p) => ` ${p}`).join('')} ${draw}:made="true">${content}</${q}>`, apply);
+  const taken = new Set([gid]);
+  const fresh = new Map<string, string>();
+  for (const n of descendants(doc, copy)) {
+    if (n.kind !== 'element' || n.id === copy) continue;
+    for (const a of n.attrs) {
+      if (a.local !== 'id' || (a.ns !== null && a.ns !== NS.xml)) continue;
+      const was = attrValue(doc, n, a.ns, 'id');
+      if (was === null || fresh.has(was)) continue;
+      const now = freshId(doc, was, taken, used);
+      taken.add(now);
+      fresh.set(was, now);
+    }
+  }
+  renameIdsIn(doc, copy, fresh, apply);
   const why = repoint(doc, id, prop, own.url, gid, apply);
   return why ?? copy;
 }
