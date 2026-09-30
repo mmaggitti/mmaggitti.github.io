@@ -49,7 +49,9 @@
 // rules on the selection tools. The P1-M1 review adds: a drag of 2,000 selected shapes keeping up,
 // the Grid step field as one history entry, the Snap sheet reachable over the canvas on the phone,
 // Ungroup leaving a clip where it clips, the Snap toggles kept across a reload, and a file's own
-// !important CSS unable to move its drawing off the paper.
+// !important CSS unable to move its drawing off the paper. P1-M2 adds shapes, style and colour, and
+// first what M1 left: a foreignObject outlined where it draws in every engine (WebKit's getBBox
+// leaves its x and y out).
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -222,6 +224,8 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theGridStepFieldIsOneEntry);
   await check(theSnapSheetIsReachableOnThePhone);
   await check(aFilesOwnCssCantMoveItsDrawing);
+  // P1-M2: shapes, style and colour.
+  await check(aForeignObjectIsOutlinedWhereItDraws);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -4685,6 +4689,52 @@ async function phoneRulesOnTheSelectionTools(browser, origin, height) {
     must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   }, { reducedMotion: 'reduce' });
+}
+
+// ── P1-M2: shapes, style and colour ────────────────────────────────────────────────────────────
+
+// S0 (an M1 leftover, CI run 34): lab/embed--bubble.svg's <foreignObject>, selected by a tap on its
+// text, is outlined where it draws: the outline's screen box (its points, from the overlay's px to
+// the client's) is the foreignObject's rendered box (getBoundingClientRect) within 1 px, and its
+// centre handle sits at that box's centre. WebKit's getBBox leaves a foreignObject's x and y out
+// (the box comes back at 0,0), which put Safari's outline at its parent's origin; Chromium's
+// includes them. So the check runs twice: as the engine measures, and with getBBox made to answer
+// as WebKit's does, in whatever engine this is, so Chromium proves what WebKit needs too.
+async function aForeignObjectIsOutlinedWhereItDraws(browser, origin) {
+  const F = readFileSync(join(CORPUS, 'lab/embed--bubble.svg'), 'utf8');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    for (const as of ['as the engine measures', "with WebKit's getBBox"]) {
+      if (as !== 'as the engine measures') {
+        await page.evaluate(() => {
+          const real = SVGGraphicsElement.prototype.getBBox;
+          SVGForeignObjectElement.prototype.getBBox = function () {
+            const b = real.call(this);
+            return new DOMRect(0, 0, b.width, b.height);
+          };
+        });
+      }
+      must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/embed--bubble.svg did not open');
+      await twoFrames(page);
+      const c = await page.evaluate(drawnCentre, 'foreignObject');
+      await page.touchscreen.tap(c.x, c.y);
+      await page.waitForTimeout(50);
+      must(await label(page) === '<foreignObject>', `${as}: test setup: a tap on the bubble's text selected ${await label(page)}`);
+      const r = await page.evaluate(() => {
+        const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+        const shown = [...document.querySelectorAll('.draw-outline')].filter((p) => p.style.display !== 'none');
+        const pts = shown.length === 1 ? shown[0].getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number)) : [];
+        const xs = pts.map((p) => o.left + p[0]), ys = pts.map((p) => o.top + p[1]);
+        const box = pts.length ? { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) } : null;
+        return { n: shown.length, box, fo: document.querySelector('.draw-host').shadowRoot.querySelector('foreignObject').getBoundingClientRect().toJSON() };
+      });
+      must(r.n === 1 && r.box, `${as}: ${r.n} outline(s) for the selected foreignObject`);
+      must(r.fo.width > 20 && r.fo.height > 10, `${as}: test setup: the foreignObject draws ${rect(r.fo)}`);
+      must(same(r.box, r.fo), `${as}: the foreignObject's outline ${rect(r.box)} is not on it ${rect(r.fo)}`);
+      const centre = (await page.evaluate(handlesNow)).find((h) => h.id === 'center');
+      must(centre && Math.hypot(centre.x - (r.fo.x + r.fo.width / 2), centre.y - (r.fo.y + r.fo.height / 2)) <= 1, `${as}: its centre handle is at ${JSON.stringify(centre)}, not the centre of ${rect(r.fo)}`);
+    }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
 }
 
 function corpusFiles() {

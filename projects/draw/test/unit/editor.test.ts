@@ -1245,13 +1245,12 @@ test('Ungroup is refused, with the reason, when the group holds an animation tha
   assert.equal(o.editor.source(), other.replace('<g id="g" transform="translate(1 2)">', '').replace('</g>', '').replace('<circle r="2"/>', '<circle r="2" transform="translate(1 2)"/>'));
 });
 
-test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform, or to anything inside one; not when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
+test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform (the child itself); a reference to a shape inside one (Illustrator’s clipPath and use, defined and used in a nested group) ungroups with every screen box in place; not refused when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
   const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
   const refused: [string, string][] = [
     [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), 'k'], // a use elsewhere
     [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/><use xlink:href="#k" x="20"/></g>'), 'k'], // a use beside it, by xlink:href
-    [svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // inside a child
-    [svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), 'lg'], // a url(#…) into a child
+    [svg('<g id="g" transform="translate(5 5)"><path id="p" d="M0 0h50"/></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // a textPath: the path's own transform counts
   ];
   for (const [file, id] of refused) {
     const r = rig();
@@ -1262,10 +1261,73 @@ test('Ungroup is refused, with the reason, when a use, an href or a url(#…) re
     assert.equal(r.editor.source(), file, `${file}: nothing was written`);
     assert.equal(r.editor.history.get().canUndo, false, file);
   }
+  // Every drawn element's screen quad (a clip's or defs' content draws where it is referred to, so it isn't one).
+  const quads = (r: Rig): Map<NodeId, number[]> => {
+    const d = doc(r);
+    const ids = [...descendants(d, d.root)].filter((n) => n.kind === 'element' && n.id !== d.root).map((n) => n.id);
+    return new Map([...measureWith(r.editor, ids)].map(([id, m]) => {
+      const { x, y, width: w, height: h } = m.box;
+      const t = m.toHost;
+      return [id, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].flatMap(([px, py]) => [t[0] * px + t[2] * py + t[4], t[1] * px + t[3] * py + t[5]])];
+    }));
+  };
+  const ILLUSTRATOR = svg(`
+  <g id="g" transform="translate(10 5) rotate(15)">
+    <g>
+      <defs><rect id="SVGID_1_" x="0" y="0" width="40" height="30"/></defs>
+      <clipPath id="SVGID_2_"><use xlink:href="#SVGID_1_" style="overflow:visible;"/></clipPath>
+      <rect x="5" y="5" width="50" height="50" clip-path="url(#SVGID_2_)" fill="#e76f51"/>
+      <use href="#dot" x="8" y="4"/>
+      <circle id="dot" cx="10" cy="10" r="3"/>
+    </g>
+  </g>`);
   for (const file of [
+    ILLUSTRATOR,
+    svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), // inside a child: its own transform is what counts
+    svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), // a url(#…) into a child: used where it is referred to
     svg('<g id="g"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), // no transform: nothing is pushed
     svg('<g id="g" transform="translate(5 5)"><clipPath id="c"><circle r="3"/></clipPath><rect width="5" height="5" clip-path="url(#c)"/></g>'), // the clip moves out as it is
     svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><text aria-labelledby="k">x</text>'), // an ARIA reference draws nothing
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    const before = quads(r);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${file}: ${r.editor.notice.get()}`);
+    const after = quads(r);
+    assert.ok(after.size >= before.size - 1 && after.size > 0, `${file}: test setup: ${after.size} measured after, ${before.size} before`);
+    for (const [id, q] of after) {
+      const was = before.get(id);
+      assert.ok(was && q.every((v, i) => Math.abs(v - was[i]) < 1e-6), `${file}: <${(doc(r).nodes.get(id) as ElementNode).qname}> moved on screen: ${was} → ${q}`);
+    }
+    r.editor.undo();
+    assert.equal(r.editor.source(), file, `${file}: one undo gives the file back`);
+  }
+});
+
+test('Ungroup is refused, with the reason, when an animateTransform sets the transform of a child that would take the group’s (one inside the child, or one whose href names it); not for one that animates another attribute, names another element, or a group with no transform', () => {
+  const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
+  const spin = (extra = '') => `<animateTransform${extra} attributeName="transform" type="rotate" from="0 5 5" to="360 5 5" dur="2s"/>`;
+  for (const [file, name] of [
+    [svg(`<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10">${spin()}</rect></g>`), '#k'], // inside the child
+    [svg(`<g id="g" transform="translate(5 5)"><rect width="10" height="10">${spin()}</rect></g>`), '<rect>'], // one with no id is named by its tag
+    [svg(`<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"/></g>${spin(' href="#k"')}`), '#k'], // elsewhere, by href
+    [svg(`<g id="g" transform="translate(5 5)"><circle id="k" r="4"/>${spin(' xlink:href="#k"')}</g>`), '#k'], // beside it, by xlink:href
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), `An animation on ${name} sets its transform; ungrouping can’t push the group’s into it.`, file);
+    assert.equal(r.editor.source(), file, `${file}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, file);
+  }
+  for (const file of [
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"><animate attributeName="x" to="9" dur="1s"/></rect></g>'), // another attribute
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"><animateTransform attributeName="gradientTransform" type="rotate" to="30" dur="1s"/></rect></g>'), // not its transform
+    svg(`<rect id="o" width="4" height="4"/><g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10">${spin(' href="#o"')}</rect></g>`), // it names another element
+    svg(`<g id="g"><rect id="k" width="10" height="10">${spin()}</rect></g>`), // no transform to push
   ]) {
     const r = rig();
     r.editor.open(file);

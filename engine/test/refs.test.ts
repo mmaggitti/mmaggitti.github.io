@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc } from '../model/doc.ts';
+import { DEFAULT_LIMITS } from '../xml/cst.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
 
 const SRC = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="http://www.w3.org/1999/xlink" aria-labelledby="t d">
@@ -31,4 +32,18 @@ test('url() fragments may be quoted with spaces and are percent-decoded, as brow
   assert.deepEqual(idx.refs.get('a b')!.map((x) => x.kind).sort(), ['href', 'url']);
   assert.equal(idx.refs.get('é')!.length, 1);
   assert.deepEqual(idx.dangling, []);
+});
+
+// The dangling list is built by a loop: push(...list) passes each reference as an argument, and a
+// call's arguments are capped (V8 throws a RangeError at about 120,000), so a file with that many
+// references to one missing id couldn't be indexed at all (P1-M1 follow-up). The file is made here,
+// not stored; the parser's node limit is raised for it (200,000 uses and the root are 200,002 nodes).
+test('a file with 200,000 references to one missing id builds its reference index', () => {
+  const src = `<svg xmlns="http://www.w3.org/2000/svg">${'<use href="#nope"/>'.repeat(200_000)}</svg>`;
+  const r = parseDoc(src, { ...DEFAULT_LIMITS, maxNodes: 250_000 });
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const idx = buildRefIndex(r.doc);
+  assert.equal(idx.refs.get('nope')!.length, 200_000);
+  assert.equal(idx.dangling.length, 200_000);
+  assert.ok(idx.dangling.every((d) => d.id === 'nope' && d.kind === 'href'));
 });

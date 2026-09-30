@@ -117,7 +117,7 @@ const BREAKS = [
     // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
     id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
     file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
-    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*255 nested elements declaring (150|600) prefixes each took \d+ ms/,
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*252 nested elements declaring 600 prefixes each took \d+ ms, [\d.]+× the \d+ ms 63 took/,
   },
   {
     id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
@@ -2169,6 +2169,27 @@ const BREAKS = [
     id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
     file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
     run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup gave the clip the group's transform/,
+  },
+  // P1-M2 S0: what M1 left. B307 (above) is item 4's break: the namespace timing test is a ratio now.
+  {
+    id: 'B409', what: 'the reference index spreads each missing id’s references into push() again (a file with 200,000 references to one missing id throws)',
+    file: 'engine/model/refs.ts', from: 'for (const [id, list] of refs) if (!ids.has(id)) for (const r of list) dangling.push(r);', to: 'for (const [id, list] of refs) if (!ids.has(id)) dangling.push(...list);',
+    run: engineTests('refs.test.ts'), expect: /✖ a file with 200,000 references to one missing id builds its reference index/,
+  },
+  {
+    id: 'B410', what: 'Ungroup refuses a reference to anything inside a child again (Illustrator’s clipPath and use in a nested group are refused)',
+    file: 'projects/draw/src/interact/structure.ts', from: "      if (k?.kind === 'element' && drawnInPlace(k)) pushed.add(c);\n", to: "      if (k?.kind === 'element' && drawnInPlace(k)) for (const d of descendants(doc, c)) if (d.kind === 'element') pushed.add(d.id);\n",
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when a use, an href or a url\(#…\) refers to a child that takes the group’s transform \(the child itself\)/,
+  },
+  {
+    id: 'B411', what: 'Ungroup pushes the group’s transform into a child whose transform an animateTransform sets',
+    file: 'projects/draw/src/interact/structure.ts', from: "      if ([...own, ...byHref].some((a) => a.kind === 'element' && setsTransform(doc, a))) {", to: '      if (false) {',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when an animateTransform sets the transform of a child/,
+  },
+  {
+    id: 'B412', what: 'a foreignObject is measured by getBBox again (WebKit’s leaves its x and y out: Safari outlines it at its parent’s origin)', slow: true, checks: ['aForeignObjectIsOutlinedWhereItDraws'],
+    file: 'projects/draw/src/panels/views.ts', from: "        if (g.localName === 'foreignObject' && g.namespaceURI === SVG_NS) {", to: '        if (false) {',
+    run: DRAW_E2E, expect: /aForeignObjectIsOutlinedWhereItDraws: with WebKit's getBBox: the foreignObject's outline .* is not on it/,
   },
 ];
 

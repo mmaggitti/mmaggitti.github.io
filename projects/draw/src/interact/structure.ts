@@ -11,7 +11,7 @@ import { NS, attrValue, descendants, el, findAttr, href, serializeNode, type Doc
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type Op } from '../../../../engine/commands/ops.ts';
 import { parseFragment } from '../../../../engine/model/fragment.ts';
 import { freshId, idsInUse, renameIdsIn } from '../../../../engine/model/ids.ts';
-import { buildRefIndex } from '../../../../engine/model/refs.ts';
+import { buildRefIndex, type Ref } from '../../../../engine/model/refs.ts';
 import { DRAW_NS, isLocked } from '../../../../engine/model/draw-state.ts';
 import { cssSets } from '../../../../engine/geometry/css.ts';
 import { TokenEditError } from '../../../../engine/code/edit.ts';
@@ -252,21 +252,42 @@ export function ungroupRefusal(doc: Doc, id: NodeId): string | null {
       return 'A child’s transform origin (or CSS transform) can’t take the group’s transform.';
     }
   }
-  // A use, an href or a url(#…) to a child that takes the transform, or to anything inside one:
-  // a use's copy of it would take the transform too.
+  // A use, an href or a url(#…) to a child that takes the transform: a use copies the element with
+  // its own attributes, so its copy would take the transform too. Only the child itself: a reference
+  // to something inside one sees no change, since a use copies that shape with its own attributes,
+  // never its ancestors', and a url(#…) paint, clip or mask is used in the referring element's own
+  // user space (Illustrator's clipPath and use, defined and used inside a nested group, ungroup).
   if (attrValue(doc, n, null, 'transform')?.trim()) {
     const pushed = new Set<NodeId>();
     for (const c of n.children) {
       const k = doc.nodes.get(c);
-      if (k?.kind === 'element' && drawnInPlace(k)) for (const d of descendants(doc, c)) pushed.add(d.id);
+      if (k?.kind === 'element' && drawnInPlace(k)) pushed.add(c);
     }
+    // (An animation's href names what it animates, not a copy: the transform-setting ones are below.)
+    const copies = (r: Ref) => (r.kind === 'href' || r.kind === 'url') && !ANIMATIONS.has((doc.nodes.get(r.from) as ElementNode).local);
     for (const [ref, owners] of index.ids) {
-      if (owners.some((o) => pushed.has(o)) && index.refs.get(ref)?.some((r) => r.kind === 'href' || r.kind === 'url')) {
+      if (owners.some((o) => pushed.has(o)) && index.refs.get(ref)?.some(copies)) {
         return `Something refers to a shape inside it (#${ref}); ungrouping would move that reference’s copy too.`;
+      }
+    }
+    // An animateTransform that sets a pushed child's transform: its value replaces the attribute's
+    // (or adds to it), so the group's transform pushed into the attribute wouldn't hold while it runs.
+    for (const c of pushed) {
+      const k = el(doc, c);
+      const kid = attrValue(doc, k, null, 'id');
+      const byHref = kid === null ? [] : (index.refs.get(kid) ?? []).filter((r) => r.kind === 'href').map((r) => doc.nodes.get(r.from)!);
+      const own = k.children.map((x) => doc.nodes.get(x)!).filter((x) => x.kind === 'element' && !href(doc, x)?.trim());
+      if ([...own, ...byHref].some((a) => a.kind === 'element' && setsTransform(doc, a))) {
+        return `An animation on ${kid === null ? `<${k.qname}>` : `#${kid}`} sets its transform; ungrouping can’t push the group’s into it.`;
       }
     }
   }
   return null;
+}
+
+/** Is this an animateTransform of the transform attribute (of whatever it animates)? */
+function setsTransform(doc: Doc, a: ElementNode): boolean {
+  return a.ns === NS.svg && a.local === 'animateTransform' && attrValue(doc, a, null, 'attributeName')?.trim() === 'transform';
 }
 
 /**
