@@ -157,7 +157,7 @@ function Row({ label, row, children }: { label: string; row: StyleRow; children:
 function PaintRow({ editor, prop, label, row, kinds = [] }: { editor: Editor; prop: string; label: string; row: StyleRow; kinds?: readonly PaintKind[] }) {
   const v = row.value;
   const colour = !row.mixed && parseColor(v)?.kind === 'color';
-  const text = row.mixed ? 'Mixed' : v || '?';
+  const text = row.mixed ? 'Mixed' : row.from === 'rule' ? 'a <style> rule’s' : v || '?';
   return (
     <Row label={label} row={row}>
       <button type="button" className="draw-inspect-swatch" aria-label={`${prop}: ${text}`} disabled={!!row.disabled} onClick={() => editor.openStyleSheet(prop)}>
@@ -223,7 +223,7 @@ function SliderRow({ editor, prop, label, row, range }: { editor: Editor; prop: 
 // A press holds the slider's one entry until the pointer lifts anywhere: a mouse let go off the
 // slider sends the slider nothing, so the release is heard on the window, and the slider going
 // away (the selection changed) ends it too.
-function StyleSlider({ editor, prop, row, range }: { editor: Editor; prop: string; row: StyleRow; range: { min: number; max: number; step: number } }) {
+function StyleSlider({ editor, prop, row, range, name = prop }: { editor: Editor; prop: string; row: StyleRow; range: { min: number; max: number; step: number }; name?: string }) {
   const held = useRef<(() => void) | null>(null); // while pressed: takes the release listeners off
   const read = parseFloat(row.value);
   const value = Number.isFinite(read) ? read : Number(STYLE_PROPS[prop]?.initial ?? 0);
@@ -240,7 +240,7 @@ function StyleSlider({ editor, prop, row, range }: { editor: Editor; prop: strin
     <input
       type="range"
       className="draw-range draw-inspect-range"
-      aria-label={prop}
+      aria-label={name}
       min={range.min}
       max={range.max}
       step={range.step}
@@ -272,7 +272,7 @@ function NumberRow({ editor, prop, label, row, slider }: { editor: Editor; prop:
   return (
     <Row label={label} row={row}>
       <FocusField editor={editor} field={{ kind: 'style', prop }} label={prop} text={row.mixed ? '' : row.value} placeholder={row.mixed ? 'Mixed' : undefined} disabled={!!row.disabled} onError={setError} />
-      {slider && <StyleSlider editor={editor} prop={prop} row={row} range={slider} />}
+      {slider && <StyleSlider editor={editor} prop={prop} row={row} range={slider} name={`${prop} slider`} />}
       <Problem error={error} />
     </Row>
   );

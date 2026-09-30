@@ -51,7 +51,11 @@
 // Ungroup leaving a clip where it clips, the Snap toggles kept across a reload, and a file's own
 // !important CSS unable to move its drawing off the paper. P1-M2 adds shapes, style and colour, and
 // first what M1 left: a foreignObject outlined where it draws in every engine (WebKit's getBBox
-// leaves its x and y out).
+// leaves its x and y out). Then the Shapes tool (a tap places SVG Lab's default scaled to the
+// artboard, a drag draws it with snapping), each shape's own handles, and generated shapes that
+// redraw from their inputs and turn plain when edited by hand; Inspect writing each value where it
+// lives (and the computed style reading it), the Colour sheet's picker keeping each notation, a
+// multi-selection edit as one entry, and the phone rules on Inspect and the picker.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -68,6 +72,7 @@ import { encodeImport } from '../src/platform/files.ts';
 import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { starPoints } from '../../../engine/generators/radial.ts';
+import { clampRgb, parseColor } from '../../../engine/values/color.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
@@ -231,6 +236,10 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(aDragDrawsTheShapeWithSnapping);
   await check(shapeHandlesEditTheLabsShapes);
   await check(generatorsRegenerateAndDetach);
+  await check(inspectWritesWhereEachValueLives);
+  await check(theColourPickerKeepsTheNotation);
+  await check(aMultiSelectionEditIsOneEntry);
+  for (const height of [956, 796]) await check(phoneRulesOnInspectAndThePicker, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -5137,6 +5146,400 @@ async function generatorsRegenerateAndDetach(browser, origin) {
     must(await undo.getAttribute('aria-label') === 'Undo Set turns', `typing 4 is ${await undo.getAttribute('aria-label')}, not one "Set turns"`);
     await undo.tap();
     must(await segs() === 24, 'one undo did not give the 3-turn spiral back');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M2 S2: Inspect and colour ─────────────────────────────────────────────────────────────────
+
+// Shapes that hold their style in each place Inspect writes to: the rect's fill as an attribute,
+// the circle's fill and stroke-width as declarations in its style="" (odd spacing, an !important),
+// the ellipse with nothing, a circle inheriting its group's stroke, and a polygon whose fill a
+// <style> rule sets.
+const STYLED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <style>.k { fill: red }</style>
+  <rect id="a" x="5" y="5" width="30" height="30" fill="#e76f51"/>
+  <circle id="b" cx="62" cy="20" r="14" style="fill: #2a9d8f ;stroke-width:2 !important"/>
+  <ellipse id="c" cx="25" cy="62" rx="20" ry="12"/>
+  <g id="badge" stroke="#264653" stroke-width="3"><circle id="kid" cx="66" cy="62" r="10"/></g>
+  <polygon id="k" class="k" points="62,80 92,80 77,96"/>
+</svg>
+`;
+// A tap on the drawn element with this id (it selects it; with Select more on, adds it).
+async function tapShape(page, id) {
+  const p = await page.evaluate(drawnCentre, `[id="${id}"]`);
+  await page.touchscreen.tap(p.x, p.y);
+  await page.waitForTimeout(50);
+}
+// The Inspect tab, with the code panel at half.
+async function showInspect(page) {
+  if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+  await page.locator('.draw-tabs button', { hasText: 'Inspect' }).tap();
+  await page.locator('.draw-inspect').waitFor();
+}
+// Inspect's controls: a paint's swatch opens the Colour sheet over the selection, where a palette
+// colour or a chip is taken and Done closes it; a segment; a field typed in, then Enter; a key on a
+// slider; the switch.
+async function inspectColour(page, prop, value) {
+  await page.locator(`.draw-inspect button[aria-label^="${prop}:"]`).tap();
+  await page.locator('.draw-modal .draw-color').waitFor();
+  const swatch = page.locator(`.draw-modal .draw-swatch[aria-label="${value}"]`);
+  if (await swatch.count()) await swatch.tap();
+  else await page.locator('.draw-modal .draw-chip', { hasText: new RegExp(`^${value}$`) }).tap();
+  await page.locator('.draw-modal-done').tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+const inspectSegment = (page, prop, text) => page.locator(`.draw-inspect [role="group"][aria-label="${prop}"] button`, { hasText: new RegExp(`^${text}$`) }).tap();
+async function inspectField(page, label, text) {
+  const f = page.locator(`.draw-inspect input:not([type="range"])[aria-label="${label}"]`);
+  await f.tap();
+  await f.fill(text);
+  await f.press('Enter');
+}
+async function inspectSliderKey(page, label, key) {
+  const s = page.locator(`.draw-inspect input[type="range"][aria-label="${label}"]`);
+  await s.focus();
+  await s.press(key);
+}
+// The colour drawn at a screen point, with the overlay's marks and the canvas's own buttons hidden.
+async function pixelAt(page, p) {
+  const hide = (on) => {
+    for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+  };
+  await page.evaluate(hide, true);
+  const shot = decodePng(await page.screenshot({ clip: { x: Math.round(p.x), y: Math.round(p.y), width: 1, height: 1 } }));
+  await page.evaluate(hide, false);
+  return shot.rgb(0, 0);
+}
+const channels = (css) => (css.match(/-?[\d.]+/g) ?? []).map(Number);
+const near3 = (a, b, tol) => a.length >= 3 && b.length >= 3 && [0, 1, 2].every((i) => Math.abs(a[i] - b[i]) <= tol);
+
+// Inspect writes each value where it lives (§5.4 of the plan's M2 brief), through its controls: on
+// the ellipse, which holds nothing, every property of the table in turn (fill, stroke, and with it
+// the width-2 rule's stroke-width, then the width, the three opacities, miterlimit, cap, join, dash,
+// dash offset, paint order, non-scaling stroke, shape-rendering and color) is added as an attribute
+// at the end of its start tag, one entry each; then a currentColor fill paints with the color it
+// set. The rect's fill attribute has its value replaced; the circle's style="" declarations have
+// only their value spans replaced (" ;" and "!important" kept). Then the drawn element's computed
+// style reads each written value (what both engines agree on: colours as channels, lengths and dash
+// lists as numbers, paint-order's first keyword), and the currentColor fill is drawn in the color.
+// The circle in the group shows its stroke "from <g#badge>"; the polygon's fill, set by a <style>
+// rule, is disabled with the P2 notice, and a tap on it writes nothing.
+async function inspectWritesWhereEachValueLives(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), STYLED)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    let want = STYLED;
+    const ellipse = () => /<ellipse[^>]*\/>/.exec(want)[0];
+    // One step: the control, the source it must leave, and its one entry.
+    const step = async (what, act, from, to, label) => {
+      await act();
+      want = want.replace(from, to);
+      const got = await source(page);
+      must(got === want, `${what}: the source is not the value written where it lives:\n${got}`);
+      must(await undo.getAttribute('aria-label') === `Undo ${label}`, `${what}: the entry is ${await undo.getAttribute('aria-label')}, not ${label}`);
+    };
+    const add = (attrs) => [ellipse(), ellipse().replace('/>', ` ${attrs}/>`)];
+    await tapShape(page, 'c');
+    await showInspect(page);
+    must(await label(page) === '<ellipse#c>', `test setup: the ellipse is not selected (${await label(page)})`);
+    await step('fill', () => inspectColour(page, 'fill', '#264653'), ...add('fill="#264653"'), 'Set fill');
+    await step('stroke (and the width-2 rule)', () => inspectColour(page, 'stroke', '#e76f51'), ...add('stroke="#e76f51" stroke-width="2"'), 'Set stroke');
+    await step('stroke-width', () => inspectField(page, 'stroke-width', '5'), 'stroke-width="2"', 'stroke-width="5"', 'Set stroke-width');
+    for (const prop of ['opacity', 'fill-opacity', 'stroke-opacity']) await step(prop, () => inspectSliderKey(page, prop, 'ArrowLeft'), ...add(`${prop}="0.99"`), `Set ${prop}`);
+    await step('stroke-miterlimit', () => inspectField(page, 'stroke-miterlimit', '8'), ...add('stroke-miterlimit="8"'), 'Set stroke-miterlimit');
+    await step('stroke-linecap', () => inspectSegment(page, 'stroke-linecap', 'Round'), ...add('stroke-linecap="round"'), 'Set stroke-linecap');
+    await step('stroke-linejoin', () => inspectSegment(page, 'stroke-linejoin', 'Bevel'), ...add('stroke-linejoin="bevel"'), 'Set stroke-linejoin');
+    await step('stroke-dasharray', () => inspectSegment(page, 'stroke-dasharray', '10 6'), ...add('stroke-dasharray="10 6"'), 'Set stroke-dasharray');
+    await step('stroke-dashoffset', () => inspectField(page, 'stroke-dashoffset', '3'), ...add('stroke-dashoffset="3"'), 'Set stroke-dashoffset');
+    await step('paint-order', () => inspectSegment(page, 'paint-order', 'Stroke first'), ...add('paint-order="stroke"'), 'Set paint-order');
+    await step('vector-effect', () => page.locator('.draw-inspect [role="switch"][aria-label="Non-scaling stroke"]').tap(), ...add('vector-effect="non-scaling-stroke"'), 'Set vector-effect');
+    await step('shape-rendering', () => inspectSegment(page, 'shape-rendering', 'crispEdges'), ...add('shape-rendering="crispEdges"'), 'Set shape-rendering');
+    await step('color', () => inspectColour(page, 'color', '#2a9d8f'), ...add('color="#2a9d8f"'), 'Set color');
+    const computed = await page.evaluate(() => {
+      const s = getComputedStyle(document.querySelector('.draw-host').shadowRoot.getElementById('c'));
+      return { fill: s.fill, stroke: s.stroke, strokeWidth: s.strokeWidth, opacity: s.opacity, fillOpacity: s.fillOpacity, strokeOpacity: s.strokeOpacity, miter: s.strokeMiterlimit, cap: s.strokeLinecap, join: s.strokeLinejoin, dash: s.strokeDasharray, offset: s.strokeDashoffset, order: s.paintOrder, effect: s.vectorEffect, rendering: s.shapeRendering, color: s.color };
+    });
+    const c = computed;
+    const wrong = [];
+    if (!near3(channels(c.fill), [38, 70, 83], 0)) wrong.push(`fill ${c.fill}`);
+    if (!near3(channels(c.stroke), [231, 111, 81], 0)) wrong.push(`stroke ${c.stroke}`);
+    if (parseFloat(c.strokeWidth) !== 5) wrong.push(`stroke-width ${c.strokeWidth}`);
+    for (const [k, v] of [['opacity', c.opacity], ['fill-opacity', c.fillOpacity], ['stroke-opacity', c.strokeOpacity]]) if (Math.abs(parseFloat(v) - 0.99) > 1e-6) wrong.push(`${k} ${v}`);
+    if (parseFloat(c.miter) !== 8) wrong.push(`stroke-miterlimit ${c.miter}`);
+    if (c.cap !== 'round' || c.join !== 'bevel') wrong.push(`cap ${c.cap}, join ${c.join}`);
+    if (JSON.stringify(channels(c.dash)) !== '[10,6]') wrong.push(`stroke-dasharray ${c.dash}`);
+    if (parseFloat(c.offset) !== 3) wrong.push(`stroke-dashoffset ${c.offset}`);
+    if (c.order.trim().split(/\s+/)[0] !== 'stroke') wrong.push(`paint-order ${c.order}`);
+    if (c.effect !== 'non-scaling-stroke') wrong.push(`vector-effect ${c.effect}`);
+    if (c.rendering.toLowerCase() !== 'crispedges') wrong.push(`shape-rendering ${c.rendering}`);
+    if (!near3(channels(c.color), [42, 157, 143], 0)) wrong.push(`color ${c.color}`);
+    must(wrong.length === 0, `the ellipse's computed style doesn't read what Inspect wrote: ${wrong.join('; ')}`);
+    // A currentColor fill paints with the color Inspect set (0.99 × 0.99 opaque over the paper).
+    await step('fill currentColor', () => inspectColour(page, 'fill', 'currentColor'), 'fill="#264653"', 'fill="currentColor"', 'Set fill');
+    const inside = await page.evaluate(screenPoint, { x: 15, y: 62 });
+    const px = await pixelAt(page, inside);
+    must(near3(px, [42, 157, 143], 8), `the currentColor fill is drawn ${px}, not the color #2a9d8f`);
+    // The rect's fill attribute: its value replaced.
+    await tapShape(page, 'a');
+    await step('the rect’s fill', () => inspectColour(page, 'fill', '#e9c46a'), 'fill="#e76f51"', 'fill="#e9c46a"', 'Set fill');
+    // The circle's style="": only each declaration's value span, " ;" and "!important" kept.
+    await tapShape(page, 'b');
+    await step('the circle’s fill declaration', () => inspectColour(page, 'fill', '#e9c46a'), 'fill: #2a9d8f ;', 'fill: #e9c46a ;', 'Set fill');
+    await step('the circle’s !important stroke-width', () => inspectField(page, 'stroke-width', '5'), 'stroke-width:2 !important', 'stroke-width:5 !important', 'Set stroke-width');
+    const circle = await page.evaluate(() => {
+      const s = getComputedStyle(document.querySelector('.draw-host').shadowRoot.getElementById('b'));
+      return { fill: s.fill, width: s.strokeWidth };
+    });
+    must(near3(channels(circle.fill), [233, 196, 106], 0) && parseFloat(circle.width) === 5, `the circle's computed fill and stroke-width are ${circle.fill} and ${circle.width}, not what its declarations now say`);
+    // The circle in the group: its stroke from <g#badge>.
+    await tapShape(page, 'kid');
+    const note = await page.locator('.draw-inspect section[aria-label="Stroke"] .draw-inspect-note').first().textContent();
+    must(note === 'from <g#badge>', `the grouped circle's stroke says ${JSON.stringify(note)}, not "from <g#badge>"`);
+    // The polygon's fill, set by a <style> rule: disabled, with the P2 notice; a tap writes nothing.
+    await tapShape(page, 'k');
+    const fill = page.locator('.draw-inspect section[aria-label="Fill"]');
+    must(await fill.locator('button[aria-label^="fill:"]').isDisabled() && await fill.locator('[role="group"] button', { hasText: 'None' }).isDisabled(), 'the rule-set fill’s controls are not disabled');
+    must(/set by a <style> rule.*arrives in P2/.test(await fill.locator('[role="status"]').textContent()), 'the rule-set fill does not say so, with the P2 notice');
+    await fill.locator('[role="group"] button', { hasText: 'None' }).tap({ force: true });
+    must(await source(page) === want, 'a tap on the rule-set fill wrote something');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Colour tokens in every notation the plan names: each one's Colour sheet (from its code token),
+// with the square's thumb dragged, the Hue slider moved and the Alpha slider set to 50%, writes
+// every value in the token's own family (tomato and transparent become hex); alpha 0.5 is written as
+// #rrggbb80, "/ 0.5" or "/ 50%" as the family has it; the drawn element's computed fill is the
+// sheet's preview (± 1 a channel); each visit is one entry. The square and the sliders are 44 pt
+// tall or more, and an arrow key on the focused square moves it.
+const HEX = [/^#[0-9a-f]{6}([0-9a-f]{2})?$/, /^#[0-9a-f]{6}80$/];
+const NOTATIONS = [
+  ['#e76f51', ...HEX],
+  ['rgb(231, 111, 81)', /^rgba?\([\d.]+, [\d.]+, [\d.]+(, [\d.]+)?\)$/, /^rgba\([\d.]+, [\d.]+, [\d.]+, 0\.5\)$/],
+  ['rgb(231 111 81 / 50%)', /^rgb\([\d.]+ [\d.]+ [\d.]+( \/ [\d.]+%)?\)$/, /^rgb\([\d.]+ [\d.]+ [\d.]+ \/ 50%\)$/],
+  ['hsl(12 76% 61%)', /^hsl\([\d.]+ [\d.]+% [\d.]+%( \/ [\d.]+)?\)$/, /^hsl\([\d.]+ [\d.]+% [\d.]+% \/ 0\.5\)$/],
+  ['oklch(0.66 0.15 36)', /^oklch\([\d.]+ [\d.]+ [\d.]+( \/ [\d.]+)?\)$/, /^oklch\([\d.]+ [\d.]+ [\d.]+ \/ 0\.5\)$/],
+  ['tomato', ...HEX],
+  ['transparent', ...HEX],
+];
+async function theColourPickerKeepsTheNotation(browser, origin) {
+  const F = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n${NOTATIONS.map(([c], i) => `  <rect id="n${i}" x="${(i % 4) * 25 + 2}" y="${Math.floor(i / 4) * 25 + 2}" width="20" height="20" fill="${c}"/>`).join('\n')}\n</svg>\n`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    await showCode(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    for (const [i, [text, family, half]] of NOTATIONS.entries()) {
+      const fillOf = async () => new RegExp(`<rect id="n${i}"[^>]* fill="([^"]*)"`).exec(await source(page))[1];
+      await tapToken(page.locator('.cv-block', { hasText: `id="n${i}"` }).locator('.cv-color').first());
+      await page.locator('.draw-modal .draw-hsv').waitFor();
+      if (i === 0) {
+        const sizes = await page.evaluate(() => ['.draw-hsv', '.draw-hue', '.draw-alpha'].map((s) => document.querySelector(`.draw-modal ${s}`).getBoundingClientRect().height));
+        must(sizes.every((h) => h >= TAP_MIN - 0.5), `the square, Hue and Alpha are ${sizes.map(Math.round).join(', ')} tall, not at least ${TAP_MIN}`);
+      }
+      // The square's thumb, dragged (pressed on the thumb within the square: at black or white it sits
+      // on the square's corner).
+      const sq = await page.locator('.draw-modal .draw-hsv').boundingBox();
+      const thumb = await page.locator('.draw-modal .draw-hsv-thumb').boundingBox();
+      const inside = (v, lo, size) => Math.min(Math.max(v, lo + 2), lo + size - 2);
+      await page.mouse.move(inside(thumb.x + thumb.width / 2, sq.x, sq.width), inside(thumb.y + thumb.height / 2, sq.y, sq.height));
+      await page.mouse.down();
+      await page.mouse.move(sq.x + sq.width * 0.5, sq.y + sq.height * 0.4, { steps: 3 });
+      await page.mouse.move(sq.x + sq.width * 0.7, sq.y + sq.height * 0.2, { steps: 3 });
+      await page.mouse.up();
+      const squared = await fillOf();
+      must(squared !== text && family.test(squared), `${text}: the square wrote ${squared}, out of its family (${family})`);
+      // The Hue slider, dragged; then the Alpha slider pressed at its middle and keyed to exactly 50%.
+      const hue = await page.locator('.draw-modal .draw-hue').boundingBox();
+      await page.mouse.move(hue.x + hue.width * 0.4, hue.y + hue.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(hue.x + hue.width * 0.5, hue.y + hue.height / 2, { steps: 3 });
+      await page.mouse.up();
+      const hued = await fillOf();
+      must(hued !== squared && family.test(hued), `${text}: the Hue slider wrote ${hued}, out of its family, or nothing`);
+      const alpha = page.locator('.draw-modal .draw-alpha');
+      const ab = await alpha.boundingBox();
+      await page.mouse.click(ab.x + ab.width / 2, ab.y + ab.height / 2);
+      for (let v = Number(await alpha.inputValue()), n = 0; v !== 50 && n < 10; v = Number(await alpha.inputValue()), n++) await alpha.press(v < 50 ? 'ArrowRight' : 'ArrowLeft');
+      await twoFrames(page);
+      const written = await fillOf();
+      must(half.test(written), `${text}: at alpha 50% the picker wrote ${written}, not ${half}`);
+      // The drawn fill is the preview's colour.
+      const { drawn, preview } = await page.evaluate((i) => ({
+        drawn: getComputedStyle(document.querySelector('.draw-host').shadowRoot.getElementById(`n${i}`)).fill,
+        preview: getComputedStyle(document.querySelector('.draw-modal .draw-preview > span:last-child')).backgroundColor,
+      }), i);
+      const [d, p] = [parseColor(drawn), parseColor(preview)];
+      const [dr, pr] = [d && clampRgb(d), p && clampRgb(p)];
+      must(!!dr && !!pr && ['r', 'g', 'b'].every((k) => Math.abs(dr[k] - pr[k]) * 255 <= 1) && Math.abs(d.alpha - p.alpha) <= 0.01, `${text}: the drawn fill ${drawn} is not the preview ${preview}`);
+      if (i === 0) {
+        // An arrow key on the focused square moves it.
+        const was = await page.locator('.draw-modal .draw-hsv').getAttribute('aria-valuenow');
+        await page.locator('.draw-modal .draw-hsv').focus();
+        await page.keyboard.press('ArrowLeft');
+        must(await page.locator('.draw-modal .draw-hsv').getAttribute('aria-valuenow') === String(Number(was) - 1) && await fillOf() !== written, `an arrow on the square did not move it (${was} → ${await page.locator('.draw-modal .draw-hsv').getAttribute('aria-valuenow')})`);
+      }
+      await page.locator('.draw-modal-done').tap();
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      must(await undo.getAttribute('aria-label') === 'Undo Set fill', `${text}: the entry is ${await undo.getAttribute('aria-label')}`);
+      await undo.tap();
+      must(await source(page) === F, `${text}: one undo did not give the file back: the visit was more than one entry`);
+    }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Three shapes selected (Select more) show their fill as Mixed; a palette colour in the Fill sheet
+// sets all three, each where it lives, in one "Set fill" that one undo takes back byte for byte; a
+// drag of the stroke-width slider is one entry; with a fourth shape selected too, whose fill a
+// <style> rule sets, the others change and the notice names the one that kept its fill.
+async function aMultiSelectionEditIsOneEntry(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), STYLED)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await tapShape(page, 'a');
+    await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+    await tapShape(page, 'b');
+    await tapShape(page, 'c');
+    must(await label(page) === '3 selected', `test setup: ${await label(page)}`);
+    await showInspect(page);
+    const swatch = page.locator('.draw-inspect button[aria-label^="fill:"]');
+    must(await swatch.getAttribute('aria-label') === 'fill: Mixed', `three fills show ${await swatch.getAttribute('aria-label')}, not Mixed`);
+    await inspectColour(page, 'fill', '#e9c46a');
+    const set = STYLED.replace('fill="#e76f51"', 'fill="#e9c46a"').replace('fill: #2a9d8f ;', 'fill: #e9c46a ;').replace('ry="12"/>', 'ry="12" fill="#e9c46a"/>');
+    must(await source(page) === set, `Set fill over three shapes:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set fill', `the entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === STYLED && await undo.isDisabled(), 'one undo did not give all three back byte for byte: the edit was more than one entry');
+    // The stroke-width slider, dragged: one entry.
+    const slider = page.locator('.draw-inspect input[type="range"][aria-label="stroke-width slider"]');
+    await slider.scrollIntoViewIfNeeded();
+    const b = await slider.boundingBox();
+    await page.mouse.move(b.x + 12, b.y + b.height / 2);
+    await page.mouse.down();
+    for (const f of [0.2, 0.3, 0.4]) await page.mouse.move(b.x + b.width * f, b.y + b.height / 2);
+    await page.mouse.up();
+    const widths = await source(page);
+    must(widths !== STYLED && /<rect[^>]* stroke-width="[\d.]+"\/>/.test(widths) && /stroke-width:[\d.]+ !important/.test(widths) && /ry="12" stroke-width="[\d.]+"\/>/.test(widths), `the slider drag did not set all three widths:\n${widths}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set stroke-width', `the slider's entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === STYLED && await undo.isDisabled(), 'the slider drag was more than one entry');
+    // A fourth, whose fill a rule sets: the others change, the notice names it.
+    await tapShape(page, 'k');
+    must(await label(page) === '4 selected', `test setup: ${await label(page)}`);
+    await inspectColour(page, 'fill', '#e9c46a');
+    must(await source(page) === set, `with the rule-set polygon selected too, Set fill wrote:\n${await source(page)}`);
+    must(await toast(page) === '1 of 4 kept their fill (<polygon#k>): Its fill is set by a <style> rule, which wins over the attribute. Editing stylesheets arrives in P2.', `the notice read ${JSON.stringify(await toast(page))}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Inspect and the Colour sheet on the phone, at 440×956 and 440×796: with one and with three shapes
+// selected, Inspect at the half and full detents holds every control at 44 pt or more, every field
+// at 16 px or more, and nothing scrolls sideways or runs past the panel; so does the Colour sheet
+// with its picker, whose Done stays above the on-screen keyboard (the visual viewport 336 pt
+// shorter) with its text field focused. The sheet stays above the canvas: at 796 with the code at
+// half, the Fill sheet opened from Inspect has Done inside the viewport, and at Done's centre and at
+// its text field's centre are those controls (the overlay's marks made hittable, so nothing of the
+// canvas lies over them); its body scrolls when it is taller than the room; Done closes it.
+async function phoneRulesOnInspectAndThePicker(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), STYLED)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const problems = [];
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      if (r.sh > r.ch) problems.push(`${state}: the page scrolls (${r.sh} > ${r.ch})`);
+      // The picker's square is a slider of its own (role="slider"), which rulesNow doesn't list.
+      const square = await page.evaluate(() => [...document.querySelectorAll('[role="slider"]')].map((el) => el.getBoundingClientRect()).filter((b) => b.width && b.height).map((b) => [b.width, b.height]));
+      for (const [w, h] of square) if (w < TAP_MIN - 0.5 || h < TAP_MIN - 0.5) problems.push(`${state}: the Saturation and brightness square is ${Math.round(w)}×${Math.round(h)}, under ${TAP_MIN}pt`);
+      const wide = await page.evaluate(() => {
+        const panel = document.querySelector('.draw-inspect');
+        if (!panel) return [];
+        const right = panel.getBoundingClientRect().right;
+        return [...panel.querySelectorAll('.draw-inspect-row, .draw-inspect-row > *')].filter((el) => el.getBoundingClientRect().right > right + 0.5).map((el) => `${el.className} ${el.textContent.slice(0, 20)}`);
+      });
+      if (wide.length) problems.push(`${state}: wider than the panel: ${wide.slice(0, 4).join('; ')}`);
+    };
+    const toHalf = async () => {
+      for (let n = 0; n < 3 && (await page.locator('.draw-sheet--half').count()) === 0; n++) await page.locator('.draw-handle').tap();
+      must(await page.locator('.draw-sheet--half').count() === 1, 'test setup: the code panel did not reach half');
+    };
+    // First, the Fill sheet from Inspect at half: above the canvas, reachable, its body scrolling (a
+    // sheet clipped inside the canvas fails here, before any tap on its Done could wait for it).
+    await tapShape(page, 'c');
+    await showInspect(page);
+    await page.locator('.draw-inspect button[aria-label^="fill:"]').tap();
+    await page.locator('.draw-modal .draw-hsv').waitFor();
+    await twoFrames(page);
+    const r = await page.evaluate(() => {
+      const marks = [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-marks *')].filter(Boolean);
+      for (const m of marks) m.style.pointerEvents = 'auto';
+      const on = (el) => {
+        const b = el.getBoundingClientRect();
+        const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom, top: top === el || el.contains(top) ? 'it' : top ? `${top.tagName} ${top.getAttribute('class')}` : 'nothing' };
+      };
+      const body = document.querySelector('.draw-modal .draw-color');
+      const out = { done: on(document.querySelector('.draw-modal-done')), field: on(document.querySelector('.draw-modal .draw-custom input')), w: innerWidth, h: innerHeight, tall: body.scrollHeight > body.clientHeight + 1, scrolled: false };
+      if (out.tall) {
+        body.scrollTop = body.scrollHeight;
+        out.scrolled = body.scrollTop > 0;
+        body.scrollTop = 0;
+      }
+      for (const m of marks) m.style.pointerEvents = '';
+      return out;
+    });
+    const d = r.done;
+    must(d.x >= 0 && d.y >= 0 && d.right <= r.w && d.bottom <= r.h, `440×${height}: Done is at ${Math.round(d.x)},${Math.round(d.y)}..${Math.round(d.right)},${Math.round(d.bottom)}, outside the ${r.w}×${r.h} viewport`);
+    must(d.top === 'it', `440×${height}: on top of Done is ${d.top}`);
+    must(r.field.top === 'it', `440×${height}: on top of the Colour field is ${r.field.top}`);
+    must(!r.tall || r.scrolled, `440×${height}: the sheet's body is taller than its room and doesn't scroll`);
+    // The keyboard up, over the field: Done stays above it.
+    await page.locator('.draw-modal .draw-custom input').focus();
+    const KB = 336;
+    await page.evaluate((h) => {
+      const vv = window.visualViewport;
+      Object.defineProperty(vv, 'height', { get: () => h, configurable: true });
+      vv.dispatchEvent(new Event('resize'));
+    }, height - KB);
+    await twoFrames(page);
+    const k = await page.evaluate(() => ({ done: document.querySelector('.draw-modal-done').getBoundingClientRect().toJSON(), visible: window.visualViewport.height }));
+    must(k.done.top >= 0 && k.done.bottom <= k.visible + 0.5, `440×${height}: with the keyboard up, Done (${Math.round(k.done.top)}–${Math.round(k.done.bottom)}) is off the screen above it (0–${k.visible})`);
+    await rules('the Fill sheet with the keyboard up');
+    await page.evaluate(() => {
+      delete window.visualViewport.height; // the keyboard goes down
+      window.visualViewport.dispatchEvent(new Event('resize'));
+    });
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 5000 });
+    must(await page.locator('.draw-modal').count() === 0, 'Done did not close the Fill sheet');
+    await rules('Inspect at half, 1 selected (after the Fill sheet)');
+    for (const [n, more] of [[1, []], [3, ['a', 'b']]]) {
+      if (more.length) {
+        await page.locator('.draw-handle').tap(); // full to peek: the whole canvas in view
+        await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+        for (const id of more) await tapShape(page, id);
+        must(await label(page) === `${n} selected`, `test setup: ${await label(page)}`);
+        await toHalf();
+      }
+      await rules(`Inspect at half, ${n} selected`);
+      await page.locator('.draw-handle').tap();
+      must(await page.locator('.draw-sheet--full').count() === 1, 'test setup: the code panel is not at full');
+      await rules(`Inspect at full, ${n} selected`);
+      await page.locator('.draw-inspect button[aria-label^="stroke:"]').tap();
+      await page.locator('.draw-modal .draw-hsv').waitFor();
+      await rules(`the stroke sheet, ${n} selected`);
+      await page.locator('.draw-modal-done').tap();
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    }
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

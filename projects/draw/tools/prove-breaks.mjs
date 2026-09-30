@@ -2366,6 +2366,35 @@ const BREAKS = [
     file: 'projects/draw/src/color-picker.ts', from: '({ ...p, s: unit(s), v: unit(v) });', to: '({ ...p, h: unit(s) && unit(v) ? p.h : 0, s: unit(s), v: unit(v) });',
     run: drawTests('color-picker.test.ts'), expect: /✖ the picker keeps its own hue through grey and black/,
   },
+  // P1-M2 S2 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B447', what: 'Inspect writes the attribute where a style="" declaration holds the value (the declaration still wins, so the drawing wouldn’t change)', slow: true, checks: ['inspectWritesWhereEachValueLives'],
+    file: 'engine/style/write.ts', from: "  if (s.at === 'style') {", to: '  if (false) {',
+    run: DRAW_E2E, expect: /inspectWritesWhereEachValueLives: the circle’s fill declaration: the source is not the value written where it lives/,
+  },
+  {
+    id: 'B448', what: 'the picker writes hex for an hsl() value (out of its notation family)', slow: true, checks: ['theColourPickerKeepsTheNotation'],
+    file: 'projects/draw/src/color-picker.ts', from: "family: own && own.kind === 'color' ? notationOf(own) : 'hex'", to: "family: own && own.kind === 'color' && notationOf(own) !== 'hsl-modern' ? notationOf(own) : 'hex'",
+    run: DRAW_E2E, expect: /theColourPickerKeepsTheNotation: hsl\(12 76% 61%\): the square wrote #[0-9a-f]+, out of its family/,
+  },
+  {
+    id: 'B449', what: 'a multi-selection fill from the Colour sheet makes one entry per shape', slow: true, checks: ['aMultiSelectionEditIsOneEntry'],
+    file: 'projects/draw/src/editor.ts', from: '    if (commit) live.drag.commit();\n',
+    to: "    if (commit && live.kind === 'style' && live.ids.length > 1) {\n      live.drag.cancel();\n      for (const id of live.ids) for (const [p, v] of live.last) this.#session!.dispatch(`Set ${p}`, (apply) => applyPlan(this.#doc!, planStyle(this.#doc!, [id], p, v, this.styleCtx), apply));\n    } else if (commit) live.drag.commit();\n",
+    run: DRAW_E2E, expect: /aMultiSelectionEditIsOneEntry: one undo did not give all three back byte for byte/,
+  },
+  {
+    id: 'B450', what: 'the Colour sheet’s HSV square shrinks under 44 pt (2rem: 24 px)', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
+    file: 'projects/draw/src/app.css', from: '.draw-hsv {\n  position: relative;\n  height: 10rem;', to: '.draw-hsv {\n  position: relative;\n  height: 2rem;',
+    run: DRAW_E2E, expect: /the Saturation and brightness square is \d+×24, under 44pt/,
+  },
+  {
+    id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
+    file: 'projects/draw/src/panels/Sheets.tsx',
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
+  },
 ];
 
 const args = process.argv.slice(2);
