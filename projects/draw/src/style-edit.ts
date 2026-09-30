@@ -34,6 +34,17 @@ export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   'shape-rendering': ['auto', 'crispEdges', 'geometricPrecision', 'optimizeSpeed'],
 };
 
+// The keyword properties' own keywords (CSS reads them in any case): a value that isn't one is
+// refused, so no text but a keyword is ever written there (SVG 2's full lists, the segments' too).
+const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
+  'stroke-linecap': ['butt', 'round', 'square'],
+  'stroke-linejoin': ['miter', 'miter-clip', 'round', 'bevel', 'arcs'],
+  'vector-effect': ['none', 'non-scaling-stroke', 'non-scaling-size', 'non-rotation', 'fixed-position'],
+  'shape-rendering': ['auto', 'optimizeSpeed', 'crispEdges', 'geometricPrecision'],
+};
+// paint-order: normal, or one to three of these, each once.
+const PAINT_ORDER = ['fill', 'stroke', 'markers'];
+
 /** The text a control writes for `prop`, or why it can't (never written). */
 export function checkStyle(prop: string, input: string): Checked {
   const text = input.trim().replace(/^−/, '-');
@@ -55,6 +66,13 @@ export function checkStyle(prop: string, input: string): Checked {
     if (text === 'none') return { text };
     const parts = text.split(/[\s,]+/);
     return parts.every((p) => NUMBER.test(p) && Number(p) >= 0) ? { text } : { error: `${JSON.stringify(input)} is not a dash list` };
+  }
+  const words = KEYWORDS[prop];
+  if (words) return words.some((w) => w.toLowerCase() === text.toLowerCase()) ? { text } : { error: `${JSON.stringify(input)} is not one of ${words.join(', ')}` };
+  if (prop === 'paint-order') {
+    const parts = text.toLowerCase().split(/[ \t\n\r\f]+/);
+    const order = parts.length === 1 && parts[0] === 'normal' ? true : parts.length <= 3 && parts.every((p) => PAINT_ORDER.includes(p)) && new Set(parts).size === parts.length;
+    return order ? { text } : { error: `${JSON.stringify(input)} is not normal or an order of fill, stroke and markers` };
   }
   return { text };
 }

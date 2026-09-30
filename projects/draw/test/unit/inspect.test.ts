@@ -674,3 +674,27 @@ test('Shared with N reads a long chain of templates in linear time: the last rec
   assert.ok(big < 6 * small, `${small.toFixed(1)} ms at 1,000 links, ${big.toFixed(1)} ms at 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
   assert.ok(big < LIMIT, `${big.toFixed(0)} ms at 4,000 links (the limit is ${LIMIT})`);
 });
+
+test('the keyword properties take only their own keywords: a stroke-linecap of "round; fill: red" writes nothing and says why, as does any text that isn’t one of a property’s keywords; each segment’s value, another order of paint-order and SVG 2’s other keywords are taken', () => {
+  const F = svg('<rect id="a" x="5" y="5" width="20" height="20" fill="#e76f51"/>');
+  const e = opened(F);
+  select(e, 'a');
+  const bad: [string, string][] = [
+    ['stroke-linecap', 'round; fill: red'], ['stroke-linejoin', 'round;fill:red'], ['paint-order', 'stroke; fill:url(#x)'], ['paint-order', 'stroke stroke'],
+    ['paint-order', 'normal fill'], ['vector-effect', 'x}y'], ['shape-rendering', 'auto !important'],
+  ];
+  for (const [prop, text] of bad) {
+    e.notice.set(null);
+    e.setStyle(prop, text);
+    assert.equal(e.source(), F, `${prop}: ${JSON.stringify(text)} writes nothing`);
+    assert.match(e.notice.get() ?? '', /is not/, `${prop}: ${JSON.stringify(text)} says why`);
+  }
+  assert.equal(e.history.get().canUndo, false);
+  const good: [string, string][] = [
+    ['stroke-linecap', 'square'], ['stroke-linejoin', 'arcs'], ['stroke-linejoin', 'miter-clip'], ['paint-order', 'markers stroke'], ['paint-order', 'normal'],
+    ['paint-order', 'stroke fill markers'], ['vector-effect', 'non-scaling-stroke'], ['shape-rendering', 'crispEdges'], ['shape-rendering', 'CRISPEDGES'],
+  ];
+  for (const [prop, text] of good) assert.deepEqual(checkStyle(prop, text), { text }, `${prop}: ${text}`);
+  e.setStyle('stroke-linecap', 'round');
+  assert.equal(e.source(), F.replace('fill="#e76f51"/>', 'fill="#e76f51" stroke-linecap="round"/>'), 'a segment’s value is written');
+});

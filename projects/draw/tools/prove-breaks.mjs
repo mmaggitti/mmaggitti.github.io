@@ -2584,6 +2584,11 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '      if (g !== null) push(direct, g, { el: n.id, prop });', to: '      if (g !== null) {\n        resolveGradient(doc, g);\n        push(direct, g, { el: n.id, prop });\n      }',
     run: drawTests('inspect.test.ts'), expect: /✖ Shared with N reads a long chain of templates in linear time/,
   },
+  {
+    id: 'B487', what: 'N1: checkStyle takes any text for the keyword properties again (a stroke-linecap of "round; fill: red" is written)',
+    file: 'projects/draw/src/style-edit.ts', from: "  if (words) return words.some((w) => w.toLowerCase() === text.toLowerCase()) ? { text } : { error: `${JSON.stringify(input)} is not one of ${words.join(', ')}` };\n", to: '',
+    run: drawTests('inspect.test.ts'), expect: /✖ the keyword properties take only their own keywords/,
+  },
 ];
 
 const args = process.argv.slice(2);
