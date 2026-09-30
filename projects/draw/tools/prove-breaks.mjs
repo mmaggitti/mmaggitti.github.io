@@ -2527,6 +2527,11 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '  if (!markups.length) return [];\n', to: '  if (!markups.length) return [];\n  if (markups.length > 1) return markups.flatMap((m) => insertGradients(doc, [m], apply));\n',
     run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a large selection take linear time/,
   },
+  {
+    id: 'B476', what: 'F9: the <style> scan is skipped, so Draw takes away a gradient a stylesheet rule still paints with (and the rule is no user)',
+    file: 'engine/geometry/css.ts', from: '    for (const rule of textContent(doc, n.id).split(/[{}]/)) {', to: '    for (const rule of [] as string[]) {',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a gradient a <style> rule still paints with stays/,
+  },
 ];
 
 const args = process.argv.slice(2);

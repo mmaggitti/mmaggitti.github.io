@@ -11,6 +11,7 @@
 // animates. A property also counts as set by a shorthand that sets it (font sets font-size).
 
 import { NS, attrValue, descendants, el, textContent, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { decodeFragment } from '../values/url.ts';
 
 export type CssSource = 'no' | 'inline' | 'sheet';
 
@@ -135,8 +136,41 @@ export function styleNamesId(doc: Doc, id: string): boolean {
   return false;
 }
 
+/**
+ * Each id a <style> element's text names in a url() (url(#id), url('#id') or url("#id"), CSS
+ * escapes read and the id percent-decoded, as browsers match it), with the <style> element of each
+ * rule that does: one entry per rule, however often the rule names it (a rule is the text between
+ * two braces). Read conservatively, as styleNamesId is: in any rule or at-rule (@keyframes too), in
+ * comments and strings too, so Draw never takes away a gradient a stylesheet may still paint with.
+ * Cached per stylesheet content (doc.styleVersion).
+ */
+export function sheetUrlRefs(doc: Doc): ReadonlyMap<string, readonly NodeId[]> {
+  const hit = urlCache.get(doc);
+  if (hit?.styleVersion === doc.styleVersion) return hit.refs;
+  const refs = new Map<string, NodeId[]>();
+  for (const n of descendants(doc, doc.root)) {
+    if (n.kind !== 'element' || n.local !== 'style' || (n.ns !== NS.svg && n.ns !== NS.xhtml)) continue;
+    for (const rule of textContent(doc, n.id).split(/[{}]/)) {
+      const named = new Set<string>();
+      for (const m of rule.matchAll(SHEET_URL)) named.add(decodeFragment(unescapeCss(m[1] ?? m[2] ?? m[3])));
+      for (const id of named) {
+        const list = refs.get(id);
+        if (list) list.push(n.id);
+        else refs.set(id, [n.id]);
+      }
+    }
+  }
+  urlCache.set(doc, { styleVersion: doc.styleVersion, refs });
+  return refs;
+}
+
+const urlCache = new WeakMap<Doc, { styleVersion: number; refs: Map<string, NodeId[]> }>();
+// url( then, after any whitespace, a fragment: quoted (to its quote, or the end: an unclosed string
+// still counts) or unquoted; a backslash escapes the next character in both.
+const SHEET_URL = /url\(\s*(?:"#((?:\\[^]|[^"\\])*)|'#((?:\\[^]|[^'\\])*)|#((?:\\[^]|[^\s"'()\\])+))/gi;
+
 // A CSS identifier's escapes read: \31  (hex, with its one optional space) and \. (the character).
-const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\(.)/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : ch!));
+const unescapeCss =(s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\(.)/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : ch!));
 
 // ── the document's sheets, read again only when what its <style> elements say may have changed ──
 

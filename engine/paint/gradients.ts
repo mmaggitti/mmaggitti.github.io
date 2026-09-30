@@ -31,6 +31,7 @@ import { numberedIds } from '../model/ids.ts';
 import { shownValue, styleSource } from '../style/where.ts';
 import { planStyle, type StyleCtx, type StylePlan } from '../style/write.ts';
 import { applyPlan } from '../geometry/write.ts';
+import { sheetUrlRefs } from '../geometry/css.ts';
 
 type Apply = (op: Op) => void;
 export type GradientKind = 'linearGradient' | 'radialGradient';
@@ -171,42 +172,70 @@ export function ownPaint(doc: Doc, id: NodeId, prop: PaintProp): OwnPaint {
   return out;
 }
 
-/** A paint that uses a gradient: the element and which of its paints. */
+/**
+ * A paint that uses a gradient: the element and which of its paints; or a <style> rule whose url(#…)
+ * names it ('rule', `el` its <style> element), which counts as one user, however many shapes the
+ * rule may paint (Draw never evaluates a selector).
+ */
 export interface User {
   el: NodeId;
-  prop: PaintProp;
+  prop: PaintProp | 'rule';
 }
 
-/** Each gradient element and the paints whose chain includes it (every element's own fill and stroke, read once). */
+/**
+ * Each gradient element and the paints whose chain includes it (every element's own fill and
+ * stroke, read once), and the <style> rules that name one whose chain includes it (css.ts
+ * sheetUrlRefs: one user per rule, the same object in each chain element's list).
+ */
 export function gradientUsers(doc: Doc): Map<NodeId, User[]> {
   const out = new Map<NodeId, User[]>();
   const chains = new Map<NodeId, NodeId[]>();
+  const chainOf = (g: NodeId): NodeId[] => {
+    let chain = chains.get(g);
+    if (!chain) chains.set(g, (chain = resolveGradient(doc, g)!.chain));
+    return chain;
+  };
+  const use = (u: User, chain: readonly NodeId[]) => {
+    for (const c of chain) {
+      const list = out.get(c);
+      if (list) list.push(u);
+      else out.set(c, [u]);
+    }
+  };
   const stack: NodeId[] = [doc.root];
   while (stack.length) {
     const n = doc.nodes.get(stack.pop()!);
     if (n?.kind !== 'element') continue;
     for (const prop of ['fill', 'stroke'] as const) {
       const g = ownPaint(doc, n.id, prop).gradient;
-      if (g === null) continue;
-      let chain = chains.get(g);
-      if (!chain) chains.set(g, (chain = resolveGradient(doc, g)!.chain));
-      for (const c of chain) {
-        const list = out.get(c);
-        if (list) list.push({ el: n.id, prop });
-        else out.set(c, [{ el: n.id, prop }]);
-      }
+      if (g !== null) use({ el: n.id, prop }, chainOf(g));
     }
     for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]);
+  }
+  const ids = idMap(doc);
+  for (const [name, styles] of sheetUrlRefs(doc)) {
+    const g = ids.get(name);
+    if (g === undefined || !isGradient(doc.nodes.get(g))) continue;
+    for (const style of styles) use({ el: style, prop: 'rule' }, chainOf(g));
   }
   return out;
 }
 
-/** The other elements (not this paint) that an edit of these chain elements would change too. */
+/**
+ * The others (not this paint) that an edit of these chain elements would change too: each other
+ * element once, and the <style> element of each rule that names one (once per rule).
+ */
 export function sharedWith(users: Map<NodeId, User[]>, written: readonly NodeId[], me: User): NodeId[] {
   const others = new Set<NodeId>();
-  for (const w of written) for (const u of users.get(w) ?? []) if (u.el !== me.el || u.prop !== me.prop) others.add(u.el);
+  const rules = new Set<User>();
+  for (const w of written) {
+    for (const u of users.get(w) ?? []) {
+      if (u.prop === 'rule') rules.add(u);
+      else if (u.el !== me.el || u.prop !== me.prop) others.add(u.el);
+    }
+  }
   others.delete(me.el);
-  return [...others];
+  return [...others, ...[...rules].map((u) => u.el)];
 }
 
 // ── new gradients ──────────────────────────────────────────────────────────────────────────────
@@ -338,18 +367,21 @@ export function stopColour(doc: Doc, stop: NodeId): string {
 /**
  * Take away the gradients among `ids` that Draw made and nothing refers to any more (each with its
  * leading whitespace), then each Draw-made <defs> left with nothing but whitespace, then Draw's
- * namespace declaration when nothing of Draw's is left.
+ * namespace declaration when nothing of Draw's is left. A reference is one the file's attributes
+ * hold (refs.ts), or a url(#…) in a <style> element's text (css.ts sheetUrlRefs, read
+ * conservatively: any rule or at-rule, @keyframes too).
  */
 export function dropUnused(doc: Doc, ids: readonly NodeId[], apply: Apply): void {
   if (!ids.length) return;
   const refs = buildRefIndex(doc).refs;
+  const sheet = sheetUrlRefs(doc);
   const holders = new Set<NodeId>();
   const gone: NodeId[] = [];
   for (const g of new Set(ids)) {
     const n = doc.nodes.get(g);
     if (!isGradient(n) || !isDrawMadeGradient(doc, n) || n.parent === null) continue;
     const own = attrValue(doc, n, null, 'id');
-    if (own !== null && (refs.get(own)?.length ?? 0) > 0) continue;
+    if (own !== null && ((refs.get(own)?.length ?? 0) > 0 || sheet.has(own))) continue;
     holders.add(n.parent);
     gone.push(g);
   }

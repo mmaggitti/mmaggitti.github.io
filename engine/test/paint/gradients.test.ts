@@ -282,3 +282,46 @@ test('Gloss on lab/create-icon.svg’s rect: SVG Lab’s radialGradient gloss-1 
   assert.deepEqual(['line', 'text', 'g', 'rect'].map((l) => glossable(doc, first(doc, l))), [false, false, false, true]);
   assert.equal(glossable(doc, doc.root), false);
 });
+
+test('a gradient a <style> rule still paints with stays: Colour, None and Gloss off on its other user keep a Draw-made gradient a rule names (in @keyframes too), as they keep one a mask, a SMIL to or values, a use or another element’s style="" names; with nothing else naming it, it goes; and each rule that names it is one more user (Shared)', () => {
+  const OTHERS: [string, (id: string) => string][] = [
+    ['a <style> rule', (id) => `<style>.k { fill: url(#${id}) }</style><rect class="k" x="30" width="10" height="10"/>`],
+    ['a rule in @keyframes', (id) => `<style>@keyframes k { to { fill: url(#${id}) } } .m { animation: k 1s }</style><rect class="m" x="30" width="10" height="10"/>`],
+    ['a mask', (id) => `<rect x="30" width="10" height="10" mask="url(#${id})"/>`],
+    ['a SMIL to', (id) => `<rect x="30" width="10" height="10"><set attributeName="fill" to="url(#${id})"/></rect>`],
+    ['SMIL values', (id) => `<rect x="30" width="10" height="10"><animate attributeName="fill" values="red;url(#${id})" dur="1s"/></rect>`],
+    ['a use', (id) => `<use href="#${id}"/>`],
+    ['another element’s style=""', (id) => `<rect x="30" width="10" height="10" style="stroke: url(#${id})"/>`],
+  ];
+  const file = (grad: string, id: string, other: string) => `<svg ${SVG} ${DRAW} viewBox="0 0 100 100">\n  <defs draw:made="true">${grad}</defs>\n  <rect id="a" width="10" height="10" fill="url(#${id})"/>\n  ${other}\n</svg>`;
+  const LINEAR = '<linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>';
+  const GLOSS = '<radialGradient id="gloss-1" cx="0.35" cy="0.3" r="0.8" draw:made="true"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e76f51"/></radialGradient>';
+  const commands: [string, string, string, (doc: Doc, apply: (op: Op) => void) => void][] = [
+    ['Colour', LINEAR, 'linear-1', (doc, apply) => void setPlainPaint(doc, [byId(doc, 'a')], 'fill', () => 'red', CTX, apply)],
+    ['None', LINEAR, 'linear-1', (doc, apply) => void setPlainPaint(doc, [byId(doc, 'a')], 'fill', () => 'none', CTX, apply)],
+    ['Gloss off', GLOSS, 'gloss-1', (doc, apply) => void glossOff(doc, [byId(doc, 'a')], CTX, apply)],
+  ];
+  for (const [what, grad, id, act] of commands) {
+    for (const [by, other] of OTHERS) {
+      const s = run(file(grad, id, other(id)), what, act);
+      assert.ok(serialize(s.doc).includes(`<defs draw:made="true">${grad}</defs>`), `${what} on #a keeps ${id}, which ${by} still names: ${serialize(s.doc)}`);
+    }
+    const alone = run(file(grad, id, '<rect x="30" width="10" height="10"/>'), what, act);
+    assert.ok(!serialize(alone.doc).includes(`id="${id}"`) && !serialize(alone.doc).includes('xmlns:draw'), `${what}: with nothing else naming it, ${id} goes, and its <defs> and xmlns:draw with it`);
+  }
+  // Users: each rule that names a gradient, or one its chain passes through, is one more (quoted,
+  // unquoted, in @keyframes), however many shapes it may paint.
+  const doc = load(`<svg ${SVG}>
+  <style>.k { fill: url(#g) } .j { stroke: url( '#g' ) } @keyframes k { to { fill: url(#t) } }</style>
+  <linearGradient id="t"><stop offset="0" stop-color="red"/></linearGradient>
+  <linearGradient id="g" href="#t"/>
+  <rect id="p" fill="url(#g)"/>
+  <rect id="q" fill="url(#t)"/>
+</svg>`);
+  const users = gradientUsers(doc);
+  const [g, t, p, q] = ['g', 't', 'p', 'q'].map((id) => byId(doc, id));
+  assert.equal(sharedWith(users, [g], { el: p, prop: 'fill' }).length, 2, 'two rules name #g: p’s edit of #g is shared with them');
+  assert.equal(sharedWith(users, [t], { el: p, prop: 'fill' }).length, 4, '#t: q, the @keyframes rule, and #g’s two rules (its chain passes through #t)');
+  assert.equal(sharedWith(users, [g, t], { el: p, prop: 'fill' }).length, 4, 'each rule once over the chain');
+  assert.equal(sharedWith(users, [t], { el: q, prop: 'fill' }).length, 4, 'p, and three rules');
+});
