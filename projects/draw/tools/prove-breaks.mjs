@@ -2569,6 +2569,11 @@ const BREAKS = [
     file: 'engine/code/edit.ts', from: '      return token.url === undefined ? null : urlTextError(text, token.url);', to: '      return null;',
     run: drawTests('inspect.test.ts'), expect: /✖ the relative URL inside a paint’s url\(\) holds a URL and nothing else/,
   },
+  {
+    id: 'B484', what: 'F4: the gradient editor resolves xml:id again (Inspect and the handles edit a gradient the canvas never draws)',
+    file: 'engine/paint/gradients.ts', from: "      if (a.local !== 'id' || a.ns !== null) continue;", to: "      if (a.local !== 'id' || (a.ns !== null && a.ns !== NS.xml)) continue;",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the gradient editor resolves a plain id only/,
+  },
 ];
 
 const args = process.argv.slice(2);

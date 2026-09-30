@@ -62,7 +62,11 @@ const isStop = (doc: Doc, id: NodeId): boolean => {
 
 let idMemo: { doc: Doc; version: number; ids: Map<string, NodeId> } | null = null;
 
-/** Each id's element: the first in document order, as browsers pick it (read once per document version). */
+/**
+ * Each id's element: the first in document order with that id, as browsers pick it, and only a plain
+ * id: the canvas never renders xml:id (renderer.ts), so url(#g) can't reach an xml:id="g" there, and
+ * the gradient editor mustn't either (read once per document version).
+ */
 export function idMap(doc: Doc): Map<string, NodeId> {
   if (idMemo && idMemo.doc === doc && idMemo.version === doc.version) return idMemo.ids;
   const ids = new Map<string, NodeId>();
@@ -71,7 +75,7 @@ export function idMap(doc: Doc): Map<string, NodeId> {
     const n = doc.nodes.get(stack.pop()!);
     if (n?.kind !== 'element') continue;
     for (const a of n.attrs) {
-      if (a.local !== 'id' || (a.ns !== null && a.ns !== NS.xml)) continue;
+      if (a.local !== 'id' || a.ns !== null) continue;
       const v = decodeAttr(a.raw, doc.entities);
       if (!ids.has(v)) ids.set(v, n.id);
     }

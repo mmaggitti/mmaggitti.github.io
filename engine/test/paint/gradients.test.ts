@@ -325,3 +325,17 @@ test('a gradient a <style> rule still paints with stays: Colour, None and Gloss 
   assert.equal(sharedWith(users, [g, t], { el: p, prop: 'fill' }).length, 4, 'each rule once over the chain');
   assert.equal(sharedWith(users, [t], { el: q, prop: 'fill' }).length, 4, 'p, and three rules');
 });
+
+test('the gradient editor resolves a plain id only, as the canvas does (it never renders xml:id): with an xml:id="g" before an id="g", url(#g) is the id one; an xml:id alone is no gradient, no template and nobody’s', () => {
+  const G = (attr: string, colour: string) => `<linearGradient ${attr}><stop offset="0" stop-color="${colour}"/></linearGradient>`;
+  const at = (doc: Doc, attr: string, value: string): NodeId => ([...descendants(doc, doc.root)].find((n) => n.kind === 'element' && n.attrs.some((a) => a.qname === attr && a.raw === value)) as ElementNode).id;
+  const both = load(`<svg ${SVG}>${G('xml:id="g"', 'red')}${G('id="g"', 'lime')}<rect id="r" fill="url(#g)"/></svg>`);
+  const r = at(both, 'id', 'r');
+  assert.equal(ownPaint(both, r, 'fill').gradient, at(both, 'id', 'g'), 'url(#g) names the id="g" one');
+  assert.deepEqual(resolveGradient(both, ownPaint(both, r, 'fill').gradient!)!.stops.map((s) => stopColour(both, s)), ['lime']);
+  assert.equal(gradientUsers(both).get(at(both, 'xml:id', 'g')), undefined, 'the xml:id one has no user');
+  const only = load(`<svg ${SVG}>${G('xml:id="g"', 'red')}<linearGradient id="t" href="#g"/><rect id="r" fill="url(#g)"/><rect id="q" fill="url(#t)"/></svg>`);
+  assert.deepEqual(ownPaint(only, at(only, 'id', 'r'), 'fill'), { value: 'url(#g)', gradient: null, url: 'g', fallback: '' }, 'an xml:id alone: no gradient');
+  const t = resolveGradient(only, at(only, 'id', 't'))!;
+  assert.deepEqual([t.chain, t.stops], [[at(only, 'id', 't')], []], 'nor a template');
+});
