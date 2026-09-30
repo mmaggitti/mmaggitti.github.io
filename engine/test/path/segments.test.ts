@@ -1,4 +1,4 @@
-// engine/path/segments: the letter cycle (SVG Lab's setSeg), Relative/Absolute, and the rule every M3
+// engine/path/segments: the letter cycle (SVG Lab's setSeg), Relative/Absolute, Reverse, and the rule every M3
 // write to d follows: only the named segments' text changes, everything else byte for byte, and the
 // absolute geometry is what the edit says (toAbsolute, within 1e-9).
 
@@ -10,7 +10,8 @@ import { Session } from '../../commands/session.ts';
 import { opSetAttrRaw } from '../../commands/ops.ts';
 import { argSpans, parsePath } from '../../path/parse.ts';
 import { toAbsolute, type AbsSeg } from '../../path/abs.ts';
-import { cycleSegment, readsRelative, toggleRelative, REFERENCES } from '../../path/segments.ts';
+import { cycleSegment, readsRelative, reverseSubpath, subpathCount, toggleRelative, REFERENCES } from '../../path/segments.ts';
+import { evaluator } from './helpers.ts';
 import { TokenEditError } from '../../code/edit.ts';
 
 const CORPUS = new URL('../fixtures/corpus/', import.meta.url);
@@ -237,4 +238,125 @@ test('Relative and Absolute over every corpus path: the drawing is unchanged wit
     n++;
   }
   assert.ok(n > 400, `only ${n} paths`);
+});
+
+// ── Reverse ────────────────────────────────────────────────────────────────────────────────────
+
+const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
+const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z'; // SVG Lab's (index.html, LabArcs)
+
+test('Reverse on lab/arcs--holes.svg’s inner subpath gives SVG Lab’s HOLE_REV exactly, every other byte of the file unchanged; a second Reverse gives the file back byte for byte; one undo each', () => {
+  const src = lab('arcs--holes.svg');
+  const doc = load(src);
+  const path = firstPath(doc);
+  const s = new Session(doc);
+  const d0 = findAttr(path, null, 'd')!.raw;
+  assert.ok(d0.endsWith(`\n   ${HOLE_IN}`));
+  const rev = reverseSubpath(d0, 1);
+  assert.equal(rev, d0.replace(HOLE_IN, HOLE_REV), 'the closing line first, the arc last with its sweep flipped');
+  s.dispatch('Reverse', (apply) => apply(opSetAttrRaw(doc, path.id, null, 'd', rev)));
+  assert.equal(serialize(doc), src.replace(HOLE_IN, HOLE_REV), 'nothing else in the file changes');
+  const back = reverseSubpath(rev, 1);
+  assert.equal(back, d0, 'a second Reverse: the file’s own text');
+  s.dispatch('Reverse', (apply) => apply(opSetAttrRaw(doc, path.id, null, 'd', back)));
+  assert.equal(serialize(doc), src);
+  s.undo();
+  assert.equal(serialize(doc), src.replace(HOLE_IN, HOLE_REV));
+  s.undo();
+  assert.equal(serialize(doc), src);
+  // Every subpath (no chosen node): the outer ring turns too, its order and newlines kept.
+  assert.equal(reverseSubpath(d0, null), 'M 14 50 A 36 36 0 1 0 86 50\n   A 36 36 0 1 0 14 50 Z\n   ' + HOLE_REV);
+});
+
+test('Reverse on open and closed subpaths: L, H and V stay, C swaps its controls, Q keeps its control, A flips its sweep, S and T are written out with their implied controls; relative segments stay relative; a relative m after an open subpath keeps its point', () => {
+  // [as written, subpath, reversed]
+  const cases: [string, number | null, string][] = [
+    ['M 10 10 L 20 10 H 30 V 20 Q 40 30 50 20 C 60 10 70 10 80 20', 0, 'M 80 20 C 70 10 60 10 50 20 Q 40 30 30 20 V 10 H 20 L 10 10'],
+    // closed: the closing line (100 0 → 0 0) comes first, reversed; the S's implied control (80, −10) and the T's (30, 10) are written out
+    ['M 0 0 Q 10 -10 20 0 T 40 0 C 50 10 60 10 70 0 S 90 -10 100 0 Z', 0, 'M 0 0 L 100 0 C 90 -10 80 -10 70 0 C 60 10 50 10 40 0 Q 30 10 20 0 Q 10 -10 0 0 Z'],
+    // relative, closed: the first line is left to the z, which draws it
+    ['m 10 10 l 10 0 l 0 10 z', 0, 'm 10 10 l 10 10 l 0 -10 z'],
+    ['M 0 0 a 10 10 0 0 1 20 0', 0, 'M 20 0 a 10 10 0 0 0 -20 0'],
+    ['M 0 0 L 10 0 m 5 5 l 1 1', 0, 'M 10 0 L 0 0 m 15 5 l 1 1'],
+    ['M 0 0 L 10 0 m 5 5 l 1 1', 1, 'M 0 0 L 10 0 m 6 6 l -1 -1'],
+    ['M 0 0 L 10 0 L 10 10 Z', 0, 'M 0 0 L 10 10 L 10 0 Z'],
+    ['M0,0 L10,0 C20,0 20,10 30,10', null, 'M30 10 C20 10, 20 0, 10 0 L0 0'], // commas: SVG Lab's spelling (§5.1), each letter still glued
+    ['M 0 0 10 0 10 10 Z', 0, 'M 0 0 L 10 10 L 10 0 Z'], // letter-less segments get their letter
+  ];
+  // A second Reverse gives the text back, except what the first wrote out: S and T as C and Q, a letter-less segment's letter.
+  const twice: Record<string, string> = {
+    'M 0 0 Q 10 -10 20 0 T 40 0 C 50 10 60 10 70 0 S 90 -10 100 0 Z': 'M 0 0 Q 10 -10 20 0 Q 30 10 40 0 C 50 10 60 10 70 0 C 80 -10 90 -10 100 0 Z',
+    'M 0 0 10 0 10 10 Z': 'M 0 0 L 10 0 L 10 10 Z',
+    'M0,0 L10,0 C20,0 20,10 30,10': 'M0 0 L10 0 C20 0, 20 10, 30 10',
+  };
+  for (const [d, sub, want] of cases) {
+    const got = reverseSubpath(d, sub);
+    assert.equal(got, want, d);
+    assert.equal(reverseSubpath(got, sub), twice[d] ?? d, `${d}: a second Reverse`);
+  }
+  assert.throws(() => reverseSubpath('M 5 5', 0), (e) => e instanceof TokenEditError && /no segment to reverse/.test(e.message));
+  assert.throws(() => reverseSubpath('M 0 0 L &#49;0 10', 0), (e) => e instanceof TokenEditError && e.message === REFERENCES);
+});
+
+/** A subpath's points, sampled (each segment at t = ¼, ½, ¾ and 1 after its start, a Z's closing line too), without repeats. */
+function samples(abs: readonly AbsSeg[], sub: number): [number, number][] {
+  const out: [number, number][] = [];
+  const add = (p: [number, number]) => {
+    const q = out[out.length - 1];
+    if (!q || Math.abs(q[0] - p[0]) > 1e-7 || Math.abs(q[1] - p[1]) > 1e-7) out.push(p);
+  };
+  for (const s of abs) {
+    if (s.sub !== sub) continue;
+    if (s.type === 'M') {
+      add([s.x, s.y]);
+      continue;
+    }
+    if (!out.length) add([s.x0, s.y0]);
+    const f = evaluator(s);
+    for (const t of [0.25, 0.5, 0.75, 1]) add(f(t));
+  }
+  return out;
+}
+const samePoints = (a: readonly [number, number][], b: readonly [number, number][]) => a.length === b.length && a.every((p, i) => Math.abs(p[0] - b[i][0]) <= 1e-6 && Math.abs(p[1] - b[i][1]) <= 1e-6);
+
+test('Reverse over every subpath of every corpus path: the subpath draws the same points the other way round, every other segment keeps its bytes and its geometry (a relative m after it compensated), and a second Reverse draws the original', () => {
+  let n = 0;
+  let skipped = 0;
+  for (const { file, d } of corpusPaths()) {
+    const p = parsePath(d);
+    const abs = toAbsolute(p);
+    for (let sub = 0; sub < subpathCount(abs); sub++) {
+      const idx = abs.flatMap((s, i) => (s.sub === sub ? [i] : []));
+      if (!abs.some((s) => s.sub === sub && s.type !== 'M' && s.type !== 'Z')) {
+        assert.throws(() => reverseSubpath(d, sub), TokenEditError);
+        skipped++;
+        continue;
+      }
+      const rev = reverseSubpath(d, sub);
+      const q = parsePath(rev);
+      const qa = toAbsolute(q);
+      const at = `${file}: ${d.slice(0, 50)}… subpath ${sub}`;
+      const first = idx[0];
+      const after = p.segs.length - idx[idx.length - 1] - 1;
+      assert.equal(q.tail, p.tail, `${at}: the tail`);
+      assert.equal(subpathCount(qa), subpathCount(abs), `${at}: the subpaths`);
+      // Before it: the same bytes. After it: the same bytes (a compensated m keeps its point) and the same geometry.
+      for (let i = 0; i < first; i++) assert.equal(q.segs[i].raw, p.segs[i].raw, `${at}: segment ${i}`);
+      for (let k = 1; k <= after; k++) {
+        const a = p.segs[p.segs.length - k];
+        const b = q.segs[q.segs.length - k];
+        const ga = abs[abs.length - k];
+        const gb = qa[qa.length - k];
+        assert.ok(Math.abs(ga.x - gb.x) <= 1e-9 && Math.abs(ga.y - gb.y) <= 1e-9, `${at}: ${a.raw.trim()} → ${b.raw.trim()} moved`);
+        if (!(k === after && a.cmd === 'm')) assert.equal(b.raw, a.raw, `${at}: a segment after it changed its bytes`);
+      }
+      // Its points, backwards.
+      assert.ok(samePoints(samples(qa, sub), samples(abs, sub).reverse()), `${at}: ${rev.slice(0, 120)}`);
+      for (let o = 0; o < subpathCount(abs); o++) if (o !== sub) assert.ok(samePoints(samples(qa, o), samples(abs, o)), `${at}: subpath ${o} moved`);
+      const again = toAbsolute(parsePath(reverseSubpath(rev, sub)));
+      assert.ok(samePoints(samples(again, sub), samples(abs, sub)), `${at}: a second Reverse`);
+      n++;
+    }
+  }
+  assert.ok(n > 700, `only ${n} subpaths reversed (${skipped} had nothing to reverse)`);
 });

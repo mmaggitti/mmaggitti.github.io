@@ -14,6 +14,7 @@ export const STYLE_PROPS: Readonly<Record<string, StyleProp>> = {
   opacity: { initial: '1', inherited: false },
   'fill-opacity': { initial: '1', inherited: true },
   'stroke-opacity': { initial: '1', inherited: true },
+  'fill-rule': { initial: 'nonzero', inherited: true }, // P1-M3: Inspect's Fill rule (holes)
   'stroke-linecap': { initial: 'butt', inherited: true },
   'stroke-linejoin': { initial: 'miter', inherited: true },
   'stroke-miterlimit': { initial: '4', inherited: true },

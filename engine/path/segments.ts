@@ -467,3 +467,214 @@ export function toggleRelative(raw: string): string {
   });
   return writeGeometry(t, rewrites);
 }
+
+// ── Reverse (a subpath's direction: the holes' other way) ──────────────────────────────────────
+
+/** The separators before a segment's letter (for a letter-less one, those before its first number, without a comma: a letter mustn't follow one). */
+function leadOf(seg: Seg): string {
+  if (seg.implicit) {
+    const spans = argSpans(seg);
+    const lead = seg.raw.slice(0, spans.length ? spans[0].start : seg.raw.length).replace(',', '');
+    return lead === '' ? ' ' : lead;
+  }
+  return seg.raw.slice(0, seg.raw.search(/[^ \t\n\r\f]/));
+}
+
+/** A written argument's source text, or undefined when the segment is relative (its numbers are offsets, not points) or doesn't write that role. */
+function absText(seg: Seg, role: Role): string | undefined {
+  if (seg.cmd !== seg.cmd.toUpperCase()) return undefined;
+  const k = rolesOf(seg.cmd).indexOf(role);
+  if (k === -1) return undefined;
+  const sp = argSpans(seg)[k];
+  return seg.raw.slice(sp.start, sp.end);
+}
+
+/** How a segment spells its arguments: glued to its letter, and with commas. */
+function styleOf(seg: Seg): { glued: boolean; comma: boolean } {
+  const spans = argSpans(seg);
+  if (!spans.length) return { glued: false, comma: false };
+  const li = seg.raw.search(/[^ \t\n\r\f]/);
+  return { glued: !seg.implicit && spans[0].start === li + 1, comma: seg.raw.slice(spans[0].start).includes(',') };
+}
+
+const isLine = (cmd: string): boolean => 'LHV'.includes(cmd.toUpperCase());
+
+/** The number of subpaths toAbsolute counts in a parsed path. */
+export const subpathCount = (abs: readonly AbsSeg[]): number => (abs.length ? abs[abs.length - 1].sub + 1 : 0);
+
+/**
+ * Reverse: subpath `sub` (toAbsolute's numbering) drawn the other way, or every subpath when `sub` is
+ * null (their order kept). The subpath's text from its M letter through its last segment is written
+ * anew (the separators before the M stay; the i-th new segment takes the i-th old one's leading
+ * separators, the Z its own), in this order:
+ * 1. M at the start S when the subpath is closed (the M unchanged), else at its last anchor;
+ * 2. closed, and the last anchor isn't S: a line to it (the closing line, reversed; `L`, or `l` when
+ *    the Z is `z`);
+ * 3. each drawing segment in reverse order, each ending at the anchor before it: L, H and V stay; C
+ *    swaps its controls; Q keeps its control; A keeps its radii, rotation and large-arc flag and flips
+ *    its sweep flag; S and T are written out as C and Q. In a closed subpath the last of them (the
+ *    first segment, reversed) is left to the Z when it is a line, since the Z draws exactly it: the
+ *    mirror of step 2, so a second Reverse gives the text back;
+ * 4. Z if it was closed.
+ * A segment keeps its case (a relative one's numbers become offsets from its new start); a coordinate
+ * keeps the source text of the absolute number that wrote that point, and any other number is written
+ * with exactText (an implied control, H's y, V's x: the fewest places that hold it, never more than
+ * the path's own, since each is a sum or difference of its numbers). A relative m after an open
+ * subpath is compensated, so nothing else moves. Throws TokenEditError.
+ */
+export function reverseSubpath(raw: string, sub: number | null): string {
+  const t = readPathText(raw);
+  if (sub === null) {
+    let out = raw;
+    let n = 0;
+    for (let s = 0; s < subpathCount(t.abs); s++) {
+      const next = reverseOne(readPathText(out), s);
+      if (next !== null) {
+        out = next;
+        n++;
+      }
+    }
+    if (!n) throw new TokenEditError('There’s no segment to reverse.');
+    return out;
+  }
+  const out = reverseOne(t, sub);
+  if (out === null) throw new TokenEditError('There’s no segment to reverse.');
+  return out;
+}
+
+interface NewSeg {
+  cmd: string;
+  texts: string[];
+  style: Seg; // whose spelling it takes
+  keep?: string; // its raw kept as it is (a closed subpath's M)
+}
+
+function reverseOne(t: PathText, sub: number): string | null {
+  const { p, abs } = t;
+  const segs = p.segs;
+  const idx: number[] = [];
+  abs.forEach((s, i) => {
+    if (s.sub === sub) idx.push(i);
+  });
+  if (!idx.length) throw new TokenEditError('There’s no such subpath.');
+  const first = idx[0];
+  const last = idx[idx.length - 1];
+  const hasM = abs[first].type === 'M';
+  const closed = abs[last].type === 'Z';
+  const draw = idx.filter((i) => abs[i].type !== 'M' && abs[i].type !== 'Z');
+  if (!draw.length) return null;
+  const S: [number, number] = hasM ? [abs[first].x, abs[first].y] : [abs[first].x0, abs[first].y0];
+  // P[j]: the subpath's anchors, P[0] = S; PT[j]: the text each of its coordinates was written with (absolute only).
+  const P: [number, number][] = [S, ...draw.map((i): [number, number] => [abs[i].x, abs[i].y])];
+  const PT: { x?: string; y?: string }[] = [
+    hasM ? { x: absText(segs[first], 'x'), y: absText(segs[first], 'y') } : {},
+    ...draw.map((i) => ({ x: absText(segs[i], 'x'), y: absText(segs[i], 'y') })),
+  ];
+  const m = draw.length;
+  const An = P[m];
+
+  // The new segments, each with its absolute values (per role) and the texts known for them.
+  const out: NewSeg[] = [];
+  let cur: [number, number] = [abs[first].x0, abs[first].y0]; // the current point before the subpath
+  const put = (cmd: string, style: Seg, vals: [Role, number, string | undefined][], keep?: string) => {
+    const rel = cmd !== cmd.toUpperCase();
+    const texts = vals.map(([r, v, known]) => {
+      if (r === 'large' || r === 'sweep' || r === 'rx' || r === 'ry' || r === 'rot') return known ?? exactText(v);
+      if (rel) return exactText(v - (X_ROLES.has(r) ? cur[0] : cur[1]));
+      return known ?? exactText(v);
+    });
+    out.push({ cmd, texts, style, keep });
+    const x = vals.find(([r]) => r === 'x');
+    const y = vals.find(([r]) => r === 'y');
+    cur = cmd.toUpperCase() === 'Z' ? S : [x ? x[1] : cur[0], y ? y[1] : cur[1]];
+  };
+  // 1. M
+  if (closed) {
+    if (hasM) put(segs[first].cmd, segs[first], [['x', S[0], PT[0].x], ['y', S[1], PT[0].y]], segs[first].raw);
+    cur = S;
+  } else {
+    const mSeg = hasM ? segs[first] : segs[draw[0]];
+    const letter = hasM ? mSeg.cmd : mSeg.cmd === mSeg.cmd.toUpperCase() ? 'M' : 'm';
+    put(letter, hasM ? mSeg : segs[last], [['x', An[0], PT[m].x], ['y', An[1], PT[m].y]]);
+  }
+  // 2. the closing line, reversed
+  const z = closed ? segs[last] : null;
+  if (z && !(same(An[0], S[0]) && same(An[1], S[1]))) {
+    put(z.cmd === 'Z' ? 'L' : 'l', segs[draw[m - 1]], [['x', An[0], PT[m].x], ['y', An[1], PT[m].y]]);
+  }
+  // 3. each drawing segment, last first
+  for (let j = m; j >= 1; j--) {
+    const i = draw[j - 1];
+    const seg = segs[i];
+    const g = abs[i];
+    const U = seg.cmd.toUpperCase();
+    const rel = seg.cmd !== U;
+    const to = P[j - 1];
+    const tx = PT[j - 1];
+    if (closed && j === 1 && isLine(seg.cmd)) break; // the Z draws it
+    if (U === 'H') put(seg.cmd, seg, [['x', to[0], tx.x]]);
+    else if (U === 'V') put(seg.cmd, seg, [['y', to[1], tx.y]]);
+    else if (U === 'L') put(seg.cmd, seg, [['x', to[0], tx.x], ['y', to[1], tx.y]]);
+    else if (g.type === 'C') {
+      put(rel ? 'c' : 'C', seg, [
+        ['c1x', g.x2, absText(seg, 'c2x')], ['c1y', g.y2, absText(seg, 'c2y')],
+        ['c2x', g.x1, U === 'C' ? absText(seg, 'c1x') : undefined], ['c2y', g.y1, U === 'C' ? absText(seg, 'c1y') : undefined],
+        ['x', to[0], tx.x], ['y', to[1], tx.y],
+      ]);
+    } else if (g.type === 'Q') {
+      put(rel ? 'q' : 'Q', seg, [
+        ['qx', g.x1, U === 'Q' ? absText(seg, 'qx') : undefined], ['qy', g.y1, U === 'Q' ? absText(seg, 'qy') : undefined],
+        ['x', to[0], tx.x], ['y', to[1], tx.y],
+      ]);
+    } else if (g.type === 'A') {
+      const spans = argSpans(seg);
+      const src = (k: number) => seg.raw.slice(spans[k].start, spans[k].end);
+      put(seg.cmd, seg, [
+        ['rx', g.rx, src(0)], ['ry', g.ry, src(1)], ['rot', g.rot, src(2)],
+        ['large', +g.large, src(3)], ['sweep', +!g.sweep, g.sweep ? '0' : '1'],
+        ['x', to[0], tx.x], ['y', to[1], tx.y],
+      ]);
+    }
+  }
+  // 4. Z
+  if (z) put(z.cmd, z, []);
+
+  // The text: the segments before the subpath, the new ones with the old leads by position, then the rest.
+  const leads = idx.map((i) => leadOf(segs[i]));
+  const zLead = z ? leads.pop()! : '';
+  let text = segs.slice(0, first).map((s) => s.raw).join('');
+  const expected: { cmd: string; args: number[] }[] = segs.slice(0, first).map((s) => ({ cmd: s.cmd, args: s.args }));
+  out.forEach((n, k) => {
+    const isZ = z !== null && k === out.length - 1;
+    const lead = isZ ? zLead : (leads[Math.min(k, leads.length - 1)] ?? ' ');
+    if (n.keep !== undefined) text += n.keep;
+    else {
+      const st = styleOf(n.style);
+      text += lead + n.cmd + (n.texts.length ? (st.glued ? '' : ' ') + spell(n.cmd, n.texts, st.comma) : '');
+    }
+    expected.push({ cmd: n.cmd, args: n.texts.map(Number) });
+  });
+  // What follows: a relative m after an open subpath is compensated (its point stays where it was).
+  for (let i = last + 1; i < segs.length; i++) {
+    const seg = segs[i];
+    let r = seg.raw;
+    let args = seg.args;
+    if (i === last + 1 && !closed && seg.cmd === 'm') {
+      const g = abs[i];
+      const spans = argSpans(seg);
+      const texts = [g.x - S[0], g.y - S[1]].map((v, k) => (same(v, seg.args[k]) ? seg.raw.slice(spans[k].start, spans[k].end) : exactText(v)));
+      r = inPlace(seg, spans, texts, 'm', text.slice(-1));
+      args = texts.map(Number);
+    }
+    if (i === last + 1 && GLUE_BEFORE.test(text) && /^[\d.eE]/.test(r)) text += ' ';
+    text += r;
+    expected.push({ cmd: seg.cmd, args });
+  }
+  if (last + 1 === segs.length && GLUE_BEFORE.test(text) && /^[\d.eE]/.test(p.tail)) text += ' ';
+  text += p.tail;
+  const back = parsePath(text);
+  const ok = back.segs.length === expected.length && !!back.error === !!p.error &&
+    back.segs.every((s, i) => s.cmd === expected[i].cmd && s.args.length === expected[i].args.length && s.args.every((v, k) => v === expected[i].args[k]));
+  if (!ok) throw new TokenEditError('the reversed subpath would change how the rest of the path reads');
+  return text;
+}
