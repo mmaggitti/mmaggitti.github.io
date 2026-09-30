@@ -27,6 +27,9 @@
 //   ` rotate(a cx cy)` is appended to the list about the local box's centre less the transform
 //   origin. Whole degrees.
 // - Scale: only an element whose list has a scale() item: its number(s), the ratio of two kept.
+// - A generated shape (a polygon, star or spiral whose inputs are draw:* attributes, P1-M2) moves by
+//   its inputs draw:cx and draw:cy (through its own transform, as its geometry would), and the
+//   Session's finish hook draws it again: it stays generated.
 // - An existing transform list is never collapsed: its items, names and order stay.
 // - Units stay as written: user units and px keep their own precision (and the step's); pt, pc,
 //   in, cm and mm convert at 96 dpi (4 places); em against the element's font size; % against the
@@ -38,7 +41,9 @@
 import { NS, attrValue, el, findAttr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
 import { rewriteNumbers, TokenEditError, type NumberEdit } from '../code/edit.ts';
-import { tokenizeAttrRaw, type NumberToken, type Token } from '../code/tokens.ts';
+import { decimalsOf, tokenizeAttrRaw, type NumberToken, type Token } from '../code/tokens.ts';
+import { DRAW_NS } from '../model/draw-ns.ts';
+import { generatorOf } from '../generators/index.ts';
 import { apply, invert, type Affine } from '../values/affine.ts';
 import { parseTransform, type TransformFn } from '../values/transform.ts';
 import { parseNumberList, fmt } from '../values/number-format.ts';
@@ -75,6 +80,7 @@ export function applyPlan(doc: Doc, plan: { edits: readonly AttrEdit[] }, applyO
 }
 
 export const ROOT_MOVE = 'The artboard doesn’t move; pan the view instead.';
+export const FLATTENS = 'Its transform flattens it, so its geometry can’t move.';
 const GEOMETRY = new Set(['rect', 'image', 'foreignObject', 'use', 'svg', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path']);
 const TRANSLATE = new Set(['g', 'a', 'switch', 'text']);
 const CSS_GEOMETRY = new Set(['x', 'y', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'd']);
@@ -93,21 +99,21 @@ const cssWhy = (prop: string, where: 'inline' | 'sheet') => `Its ${prop} is set 
 // ── numbers ────────────────────────────────────────────────────────────────────────────────────
 
 /** Decimal places a value needs, as fmt writes it, at most `max`. */
-function placesOf(x: number, max = 4): number {
+export function placesOf(x: number, max = 4): number {
   const s = fmt(Math.abs(x), 10);
   const dot = s.indexOf('.');
   return Math.min(max, dot === -1 ? 0 : s.length - dot - 1);
 }
 
 /** The number tokens of an attribute's raw text, read by its own grammar. */
-function numberTokens(doc: Doc, n: ElementNode, local: string, raw: string): NumberToken[] {
+export function numberTokens(doc: Doc, n: ElementNode, local: string, raw: string): NumberToken[] {
   return tokenizeAttrRaw(doc, n, { ns: null, local }, raw).filter((t): t is NumberToken => t.kind === 'number');
 }
 
 const retokenizer = (doc: Doc, n: ElementNode, local: string) => (raw: string): Token[] => tokenizeAttrRaw(doc, n, { ns: null, local }, raw);
 
 /** Rewrite numbers of one attribute, or say why not. */
-function rewrite(doc: Doc, n: ElementNode, local: string, raw: string, edits: NumberEdit[]): AttrEdit | { refused: string } {
+export function rewrite(doc: Doc, n: ElementNode, local: string, raw: string, edits: NumberEdit[]): AttrEdit | { refused: string } {
   try {
     return { id: n.id, ns: null, local, raw: rewriteNumbers(raw, edits, retokenizer(doc, n, local)), add: false };
   } catch (e) {
@@ -149,7 +155,7 @@ function writeIn(value: number, unit: string, token: NumberToken | null, delta: 
  * One length attribute changed: by `delta` user units (a move) or to `to` user units (a resize).
  * An absent attribute is added in user units (only when it changes).
  */
-function lengthEdit(doc: Doc, n: ElementNode, local: string, axis: Axis, change: { delta: number } | { to: number }, opts: WriteOpts): AttrEdit | { refused: string } | null {
+export function lengthEdit(doc: Doc, n: ElementNode, local: string, axis: Axis, change: { delta: number } | { to: number }, opts: WriteOpts): AttrEdit | { refused: string } | null {
   if (CSS_GEOMETRY.has(local)) {
     const set = cssSets(doc, n.id, local);
     if (set !== 'no') return { refused: cssWhy(local, set) };
@@ -224,7 +230,7 @@ export function planMove(doc: Doc, id: NodeId, dx: number, dy: number, opts: Wri
     if (box === null) return refuse('Its transform box is set by a <style> rule.');
     if (box === 'view-box') {
       const inv = invert([t[0], t[1], t[2], t[3], 0, 0]);
-      if (!inv) return refuse('Its transform flattens it, so its geometry can’t move.');
+      if (!inv) return refuse(FLATTENS);
       local = apply(inv, dx, dy);
     }
   }
@@ -237,6 +243,13 @@ export function planMove(doc: Doc, id: NodeId, dx: number, dy: number, opts: Wri
     return null;
   };
   let problem: string | null = null;
+  // A generated shape (engine/generators/) moves by its centre's inputs, draw:cx and draw:cy; the
+  // Session's finish hook then draws it again from them, so it stays generated.
+  if (generatorOf(doc, id)) {
+    if (n.local === 'path' && cssSets(doc, id, 'd') !== 'no') return refuse(cssWhy('d', cssSets(doc, id, 'd') as 'inline' | 'sheet'));
+    problem = add(inputEdit(doc, n, 'cx', lx, opts)) ?? add(inputEdit(doc, n, 'cy', ly, opts));
+    return problem ? refuse(problem) : { edits };
+  }
   switch (n.local) {
     case 'rect':
     case 'image':
@@ -261,6 +274,20 @@ export function planMove(doc: Doc, id: NodeId, dx: number, dy: number, opts: Wri
       break;
   }
   return problem ? refuse(problem) : { edits };
+}
+
+const INPUT_NUMBER = /-?(?:\d*\.\d+|\d+)/;
+
+/** A generator input (a plain decimal in Draw's namespace) moved by `delta`, only its number's characters rewritten. */
+function inputEdit(doc: Doc, n: ElementNode, local: string, delta: number, opts: WriteOpts): AttrEdit | null {
+  if (delta === 0) return null;
+  const a = findAttr(n, DRAW_NS, local)!;
+  const m = INPUT_NUMBER.exec(a.raw);
+  const value = Number(attrValue(doc, n, DRAW_NS, local)!.trim());
+  const text = fmt(value + delta, Math.max(opts.decimals ?? 0, m ? decimalsOf(m[0]) : 0, placesOf(delta)));
+  // Written with a reference (&#53;0): the whole value, which needs no escaping.
+  const raw = m && !a.raw.includes('&') ? rewriteNumbers(a.raw, [{ start: m.index, end: m.index + m[0].length, text }]) : text;
+  return raw === a.raw ? null : { id: n.id, ns: DRAW_NS, local, raw, add: false };
 }
 
 function moveByTranslate(doc: Doc, n: ElementNode, dx: number, dy: number, opts: WriteOpts): Plan {

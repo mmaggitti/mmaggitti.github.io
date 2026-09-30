@@ -2,7 +2,10 @@
 // sheet, an import, undo, redo) becomes a named transaction of ops; each dispatch emits exactly one
 // ChangeSet to the subscribers (renderer, code view, overlay, store, drafts), in the order they
 // subscribed. A drag is a session of its own: its frames apply live and commit as ONE history
-// entry, so undo after a drag restores the state before it, byte for byte.
+// entry, so undo after a drag restores the state before it, byte for byte. An optional `finish`
+// hook runs after every transaction's and every drag frame's own ops, and what it applies joins
+// them (the editor's generated shapes regenerate or detach there, engine/generators/); undo and
+// redo replay what was recorded and never call it.
 
 import type { Doc } from '../model/doc.ts';
 import { coalesce, emptyChangeSet, noteChange, redoOp, undoOp, type ChangeSet, type Op } from './ops.ts';
@@ -16,6 +19,13 @@ export type Listener = (changes: ChangeSet, why: { label: string; kind: 'do' | '
 
 /** Builds a transaction: each intent applies immediately and returns its op. */
 export type Build = (apply: (op: Op) => void) => void;
+
+/** Runs after a transaction's (or a drag frame's) own ops, `ops` being those; what it applies joins them. */
+export type Finish = (doc: Doc, ops: readonly Op[], apply: (op: Op) => void) => void;
+
+export interface SessionOptions {
+  finish?: Finish;
+}
 
 export interface Drag {
   /** Apply one frame: the previous frame's ops are replaced by this frame's. */
@@ -34,9 +44,11 @@ export class Session {
   private undone: Transaction[] = [];
   private listeners: Listener[] = [];
   private dragging = false;
+  private finish: Finish | null;
 
-  constructor(doc: Doc) {
+  constructor(doc: Doc, options: SessionOptions = {}) {
     this.doc = doc;
+    this.finish = options.finish ?? null;
   }
 
   subscribe(fn: Listener): () => void {
@@ -135,6 +147,7 @@ export class Session {
     const ops: Op[] = [];
     try {
       build((op) => ops.push(op));
+      if (this.finish) this.finish(this.doc, ops.slice(), (op) => ops.push(op));
     } catch (e) {
       for (let i = ops.length - 1; i >= 0; i--) undoOp(this.doc, ops[i]);
       throw e;

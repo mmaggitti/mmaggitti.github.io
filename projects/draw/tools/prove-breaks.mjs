@@ -2072,7 +2072,7 @@ const BREAKS = [
   },
   {
     id: 'B394', what: 'F10: a move of an element whose transform flattens it is not refused',
-    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse('Its transform flattens it, so its geometry can’t move.');\n", to: '',
+    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse(FLATTENS);\n", to: '',
     run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
   },
   {
