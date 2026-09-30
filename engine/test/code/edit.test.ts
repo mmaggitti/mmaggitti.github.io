@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc, serialize, descendants, findAttr, detachNode, attachNode, setLeafRaw, type Doc, type ElementNode, type LeafNode } from '../../model/doc.ts';
 import { tokenizeAttr, tokenizeText, type NumberToken, type Token } from '../../code/tokens.ts';
-import { applyTokenEdit, scrubNumber, tokenEdit, tokenTextError, TokenEditError, type TokenTarget } from '../../code/edit.ts';
+import { applyTokenEdit, rewriteNumbers, scrubNumber, tokenEdit, tokenTextError, TokenEditError, type TokenTarget } from '../../code/edit.ts';
+import { tokenizeAttrRaw } from '../../code/tokens.ts';
 import { blockFor, codeBlocks } from '../../code/blocks.ts';
 
 const SVG = 'xmlns="http://www.w3.org/2000/svg"';
@@ -272,4 +273,43 @@ test('blocks follow serialize through structural edits and duplicate attributes'
   attachNode(doc, circle, doc.root, 2);
   assert.equal(codeBlocks(doc).map((b) => b.text).join(''), serialize(doc));
   assert.ok(serialize(doc).startsWith(`<svg ${SVG}><g/>`));
+});
+
+// ── rewriteNumbers: several numbers of one value at once (P1-M1, the write policy) ────────────────
+
+test('rewriteNumbers rewrites the chosen numbers right to left and keeps every other byte', () => {
+  const doc = load('<g transform="translate(50 50)&#10;  rotate(0)\n  scale(1)"/><path d="M10,10 L 20 20"/>');
+  const g = first(doc, 'g');
+  const raw = findAttr(g, null, 'transform')!.raw;
+  const nums = tokenizeAttrRaw(doc, g, { ns: null, local: 'transform' }, raw).filter((t) => t.kind === 'number');
+  const out = rewriteNumbers(raw, [{ start: nums[0].start, end: nums[0].end, text: '53' }, { start: nums[1].start, end: nums[1].end, text: '47.5' }, { start: nums[3].start, end: nums[3].end, text: '2' }],
+    (r) => tokenizeAttrRaw(doc, g, { ns: null, local: 'transform' }, r));
+  assert.equal(out, 'translate(53 47.5)&#10;  rotate(0)\n  scale(2)', 'the character reference and the line break stay');
+  const path = first(doc, 'path');
+  const d = findAttr(path, null, 'd')!.raw;
+  const pn = tokenizeAttrRaw(doc, path, { ns: null, local: 'd' }, d);
+  assert.equal(rewriteNumbers(d, pn.map((t, i) => ({ start: t.start, end: t.end, text: String(i) }))), 'M0,1 L 2 3', 'every separator kept');
+  assert.equal(rewriteNumbers('1 2 3', []), '1 2 3', 'nothing to do');
+});
+
+test('rewriteNumbers pads a glued number with a space inside its own span', () => {
+  // "10-5" reads as 10 and -5: giving -5 a plus sign would glue it to the 10.
+  assert.equal(rewriteNumbers('M10-5', [{ start: 3, end: 5, text: '5' }]), 'M10 5');
+  // "1.5.5" reads as 1.5 and .5: a new first number without a point would swallow the .5.
+  assert.equal(rewriteNumbers('1.5.5', [{ start: 0, end: 3, text: '2' }]), '2 .5');
+  assert.equal(rewriteNumbers('1.5.5', [{ start: 0, end: 3, text: '2.25' }]), '2.25.5', 'with a point of its own it needs none');
+  assert.equal(rewriteNumbers('0,-1', [{ start: 2, end: 4, text: '-7' }]), '0,-7');
+  assert.equal(rewriteNumbers('10px', [{ start: 0, end: 2, text: '12' }]), '12px', 'a unit is not a neighbour');
+});
+
+test('rewriteNumbers refuses what would read differently, overlapping edits, and text that is not a plain number', () => {
+  const doc = load('<path d="M0 0 A5 5 0 0 1 10 10"/>');
+  const path = first(doc, 'path');
+  const d = findAttr(path, null, 'd')!.raw;
+  const read = (r: string) => tokenizeAttrRaw(doc, path, { ns: null, local: 'd' }, r);
+  const radius = read(d).filter((t) => t.kind === 'number')[2]; // the rotation
+  assert.throws(() => rewriteNumbers(d, [{ start: radius.start, end: radius.end, text: '1' }].map((e) => ({ ...e, end: e.end + 2 })), read), TokenEditError, 'a span over a flag');
+  assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: '3' }, { start: 0, end: 3, text: '4' }]), /overlap/);
+  assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: '1e3' }]), /plain number/);
+  assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: 'x' }]), TokenEditError);
 });

@@ -11,6 +11,7 @@ test('parseLength reads a number and an optional unit, case-insensitively', () =
     [' 10PX\n', { value: 10, unit: 'px' }],
     ['-1.5e1Em', { value: -15, unit: 'em' }],
     ['2ex', { value: 2, unit: 'ex' }],
+    ['1.5REM', { value: 1.5, unit: 'rem' }],
     ['50%', { value: 50, unit: '%' }],
     ['.5in', { value: 0.5, unit: 'in' }],
     ['+3Pt', { value: 3, unit: 'pt' }],
@@ -54,6 +55,8 @@ test('em, ex and % need their context, and are null without it', () => {
   near(toUserUnits(em, { fontSize: 16 }), 32, 'em');
   near(toUserUnits(ex, { fontSize: 16 }), 16, 'ex is half an em');
   near(toUserUnits(pc, { percentBase: 300 }), 150, '%');
+  assert.equal(toUserUnits(parseLength('2rem')!, { fontSize: 16 }), null, 'rem is the root’s, not the element’s');
+  near(toUserUnits(parseLength('2rem')!, { remPx: 12 }), 24, 'rem');
   near(toUserUnits(pc, { percentBase: 0 }), 0, '% of zero');
   near(toUserUnits(parseLength('1in')!, { fontSize: 16, percentBase: 1 }), 96, 'context ignored for absolute units');
 });

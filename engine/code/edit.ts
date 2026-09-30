@@ -168,6 +168,58 @@ export function tokenEdit(doc: Doc, nodeId: NodeId, target: TokenTarget, token: 
   return splice(doc, nodeId, target, token, newText).raw;
 }
 
+export interface NumberEdit {
+  start: number; // a number token's span in the raw text
+  end: number;
+  text: string; // the new number: a plain decimal (fmt's output)
+}
+
+// Numbers as the tokenizer reads them in lists, paths and transforms: the default re-reader.
+const SCAN = /[+-]?(?:\d*\.\d+|\d+)(?:[eE][+-]?\d+)?/g;
+const scanNumbers = (raw: string): Token[] =>
+  [...raw.matchAll(SCAN)].map((m) => ({ kind: 'number', prop: '', start: m.index, end: m.index + m[0].length, text: m[0], value: Number(m[0]), decimals: 0 }));
+
+/**
+ * Several number tokens of one raw attribute value rewritten at once, right to left: each span
+ * (from the attribute's number tokens) becomes its new text, and every other byte stays, so a
+ * multi-line transform list or a path keeps its separators, spacing and units. Where a new number
+ * would glue to its neighbour ("1-2" read as one, "1.5.5"), a space goes inside the replaced span,
+ * as tokenEdit does. The result must read as the same tokens in the same order (`retokenize`, the
+ * attribute's own grammar; plain number scanning by default), else TokenEditError.
+ */
+export function rewriteNumbers(raw: string, edits: readonly NumberEdit[], retokenize: (raw: string) => Token[] = scanNumbers): string {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  for (let i = 1; i < sorted.length; i++) if (sorted[i].end > sorted[i - 1].start) throw new TokenEditError('two number edits overlap');
+  for (const e of sorted) if (!NUMBER.test(e.text)) throw new TokenEditError(`${JSON.stringify(e.text)} is not a plain number`);
+  const before = retokenize(raw);
+  let out = raw;
+  const placed = new Map<number, { start: number; text: string }>(); // original start → where the new text landed (before the shift)
+  for (const e of sorted) {
+    const head = out.slice(0, e.start);
+    const tail = out.slice(e.end);
+    // A digit or point before glues to a number starting with a digit; a number without a point
+    // glues to a '.' after it (and any number to a digit or an exponent after it).
+    const lead = /[\d.]$/.test(head) && /^[\d.]/.test(e.text) ? ' ' : '';
+    const trail = /^\d/.test(tail) || /^[eE][+-]?\d/.test(tail) || (tail.startsWith('.') && !e.text.includes('.')) ? ' ' : '';
+    out = head + lead + e.text + trail + tail;
+    placed.set(e.start, { start: e.start + lead.length, text: e.text });
+    // Every span to the right moves by this edit's change in length.
+    const shift = lead.length + e.text.length + trail.length - (e.end - e.start);
+    for (const [k, p] of placed) if (k > e.start) p.start += shift;
+  }
+  const after = retokenize(out);
+  const edited = new Map(sorted.map((e) => [e.start, placed.get(e.start)!]));
+  const same = after.length === before.length && before.every((b, j) => {
+    const a = after[j];
+    if (a.kind !== b.kind) return false;
+    const p = edited.get(b.start);
+    if (p) return a.kind === 'number' && a.start === p.start && a.text === p.text;
+    return a.text === b.text;
+  });
+  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');
+  return out;
+}
+
 /**
  * Apply a token edit to the document (setAttrRaw, or setLeafRaw for text and CDATA), and
  * return the token as it now reads (null only for a text run the edit emptied or split).

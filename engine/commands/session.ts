@@ -63,7 +63,7 @@ export class Session {
   dispatch(label: string, build: Build): ChangeSet {
     if (this.dragging) throw new Error('dispatch during a drag: commit or cancel it first');
     const ops = this.run(build);
-    const kept = coalesce(ops);
+    const kept = coalesce(ops, this.doc);
     if (kept.length) {
       this.done.push({ label, ops: kept });
       if (this.done.length > HISTORY_LIMIT) this.done.shift();
@@ -114,7 +114,7 @@ export class Session {
         finish();
         // Earlier frames were rolled back, so the applied frame's ops run from the state before
         // the drag to the state now: they are the one entry to keep.
-        const net = coalesce(frame);
+        const net = coalesce(frame, this.doc);
         if (net.length) {
           this.done.push({ label, ops: net });
           if (this.done.length > HISTORY_LIMIT) this.done.shift();
