@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { DETACHED, Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -22,6 +22,13 @@ import { mapRect } from '../../../../engine/geometry/bounds.ts';
 import { starPoints as starPointsOf } from '../../../../engine/generators/radial.ts';
 import { arcCenter, arcPoint, type ArcCenter } from '../../../../engine/path/arc.ts';
 import { donutSlices } from '../../../../engine/generators/donut.ts';
+import { parsePath } from '../../../../engine/path/parse.ts';
+import { toAbsolute } from '../../../../engine/path/abs.ts';
+import { insideAt, type BoolOp } from '../../../../engine/path/winding.ts';
+import { DRAW_NS } from '../../../../engine/model/draw-ns.ts';
+import { OFFLINE, type Libraries } from '../../src/paths/pipeline.ts';
+import { combine as pathBoolCombine } from '../../src/paths/booleans.ts';
+import { combine as paperCombine } from '../../src/paths/paper-fallback.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -41,7 +48,7 @@ interface Rig {
   focused: (FocusMark | null)[];
 }
 
-function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
+function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
@@ -114,6 +121,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
       },
       hostSize: () => size,
       sinkReady: () => true,
+      booleans,
     }),
   };
   r.editor.version.subscribe(() => log.push('stores'));
@@ -2252,4 +2260,112 @@ test('the donut: Edit as donut changes only the holder’s start tag (one entry)
   assert.equal(r.editor.donut()?.recognized ?? false, false);
   r.editor.undo();
   assert.equal(r.editor.source(), adopted, 'one undo brings the donut back');
+});
+
+// ── P1-M3 S3: booleans ─────────────────────────────────────────────────────────────────────────
+
+// The libraries themselves, as the chunks give them (node imports them directly).
+const LIBS: Libraries = { primary: async () => pathBoolCombine, fallback: async () => paperCombine };
+const BOOL_RECT = '<rect id="a" x="10" y="10" width="50" height="50" rx="4" fill="#e76f51" stroke="#264653" opacity="0.9"/>';
+const BOOL_CIRCLE = '<circle id="b" cx="0" cy="0" r="25" fill="#2a9d8f" transform="translate(60 60)"/>';
+const BOOL_FILE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${BOOL_RECT}\n  ${BOOL_CIRCLE}\n  <text id="t" x="10" y="95">Hi</text>\n</svg>`;
+/** Whether the fill of `d` holds each point. */
+const fills = (d: string, pts: readonly [number, number][]) => pts.map(([x, y]) => insideAt(toAbsolute(parsePath(d)), x, y, 'nonzero'));
+
+test('Union, Subtract, Intersect and Exclude: the result replaces the bottom operand in its place (its attributes in order less its geometry, then d, after its leading whitespace), the others go with theirs, one entry each, the result selected; one undo gives the file back byte for byte', async () => {
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(BOOL_FILE);
+  const [a, b] = [idOf(r, 'a'), idOf(r, 'b')];
+  // In the rect only, in both, in the circle only (centred at (60, 60) by its transform), in neither.
+  const PTS: [number, number][] = [[20, 20], [55, 55], [75, 75], [90, 15]];
+  const WANT: Record<BoolOp, boolean[]> = {
+    union: [true, true, true, false],
+    difference: [true, false, false, false],
+    intersection: [false, true, false, false],
+    exclusion: [true, false, true, false],
+  };
+  for (const op of BOOLEAN_OPS) {
+    r.editor.select([b, a]); // the bottom is the first in the document, whatever the order of the taps
+    await r.editor.combine(op);
+    const src = r.editor.source();
+    const d = /<path id="a" fill="#e76f51" stroke="#264653" opacity="0\.9" d="([^"]+)"\/>/.exec(src)?.[1];
+    assert.ok(d, `${op} wrote:\n${src}`);
+    assert.equal(src, BOOL_FILE.replace(BOOL_RECT, `<path id="a" fill="#e76f51" stroke="#264653" opacity="0.9" d="${d}"/>`).replace(`\n  ${BOOL_CIRCLE}`, ''), `${op}: the rest of the file as it was`);
+    assert.match(d, /^M -?[\d.]+ -?[\d.]+( [LC]( -?[\d.]+)+)* Z( M -?[\d.]+ -?[\d.]+( [LC]( -?[\d.]+)+)* Z)*$/, `${op}: its d is loops of M, L, C and Z`);
+    assert.deepEqual(fills(d, PTS), WANT[op], `${op}: where it fills`);
+    assert.equal(r.editor.history.get().undoLabel, BOOLEAN_LABELS[op]);
+    assert.deepEqual(sel(r), [element(doc(r), (n) => n.local === 'path').id], `${op}: the result is selected`);
+    r.editor.undo();
+    assert.equal(r.editor.source(), BOOL_FILE, `${op}: one undo gives the file back`);
+  }
+});
+
+test('a bottom <path> keeps its own element: only its d changes, in place and in its own quotes, and its generator inputs go (Draw’s declaration with them, nothing of Draw’s being left)', async () => {
+  const P = `<path id="p" d='M 10 10 H 60 V 60 H 10 Z' draw:gen="spiral" draw:cx="35" draw:cy="35" draw:r="20" draw:turns="2" fill="red"/>`;
+  const F = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="${DRAW_NS}" viewBox="0 0 100 100">\n  ${P}\n  <rect x="40" y="40" width="40" height="40"/>\n</svg>`;
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  const p = idOf(r, 'p');
+  r.editor.select([p, element(doc(r), (n) => n.local === 'rect').id]);
+  await r.editor.combine('union');
+  const src = r.editor.source();
+  const d = /<path id="p" d='([^']+)' fill="red"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <path id="p" d='${d}' fill="red"/>\n</svg>`);
+  assert.deepEqual(fills(d, [[20, 20], [70, 70], [70, 20]]), [true, true, false]);
+  assert.deepEqual(sel(r), [p], 'the same element, selected');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('booleans refuse, saying why and writing nothing: one shape, a line, text, a group, a <use>, CSS geometry, a d with an error, a fill-rule a <style> rule may set, a bottom with a <title>, a shape the canvas can’t measure, nothing left, and a chunk that can’t load', async () => {
+  const W = (body: string, first = '<rect id="a" x="10" y="10" width="50" height="50"/>') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${first}\n  ${body}\n</svg>`;
+  const cases: [file: string, op: BoolOp, notice: string, libs?: Libraries, over?: (r: () => Rig) => Partial<CanvasPort>][] = [
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Select two shapes or more to combine them.'],
+    [W('<line id="b" x1="0" y1="0" x2="50" y2="50" stroke="#000"/>'), 'union', 'A line has no area.'],
+    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', 'Convert text to paths first (P1-M4).'],
+    [W('<g id="b"><rect x="0" y="0" width="5" height="5"/></g>'), 'union', 'Only shapes combine.'],
+    [W('<use id="b" href="#a" x="5"/>'), 'union', 'Only shapes combine.'],
+    [W('<circle id="b" cx="50" cy="50" r="10" style="r: 20px"/>'), 'union', 'Its r is set by CSS (its style attribute), which wins over the attribute.'],
+    [W('<path id="b" d="M 0 0 L 10 Q"/>'), 'union', 'Its path data has an error at character 12.'],
+    [W('<style>circle { fill-rule: evenodd }</style>\n  <circle id="b" cx="50" cy="50" r="10"/>'), 'union', 'A <style> rule may set its fill-rule, which Draw can’t read yet (P2).'],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>', '<rect id="a" x="10" y="10" width="50" height="50"><title>A</title></rect>'), 'union', 'Its <title> would be lost.'],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Draw can’t tell where it is.', LIBS, (r) => ({
+      measure: (ids) => {
+        const m = measureWith(r().editor, ids, true);
+        m.delete(idOf(r(), 'b'));
+        return m;
+      },
+    })],
+    [W('<rect id="b" x="70" y="70" width="20" height="20"/>'), 'intersection', 'Nothing would be left.'],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', OFFLINE, { primary: () => Promise.reject(new Error('Failed to fetch')), fallback: LIBS.fallback }],
+  ];
+  for (const [file, op, notice, libs = LIBS, over] of cases) {
+    let r!: Rig;
+    r = rig(HOST, over ? over(() => r) : {}, libs);
+    r.editor.open(file);
+    const ids = notice.startsWith('Select two') ? [idOf(r, 'a')] : [idOf(r, 'a'), idOf(r, 'b')];
+    r.editor.select(ids);
+    await r.editor.combine(op);
+    assert.equal(r.editor.notice.get(), notice, `${file}: ${op}`);
+    assert.equal(r.editor.source(), file, `${notice}: nothing written`);
+    assert.equal(r.editor.history.get().canUndo, false, `${notice}: nothing recorded`);
+  }
+});
+
+test('a boolean the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+  r.editor.open(BOOL_FILE);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  const pending = r.editor.combine('union');
+  r.editor.select([idOf(r, 't')]);
+  r.editor.delete(); // meanwhile, the text goes
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after, 'nothing written over the change');
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
 });

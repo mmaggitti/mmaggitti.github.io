@@ -87,6 +87,12 @@ import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
 import { parsePaint } from '../../../engine/values/color.ts';
 import { elementLabel } from './panels/label.ts';
 import { pathNodes, planBendTap, planNodeDrag, type NodeKind } from '../../../engine/path/nodes.ts';
+import { shapeOutline } from '../../../engine/path/from-shape.ts';
+import { loopsD, mapLoops, toLoops } from '../../../engine/path/loops.ts';
+import type { BoolOp } from '../../../engine/path/winding.ts';
+import { runPipeline, type BoolInput, type Libraries } from './paths/pipeline.ts';
+import { LAZY_LIBRARIES } from './paths/load.ts';
+import { writeBoolean } from './paths/write.ts';
 import { closeLast, cycleSegment as cycleSegmentOf, lastClosed, makeCorner, makeSmooth, nodeType, openLast, readsRelative, reverseSubpath, setArcFlags, subpathCount, toggleRelative as toggleRelativeOf } from '../../../engine/path/segments.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
@@ -149,6 +155,8 @@ export interface EditorPorts {
   remPx?(): number;
   /** False when the sink can't render (no DOMPurify): then nothing opens. */
   sinkReady(): boolean;
+  /** The boolean libraries (P1-M3): paths/load.ts's lazy chunks unless a test hands its own. */
+  booleans?: Libraries;
 }
 
 // ── state React reads ──────────────────────────────────────────────────────────────────────────
@@ -790,6 +798,62 @@ export class Editor {
     if (!ids?.length || !this.#dispatch('Delete', (apply) => remove(doc, ids, apply))) return;
     this.focus.set(null);
     this.select([]);
+  }
+
+  /**
+   * Union, Subtract, Intersect or Exclude the selected shapes (P1-M3 S3): two or more, in document
+   * order, the bottom (painted first) first. Each outline goes into the bottom's user units through
+   * the measured matrices, with its own fill-rule; path-bool combines them (its chunk loads on first
+   * use), and paper-core only when path-bool throws or fails the self-check (paths/pipeline.ts).
+   * Nothing is written until a result passes; the drawing changing meanwhile refuses. Then one entry:
+   * the result replaces the bottom, keeping its attributes, the others go (paths/write.ts), and the
+   * result is selected.
+   */
+  async combine(op: BoolOp): Promise<void> {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (!ids) return;
+    if (ids.length < 2) return void this.notice.set('Select two shapes or more to combine them.');
+    const read = this.#booleanInputs(doc, ids);
+    if ('refused' in read) return void this.notice.set(read.refused);
+    const version = this.version.get();
+    const out = await runPipeline(read.inputs, op, this.#ports.booleans ?? LAZY_LIBRARIES);
+    if (this.#doc !== doc || this.version.get() !== version) return void this.notice.set(DRAWING_CHANGED);
+    if ('refused' in out) return void this.notice.set(out.refused);
+    const d = loopsD(out.loops);
+    let result: NodeId | null = null;
+    if (this.#dispatch(BOOLEAN_LABELS[op], (apply) => void (result = writeBoolean(doc, ids, d, apply)))) this.select([result!]);
+  }
+
+  // A boolean's operands as the pipeline takes them (each outline as loops of lines and cubics, in the
+  // bottom's user units: inv(toHost of the bottom) · toHost of the operand, the DOM's truth; each with
+  // its own fill-rule, as M2's style reading gives it), or the first refusal, in document order.
+  #booleanInputs(doc: Doc, ids: readonly NodeId[]): { inputs: BoolInput[] } | { refused: string } {
+    for (const id of ids) {
+      const n = el(doc, id);
+      if (n.ns === NS.svg && n.local === 'line') return { refused: 'A line has no area.' };
+      if (n.ns === NS.svg && (n.local === 'text' || TEXT_PARTS.has(n.local))) return { refused: 'Convert text to paths first (P1-M4).' };
+      if (n.ns !== NS.svg || !COMBINES.has(n.local)) return { refused: 'Only shapes combine.' };
+    }
+    const bottom = el(doc, ids[0]);
+    const child = bottom.local === 'path' ? undefined : bottom.children.map((c) => doc.nodes.get(c)!).find((c) => c.kind === 'element');
+    if (child) return { refused: `Its <${(child as ElementNode).qname}> would be lost.` };
+    const measured = this.#ports.canvas.measure(ids);
+    const base = measured.get(ids[0]);
+    const toBottom = base && invert(base.toHost);
+    const inputs: BoolInput[] = [];
+    for (const id of ids) {
+      const o = shapeOutline(doc, id, this.geo);
+      if ('refused' in o) return o;
+      const m = measured.get(id);
+      if (!m || !toBottom) return { refused: 'Draw can’t tell where it is.' };
+      const rule = shownValue(doc, id, 'fill-rule').value;
+      if (rule === null) return { refused: 'A <style> rule may set its fill-rule, which Draw can’t read yet (P2).' };
+      const loops = toLoops(o.abs);
+      inputs.push({ loops: id === ids[0] ? loops : mapLoops(loops, multiply(toBottom, m.toHost)), rule: rule.trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero' });
+    }
+    return { inputs };
   }
 
   /** Duplicate the selection: each copy just after its original, 5 units right and down, selected. */
@@ -3432,6 +3496,11 @@ const SLOP_PX = 5; // a marquee under this in either direction takes nothing
 export const LOCKED = 'It’s locked. Unlock it in Layers first.';
 const CONTAINERS = new Set(['g', 'a', 'switch', 'svg']);
 const TEXT_PARTS = new Set(['tspan', 'textPath']);
+/** The four booleans (P1-M3), in the More sheet's order, and their labels (its rows, and their history entries). */
+export const BOOLEAN_OPS: readonly BoolOp[] = ['union', 'difference', 'intersection', 'exclusion'];
+export const BOOLEAN_LABELS: Readonly<Record<BoolOp, string>> = { union: 'Union', difference: 'Subtract', intersection: 'Intersect', exclusion: 'Exclude' };
+export const DRAWING_CHANGED = 'The drawing changed; try again.';
+const COMBINES = new Set(['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline']);
 
 interface MoveState {
   drag: Drag;

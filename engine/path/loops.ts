@@ -124,10 +124,35 @@ const boxOf = (p: readonly Pt[]): Box => {
   return b;
 };
 
+// The loops that may hold loop i, found through a uniform grid over all the boxes (about √n × √n
+// cells): each loop is listed in every cell its box covers, and a loop that holds loop i covers i's
+// box, so it is listed in the cell of that box's corner. So n small disjoint loops cost n, not n².
+function holdersOf(boxes: readonly Box[]): (i: number) => readonly number[] {
+  const all = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const b of boxes) {
+    if (!(b.x0 <= b.x1)) continue; // no points
+    all.x0 = Math.min(all.x0, b.x0);
+    all.y0 = Math.min(all.y0, b.y0);
+    all.x1 = Math.max(all.x1, b.x1);
+    all.y1 = Math.max(all.y1, b.y1);
+  }
+  const g = Math.max(1, Math.ceil(Math.sqrt(boxes.length)));
+  const cw = (all.x1 - all.x0) / g || 1;
+  const ch = (all.y1 - all.y0) / g || 1;
+  const col = (x: number) => Math.min(g - 1, Math.max(0, Math.floor((x - all.x0) / cw)));
+  const row = (y: number) => Math.min(g - 1, Math.max(0, Math.floor((y - all.y0) / ch)));
+  const cells: number[][] = Array.from({ length: g * g }, () => []);
+  boxes.forEach((b, j) => {
+    if (!(b.x0 <= b.x1)) return;
+    for (let r = row(b.y0); r <= row(b.y1); r++) for (let c = col(b.x0); c <= col(b.x1); c++) cells[r * g + c].push(j);
+  });
+  return (i) => (boxes[i].x0 <= boxes[i].x1 ? cells[row(boxes[i].y0) * g + col(boxes[i].x0)] : []);
+}
+
 // How many of the other loops hold loop i: a few points along it (its edges' midpoints) tested
 // against each loop whose box holds its box, the majority deciding (a point on another loop's outline
 // can't decide alone).
-function depthOf(polys: readonly Pt[][], boxes: readonly Box[], i: number): number {
+function depthOf(polys: readonly Pt[][], boxes: readonly Box[], holders: readonly number[], i: number): number {
   const me = polys[i];
   if (me.length < 2) return 0;
   const probes: Pt[] = [];
@@ -138,7 +163,7 @@ function depthOf(polys: readonly Pt[][], boxes: readonly Box[], i: number): numb
   }
   const bi = boxes[i];
   let depth = 0;
-  for (let j = 0; j < polys.length; j++) {
+  for (const j of holders) {
     const bj = boxes[j];
     if (j === i || polys[j].length < 3 || bj.x0 > bi.x0 || bj.y0 > bi.y0 || bj.x1 < bi.x1 || bj.y1 < bi.y1) continue;
     const inside = probes.filter(([x, y]) => windingOf([polys[j]], x, y) !== 0).length;
@@ -151,7 +176,8 @@ function depthOf(polys: readonly Pt[][], boxes: readonly Box[], i: number): numb
 export function orientLoops(loops: readonly Loop[]): Loop[] {
   const polys = loops.map((l) => polygons(loopsToAbs([l]))[0] ?? []);
   const boxes = polys.map(boxOf);
-  return loops.map((l, i) => ((shoelace(polys[i]) > 0) === (depthOf(polys, boxes, i) % 2 === 0) ? l : reversed(l)));
+  const holders = holdersOf(boxes);
+  return loops.map((l, i) => ((shoelace(polys[i]) > 0) === (depthOf(polys, boxes, holders(i), i) % 2 === 0) ? l : reversed(l)));
 }
 
 /** The loops as d (the header's spelling). */

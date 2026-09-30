@@ -1,20 +1,24 @@
 // A command over a large selection costs time in proportion to it (the P1-M1 review, F5): a drag, a
 // held arrow, Align, Duplicate, Delete and Group over 4,000 selected shapes, against 1,000, in node
-// with the fake views (fakes.ts). Its own file, so the deliberate breaks that run editor.test.ts
-// don't wait for it.
+// with the fake views (fakes.ts); and Union (P1-M3). Its own file, so the deliberate breaks that run
+// editor.test.ts don't wait for it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Editor } from '../../src/editor.ts';
-import { fakeEditor } from './fakes.ts';
+import { Editor } from '../../src/editor.ts';
+import { loopsD } from '../../../../engine/path/loops.ts';
+import type { Libraries } from '../../src/paths/pipeline.ts';
+import { bind, fakeEditor, fakePorts } from './fakes.ts';
 
-/** An editor on `n` rects in a grid, every one selected. */
-function manySelected(n: number): Editor {
+/** An editor on `n` rects in a grid, every one selected (with these boolean libraries, when given). */
+function manySelected(n: number, booleans?: Libraries): Editor {
   const side = Math.ceil(Math.sqrt(n));
   const cell = 100 / side;
   const at = (v: number) => (v * cell).toFixed(2);
   const rects = Array.from({ length: n }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n');
-  const e = fakeEditor();
+  const ports = fakePorts();
+  ports.booleans = booleans;
+  const e = booleans ? bind(ports, new Editor(ports)) : fakeEditor();
   assert.ok(e.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n${rects}\n</svg>`).ok);
   e.selectAll();
   assert.equal(e.selection.get().size, n, 'test setup: Select all took every rect');
@@ -66,4 +70,32 @@ test('a command over a large selection takes linear time: a drag, a held arrow, 
     assert.ok(big < most * small, `${what}: ${small.toFixed(0)} ms over 1,000 shapes, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×${most})`);
     if (limit !== null) assert.ok(big < limit, `${what}: ${big.toFixed(0)} ms over 4,000 shapes (the limit is ${limit})`);
   }
+});
+
+// Union (P1-M3 S3) over the same grids: each operand read once (its outline, its measurement, its
+// fill-rule), scored, oriented and written once. The libraries are a stand-in that answers at once
+// (the union of disjoint squares is the squares), so what is timed is Draw's own work. Measured in
+// node: about 110 and 450 ms.
+test('Union over a large selection takes linear time: over 4,000 shapes it costs under 6× what it costs over 1,000', async () => {
+  const quick: Libraries = {
+    primary: async () => (inputs) => inputs.map((i) => loopsD(i.loops)).join(' '),
+    fallback: () => Promise.reject(new Error('the stand-in never fails')),
+  };
+  const cost = async (n: number): Promise<number> => {
+    const e = manySelected(n, quick);
+    const t = performance.now();
+    await e.combine('union');
+    const ms = performance.now() - t;
+    assert.equal(e.history.get().undoLabel, 'Union', `test setup: Union did something over ${n} shapes (${e.notice.get()})`);
+    return ms;
+  };
+  await cost(200); // warm the engine up
+  let small = await cost(1000);
+  let big = await cost(4000);
+  // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest run of each size counts.
+  for (let again = 0; again < 2 && big >= 6 * small; again++) {
+    small = Math.min(small, await cost(1000));
+    big = Math.min(big, await cost(4000));
+  }
+  assert.ok(big < 6 * small, `Union: ${small.toFixed(0)} ms over 1,000 shapes, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
 });

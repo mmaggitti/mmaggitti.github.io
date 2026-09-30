@@ -8,7 +8,8 @@
 // (from the code), Forward, Back and Delete are disabled. Edit source doesn't fit beside them, so
 // it lives in the More sheet, with Fill… and Stroke… (the Colour sheet over the selection, P1-M2),
 // Gloss (SVG Lab's, on or off, P1-M2), Duplicate, Group, Ungroup, Select group, Select all, Align
-// (six ways) and Distribute (two).
+// (six ways) and Distribute (two); and, for two or more selected, Combine: Union, Subtract, Intersect
+// and Exclude (P1-M3).
 //
 // While the Shapes tool is on (P1-M2), the bar is its kind picker instead: seven 44 pt icon buttons
 // (Rectangle, Circle, Ellipse, Line, Polygon, Star, Spiral), the chosen one pressed, then Cancel,
@@ -21,7 +22,7 @@
 // button.
 
 import { useEffect, useState, type ReactNode } from 'react';
-import type { Editor } from '../editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, type Editor } from '../editor.ts';
 import { SHAPE_KINDS, SHAPE_NAMES, type ShapeKind } from '../interact/shapes-tool.ts';
 import type { Unparsed } from '../workspace.ts';
 import { elementLabel } from './label.ts';
@@ -218,6 +219,7 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
 
 /** The More sheet: what doesn't fit on the bar, one 44 pt row each. */
 function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
+  const selected = useStore(editor.selection).size;
   const then = (act: () => void) => () => {
     close();
     act();
@@ -257,6 +259,12 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
           {row('Distribute horizontally', () => editor.distribute('h'))}
           {row('Distribute vertically', () => editor.distribute('v'))}
         </div>
+        {selected >= 2 && (
+          <>
+            <p className="draw-subhead">Combine</p>
+            <div className="draw-more-grid">{BOOLEAN_OPS.map((op) => row(BOOLEAN_LABELS[op], () => void editor.combine(op)))}</div>
+          </>
+        )}
       </div>
     </Modal>
   );
