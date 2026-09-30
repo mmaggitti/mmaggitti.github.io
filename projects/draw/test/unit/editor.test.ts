@@ -1042,3 +1042,88 @@ test('a move snaps to a target within 8 px of the moving box’s edges or centre
   assert.equal(r.models.at(-1)?.snapLines.length, 1, 'a snap line while snapped');
   r.editor.pointerCancel();
 });
+
+// ── S4: Duplicate, Group, Ungroup, Select group ────────────────────────────────────────────────
+
+const BADGE = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <defs><linearGradient id="grad"><stop offset="0" stop-color="#000"/></linearGradient></defs>
+  <g id="badge">
+    <clipPath id="clip"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face" x="10" y="10" width="20" height="20" clip-path="url(#clip)" style="fill:url(#grad)" draw:locked="true"/>
+  </g>
+</svg>`;
+
+test('Duplicate: the copy follows its original with its whitespace, fresh ids and its own references, no lock, 5 units right and down; one entry', () => {
+  const r = rig();
+  r.editor.open(BADGE);
+  const badge = idOf(r, 'badge');
+  r.editor.select([badge]);
+  r.editor.duplicate();
+  const src = r.editor.source();
+  const copy = `\n  <g id="badge-2" transform="translate(5 5)">
+    <clipPath id="clip-2"><circle cx="20" cy="20" r="10"/></clipPath>
+    <rect id="face-2" x="10" y="10" width="20" height="20" clip-path="url(#clip-2)" style="fill:url(#grad)"/>
+  </g>`;
+  assert.equal(src, BADGE.replace('\n  </g>\n', `\n  </g>${copy}\n`), 'the original’s bytes unchanged, the copy after it');
+  assert.deepEqual(sel(r), [idOf(r, 'badge-2')], 'the copy is selected');
+  assert.equal(r.editor.history.get().undoLabel, 'Duplicate');
+  assert.equal(text(r), src, 'the code shows exactly the document');
+  r.editor.undo();
+  assert.equal(r.editor.source(), BADGE, 'one undo gives the file back');
+  assert.equal(text(r), BADGE);
+});
+
+test('Group puts the selection in a new <g> where the last one was; Ungroup pushes the group’s transform down and refuses what would change the drawing; Select group climbs one level', () => {
+  const r = rig();
+  const THREE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="b" x="40" y="10" width="10" height="10"/>
+  <circle id="c" cx="70" cy="70" r="5"/>
+</svg>`;
+  r.editor.open(THREE);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'c')]);
+  r.editor.group();
+  assert.equal(r.editor.source(), THREE.replace('\n  <rect id="a" x="10" y="10" width="10" height="10"/>', '').replace('<circle id="c" cx="70" cy="70" r="5"/>', '<g>\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <circle id="c" cx="70" cy="70" r="5"/>\n  </g>'));
+  assert.equal(r.editor.history.get().undoLabel, 'Group');
+  const g = [...r.editor.selection.get()][0];
+  assert.equal((doc(r).nodes.get(g) as ElementNode).local, 'g', 'the group is selected');
+  assert.equal(text(r), r.editor.source());
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.selectGroup();
+  assert.deepEqual(sel(r), [g], 'Select group climbs to the group');
+  r.editor.undo();
+  assert.equal(r.editor.source(), THREE);
+  // Across parents: refused.
+  const r2 = rig();
+  r2.editor.open(SHAPES);
+  r2.editor.select([idOf(r2, 'a'), idOf(r2, 'c')]);
+  r2.editor.group();
+  assert.equal(r2.editor.notice.get(), 'Group needs shapes with the same parent.');
+  assert.equal(r2.editor.source(), SHAPES);
+  // Ungroup: the transform goes down to each child.
+  const G = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g transform="translate(10 5) rotate(15)">
+    <rect x="1" y="2" width="3" height="4"/>
+    <circle cx="5" cy="5" r="2" transform="scale(2)"/>
+  </g>
+</svg>`;
+  const r3 = rig();
+  r3.editor.open(G);
+  const grp = element(doc(r3), (n) => n.local === 'g');
+  r3.editor.select([grp.id]);
+  r3.editor.ungroup();
+  assert.equal(r3.editor.source(), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect x="1" y="2" width="3" height="4" transform="translate(10 5) rotate(15)"/>
+    <circle cx="5" cy="5" r="2" transform="translate(10 5) rotate(15) scale(2)"/>
+  \n</svg>`, 'the children keep their bytes and whitespace (the group’s last line break stays); the group and its own whitespace go');
+  assert.equal(r3.editor.history.get().undoLabel, 'Ungroup');
+  assert.equal(r3.editor.selection.get().size, 2, 'the former children are selected');
+  r3.editor.undo();
+  assert.equal(r3.editor.source(), G);
+  const r4 = rig();
+  r4.editor.open(G.replace('<g transform', '<g opacity="0.5" transform'));
+  r4.editor.select([element(doc(r4), (n) => n.local === 'g').id]);
+  r4.editor.ungroup();
+  assert.equal(r4.editor.notice.get(), 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.');
+  assert.equal(r4.editor.history.get().canUndo, false);
+});

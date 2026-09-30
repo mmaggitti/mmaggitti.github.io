@@ -44,7 +44,8 @@ import { SNAP_ALL, SNAP_PX, boxTargets, snapAxis, snapStep, stepDecimals, toStep
 import { applyPlan, movesBy, planMove, planResize, planRotate, planScale, rotationOf, scaleOf, ROOT_MOVE, type Corner, type Plan } from '../../../engine/geometry/write.ts';
 import { handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from './interact/handles.ts';
 import { documentOrder, isThin, thinHit } from '../../../engine/geometry/hit.ts';
-import { remove, restack, ROOT_DELETE } from './interact/structure.ts';
+import { duplicate, group, groupRefusal, groupsOf, remove, restack, ungroup, ungroupRefusal, ROOT_DELETE } from './interact/structure.ts';
+import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
 import { NO_STATE, isLocked, moveGuide, readState, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
@@ -633,6 +634,117 @@ export class Editor {
     if (!ids?.length || !this.#dispatch('Delete', (apply) => remove(doc, ids, apply))) return;
     this.focus.set(null);
     this.select([]);
+  }
+
+  /** Duplicate the selection: each copy just after its original, 5 units right and down, selected. */
+  duplicate(): void {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (!ids?.length) return;
+    let copies: NodeId[] = [];
+    const refused: string[] = [];
+    const ok = this.#dispatch('Duplicate', (apply) => {
+      copies = duplicate(doc, ids, apply);
+      const opts = { ctx: this.geo, decimals: 3 };
+      for (const c of copies) {
+        const d = this.#rootDelta(c, { x: 5, y: 5 });
+        const plan = d ? planMove(doc, c, d.x, d.y, opts) : { refused: 'Draw can’t tell where it is.' };
+        if ('refused' in plan) refused.push(plan.refused);
+        else applyPlan(doc, plan, apply);
+      }
+    });
+    if (!ok) return;
+    this.select(copies);
+    if (refused.length) this.notice.set(`Duplicated in place: ${refused[0]}`);
+  }
+
+  /** Group the selection (one parent) in a new <g>, which is then selected. */
+  group(): void {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const sel = [...this.selection.get()];
+    const order = documentOrder(doc);
+    const ids = sel.filter((id) => !sel.some((o) => o !== id && isInside(doc, id, o))).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    const why = groupRefusal(doc, ids);
+    if (why) return void this.notice.set(why);
+    let g: NodeId | null = null;
+    if (this.#dispatch('Group', (apply) => (g = group(doc, ids, apply)))) this.select([g!]);
+  }
+
+  /** Ungroup the selected group: its children take its place, its transform pushed down to each. */
+  ungroup(): void {
+    const doc = this.#doc;
+    const sel = [...this.selection.get()];
+    if (!doc || this.#live || this.#gesture || sel.length !== 1) return void (doc && sel.length !== 1 && this.notice.set('Select one group to ungroup.'));
+    const why = ungroupRefusal(doc, sel[0]);
+    if (why) return void this.notice.set(why);
+    let kids: NodeId[] = [];
+    if (this.#dispatch('Ungroup', (apply) => (kids = ungroup(doc, sel[0], apply)))) this.select(kids);
+  }
+
+  /** Select group: each selected element's nearest container that isn't the root. */
+  selectGroup(): void {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    this.focus.set(null);
+    this.select(groupsOf(doc, [...this.selection.get()]));
+  }
+
+  /** Align the selection (two or more: to their union box; one: to the artboard), one entry. */
+  align(kind: AlignKind): void {
+    const names: Record<AlignKind, string> = { left: 'Align left', center: 'Align centre', right: 'Align right', top: 'Align top', middle: 'Align middle', bottom: 'Align bottom' };
+    this.#arrange(names[kind], (boxes) => {
+      const to = boxes.length > 1 ? unionRect(boxes) : this.#board;
+      return to ? alignDeltas(boxes, to, kind) : null;
+    });
+  }
+
+  /** Distribute three or more: the first and last stay, the gaps between them become equal. */
+  distribute(axis: 'h' | 'v'): void {
+    this.#arrange(axis === 'h' ? 'Distribute horizontally' : 'Distribute vertically', (boxes) => (boxes.length >= 3 ? distributeDeltas(boxes, axis) : null));
+  }
+
+  // Align and distribute: the selection's boxes as the canvas measures them (root units), the
+  // deltas, then each move through the planner, exactly (3 places). Refused ones stay and are named.
+  #arrange(label: string, deltas: (boxes: Rect[]) => Point[] | null): void {
+    const doc = this.#doc;
+    const box = this.#box;
+    if (!doc || !box || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (!ids?.length) return;
+    const inv = invert(rootToHostMatrix(box, this.#viewport, this.#M));
+    const measured = this.#ports.canvas.measure(ids);
+    const have = ids.filter((id) => measured.has(id));
+    if (!inv || !have.length) return;
+    const boxes = have.map((id) => rectInRoot(inv, unionBox([quadOf(measured.get(id)!.box, measured.get(id)!.toHost)])!));
+    const ds = deltas(boxes);
+    if (!ds) return void this.notice.set(label.startsWith('Distribute') ? 'Distribute needs three shapes or more.' : 'There is nothing to align to.');
+    const refused: string[] = [];
+    this.#dispatch(label, (apply) => {
+      const opts = { ctx: this.geo, decimals: 3 };
+      have.forEach((id, i) => {
+        if (Math.abs(ds[i].x) < 1e-9 && Math.abs(ds[i].y) < 1e-9) return;
+        const d = this.#rootDelta(id, ds[i]);
+        const plan = d ? planMove(doc, id, d.x, d.y, opts) : { refused: 'Draw can’t tell where it is.' };
+        if ('refused' in plan) refused.push(elementName(doc, id));
+        else applyPlan(doc, plan, apply);
+      });
+    });
+    if (refused.length) this.notice.set(`${refused.length} shape${refused.length === 1 ? '' : 's'} couldn’t move: ${refused.join(', ')}`);
+  }
+
+  // A delta in root user units, in the element's parent's units (through the canvas's measurements).
+  #rootDelta(id: NodeId, d: Point): Point | null {
+    const doc = this.#doc!;
+    const parent = doc.nodes.get(id)!.parent!;
+    const m = this.#ports.canvas.measure([doc.root, parent]);
+    const root = m.get(doc.root)?.toHost ?? (this.#box ? rootToHostMatrix(this.#box, this.#viewport, this.#M) : null);
+    const p = m.get(parent)?.toHost;
+    const inv = p && invert(linear(p));
+    if (!root || !inv) return null;
+    const [x, y] = applyM(multiply(inv, linear(root)), d.x, d.y);
+    return { x, y };
   }
 
   #restack(label: string, dir: 1 | -1): void {
@@ -1700,6 +1812,16 @@ interface HandleDrag {
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
+const unionRect = (bs: readonly Rect[]): Rect => {
+  const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));
+  return { x, y, width: Math.max(...bs.map((b) => b.x + b.width)) - x, height: Math.max(...bs.map((b) => b.y + b.height)) - y };
+};
+/** How the notices name an element: its id, else its tag. */
+function elementName(doc: Doc, id: NodeId): string {
+  const n = doc.nodes.get(id) as ElementNode;
+  const own = attrValue(doc, n, null, 'id');
+  return own ? `#${own}` : `<${n.qname}>`;
+}
 const isIdentity = (m: Affine): boolean => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
 const PILL_LONG = 44; // px: a guide's pill, 44 along its guide and 20 across, picked over 44 × 44
 /** The guide whose pill a press at `at` takes: within its 44 × 44 pick area, the nearest. */

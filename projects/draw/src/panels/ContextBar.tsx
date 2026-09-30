@@ -6,8 +6,8 @@
 // The selection's actions at 440 pt (P1-M1): the label, then six 44 pt icon buttons: Deselect,
 // Select more (a toggle), Bring forward, Send back, Delete and More. With only the root selected
 // (from the code), Forward, Back and Delete are disabled. Edit source doesn't fit beside them, so
-// it lives in the More sheet, with Select all (S4 adds Duplicate, Group, Ungroup, Select group,
-// Align and Distribute there).
+// it lives in the More sheet, with Duplicate, Group, Ungroup, Select group, Select all, Align (six
+// ways) and Distribute (two).
 
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Editor } from '../editor.ts';
@@ -128,6 +128,11 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
     close();
     act();
   };
+  const row = (label: string, act: () => void) => (
+    <button key={label} type="button" className="ds-btn draw-more-row" onClick={then(act)}>
+      {label}
+    </button>
+  );
   return (
     <Modal title="More" onClose={close} done mono={false}>
       <div className="draw-more">
@@ -136,9 +141,25 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
             Edit source
           </button>
         )}
-        <button type="button" className="ds-btn draw-more-row" onClick={then(() => editor.selectAll())}>
-          Select all
-        </button>
+        {row('Duplicate', () => editor.duplicate())}
+        {row('Group', () => editor.group())}
+        {row('Ungroup', () => editor.ungroup())}
+        {row('Select group', () => editor.selectGroup())}
+        {row('Select all', () => editor.selectAll())}
+        <p className="draw-subhead">Align</p>
+        <div className="draw-more-grid">
+          {row('Align left', () => editor.align('left'))}
+          {row('Align centre', () => editor.align('center'))}
+          {row('Align right', () => editor.align('right'))}
+          {row('Align top', () => editor.align('top'))}
+          {row('Align middle', () => editor.align('middle'))}
+          {row('Align bottom', () => editor.align('bottom'))}
+        </div>
+        <p className="draw-subhead">Distribute</p>
+        <div className="draw-more-grid">
+          {row('Distribute horizontally', () => editor.distribute('h'))}
+          {row('Distribute vertically', () => editor.distribute('v'))}
+        </div>
       </div>
     </Modal>
   );
