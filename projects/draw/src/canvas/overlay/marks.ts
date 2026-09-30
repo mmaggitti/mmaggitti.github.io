@@ -1,7 +1,9 @@
 // The overlay's SVG marks, drawn from the model (src/interact/overlay-model.ts): selection outlines,
 // the marquee, coordinate guides, snap lines, the user's guides and their pills, the local grid,
-// the rotation guide and the handles, with SVG Lab's look. Every element is reused between frames
-// (a drag frame changes attributes, never the element list), and only what changed is written.
+// the rotation guide and the handles, with SVG Lab's look. The model is in host px; every
+// coordinate written here is in the overlay's own px (the host's offset added), so an outline's
+// points read as where it is drawn. Every element is reused between frames (a drag frame changes
+// attributes, never the element list), and only what changed is written.
 
 import type { Handle, Label, Line, OverlayModel } from '../../interact/overlay-model.ts';
 import type { Point } from '../viewport.ts';
@@ -89,11 +91,15 @@ export class Marks {
     this.#labels = new Pool(r, 'text', 'draw-mark-label');
   }
 
+  #o: Point = { x: 0, y: 0 }; // the host's top-left in the overlay's px
+
   /** Draw the model, `offset` being the host's top-left in the overlay's own px. */
   draw(model: OverlayModel, offset: Point, hostWidth: number, hostHeight: number): void {
-    put(this.#root, 'transform', `translate(${n2(offset.x)} ${n2(offset.y)})`);
+    this.#o = offset;
+    const X = (v: number) => n2(v + offset.x);
+    const Y = (v: number) => n2(v + offset.y);
     const outlines = this.#outlines.take(model.outlines.length);
-    model.outlines.forEach((o, i) => put(outlines[i], 'points', o.quad.map((p) => `${n2(p.x)},${n2(p.y)}`).join(' ')));
+    model.outlines.forEach((o, i) => put(outlines[i], 'points', o.quad.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')));
     const local = model.localGrid;
     this.#lines(this.#localGrid, local?.lines ?? []);
     this.#lines(this.#localAxes, local?.axes ?? []);
@@ -102,8 +108,8 @@ export class Marks {
     this.#lines(this.#guides, model.guides.map((g) => (g.axis === 'v' ? { from: { x: g.at, y: -offset.y }, to: { x: g.at, y: hostHeight + offset.y } } : { from: { x: -offset.x, y: g.at }, to: { x: hostWidth + offset.x, y: g.at } })));
     const [m] = this.#marquee.take(model.marquee ? 1 : 0);
     if (m && model.marquee) {
-      put(m, 'x', n2(model.marquee.x));
-      put(m, 'y', n2(model.marquee.y));
+      put(m, 'x', X(model.marquee.x));
+      put(m, 'y', Y(model.marquee.y));
       put(m, 'width', n2(model.marquee.width));
       put(m, 'height', n2(model.marquee.height));
     }
@@ -111,8 +117,8 @@ export class Marks {
     const pills = this.#pills.take(model.guides.length);
     model.guides.forEach((g, i) => {
       const [w, h] = g.axis === 'v' ? [20, 44] : [44, 20];
-      put(pills[i], 'x', n2(g.pill.x - w / 2));
-      put(pills[i], 'y', n2(g.pill.y - h / 2));
+      put(pills[i], 'x', X(g.pill.x - w / 2));
+      put(pills[i], 'y', Y(g.pill.y - h / 2));
       put(pills[i], 'width', String(w));
       put(pills[i], 'height', String(h));
       put(pills[i], 'rx', '10');
@@ -123,16 +129,18 @@ export class Marks {
   }
 
   #lines(pool: Pool, lines: readonly Line[]): void {
+    const { x, y } = this.#o;
     const els = pool.take(lines.length);
     lines.forEach((l, i) => {
-      put(els[i], 'x1', n2(l.from.x));
-      put(els[i], 'y1', n2(l.from.y));
-      put(els[i], 'x2', n2(l.to.x));
-      put(els[i], 'y2', n2(l.to.y));
+      put(els[i], 'x1', n2(l.from.x + x));
+      put(els[i], 'y1', n2(l.from.y + y));
+      put(els[i], 'x2', n2(l.to.x + x));
+      put(els[i], 'y2', n2(l.to.y + y));
     });
   }
 
-  #handles(hs: readonly Handle[]): void {
+  #handles(list: readonly Handle[]): void {
+    const hs = list.map((h) => ({ ...h, at: { x: h.at.x + this.#o.x, y: h.at.y + this.#o.y } }));
     const squares = hs.filter((h) => HANDLE[h.kind][0] !== 'circle');
     const circles = hs.filter((h) => HANDLE[h.kind][0] === 'circle');
     const sq = this.#squares.take(squares.length);
@@ -168,8 +176,8 @@ export class Marks {
   #text(labels: readonly Label[]): void {
     const els = this.#labels.take(labels.length);
     labels.forEach((l, i) => {
-      put(els[i], 'x', n2(l.at.x));
-      put(els[i], 'y', n2(l.at.y));
+      put(els[i], 'x', n2(l.at.x + this.#o.x));
+      put(els[i], 'y', n2(l.at.y + this.#o.y));
       put(els[i], 'text-anchor', l.anchor);
       if (els[i].textContent !== l.text) els[i].textContent = l.text;
     });

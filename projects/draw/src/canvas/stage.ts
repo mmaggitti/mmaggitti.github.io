@@ -1,8 +1,10 @@
 // The canvas's input, framework-free: Pointer Events through the gesture machine, the wheel, and
 // the host's size, turned into the editor's navigation and the Select tool.
 //
-// - One finger, the mouse or the Pencil is the tool: a tap selects what is under it, found with the
-//   shadow root's own hit test and mapped back to its NodeId by the renderer.
+// - One finger, the mouse or the Pencil is the tool, fed to the editor's pointer API (down, drag,
+//   up, cancel): what is under it is the shadow root's own hit test, every element there topmost
+//   first (elementsFromPoint, or elementFromPoint where a shadow root has no such method: feature-
+//   detected, never by browser), mapped back to NodeIds by the renderer. ⇧, ⌘ or Ctrl adds.
 // - Two fingers pinch and pan the view; a quick two-finger tap is undo.
 // - The wheel pans; with ctrl (a trackpad pinch, or ctrl and the wheel) it zooms about the pointer.
 // - A press on the app's own controls over the drawing (.draw-chrome: Play, Files) is theirs.
@@ -11,9 +13,14 @@
 //   for the whole document.
 // It only listens and reads; it makes no DOM (tools/check-sinks.mjs).
 
+import type { NodeId } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../editor.ts';
 import { GestureMachine, type GestureEvent, type PointerKind } from './gestures.ts';
 import type { Renderer } from './renderer.ts';
+
+/** Which hit test the canvas uses: every element under a point, or only the topmost. */
+export const hitPath = (): 'elementsFromPoint' | 'elementFromPoint' =>
+  typeof ShadowRoot !== 'undefined' && typeof ShadowRoot.prototype.elementsFromPoint === 'function' ? 'elementsFromPoint' : 'elementFromPoint';
 
 /** Wheel pixels per doubling of the zoom (a notch of most mouse wheels). */
 export const WHEEL_PER_DOUBLING = 100;
@@ -83,11 +90,17 @@ export class Stage {
   #gesture(g: GestureEvent, e: PointerEvent): void {
     const ed = this.#editor;
     switch (g.type) {
-      case 'tool-tap': {
-        const hit = this.#shadow.elementFromPoint(e.clientX, e.clientY);
-        ed.tapCanvas(this.#renderer.idFor(hit) ?? null);
-        return;
-      }
+      case 'tool-down':
+        return ed.pointerDown(g.at, this.#hits(e.clientX, e.clientY), { add: e.shiftKey || e.metaKey || e.ctrlKey });
+      case 'tool-drag-start':
+        return ed.pointerDrag(g.at, g.held);
+      case 'tool-drag':
+        return ed.pointerDrag(g.at);
+      case 'tool-drag-end':
+      case 'tool-tap':
+        return ed.pointerUp(g.at);
+      case 'tool-cancel':
+        return ed.pointerCancel();
       case 'nav-start':
         return ed.navStart();
       case 'nav':
@@ -96,8 +109,18 @@ export class Stage {
         return ed.navEnd();
       case 'two-finger-tap':
         return ed.undo();
-      // Tool drags belong to P1's tools (move, marquee, pen); Select has none yet.
     }
+  }
+
+  /** The drawn nodes under a client point, topmost first, each once. */
+  #hits(x: number, y: number): NodeId[] {
+    const els = hitPath() === 'elementsFromPoint' ? this.#shadow.elementsFromPoint(x, y) : [this.#shadow.elementFromPoint(x, y)];
+    const out: NodeId[] = [];
+    for (const el of els) {
+      const id = this.#renderer.idFor(el);
+      if (id !== undefined && !out.includes(id)) out.push(id);
+    }
+    return out;
   }
 
   #wheel(e: WheelEvent): void {

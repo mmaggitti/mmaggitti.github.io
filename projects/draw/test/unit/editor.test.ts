@@ -739,3 +739,147 @@ test('a render error: the whole drawing is drawn again from the model; if that f
   assert.equal(r.editor.canvasError.get(), null, 'which works now, so the message goes');
   assert.ok(r.editor.source().includes('cx="213"'), 'undo carried on through it');
 });
+
+// ── P1-M1: the pointer (decision 7) ────────────────────────────────────────────────────────────
+
+const SHAPES = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+  <rect id="b" x="40" y="10" width="10" height="10"/>
+  <g id="g"><circle id="c" cx="70" cy="70" r="5"/></g>
+  <rect id="k" x="10" y="60" width="10" height="10" draw:locked="true"/>
+  <line id="l" x1="10" y1="90" x2="90" y2="90" stroke="#000"/>
+</svg>`;
+const idOf = (r: Rig, id: string): NodeId => element(doc(r), (n) => n.attrs.some((a) => a.local === 'id' && a.raw === id)).id;
+/** Host px of a point in the root's user units (the fakes' camera: the root's box, M). */
+function hostAt(r: Rig, x: number, y: number) {
+  const { box, viewport, M } = r.editor.rootBox;
+  const k = box!.width / viewport.width;
+  return { x: box!.left + k * (M[0] * x + M[4]), y: box!.top + k * (M[3] * y + M[5]) };
+}
+const pxPerUnit = (r: Rig) => (r.editor.rootBox.box!.width / r.editor.rootBox.viewport.width) * r.editor.rootBox.M[0];
+const sel = (r: Rig) => [...r.editor.selection.get()].sort();
+function tap(r: Rig, at: { x: number; y: number }, hits: NodeId[], add = false) {
+  r.editor.pointerDown(at, hits, { add });
+  r.editor.pointerUp(at);
+}
+function drag(r: Rig, from: { x: number; y: number }, to: { x: number; y: number }, hits: NodeId[], opts: { held?: boolean; add?: boolean; frames?: number } = {}) {
+  r.editor.pointerDown(from, hits, { add: !!opts.add });
+  const n = opts.frames ?? 4;
+  for (let i = 1; i <= n; i++) r.editor.pointerDrag({ x: from.x + ((to.x - from.x) * i) / n, y: from.y + ((to.y - from.y) * i) / n }, i === 1 && !!opts.held);
+  r.editor.pointerUp(to);
+}
+
+test('a tap selects the shape itself; Select more or ⇧ toggles it; empty canvas clears (and Select more turns off)', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b, c] = ['a', 'b', 'c'].map((id) => idOf(r, id));
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a]);
+  tap(r, hostAt(r, 70, 70), [c]);
+  assert.deepEqual(sel(r), [c], 'the circle itself, not its group (decision 7)');
+  tap(r, hostAt(r, 45, 15), [b], true);
+  assert.deepEqual(sel(r), [b, c].sort(), '⇧ adds');
+  tap(r, hostAt(r, 45, 15), [b], true);
+  assert.deepEqual(sel(r), [c], '⇧ again takes it out');
+  r.editor.selectMore.set(true);
+  tap(r, hostAt(r, 15, 15), [a]);
+  assert.deepEqual(sel(r), [a, c].sort(), 'Select more adds');
+  tap(r, hostAt(r, 30, 45), []);
+  assert.deepEqual(sel(r), [a, c].sort(), 'with Select more an empty tap does nothing');
+  r.editor.selectMore.set(false);
+  tap(r, hostAt(r, 30, 45), []);
+  assert.deepEqual(sel(r), [], 'an empty tap clears');
+  assert.equal(r.editor.source(), SHAPES, 'taps change nothing in the file');
+  assert.equal(r.editor.history.get().canUndo, false);
+});
+
+test('a tap near a hairline takes it (22 px plus half its stroke); locked shapes are skipped', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const near = hostAt(r, 50, 90);
+  const reach = 22 + pxPerUnit(r) / 2; // 22 px and half its 1-unit stroke
+  tap(r, { x: near.x, y: near.y - reach + 0.5 }, []);
+  assert.deepEqual(sel(r), [idOf(r, 'l')], 'within 22 px and half its stroke of the line');
+  tap(r, { x: near.x, y: near.y - reach - 0.5 }, []);
+  assert.deepEqual(sel(r), [], 'beyond it, nothing');
+  tap(r, hostAt(r, 15, 65), [idOf(r, 'k')]);
+  assert.deepEqual(sel(r), [], 'a locked shape takes no tap: the canvas under it is empty');
+});
+
+test('a drag on an unselected shape selects and moves it, as one history entry, by whole units', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  const k = pxPerUnit(r);
+  drag(r, from, { x: from.x + 7.4 * k, y: from.y - 3.6 * k }, [a]);
+  assert.deepEqual(sel(r), [a], 'it is selected');
+  assert.equal(r.editor.source(), SHAPES.replace('<rect id="a" x="10" y="10"', '<rect id="a" x="17" y="6"'), 'moved by the rounded delta, nothing else changed');
+  assert.deepEqual(r.editor.history.get().undoLabel, 'Move');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(r.editor.history.get().canUndo, false, 'one entry for the whole gesture');
+});
+
+test('a drag on a selected shape moves the whole selection; one inside a selected group moves the group', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b, g, c] = ['a', 'b', 'g', 'c'].map((id) => idOf(r, id));
+  r.editor.select([a, b]);
+  const from = hostAt(r, 45, 15);
+  const k = pxPerUnit(r);
+  drag(r, from, { x: from.x + 5 * k, y: from.y + 5 * k }, [b]);
+  assert.equal(r.editor.source(), SHAPES.replace('x="10" y="10"', 'x="15" y="15"').replace('x="40" y="10"', 'x="45" y="15"'));
+  assert.deepEqual(sel(r), [a, b].sort());
+  r.editor.select([g]);
+  const at = hostAt(r, 70, 70);
+  drag(r, at, { x: at.x + 2 * k, y: at.y }, [c]);
+  assert.deepEqual(sel(r), [g], 'the group stays selected');
+  assert.ok(r.editor.source().includes('<g id="g" transform="translate(2 0)">'), 'a group moves by translate');
+});
+
+test('an empty-canvas drag and a hold-drag draw a marquee that takes only what it wholly encloses', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), []);
+  assert.deepEqual(sel(r), [a], 'A inside');
+  drag(r, hostAt(r, 5, 5), hostAt(r, 45, 25), []);
+  assert.deepEqual(sel(r), [a], 'B half inside is not taken');
+  r.editor.select([]);
+  drag(r, hostAt(r, 42, 12), hostAt(r, 55, 25), [b], { held: true });
+  assert.deepEqual(sel(r), [], 'a hold-drag from B draws a marquee (B is not wholly inside it)');
+  assert.equal(r.editor.source(), SHAPES, 'and moves nothing');
+  drag(r, hostAt(r, 35, 5), hostAt(r, 55, 25), [b], { held: true });
+  assert.deepEqual(sel(r), [b], 'one around B takes it');
+  drag(r, hostAt(r, 5, 5), hostAt(r, 25, 25), [], { add: true });
+  assert.deepEqual(sel(r), [a, b].sort(), 'with ⇧ a second marquee adds');
+  drag(r, hostAt(r, 5, 55), hostAt(r, 25, 75), []);
+  assert.deepEqual(sel(r), [], 'a locked shape is not taken');
+  const at = hostAt(r, 30, 45);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerDrag({ x: at.x + 20, y: at.y + 3 });
+  r.editor.pointerUp({ x: at.x + 20, y: at.y + 3 });
+  assert.deepEqual(sel(r), [], 'a marquee under 5 px in either direction takes nothing');
+  assert.equal(r.editor.history.get().canUndo, false, 'marquees are never history');
+});
+
+test('a cancelled move restores the file byte for byte and records nothing; a locked shape drags a marquee', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  const from = hostAt(r, 15, 15);
+  r.editor.pointerDown(from, [a], { add: false });
+  r.editor.pointerDrag({ x: from.x + 30, y: from.y });
+  r.editor.pointerDrag({ x: from.x + 60, y: from.y });
+  assert.notEqual(r.editor.source(), SHAPES, 'test setup: it moved live');
+  r.editor.pointerCancel();
+  assert.equal(r.editor.source(), SHAPES);
+  assert.equal(r.editor.history.get().canUndo, false);
+  drag(r, hostAt(r, 15, 65), hostAt(r, 30, 80), [idOf(r, 'k')]);
+  assert.equal(r.editor.source(), SHAPES, 'the locked shape did not move');
+  r.editor.select([idOf(r, 'k')]);
+  const k = hostAt(r, 15, 65);
+  drag(r, k, { x: k.x + 30, y: k.y }, [idOf(r, 'k')]);
+  assert.equal(r.editor.source(), SHAPES, 'selected from the code, it still refuses a move on the canvas');
+});

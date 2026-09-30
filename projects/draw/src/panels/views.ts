@@ -48,6 +48,7 @@ export class Views {
         const b = this.host?.getBoundingClientRect();
         return b ? { width: b.width, height: b.height } : { width: 0, height: 0 };
       },
+      remPx: () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 12,
       sinkReady,
     };
   }

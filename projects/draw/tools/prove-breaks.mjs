@@ -1747,6 +1747,16 @@ const BREAKS = [
     file: 'projects/draw/src/interact/overlay-model.ts', from: '  const want = GRID_MIN_PX / pxPerUnit;', to: '  const want = 1 / pxPerUnit;',
     run: drawTests('overlay-model.test.ts'), expect: /✖ the grid step is the smallest 1, 2 or 5/,
   },
+  {
+    id: 'B329', what: '`held` ignores the time (a hold-drag reads as an ordinary drag)',
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'held: e.t - tr.t0 >= HOLD_MS', to: 'held: false',
+    run: drawTests('viewport.test.ts'), expect: /✖ a drag that starts after the pointer was held still for 450 ms is held/,
+  },
+  {
+    id: 'B330', what: 'a drag on an unselected shape only selects it (no move)',
+    file: 'projects/draw/src/editor.ts', from: '    if (!selected) this.select(g.add ? [...sel, g.target] : [g.target]);', to: "    if (!selected) {\n      this.select(g.add ? [...sel, g.target] : [g.target]);\n      g.mode = 'none';\n      return;\n    }",
+    run: drawTests('editor.test.ts'), expect: /✖ a drag on an unselected shape selects and moves it/,
+  },
 ];
 
 const args = process.argv.slice(2);

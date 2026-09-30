@@ -20,7 +20,7 @@
 // - Every token takes the keyboard: Enter or Space does what a tap does (a number opens its sheet),
 //   and the arrow keys step a number, one history entry each.
 
-import { NS, el, parseDoc, serialize, serializeNode, type Doc, type NodeId } from '../../../engine/model/doc.ts';
+import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, type ChangeSet } from '../../../engine/commands/ops.ts';
@@ -39,7 +39,16 @@ import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
 import { rootTransform } from '../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../engine/geometry/bounds.ts';
 import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
-import { EMPTY, gridModel, gridStep, paperRect, quadOf, type CameraBox, type OverlayModel } from './interact/overlay-model.ts';
+import { EMPTY, coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type OverlayModel, type Quad } from './interact/overlay-model.ts';
+import { snapStep, stepDecimals, toStep } from './interact/snap.ts';
+import { applyPlan, movesBy, planMove, ROOT_MOVE, type Plan } from '../../../engine/geometry/write.ts';
+import { isThin, thinHit } from '../../../engine/geometry/hit.ts';
+import { displayNone } from '../../../engine/geometry/bounds.ts';
+import type { GeoContext } from '../../../engine/geometry/ctm.ts';
+import { isLocked } from '../../../engine/model/draw-state.ts';
+import { apply as applyM, invert, multiply } from '../../../engine/values/affine.ts';
+import { parseTransform } from '../../../engine/values/transform.ts';
+import { fmt } from '../../../engine/values/number-format.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
@@ -87,6 +96,8 @@ export interface EditorPorts {
   overlay: OverlayPort;
   /** The canvas host's size in CSS pixels, read when a document opens. */
   hostSize(): Size;
+  /** The page's root font size in CSS px (what rem is on the canvas); 12 at Draw's 75% scale if absent. */
+  remPx?(): number;
   /** False when the sink can't render (no DOMPurify): then nothing opens. */
   sinkReady(): boolean;
 }
@@ -154,6 +165,8 @@ export class Editor {
   readonly motion: Store<Motion> = createStore<Motion>('still');
   /** Whether the grid is shown (a device preference the canvas sets, never in the file). */
   readonly grid: Store<boolean> = createStore(false);
+  /** Select more: taps and marquees add to the selection (a ContextBar toggle). */
+  readonly selectMore: Store<boolean> = createStore(false);
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -171,12 +184,17 @@ export class Editor {
   #fitted = true; // true until the user zooms or pans: a resize then fits again
   #navStart: View | null = null;
   #listeners = new Set<() => void>();
+  #gesture: Gesture | null = null; // the pointer's, from down to up
 
   constructor(ports: EditorPorts) {
     this.#ports = ports;
     this.focus.subscribe(() => this.#markFocus());
     this.readOnly.subscribe(() => this.#ports.code.readOnly(this.readOnly.get()));
     this.grid.subscribe(() => this.#show());
+    // Select more lasts until it is tapped off, Deselect, Escape, or the selection empties.
+    this.selection.subscribe(() => {
+      if (!this.selection.get().size && this.selectMore.get()) this.selectMore.set(false);
+    });
   }
 
   get doc(): Doc | null {
@@ -371,10 +389,9 @@ export class Editor {
 
   /** A tap on the canvas: `hit` is the drawn node under it (null: nothing drawn there). */
   tapCanvas(hit: NodeId | null): void {
-    if (!this.#doc || this.#live) return;
-    this.focus.set(null);
+    if (!this.#doc || this.#live || this.#gesture) return;
     const target = selectionTarget(this.#doc, hit);
-    this.select(target === null ? [] : [target]);
+    this.#tap(target !== null && isLocked(this.#doc, target) ? null : target, this.selectMore.get());
   }
 
   /** A tap on a code block's plain text selects the element it belongs to. */
@@ -405,7 +422,9 @@ export class Editor {
       const m = measured.get(id);
       return m ? [{ id, quad: quadOf(m.box, m.toHost) }] : [];
     });
-    return { ...EMPTY, paper, grid: this.grid.get() ? gridModel(box, vp, this.#M, this.#size, paper, this.gridStep()) : null, outlines };
+    const model: OverlayModel = { ...EMPTY, paper, grid: this.grid.get() ? gridModel(box, vp, this.#M, this.#size, paper, this.gridStep()) : null, outlines };
+    this.#gestureMarks(model, paper);
+    return model;
   }
 
   /** The grid's step in the root's user units: the smallest 1-2-5 step at least 12 px apart. */
@@ -418,6 +437,291 @@ export class Editor {
 
   #show(): void {
     this.#ports.overlay.show(this.overlayModel());
+  }
+
+  // ── the pointer: select, move, marquee (decision 7) ───────────────────────────────────────
+
+  /** Geometry's context: the root's viewport at 100% and the page's rem. */
+  get geo(): GeoContext {
+    return { viewport: this.#viewport, remPx: this.#ports.remPx?.() ?? 12 };
+  }
+
+  /** Deselect (the ContextBar's ×, Escape): the selection empties and Select more turns off. */
+  deselect(): void {
+    this.focus.set(null);
+    this.select([]);
+    this.selectMore.set(false);
+  }
+
+  /**
+   * A pointer went down on the canvas at `at` (host px) over `hits` (drawn nodes, topmost first).
+   * Nothing happens until it moves or lifts: a tap selects, a drag moves or draws a marquee.
+   */
+  pointerDown(at: Point, hits: readonly NodeId[], mods: { add: boolean }): void {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const all = this.#withThin(at, hits);
+    const target = all.map((id) => selectionTarget(doc, id)).find((t): t is NodeId => t !== null && !isLocked(doc, t)) ?? null;
+    this.#gesture = { at0: at, at, target, add: mods.add || this.selectMore.get(), mode: 'pending', move: null };
+  }
+
+  /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
+  pointerDrag(at: Point, held = false): void {
+    const g = this.#gesture;
+    if (!g || !this.#doc) return;
+    g.at = at;
+    if (g.mode === 'pending') this.#startDrag(g, held);
+    if (g.mode === 'move') this.#moveFrame(g);
+    else this.#show();
+  }
+
+  /** The pointer lifted: a tap, or the end of a drag (one history entry for a move). */
+  pointerUp(at: Point): void {
+    const g = this.#gesture;
+    if (!g) return;
+    g.at = at;
+    this.#gesture = null;
+    if (g.mode === 'pending') this.#tap(g.target, g.add);
+    else if (g.mode === 'move') this.#endMove(g, true);
+    else if (g.mode === 'marquee') this.#endMarquee(g);
+    this.#show();
+  }
+
+  /** Another finger or the Pencil took over: a move is undone, a marquee disappears. */
+  pointerCancel(): void {
+    const g = this.#gesture;
+    if (!g) return;
+    this.#gesture = null;
+    if (g.mode === 'move') this.#endMove(g, false);
+    this.#show();
+  }
+
+  /** Is a pointer gesture or a scrub under way (Escape cancels one)? */
+  get busy(): boolean {
+    return !!this.#live || !!this.#gesture?.move;
+  }
+
+  /** Escape: cancel a live drag if one is running, else deselect. */
+  escape(): void {
+    if (this.#gesture) return this.pointerCancel();
+    if (this.#live) return this.#endLive(false);
+    this.deselect();
+  }
+
+  /** Select all: what a marquee around the whole document would take. */
+  selectAll(): void {
+    if (!this.#doc || this.#live || this.#gesture) return;
+    this.focus.set(null);
+    this.select(this.#leaves(null));
+  }
+
+  // A tap: the target is selected (with Select more, or ⇧/⌘, toggled); empty canvas deselects
+  // (with Select more, or ⇧/⌘, nothing happens).
+  #tap(target: NodeId | null, add: boolean): void {
+    this.focus.set(null);
+    if (target === null) {
+      if (!add) this.deselect();
+      return;
+    }
+    const sel = this.selection.get();
+    if (!add) return this.select([target]);
+    this.select(sel.has(target) ? [...sel].filter((id) => id !== target) : [...sel, target]);
+  }
+
+  // The DOM's hits and the engine's thin-shape hit (22 px plus half the stroke): before the first
+  // DOM hit when it paints above it (later in document order), else after it.
+  #withThin(at: Point, hits: readonly NodeId[]): NodeId[] {
+    const doc = this.#doc!;
+    const box = this.#box;
+    const out = [...hits];
+    if (!box) return out;
+    const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = invert(toHost);
+    if (!inv) return out;
+    const [x, y] = applyM(inv, at.x, at.y);
+    const scale = Math.sqrt(Math.abs(toHost[0] * toHost[3] - toHost[1] * toHost[2]));
+    const thin = [...this.#elements()].filter((id) => isThin(doc, id) && outlineable(doc, id));
+    const hit = thinHit(doc, thin, { x, y }, THIN_PX, scale, this.geo);
+    if (hit === null || out.includes(hit)) return out;
+    const first = out[0];
+    if (first === undefined) return [hit];
+    const order = this.#order();
+    return (order.get(hit) ?? -1) > (order.get(first) ?? -1) ? [hit, ...out] : [first, hit, ...out.slice(1)];
+  }
+
+  *#elements(): Generator<NodeId> {
+    const doc = this.#doc!;
+    const walk = function* (id: NodeId): Generator<NodeId> {
+      const n = doc.nodes.get(id);
+      if (n?.kind !== 'element') return;
+      yield id;
+      for (const c of n.children) yield* walk(c);
+    };
+    yield* walk(doc.root);
+  }
+
+  #order(): Map<NodeId, number> {
+    const m = new Map<NodeId, number>();
+    let i = 0;
+    for (const id of this.#elements()) m.set(id, i++);
+    return m;
+  }
+
+  #startDrag(g: Gesture, held: boolean): void {
+    const doc = this.#doc!;
+    if (held || g.target === null) {
+      g.mode = 'marquee';
+      return;
+    }
+    // On a selected shape (it or an ancestor is selected) the whole selection moves; on another,
+    // it is selected first (added, with Select more or ⇧/⌘), in the same gesture.
+    const sel = this.selection.get();
+    let selected = false;
+    for (let n: NodeId | null = g.target; n !== null; n = doc.nodes.get(n)?.parent ?? null) if (sel.has(n)) selected = true;
+    if (!selected) this.select(g.add ? [...sel, g.target] : [g.target]);
+    this.focus.set(null);
+    if (!this.#writable()) {
+      g.mode = 'none';
+      return;
+    }
+    this.#startMove(g, [...this.selection.get()], 'Move');
+  }
+
+  // A move: the elements (none inside another that moves, never the root), each parent's host px
+  // → its units (from the canvas's own measurement, so a CSS transform on an ancestor still lands
+  // under the finger), and one drag for the whole gesture.
+  #startMove(g: Gesture, selection: NodeId[], label: string): void {
+    const doc = this.#doc!;
+    const ids = selection.filter((id) => id !== doc.root && attached(doc, id) && !selection.some((o) => o !== id && isInside(doc, id, o)));
+    if (!ids.length || !this.#session) {
+      if (selection.includes(doc.root)) this.notice.set(ROOT_MOVE);
+      g.mode = 'none';
+      return;
+    }
+    const locked = ids.find((id) => isLocked(doc, id));
+    if (locked !== undefined) {
+      this.notice.set(LOCKED);
+      g.mode = 'none';
+      return;
+    }
+    const parents = [...new Set(ids.map((id) => doc.nodes.get(id)!.parent!))];
+    const measured = this.#ports.canvas.measure([doc.root, ...parents]);
+    const root = measured.get(doc.root)?.toHost ?? (this.#box ? rootToHostMatrix(this.#box, this.#viewport, this.#M) : null);
+    const rootInv = root && invert(linear(root));
+    if (!root || !rootInv) {
+      g.mode = 'none';
+      return;
+    }
+    const toParent = new Map<NodeId, Affine | null>();
+    for (const p of parents) {
+      const m = measured.get(p)?.toHost;
+      toParent.set(p, m ? multiply(invert(linear(m)) ?? [0, 0, 0, 0, 0, 0], linear(root)) : null);
+    }
+    const px = Math.sqrt(Math.abs(root[0] * root[3] - root[1] * root[2]));
+    const step = snapStep(px);
+    g.mode = 'move';
+    g.move = { drag: this.#session.drag(label), ids, toParent, rootInv, step, delta: null, refused: null };
+  }
+
+  // The delta from where the pointer went down (so the slop's first 5 px count), in root units,
+  // rounded to the snap step.
+  #moveFrame(g: Gesture): void {
+    const m = g.move!;
+    const [rx, ry] = applyM(m.rootInv, g.at.x - g.at0.x, g.at.y - g.at0.y);
+    this.#applyMove(m, { x: toStep(rx, m.step), y: toStep(ry, m.step) });
+  }
+
+  // Every frame re-plans from the document as it was before the drag (the drag rolls the last
+  // frame back first), so rounding never accumulates. A refused element stays; the first reason
+  // is the notice.
+  #applyMove(m: MoveState, d: Point): void {
+    if (m.delta && m.delta.x === d.x && m.delta.y === d.y) return this.#show();
+    m.delta = d;
+    const doc = this.#doc!;
+    const opts = { ctx: this.geo, decimals: stepDecimals(m.step) };
+    m.drag.update((apply) => {
+      for (const id of m.ids) {
+        const t = m.toParent.get(doc.nodes.get(id)!.parent!);
+        if (!t) continue;
+        const [pdx, pdy] = applyM(t, d.x, d.y);
+        const plan: Plan = planMove(doc, id, pdx, pdy, opts);
+        if ('refused' in plan) m.refused ??= plan.refused;
+        else applyPlan(doc, plan, apply);
+      }
+    });
+    if (m.refused && this.notice.get() !== m.refused) this.notice.set(m.refused);
+  }
+
+  #endMove(g: Gesture, commit: boolean): void {
+    const m = g.move;
+    if (!m) return;
+    g.move = null;
+    if (commit) m.drag.commit();
+    else m.drag.cancel();
+    this.#bump();
+    this.#changed();
+  }
+
+  #endMarquee(g: Gesture): void {
+    const r = rectOf(g.at0, g.at);
+    if (r.width < SLOP_PX || r.height < SLOP_PX) return;
+    const inside = this.#leaves(r);
+    const sel = this.selection.get();
+    this.focus.set(null);
+    this.select(g.add ? [...new Set([...sel, ...inside])] : inside);
+  }
+
+  // The leaf shapes a marquee can take (not a container, not a text's own parts), rendered,
+  // displayed and not locked, whose screen box lies inside `r` (host px; null: anywhere).
+  #leaves(r: Rect | null): NodeId[] {
+    const doc = this.#doc!;
+    const ids = [...this.#elements()].filter((id) => {
+      const n = doc.nodes.get(id);
+      return n?.kind === 'element' && id !== doc.root && selectionTarget(doc, id) === id && !CONTAINERS.has(n.local) && !TEXT_PARTS.has(n.local) && displayNone(doc, id) !== true && !isLocked(doc, id);
+    });
+    const measured = this.#ports.canvas.measure(ids);
+    return ids.filter((id) => {
+      const m = measured.get(id);
+      if (!m) return false;
+      if (!r) return true;
+      const b = unionBox([quadOf(m.box, m.toHost)])!;
+      return b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.width <= r.x + r.width + 0.5 && b.y + b.height <= r.y + r.height + 0.5;
+    });
+  }
+
+  // The gesture's marks: the marquee, or while moving the tooltip and (for one element) the
+  // coordinate guides from the artboard's edges.
+  #gestureMarks(model: OverlayModel, paper: Rect): void {
+    const g = this.#gesture;
+    const doc = this.#doc!;
+    if (!g) return;
+    if (g.mode === 'marquee') {
+      model.marquee = rectOf(g.at0, g.at);
+      return;
+    }
+    const m = g.move;
+    if (g.mode !== 'move' || !m || !m.delta) return;
+    const measured = this.#ports.canvas.measure(m.ids);
+    const quads = m.ids.flatMap((id) => {
+      const x = measured.get(id);
+      return x ? [quadOf(x.box, x.toHost)] : ([] as Quad[]);
+    });
+    const u = unionBox(quads);
+    if (!u) return;
+    const centre = { x: u.x + u.width / 2, y: u.y + u.height / 2 };
+    const box = this.#box!;
+    const inv = invert(rootToHostMatrix(box, this.#viewport, this.#M));
+    if (!inv) return;
+    const [cx, cy] = applyM(inv, centre.x, centre.y);
+    const dec = stepDecimals(m.step);
+    let text = `x ${fmt(cx, dec)}, y ${fmt(cy, dec)}`;
+    if (m.ids.length === 1 && movesBy(doc, m.ids[0]) === 'translate') {
+      const raw = attrValueOf(doc, m.ids[0], 'transform');
+      const first = raw === null ? null : parseTransform(raw)?.items[0];
+      if (first?.fn === 'translate') text = `translate(${fmt(first.args[0], 3)} ${fmt(first.args[1] ?? 0, 3)})`;
+    }
+    model.tip = tip(text, g.at);
+    if (m.ids.length === 1) model.coords = coordGuides(centre, paper, { x: cx, y: cy }, dec, this.#size.width);
   }
 
   // ── history ────────────────────────────────────────────────────────────────────────────────
@@ -441,7 +745,7 @@ export class Editor {
 
   /** Run one named transaction; a refused edit becomes the notice and changes nothing. */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       return true;
@@ -822,6 +1126,44 @@ export class Editor {
     this.#navStart = null;
   }
 
+}
+
+/** Screen px within which a tap takes a thin shape (plus half its stroke): SVG Lab's hitThin. */
+export const THIN_PX = 22;
+const SLOP_PX = 5; // a marquee under this in either direction takes nothing
+export const LOCKED = 'It’s locked. Unlock it in Layers first.';
+const CONTAINERS = new Set(['g', 'a', 'switch', 'svg']);
+const TEXT_PARTS = new Set(['tspan', 'textPath']);
+
+interface MoveState {
+  drag: Drag;
+  ids: NodeId[];
+  toParent: Map<NodeId, Affine | null>; // root units → each parent's units (linear)
+  rootInv: Affine; // host px → root units (linear)
+  step: number;
+  delta: Point | null; // the snapped delta the last frame wrote
+  refused: string | null;
+}
+interface Gesture {
+  at0: Point; // host px where the pointer went down
+  at: Point;
+  target: NodeId | null; // what a tap selects: the topmost hit's selectable element that isn't locked
+  add: boolean; // Select more, or ⇧/⌘ on the press
+  mode: 'pending' | 'move' | 'marquee' | 'none';
+  move: MoveState | null;
+}
+
+const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
+const rectOf = (a: Point, b: Point): Rect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) });
+
+function isInside(doc: Doc, id: NodeId, ancestor: NodeId): boolean {
+  for (let n = doc.nodes.get(id)?.parent ?? null; n !== null; n = doc.nodes.get(n)?.parent ?? null) if (n === ancestor) return true;
+  return false;
+}
+
+function attrValueOf(doc: Doc, id: NodeId, local: string): string | null {
+  const n = doc.nodes.get(id);
+  return n?.kind === 'element' ? attrValue(doc, n, null, local) : null;
 }
 
 const sameTarget = (a: TokenTarget, b: TokenTarget): boolean =>
