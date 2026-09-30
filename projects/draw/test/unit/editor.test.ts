@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { descendants, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
@@ -1133,6 +1133,52 @@ test('Group puts the selection in a new <g> where the last one was; Ungroup push
   r4.editor.ungroup();
   assert.equal(r4.editor.notice.get(), 'It has opacity, which applies to the group as a whole; ungrouping would change how it looks.');
   assert.equal(r4.editor.history.get().canUndo, false);
+});
+
+test('Group refuses to nest a shape past the depth the parser opens, and every file it writes re-parses; Duplicate and Ungroup never nest deeper', () => {
+  const reparses = (r: Rig, why: string) => {
+    const back = parseDoc(r.editor.source());
+    assert.ok(back.ok, `${why}: the file no longer parses (${back.ok ? '' : back.error.message})`);
+  };
+  const DEEP = (leaf: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${'<g>'.repeat(254)}${leaf}${'</g>'.repeat(254)}</svg>`;
+  // A shape with an end tag at depth 256, the most the parser opens: one Group more is refused.
+  const r = rig();
+  const deep = DEEP('<rect id="d" x="10" y="10" width="10" height="10"></rect>');
+  assert.ok(r.editor.open(deep).ok);
+  r.editor.select([idOf(r, 'd')]);
+  r.editor.group();
+  assert.equal(r.editor.notice.get(), 'Grouping would nest it deeper than 256 levels.');
+  assert.equal(r.editor.source(), deep, 'nothing was written');
+  assert.equal(r.editor.history.get().canUndo, false);
+  // Duplicate puts the copy beside it, at its own depth; Ungroup lifts children a level.
+  r.editor.duplicate();
+  assert.equal(r.editor.history.get().undoLabel, 'Duplicate');
+  reparses(r, 'Duplicate at the limit');
+  r.editor.undo();
+  r.editor.select([doc(r).nodes.get(idOf(r, 'd'))!.parent!]);
+  r.editor.ungroup();
+  assert.equal(r.editor.history.get().undoLabel, 'Ungroup');
+  reparses(r, 'Ungroup at the limit');
+  // A shape that closes itself takes no level of its own: the group may go at 256.
+  const r2 = rig();
+  assert.ok(r2.editor.open(DEEP('<rect id="d" x="10" y="10" width="10" height="10"/>')).ok);
+  r2.editor.select([idOf(r2, 'd')]);
+  r2.editor.group();
+  assert.equal(r2.editor.history.get().undoLabel, 'Group', `${r2.editor.notice.get()}`);
+  reparses(r2, 'a group at 256 around a <rect/>');
+  // Group after Group (each new group is selected, so the next wraps it) until it is refused.
+  const r3 = rig();
+  r3.editor.open(SHAPES);
+  r3.editor.select([idOf(r3, 'a')]);
+  let groups = 0;
+  for (; groups < 300; groups++) {
+    const before = r3.editor.source();
+    r3.editor.group();
+    if (r3.editor.source() === before) break;
+    reparses(r3, `Group ${groups + 1}`);
+  }
+  assert.equal(r3.editor.notice.get(), 'Grouping would nest it deeper than 256 levels.', `refused after ${groups} groups`);
+  assert.equal(groups, 255, 'the rect closes itself: 255 groups around it (the last at depth 256), then a refusal');
 });
 
 test('Layers: Hide writes display="none" and Show gives the bytes back; Lock writes draw:locked with the declaration and Unlock gives the bytes back; Rename rewrites every reference, and refuses a bad or taken id', () => {

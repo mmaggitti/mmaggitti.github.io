@@ -2009,6 +2009,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    if (placements.length) code.place(placements);', to: '    for (const one of placements) code.place([one]);',
     run: drawTests('editor.test.ts'), expect: /✖ Bring forward and Send back swap each selected element/,
   },
+  {
+    id: 'B379', what: 'F4: Group nests a shape past the depth the parser opens (a working copy that no longer opens)',
+    file: 'projects/draw/src/interact/structure.ts', from: "  if (depthOf(doc, p!) + 1 + Math.max(0, ...ids.map((id) => height(doc, id))) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Group refuses to nest a shape past the depth the parser opens/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],

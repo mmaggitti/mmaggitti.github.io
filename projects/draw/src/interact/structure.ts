@@ -15,6 +15,7 @@ import { buildRefIndex } from '../../../../engine/model/refs.ts';
 import { DRAW_NS, isLocked } from '../../../../engine/model/draw-state.ts';
 import { cssSets } from '../../../../engine/geometry/css.ts';
 import { TokenEditError } from '../../../../engine/code/edit.ts';
+import { DEFAULT_LIMITS } from '../../../../engine/xml/cst.ts';
 
 export const ROOT_DELETE = 'The root <svg> can’t be deleted.';
 
@@ -137,13 +138,34 @@ export function duplicate(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => v
   return copies;
 }
 
-/** Why `ids` can't be grouped, or null: one parent, none the root, none locked. */
+/** How deep an element is, as the parser counts it: the root is 1. */
+function depthOf(doc: Doc, id: NodeId): number {
+  let d = 0;
+  for (let n = doc.nodes.get(id); n; n = n.parent === null ? undefined : doc.nodes.get(n.parent)) d++;
+  return d;
+}
+
+/** The levels a subtree takes, as the parser counts them: an element that closes itself (<rect/>) takes none. */
+function height(doc: Doc, id: NodeId): number {
+  const n = doc.nodes.get(id);
+  if (n?.kind !== 'element' || (n.selfClosing && !n.children.length)) return 0;
+  let h = 0;
+  for (const c of n.children) h = Math.max(h, height(doc, c));
+  return h + 1;
+}
+
+/**
+ * Why `ids` can't be grouped, or null: one parent, none the root, none locked, and nothing pushed
+ * past the depth the parser opens (a <g> puts every grouped subtree one level deeper, and a file
+ * nested past it would not open again).
+ */
 export function groupRefusal(doc: Doc, ids: readonly NodeId[]): string | null {
   if (!ids.length) return 'Select the shapes to group first.';
   if (ids.includes(doc.root)) return 'Group can’t take the root <svg>.';
   if (ids.some((id) => isLocked(doc, id))) return 'It’s locked. Unlock it in Layers first.';
   const p = doc.nodes.get(ids[0])!.parent;
   if (ids.some((id) => doc.nodes.get(id)!.parent !== p)) return 'Group needs shapes with the same parent.';
+  if (depthOf(doc, p!) + 1 + Math.max(0, ...ids.map((id) => height(doc, id))) > DEFAULT_LIMITS.maxDepth) return `Grouping would nest it deeper than ${DEFAULT_LIMITS.maxDepth} levels.`;
   return null;
 }
 
