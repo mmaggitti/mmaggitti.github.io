@@ -2120,9 +2120,9 @@ const BREAKS = [
   },
   // P1-M1 review fixes, slow.
   {
-    id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
+    id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame over 2,000 shapes costs far more than 4× one over 500)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
     file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
-    run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms at best/,
+    run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms \(the median\), [\d.]+× the \d+ ms over 500, not under 6×/,
   },
   {
     id: 'B392', what: 'F11: each keystroke in the Grid step field is its own history entry again', slow: true, checks: ['theGridStepFieldIsOneEntry'],

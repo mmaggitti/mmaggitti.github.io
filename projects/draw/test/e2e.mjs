@@ -3441,54 +3441,69 @@ async function zOrderAndDeletePatchOnlyWhatMoved(browser, origin) {
   });
 }
 
-// A large selection keeps up (the P1-M1 review, F5): with 2,000 rects selected (⌘A), each frame of
-// a drag of them all takes under 380 ms, 5× under the 1.9 s a frame took when every element read the
-// whole document's stylesheets again (the fastest of five frames, so a pause of the runner's doesn't
-// count; the code at peek, as that was measured), and the drag is one Move. With the code open,
-// Delete of them all, and its undo, leave the code listing the file exactly.
+// A large selection keeps up (the P1-M1 review, F5): a drag of every rect (⌘A) costs a frame in
+// proportion to what is selected. In one page, the median of seven frames over 2,000 selected shapes
+// is under 6× the median over 500 (linear is 4×; the quadratic code, which read the whole document's
+// stylesheets again for each element, was far past it: 1.9 s against about 150 ms) and under
+// 1,000 ms. A ratio, so a slower runner (CI's WebKit) slows both sides alike. Each drag is one Move
+// (the code at peek, as the review measured). With the code open, Delete of the 2,000, and its undo,
+// leave the code listing the file exactly.
 async function aLargeSelectionDragsWithoutStalling(browser, origin) {
-  const N = 2000;
-  const side = Math.ceil(Math.sqrt(N));
-  const cell = 1000 / side;
-  const at = (v) => (v * cell).toFixed(2);
-  const BIG = `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n${Array.from({ length: N }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n')}\n</svg>\n`;
+  const grid = (n) => {
+    const side = Math.ceil(Math.sqrt(n));
+    const cell = 1000 / side;
+    const at = (v) => (v * cell).toFixed(2);
+    return { cell, text: `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n${Array.from({ length: n }, (_, i) => `  <rect id="r${i}" x="${at(i % side)}" y="${at(Math.floor(i / side))}" width="${at(0.6)}" height="${at(0.6)}"/>`).join('\n')}\n</svg>\n` };
+  };
   await withPage(browser, origin, 956, async (page, errors) => {
-    const stats = await page.evaluate((t) => window.drawTest.render(t), BIG);
-    must(stats.ok && stats.rendered === N + 1, `test setup: the drawing rendered ${stats.rendered} elements`);
+    const selectAll = () => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+    // Opens n rects, selects them all and drags them by seven timed frames, then undoes the Move:
+    // the frames' median, in ms.
+    const median = async (n) => {
+      const { cell, text } = grid(n);
+      const stats = await page.evaluate((t) => window.drawTest.render(t), text);
+      must(stats.ok && stats.rendered === n + 1, `test setup: the drawing rendered ${stats.rendered} elements, not ${n + 1}`);
+      await selectAll();
+      must(await page.locator('.draw-label').textContent() === `${n} selected`, `test setup: Select all took "${await page.locator('.draw-label').textContent()}"`);
+      const frames = await page.evaluate((c) => {
+        const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+        const p = new DOMPoint(c * 0.3, c * 0.3).matrixTransform(svg.getScreenCTM());
+        const area = document.querySelector('.draw-canvas');
+        const fire = (type, x, y) => area.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        fire('pointerdown', p.x, p.y);
+        fire('pointermove', p.x + 8, p.y + 3); // past the slop: the move starts
+        const ms = [];
+        for (let i = 2; i <= 8; i++) {
+          const t = performance.now();
+          fire('pointermove', p.x + 8 * i, p.y + 3 * i);
+          ms.push(performance.now() - t);
+        }
+        fire('pointerup', p.x + 64, p.y + 24);
+        return ms;
+      }, cell);
+      must(await page.locator('.draw-tool', { hasText: 'Undo' }).getAttribute('aria-label') === 'Undo Move', `the drag of ${n} was not one Move`);
+      must(await page.evaluate((t) => window.drawTest.source() !== t, text), `the drag of ${n} moved nothing`);
+      await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+      must(await page.evaluate((t) => window.drawTest.source() === t, text), `the Move of ${n} did not undo to the file`);
+      return [...frames].sort((a, b) => a - b)[3];
+    };
+    await median(500); // once first, not counted: the engine warms up
+    const small = await median(500);
+    const big = await median(2000);
+    const times = `${(big / small).toFixed(1)}×`;
+    must(big < 6 * small, `a drag frame over 2000 selected shapes took ${big.toFixed(0)} ms (the median), ${times} the ${small.toFixed(0)} ms over 500, not under 6×`);
+    must(big < 1000, `a drag frame over 2000 selected shapes took ${big.toFixed(0)} ms (the median), not under 1,000`);
+    const BIG = grid(2000).text;
     const listing = () => page.evaluate(() => [...document.querySelectorAll('.draw-code .cv-block')].map((b) => b.textContent).join('') === window.drawTest.source());
-    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
-    must(await page.locator('.draw-label').textContent() === `${N} selected`, `test setup: Select all took "${await page.locator('.draw-label').textContent()}"`);
-    const frames = await page.evaluate((c) => {
-      const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
-      const p = new DOMPoint(c * 0.3, c * 0.3).matrixTransform(svg.getScreenCTM());
-      const area = document.querySelector('.draw-canvas');
-      const fire = (type, x, y) => area.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
-      fire('pointerdown', p.x, p.y);
-      fire('pointermove', p.x + 8, p.y + 3); // past the slop: the move starts
-      const ms = [];
-      for (let i = 2; i <= 6; i++) {
-        const t = performance.now();
-        fire('pointermove', p.x + 8 * i, p.y + 3 * i);
-        ms.push(performance.now() - t);
-      }
-      fire('pointerup', p.x + 48, p.y + 18);
-      return ms;
-    }, cell);
-    const fastest = Math.min(...frames);
-    must(fastest < 380, `a drag frame over ${N} selected shapes took ${fastest.toFixed(0)} ms at best (${frames.map((f) => f.toFixed(0)).join('/')}), not under 380`);
-    must(await page.locator('.draw-tool', { hasText: 'Undo' }).getAttribute('aria-label') === 'Undo Move', 'the drag of them all was not one Move');
-    must(await page.evaluate((t) => window.drawTest.source() !== t, BIG), 'the drag moved nothing');
-    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
-    must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Move did not undo to the file');
     await showCode(page);
-    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+    await selectAll();
     await page.locator('.draw-ctx-btn[aria-label="Delete"]').tap();
     must(await page.evaluate(() => window.drawTest.source()) === `<svg xmlns="${SVG_NS}" viewBox="-60 -60 1120 1120">\n</svg>\n`, 'Delete of them all left more than the root');
     must(await listing(), 'after Delete of them all, the code listing is not the file');
     await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
     must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Delete did not undo to the file');
     must(await listing(), 'after the undo of Delete, the code listing is not the file');
-    console.log(`     draw: a drag frame over ${N} selected shapes: ${fastest.toFixed(0)} ms at best`);
+    console.log(`     draw: a drag frame over 500 selected shapes: ${small.toFixed(0)} ms, over 2,000: ${big.toFixed(0)} ms (medians, ${times})`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
