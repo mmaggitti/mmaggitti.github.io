@@ -55,6 +55,11 @@ export interface RefToken extends Span {
 
 export interface TextToken extends Span {
   kind: 'text';
+  /**
+   * The URL inside a paint's url(…) (value:url/relative): the quote it is written in ('' when
+   * unquoted), which decides what it may hold (code/edit.ts tokenTextError): a URL, never CSS.
+   */
+  url?: '' | '"' | "'";
 }
 
 export type Token = NumberToken | ColorToken | EnumToken | RefToken | TextToken;
@@ -421,7 +426,7 @@ function urlRef(t: string, at: number, emit: Emit, prop: string, relative = fals
   const g = m[1] !== undefined ? 1 : m[2] !== undefined ? 2 : 3;
   const [s, e] = m.indices[g]!;
   if (e - s >= 2 && t[s] === '#') emit(at + s + 1, at + e, { kind: 'ref', prop, id: decodeFragment(t.slice(s + 1, e)) });
-  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop });
+  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop, url: g === 1 ? '"' : g === 2 ? "'" : '' });
   return m[0].length;
 }
 

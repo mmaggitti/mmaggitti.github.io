@@ -2472,7 +2472,8 @@ const BREAKS = [
   },
   {
     id: 'B465', what: 'a relative URL in a paint’s url() gets no token (the code can’t edit it)',
-    file: 'engine/code/tokens.ts', from: "  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop });\n", to: '',
+    // P1-M2 fix (F5): re-planted on the token's new data (its url flag), the same fault.
+    file: 'engine/code/tokens.ts', from: "  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop, url: g === 1 ? '\"' : g === 2 ? \"'\" : '' });\n", to: '',
     run: engineTests('code/tokens.test.ts'), expect: /✖ a relative URL \(value:url\/relative\)/,
   },
   {
@@ -2562,6 +2563,11 @@ const BREAKS = [
     id: 'B482', what: 'F1: declarations() ignores an escape inside parentheses again (it splits fill:url(#a\\);stroke:blue in two, where the browser reads one declaration)',
     file: 'engine/geometry/css.ts', from: "    else if (c === '\\\\') k += 2; // an escape: the next character is part of a name or url, never a parenthesis\n", to: '',
     run: engineTests('geometry/css.test.ts'), expect: /✖ declarations: a backslash escapes the next character/,
+  },
+  {
+    id: 'B483', what: 'F5: the relative URL token takes any one-line text again (#x);stroke:none closes the url() and writes CSS)',
+    file: 'engine/code/edit.ts', from: '      return token.url === undefined ? null : urlTextError(text, token.url);', to: '      return null;',
+    run: drawTests('inspect.test.ts'), expect: /✖ the relative URL inside a paint’s url\(\) holds a URL and nothing else/,
   },
 ];
 

@@ -598,3 +598,41 @@ test('a typed paint with a backslash inside url() is refused and writes nothing,
   assert.equal(e.source(), F, 'nothing written');
   assert.equal(e.styleRow('stroke')?.value, 'blue');
 });
+
+// A relative URL inside a paint's url() is a text token, and the Text sheet writes what is typed
+// there: it must stay a URL, or the url() ends early and what follows is CSS (fill:url(#x);stroke:none).
+test('the relative URL inside a paint’s url() holds a URL and nothing else: #x);stroke:none typed into its token is refused and writes nothing, in style="" and in a fill attribute; a quote or a backslash where it would end the url() is refused too; other.svg#h is written, one entry', () => {
+  const F = svg(`<rect id="r" width="10" height="10" style="fill:url(other.svg#g);stroke:blue"/>
+  <rect id="s" x="20" width="10" height="10" fill="url('lib/other.svg#g') red"/>`);
+  const listing = new Map<string, ViewBlock>();
+  const ports = fakePorts();
+  ports.code = { ...ports.code, set: (bs) => { listing.clear(); for (const b of bs) listing.set(b.key, b); }, patch: (b) => void (listing.has(b.key) && listing.set(b.key, b)) };
+  const e = bind(ports, new EditorClass(ports));
+  assert.ok(e.open(F).ok);
+  const tap = (id: string) => {
+    const n = idOf(e, id);
+    const block = listing.get(`${n}:start`) ?? listing.get(`${n}:leaf`);
+    const token = block?.tokens.find((t) => t.kind === 'text');
+    assert.ok(block && token, `test setup: #${id}'s relative URL is a text token`);
+    e.tapToken(block, token);
+    assert.equal(e.sheet.get()?.kind, 'text');
+  };
+  for (const [id, bad] of [['r', ['#x);stroke:none', 'a b', "a'", 'a"', 'a(', 'a\\']], ['s', ["#x') red;stroke:none", 'a\\', "a'b", 'a\nb']]] as const) {
+    tap(id);
+    for (const text of bad) assert.ok('error' in e.sheetInput(text), `#${id}: ${JSON.stringify(text)} is refused`);
+    e.closeSheet();
+    assert.equal(e.source(), F, `#${id}: nothing written`);
+  }
+  assert.equal(e.history.get().canUndo, false, 'no entry either');
+  tap('r');
+  assert.ok('text' in e.sheetInput('other.svg#h'));
+  e.closeSheet();
+  assert.equal(e.source(), F.replace('fill:url(other.svg#g)', 'fill:url(other.svg#h)'), 'only the URL’s characters');
+  tap('s');
+  assert.ok('text' in e.sheetInput('a"b'), 'a double quote inside single quotes is a URL character');
+  e.closeSheet();
+  assert.ok(e.source().includes(`fill="url('a&quot;b') red"`), e.source());
+  e.undo();
+  e.undo();
+  assert.equal(e.source(), F, 'one entry each');
+});
