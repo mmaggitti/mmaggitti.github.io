@@ -14,8 +14,9 @@
 //   attribute values every literal tab and line end read as a space (§3.3.3).
 // - wellFormedRefs refuses the references a browser refuses (a bare &, a reference without ';', a
 //   character reference to a character XML doesn't allow, an undeclared entity, an external entity
-//   in an attribute value, an entity whose text isn't well-formed where it is used), each at its
-//   place. An undeclared entity in a document whose DOCTYPE references a parameter entity is over
+//   in an attribute value, an unparsed (NDATA) entity anywhere, an entity whose text isn't
+//   well-formed where it is used), each at its place. An entity declared twice is its first
+//   declaration, as in XML, and entity names are the lexer's names. An undeclared entity in a document whose DOCTYPE references a parameter entity is over
 //   Draw's limits instead: the parameter entity may declare it, and Draw never expands one. So is
 //   one under a DOCTYPE that names an XHTML DTD, where browsers supply HTML's named references
 //   (&nbsp;, &copy;…) themselves and Draw doesn't.
