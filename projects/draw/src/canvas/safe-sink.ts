@@ -237,12 +237,15 @@ export function cameraSheet(): CSSStyleSheet {
 
 /**
  * Place the rendered root: exactly one rule, the box's offset and size (fmt throws on a number
- * that isn't finite), or with no box the host filled.
+ * that isn't finite), or with no box the host filled. The rule is in a cascade layer: a layered
+ * !important outranks the file's own unlayered !important, however specific (#root { left: 100px
+ * !important } would move the drawing off its paper). A file's own @layer with !important can still
+ * win (the engine README's known limits).
  */
 export function placeRoot(sheet: CSSStyleSheet, box: CameraBox | null): void {
   const px = (n: number) => `${fmt(n, 3)}px`;
   const [left, top, width, height] = box ? [px(box.left), px(box.top), px(box.width), px(box.height)] : ['0', '0', '100%', '100%'];
-  sheet.replaceSync(`:host > svg { position: absolute !important; left: ${left} !important; top: ${top} !important; width: ${width} !important; height: ${height} !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: content-box !important; overflow: visible !important }`);
+  sheet.replaceSync(`@layer draw-camera { :host > svg { position: absolute !important; left: ${left} !important; top: ${top} !important; width: ${width} !important; height: ${height} !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: content-box !important; overflow: visible !important } }`);
 }
 
 /**

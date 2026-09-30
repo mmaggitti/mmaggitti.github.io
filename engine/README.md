@@ -85,6 +85,13 @@ Fixed in P1-M1:
   viewport transform into every CTM, so the engine and the canvas agree on where things are
   (e2e `geometryMatchesTheBrowser`).
 
+A known limit of that camera: the canvas places the drawn root with `!important` declarations in a
+cascade layer of its own (`draw-camera`, `src/canvas/safe-sink.ts` `placeRoot`), which outrank the
+file's own unlayered `!important`, however specific (`#root { left: 100px !important }` leaves the
+drawing on its paper: e2e `aFilesOwnCssCantMoveItsDrawing`). A file that sets the root's position or
+size with `!important` inside an `@layer` of its own can still move the drawing off its paper: its
+layer comes first, and for `!important` declarations the first layer wins.
+
 Fixed in P1-M0:
 - well-formedness is as strict as a browser's (ledger row `syntax:strict-well-formedness`), so such
   a file opens as read-only source, marked where the browser's parser stops. Each is refused at its

@@ -2097,6 +2097,11 @@ const BREAKS = [
     run: DRAW_E2E, expect: /theSnapSheetIsReachableOnThePhone: (Done is at .* outside the|on top of (Done|the Grid step field) is)/,
   },
   {
+    id: 'B396', what: "F17: the camera's rule leaves its cascade layer (a file's #id rule with !important moves the drawing off its paper)", slow: true, checks: ['aFilesOwnCssCantMoveItsDrawing'],
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: /`@layer draw-camera \{ (:host > svg \{[^`]*\}) \}`/, to: '`$1`',
+    run: DRAW_E2E, expect: /aFilesOwnCssCantMoveItsDrawing: the file's #r \{ left, top !important \} moved the drawing/,
+  },
+  {
     id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
     file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
     run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup gave the clip the group's transform/,

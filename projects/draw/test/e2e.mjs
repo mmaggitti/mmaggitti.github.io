@@ -217,6 +217,7 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(aLargeSelectionDragsWithoutStalling);
   await check(theGridStepFieldIsOneEntry);
   await check(theSnapSheetIsReachableOnThePhone);
+  await check(aFilesOwnCssCantMoveItsDrawing);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -3561,6 +3562,24 @@ async function theSnapSheetIsReachableOnThePhone(browser, origin) {
     await page.locator('.draw-modal-done').tap();
     await page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 5000 });
     must(await page.locator('.draw-modal').count() === 0, 'Done did not close the Snap sheet');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A file's own CSS can't move its drawing off the paper (the P1-M1 review, F17): with
+// #r { left: 100px !important; top: 50px !important } on its root (an id outranks :host > svg), the
+// rect that fills its viewBox still lies exactly on the paper, because the camera's rule is in a
+// cascade layer. (A file's own @layer with !important still wins: the engine README's known limits.)
+async function aFilesOwnCssCantMoveItsDrawing(browser, origin) {
+  const T = `<svg id="r" xmlns="${SVG_NS}" viewBox="0 0 100 100"><style>#r { left: 100px !important; top: 50px !important }</style><rect id="fill" width="100" height="100" fill="#2a9d8f"/></svg>`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const r = await page.evaluate(() => ({
+      drawing: document.querySelector('.draw-host').shadowRoot.getElementById('fill').getBoundingClientRect().toJSON(),
+      paper: document.querySelector('.draw-paper').getBoundingClientRect().toJSON(),
+    }));
+    must(boxNear(r.drawing, r.paper, 1), `the file's #r { left, top !important } moved the drawing to ${rect(r.drawing)}, off its paper at ${rect(r.paper)}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
