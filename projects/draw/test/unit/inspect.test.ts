@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { descendants, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../../src/editor.ts';
 import { RULE_SETS } from '../../../../engine/style/write.ts';
-import { dashPresets } from '../../src/style-edit.ts';
+import { dashPresets, paintKinds } from '../../src/style-edit.ts';
+import { colorChoices, styleSlot } from '../../src/color-choices.ts';
 import { pickAlpha, pickHue, pickSV, pickerStart, pickerText } from '../../src/color-picker.ts';
 import { fakeEditor } from './fakes.ts';
 
@@ -154,6 +155,28 @@ test('the stroke sheet: a stroke given to a shape with none also gets the width-
   select(big, 'a');
   big.setStyle('stroke', '#264653');
   assert.ok(big.source().includes('stroke="#264653" stroke-width="5"'), big.source());
+});
+
+test('a line: Inspect offers it no Fill row and its stroke no None, as its stroke sheet offers no none chip (SVG Lab’s styleAttrs and L1885); a selection with a line and a rect keeps Fill, but its stroke still takes no None; the width and Cap write, one entry each', () => {
+  assert.equal(paintKinds('fill', ['line']), null);
+  assert.deepEqual(paintKinds('stroke', ['line']), ['color']);
+  assert.deepEqual(paintKinds('fill', ['line', 'rect']), ['none', 'color'], 'the rect has a fill');
+  assert.deepEqual(paintKinds('stroke', ['line', 'rect']), ['color'], 'none would make the line vanish');
+  assert.deepEqual(paintKinds('stroke', ['polyline']), ['none', 'color'], 'only a line drops it');
+  const chips = (locals: string[]) => colorChoices(styleSlot('stroke', locals), 'red').chips.map((c) => c.value);
+  assert.ok(!chips(['line']).includes('none') && !chips(['rect', 'line']).includes('none') && chips(['rect']).includes('none'));
+  const F = svg('<line id="l" x1="10" y1="10" x2="90" y2="60" stroke="#e76f51" stroke-width="4"/>');
+  const e = opened(F);
+  select(e, 'l');
+  e.fieldStart({ kind: 'style', prop: 'stroke-width' });
+  assert.equal(e.fieldInput('9'), null);
+  e.fieldEnd();
+  assert.equal(e.source(), F.replace('stroke-width="4"', 'stroke-width="9"'));
+  e.setStyle('stroke-linecap', 'round');
+  assert.equal(e.source(), F.replace('stroke-width="4"/>', 'stroke-width="9" stroke-linecap="round"/>'));
+  e.undo();
+  e.undo();
+  assert.equal(e.source(), F, 'one entry each');
 });
 
 test('the Dash presets are SVG Lab’s none, "10 6", "2 6" and "16 4 2 4", each number × k', () => {

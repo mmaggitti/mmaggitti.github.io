@@ -5393,8 +5393,10 @@ async function theColourPickerKeepsTheNotation(browser, origin) {
 
 // Three shapes selected (Select more) show their fill as Mixed; a palette colour in the Fill sheet
 // sets all three, each where it lives, in one "Set fill" that one undo takes back byte for byte; a
-// drag of the stroke-width slider is one entry; with a fourth shape selected too, whose fill a
-// <style> rule sets, the others change and the notice names the one that kept its fill.
+// drag of the stroke-width slider is one entry; More → Stroke… opens the stroke sheet over them (the
+// width-2 rule writing a width where there was none), one entry; with a fourth shape selected too,
+// whose fill a <style> rule sets, More → Fill… changes the others and the notice names the one that
+// kept its fill.
 async function aMultiSelectionEditIsOneEntry(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     must((await page.evaluate((t) => window.drawTest.render(t), STYLED)).ok, 'test setup: the file did not open');
@@ -5427,10 +5429,30 @@ async function aMultiSelectionEditIsOneEntry(browser, origin) {
     must(await undo.getAttribute('aria-label') === 'Undo Set stroke-width', `the slider's entry is ${await undo.getAttribute('aria-label')}`);
     await undo.tap();
     must(await source(page) === STYLED && await undo.isDisabled(), 'the slider drag was more than one entry');
+    // More → Stroke…: the stroke sheet over the selection; the width-2 rule gives a width to the two
+    // that had none (the circle's style="" has one); one entry.
+    await openMore(page);
+    await page.locator('.draw-more .draw-more-row', { hasText: /^Stroke…$/ }).tap();
+    await page.locator('.draw-modal .draw-hsv').waitFor();
+    must(await page.locator('.draw-modal-title').textContent() === 'stroke', `More → Stroke… opened ${await page.locator('.draw-modal-title').textContent()}`);
+    await page.locator('.draw-modal .draw-swatch[aria-label="#264653"]').tap();
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const stroked = STYLED.replace('fill="#e76f51"/>', 'fill="#e76f51" stroke="#264653" stroke-width="2"/>').replace('!important"/>', '!important" stroke="#264653"/>').replace('ry="12"/>', 'ry="12" stroke="#264653" stroke-width="2"/>');
+    must(await source(page) === stroked, `More → Stroke… over three shapes:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set stroke', `More → Stroke…'s entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source(page) === STYLED && await undo.isDisabled(), 'More → Stroke… was more than one entry');
     // A fourth, whose fill a rule sets: the others change, the notice names it.
     await tapShape(page, 'k');
     must(await label(page) === '4 selected', `test setup: ${await label(page)}`);
-    await inspectColour(page, 'fill', '#e9c46a');
+    await openMore(page); // More → Fill… this time: the same sheet as Inspect's swatch
+    await page.locator('.draw-more .draw-more-row', { hasText: /^Fill…$/ }).tap();
+    await page.locator('.draw-modal .draw-hsv').waitFor();
+    must(await page.locator('.draw-modal-title').textContent() === 'fill', `More → Fill… opened ${await page.locator('.draw-modal-title').textContent()}`);
+    await page.locator('.draw-modal .draw-swatch[aria-label="#e9c46a"]').tap();
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
     must(await source(page) === set, `with the rule-set polygon selected too, Set fill wrote:\n${await source(page)}`);
     must(await toast(page) === '1 of 4 kept their fill (<polygon#k>): Its fill is set by a <style> rule, which wins over the attribute. Editing stylesheets arrives in P2.', `the notice read ${JSON.stringify(await toast(page))}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
