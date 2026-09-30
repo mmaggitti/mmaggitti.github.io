@@ -394,3 +394,15 @@ test('SMIL: an animation renders only if what it animates renders on its target'
   assert.ok(smilTargetAllowed(animate, 'fill') && !smilTargetAllowed(animate, 'not-an-attribute'));
   assert.ok(smilTargetAllowed(find(doc, 'animateMotion'), '', rect), 'animateMotion has no attributeName');
 });
+
+test('SVG 2: href wins, so an element with href drops its xlink:href whatever either says (a relative href and a fragment xlink:href render with no template at all, as the file alone draws)', () => {
+  const doc = parse(svg('<linearGradient id="g" href="other.svg#a" xlink:href="#a"/><use href="#a" xlink:href="#b"/><use xlink:href="#b"/><image href="#i" xlink:href="data:image/png;base64,AAAA"/>'));
+  const attrOf = (e: ElementNode, ns: string | null) => e.attrs.find((a) => a.local === 'href' && a.ns === ns)!;
+  const [grad, use1, use2, image] = ['linearGradient', 'use', 'use', 'image'].map((l, i) => [...descendants(doc, doc.root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === l)[l === 'use' && i === 2 ? 1 : 0]);
+  assert.equal(renderValue(grad, attrOf(grad, NS.xlink), '#a'), null, 'the gradient’s xlink:href is dropped beside its relative href');
+  assert.equal(renderValue(grad, attrOf(grad, null), 'other.svg#a'), null, 'and the relative href never renders');
+  assert.equal(renderValue(use1, attrOf(use1, NS.xlink), '#b'), null);
+  assert.equal(renderValue(use1, attrOf(use1, null), '#a'), '#a', 'the href renders');
+  assert.equal(renderValue(use2, attrOf(use2, NS.xlink), '#b'), '#b', 'xlink:href alone still renders');
+  assert.equal(renderValue(image, attrOf(image, NS.xlink), 'data:image/png;base64,AAAA'), null);
+});

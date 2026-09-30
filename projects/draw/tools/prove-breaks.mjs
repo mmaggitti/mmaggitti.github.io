@@ -1877,7 +1877,8 @@ const BREAKS = [
   {
     id: 'B352', what: 'stripNamespaces leaves an empty Draw-made <metadata>',
     // P1-M1 fix (F1): re-anchored; what Draw made is judged by draw-ns.ts's one rule.
-    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
+    // P1-M2: re-anchored (Draw's <defs> joins the holders an export may drop; a gradient never).
+    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && isHolderKind(m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
     run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState gives every corpus file back byte for byte/,
   },
   {
@@ -2394,6 +2395,92 @@ const BREAKS = [
     from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
     to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
     run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
+  },
+  // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).
+  {
+    id: 'B452', what: 'a linear gradient takes x1 from a radial template',
+    file: 'engine/paint/gradients.ts', from: '  for (const name of GEOMETRY[kind]) take(name, kind);', to: '  for (const name of GEOMETRY[kind]) take(name);',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the chain: href before xlink:href/,
+  },
+  {
+    id: 'B453', what: 'the stops come from the gradient the paint names even when it has none (not from its template)',
+    file: 'engine/paint/gradients.ts', from: 'const holder = chain.find((n) => n.children.some((c) => isStop(doc, c))) ?? null;', to: 'const holder = chain[0];',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the chain: href before xlink:href/,
+  },
+  {
+    id: 'B454', what: 'a new gradient is named by freshId’s scheme ("linear", not SVG Lab’s "linear-1")',
+    file: 'engine/model/ids.ts', from: '    next.set(prefix, n + 1);\n    return `${prefix}-${n}`;', to: '    next.set(prefix, n + 1);\n    return n === 1 ? prefix : `${prefix}-${n}`;',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Linear on lab\/style\.svg’s circle/,
+  },
+  {
+    id: 'B455', what: 'a Draw-made <defs> left empty stays when its last gradient goes',
+    file: 'engine/paint/gradients.ts', from: "    if (n?.kind === 'element' && n.parent !== null && isDrawMadeEmpty(doc, n)) removeWithSpace(doc, h, apply);\n", to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Linear on lab\/style\.svg’s circle/,
+  },
+  {
+    id: 'B456', what: 'Make unique keeps the template link (the copy still takes from its template)',
+    file: 'engine/paint/gradients.ts', from: "  let content = '';\n", to: "  const link = templateLink(el(doc, r.id));\n  if (link) parts.push(`${link.qname}=\"${link.raw}\"`);\n  let content = '';\n",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique/,
+  },
+  {
+    id: 'B457', what: 'Make unique re-points every user of the gradient, not only this paint',
+    file: 'engine/paint/gradients.ts', from: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n', to: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n  for (const u of gradientUsers(doc).get(r.id) ?? []) repoint(doc, u.el, u.prop, own.url, gid, apply);\n',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique/,
+  },
+  {
+    id: 'B458', what: 'the gradient handles apply gradientTransform outside the bounding-box mapping (T·U, not U·T)',
+    file: 'engine/paint/handles.ts', from: '  const M = multiply(geo.toHost, multiply(U, T));', to: '  const M = multiply(geo.toHost, multiply(T, U));',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ linear and radial handles sit at toHost · U · T · p/,
+  },
+  {
+    id: 'B459', what: 'fixF is gone: a written focus is left outside 0.96 r',
+    file: 'engine/paint/handles.ts', from: '    if (d > 0.96 * rr && d > 0) {', to: '    if (false) {',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ fixF/,
+  },
+  {
+    id: 'B460', what: 'bounding-box gradient handles round to whole units (not 0.01)',
+    file: 'engine/paint/handles.ts', from: ': f.obb ? fmt(n, 2) :', to: ': f.obb ? fmt(n, 0) :',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ linear and radial handles sit at toHost · U · T · p/,
+  },
+  {
+    id: 'B461', what: 'Add stop puts the new stop at the next stop’s offset (the end), not the midpoint',
+    file: 'engine/paint/stops.ts', from: '  const mid = (o1 + o2) / 2;', to: '  const mid = o2;',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the stop editor/,
+  },
+  {
+    id: 'B462', what: 'Gloss writes r 0.5, not SVG Lab’s 0.8',
+    file: 'engine/paint/gloss.ts', from: `export const GLOSS_ATTRS = 'cx="0.35" cy="0.3" r="0.8"';`, to: `export const GLOSS_ATTRS = 'cx="0.35" cy="0.3" r="0.5"';`,
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Gloss on lab\/create-icon\.svg’s rect/,
+  },
+  {
+    id: 'B463', what: 'Gloss off leaves the gloss gradient (and its <defs>) behind',
+    file: 'engine/paint/gloss.ts', from: '  dropUnused(doc, dropped, apply);\n', to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Gloss on lab\/create-icon\.svg’s rect/,
+  },
+  {
+    id: 'B464', what: 'the template chain follows a relative href (other.svg#a) as if it were #a',
+    file: 'engine/paint/gradients.ts', from: "  if (v.length < 2 || !v.startsWith('#')) return null; // another file (value:url/relative): never followed\n  const t = ids.get(decodeFragment(v.slice(1)));", to: "  const t = ids.get(decodeFragment(v.slice(v.indexOf('#') + 1)));",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a relative URL is not followed/,
+  },
+  {
+    id: 'B465', what: 'a relative URL in a paint’s url() gets no token (the code can’t edit it)',
+    file: 'engine/code/tokens.ts', from: "  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop });\n", to: '',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a relative URL \(value:url\/relative\)/,
+  },
+  {
+    id: 'B466', what: 'the Draw-made test takes any draw:made value ("yes" counts as Draw’s)',
+    file: 'engine/model/draw-ns.ts', from: "a.local === 'made' && a.raw === 'true'", to: "a.local === 'made'",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the Draw-made predicate/,
+  },
+  {
+    id: 'B467', what: 'the Draw-made test takes a gradient holding a comment (Draw would take the file’s comment away)',
+    file: 'engine/model/draw-ns.ts', from: '  if (!isDrawMade(n) || isHolderKind(n)) return false;\n  return n.children.every((c) => {', to: '  if (!isDrawMade(n) || isHolderKind(n)) return false;\n  return true || n.children.every((c) => {',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the Draw-made predicate/,
+  },
+  {
+    id: 'B468', what: 'decision 5: the render policy keeps xlink:href beside href again (the canvas follows a template the file alone never uses)',
+    file: 'engine/policy/render-policy.ts', from: "  if (attr.ns === NS.xlink && attr.local === 'href' && el.attrs.some((a) => a.ns === null && a.local === 'href')) return null;\n", to: '',
+    run: POLICY_TESTS, expect: /✖ SVG 2: href wins/,
   },
 ];
 

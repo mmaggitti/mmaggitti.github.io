@@ -345,3 +345,17 @@ test('entity safety: an edit beside a reference leaves the reference as written'
   assert.equal(leaf.raw, 'Tom &amp; Spike');
   assertNoStraddle(doc);
 });
+
+test('a relative URL (value:url/relative): in a gradient’s href and xlink:href, in fill="url(other.svg#g) red" and in style="fill:url(\'other.svg#g\')", one text token over exactly its own characters; a #id there is still a ref; a data: URL, and an href on any other element, get no new token', () => {
+  const doc = load(`<linearGradient href="other.svg#a"/><radialGradient xlink:href=" other.svg#a "/><linearGradient href="#b"/><linearGradient href="data:image/png;base64,AAAA"/><use href="other.svg#a"/><rect fill="url(other.svg#g) red"/><rect style="fill:url('other.svg#g')"/><rect fill="url(#g)"/><rect stroke="url(&quot;x.svg#y&quot;)"/>`);
+  const kinds = (ts: Token[]) => ts.map((t) => `${t.kind}:${t.text}`);
+  assert.deepEqual(kinds(attr(doc, 'linearGradient', 'href')), ['text:other.svg#a']);
+  assert.deepEqual(kinds(attr(doc, 'radialGradient', 'href', NS.xlink)), ['text:other.svg#a'], 'inside the attribute’s whitespace');
+  assert.deepEqual(kinds(attr(doc, 'linearGradient', 'href', null, 1)), ['ref:b'], 'a fragment stays a ref');
+  assert.deepEqual(kinds(attr(doc, 'linearGradient', 'href', null, 2)), [], 'a data: URL gets none');
+  assert.deepEqual(kinds(attr(doc, 'use', 'href')), [], 'an href on another element gets none');
+  assert.deepEqual(kinds(attr(doc, 'rect', 'fill')), ['text:other.svg#g', 'color:red'], 'the paint’s URL, then its fallback');
+  assert.deepEqual(kinds(attr(doc, 'rect', 'style', null, 1)), ['text:other.svg#g'], 'between the quotes, in style=""');
+  assert.deepEqual(kinds(attr(doc, 'rect', 'fill', null, 2)), ['ref:g']);
+  assert.deepEqual(kinds(attr(doc, 'rect', 'stroke', null, 3)), ['text:x.svg#y'], 'quoted by references, the URL’s own characters are still its token');
+});

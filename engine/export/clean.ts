@@ -9,11 +9,12 @@
 //
 // stripNamespaces is the same for any set of namespaces; cleanExport strips every editor's, Draw's
 // own included, and stripDrawState (model/draw-state.ts) Draw's alone. What Draw inserted goes with
-// the whitespace it brought: a draw: element takes the whitespace just before it, and an element Draw
-// made (draw-ns.ts: a <metadata draw:made="true">) goes too when nothing of the file's is left in it.
+// the whitespace it brought: a draw: element takes the whitespace just before it, and a holder Draw
+// made (draw-ns.ts: a <metadata> or <defs> with draw:made="true") goes too when nothing of the file's
+// is left in it. A gradient Draw made is drawing content: it stays, without its draw:made.
 
 import { descendants, detachNode, parseDoc, restoreAttr, serialize, type Doc, type ElementNode } from '../model/doc.ts';
-import { DRAW_NS, holdsOnlyDrawItems, isDrawMade } from '../model/draw-ns.ts';
+import { DRAW_NS, holdsOnlyDrawItems, isDrawMade, isHolderKind } from '../model/draw-ns.ts';
 import { decodeAttr } from '../xml/entities.ts';
 
 /** Editor namespaces: the ledger's namespace rows marked "Editor data" (checked by a test). */
@@ -76,8 +77,10 @@ export function stripNamespaces(doc: Doc, uris: ReadonlySet<string>): CleanResul
     removedElements++;
   };
   for (const e of editorEls) if (isAttached(copy, e)) drop(e);
+  // Draw's own <metadata> and <defs> go when nothing of the file's is left in them; a gradient Draw
+  // made is drawing content, and stays (only its draw:made went, above).
   for (const m of made) {
-    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);
+    if (isAttached(copy, m) && isHolderKind(m) && holdsOnlyDrawItems(copy, m)) drop(m);
   }
   // Declarations of editor namespaces nothing uses any more.
   const used = usedNamespaces(copy);

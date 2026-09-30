@@ -166,6 +166,11 @@ export function extensionsSupported(value: string): boolean {
  */
 export function renderValue(el: ElementNode, attr: Attr, value: string): string | null {
   if (!attributeRenders(el.ns, el.local, attr.ns, attr.local)) return null;
+  // SVG 2: href wins and xlink:href is ignored, even when the href can't be used. Dropping it here
+  // keeps a browser from following xlink:href where the policy dropped a relative href, so the
+  // canvas, Draw's gradient chain (paint/gradients.ts) and the file alone agree. It drops more than
+  // before, never less.
+  if (attr.ns === NS.xlink && attr.local === 'href' && el.attrs.some((a) => a.ns === null && a.local === 'href')) return null;
   if (URL_ATTRIBUTES.has(attrKey(attr.ns, attr.local)!)) return urlAllowed(el.local, attr.local, value) ? value : null;
   if (attr.ns === null && attr.local === 'style' && !cssAllowed(value)) return null;
   return cssUrlsLocal(value) ? value : null;
