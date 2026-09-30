@@ -204,8 +204,9 @@
   color: var(--text);
   touch-action: manipulation;
 }
-/* The Snap sheet: rows of at least 44 pt. */
-.draw-snap { display: flex; flex-direction: column; gap: var(--space-2); }
+/* The Snap sheet: rows of at least 44 pt. Its title and Done stay put while its body scrolls. */
+.draw-modal:has(> .draw-snap) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-snap { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .draw-snap-row { flex: 1 1 auto; min-height: max(var(--tap-min), var(--control-h-sm)); }
 .draw-snap-row[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .draw-snap-row[aria-pressed="false"] { opacity: 0.85; }

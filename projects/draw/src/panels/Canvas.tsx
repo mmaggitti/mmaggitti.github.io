@@ -9,11 +9,13 @@
 //
 // Over the drawing: the Grid and Snap buttons at the top-left (view options kept on this device,
 // never in the file; the Snap sheet also sets the grid step and the guides, which the file keeps as
-// Draw's own state); and when there is something to say, a file that isn't well-formed (it is shown only as
+// Draw's own state; it is rendered in the app's root, outside the canvas, whose containment would
+// clip it and whose chrome and marks would paint over it, as the ContextBar's More sheet is); and when there is something to say, a file that isn't well-formed (it is shown only as
 // source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
 // under reduced motion, Play for a drawing that animates (it opens paused, top-right).
 
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { Editor } from '../editor.ts';
 import type { Unparsed } from '../workspace.ts';
 import { failureText } from '../files-view.ts';
@@ -72,7 +74,7 @@ export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }
       <div ref={host} className="draw-host" aria-hidden="true" />
       <div ref={marks} className="draw-marks" />
       <GridButton editor={editor} />
-      <SnapButton editor={editor} />
+      <SnapButton editor={editor} area={area} />
       {error && <p className="draw-error ds-small">Can&rsquo;t show the drawing: {error}.</p>}
       <Over editor={editor} unparsed={unparsed} files={files} />
     </main>
@@ -116,8 +118,8 @@ function readSnap(): SnapPrefs {
   return { grid: !off.has('grid'), guides: !off.has('guides'), shapes: !off.has('shapes'), artboard: !off.has('artboard') };
 }
 
-/** The Snap button and its sheet: the grid, its step, what snaps, and the guides. */
-function SnapButton({ editor }: { editor: Editor }) {
+/** The Snap button and its sheet (in the app's root, not the canvas): the grid, its step, what snaps, and the guides. */
+function SnapButton({ editor, area }: { editor: Editor; area: RefObject<HTMLElement | null> }) {
   const [open, setOpen] = useState(false);
   useEffect(() => editor.snap.set(readSnap()), [editor]);
   return (
@@ -125,7 +127,7 @@ function SnapButton({ editor }: { editor: Editor }) {
       <button type="button" className="draw-chrome draw-snap-btn" aria-label="Snap" aria-haspopup="dialog" onClick={() => setOpen(true)}>
         {SNAP_ICON}
       </button>
-      {open && <SnapSheet editor={editor} close={() => setOpen(false)} />}
+      {open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}
     </>
   );
 }
@@ -136,6 +138,9 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
   useStore(editor.version);
   const state = editor.drawState;
   const [step, setStep] = useState(state.grid === null ? '' : String(state.grid));
+  // The Grid step field is one history entry while it is typed in: it ends on a blur, or when the
+  // sheet closes (Done, the dim, Escape) with the field still focused.
+  useEffect(() => () => editor.gridStepEnd(), [editor]);
   const setGrid = (on: boolean) => {
     writePref('grid', on ? 'on' : null);
     editor.grid.set(on);
@@ -148,8 +153,8 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
   const applyStep = (text: string) => {
     setStep(text);
     const v = Number(text);
-    if (text.trim() === '') editor.setGridStep(null);
-    else if (v > 0 && Number.isFinite(v)) editor.setGridStep(v);
+    if (text.trim() === '') editor.gridStepInput(null);
+    else if (v > 0 && Number.isFinite(v)) editor.gridStepInput(v);
   };
   return (
     <Modal title="Snap" onClose={close} done mono={false}>
@@ -159,7 +164,7 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
         </button>
         <label className="draw-snap-step">
           <span>Grid step</span>
-          <input className="draw-field ds-mono" inputMode="decimal" enterKeyHint="done" autoComplete="off" placeholder="Auto" aria-label="Grid step (empty: automatic)" value={step} onChange={(e) => applyStep(e.target.value)} />
+          <input className="draw-field ds-mono" inputMode="decimal" enterKeyHint="done" autoComplete="off" placeholder="Auto" aria-label="Grid step (empty: automatic)" value={step} onFocus={() => editor.gridStepStart()} onBlur={() => editor.gridStepEnd()} onChange={(e) => applyStep(e.target.value)} />
         </label>
         <p className="draw-subhead">Snap to</p>
         <div className="draw-snap-toggles">

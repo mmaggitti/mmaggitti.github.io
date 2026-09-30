@@ -1397,6 +1397,39 @@ test('on a mirrored element the scale diamond keeps the mirror, and the ring tur
   }
 });
 
+test('the Snap sheet’s Grid step field is one history entry while it is typed in: one undo after typing 25 gives Auto back', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  // "2", "25": each written live, as the grid follows; one entry when the field lets go.
+  r.editor.gridStepStart();
+  for (const v of [2, 25]) {
+    r.editor.gridStepInput(v);
+    assert.equal(r.editor.drawState.grid, v, 'the grid follows the field as it is typed');
+  }
+  r.editor.gridStepEnd();
+  assert.match(r.editor.source(), /<draw:state version="1" grid="25"\/>/);
+  assert.equal(r.editor.history.get().undoLabel, 'Set grid step');
+  r.editor.undo();
+  assert.equal(r.editor.drawState.grid, null, 'one undo: Auto again');
+  assert.equal(r.editor.source(), SHAPES, 'and the file as it was');
+  assert.equal(r.editor.history.get().canUndo, false, 'typing 25 was one entry');
+  // "25", ⌫, "0.5" (20.5), a value that isn't a step (left out), then the field emptied: Auto, one entry, nothing written.
+  r.editor.redo();
+  r.editor.gridStepStart();
+  for (const v of [2, 20, 20.5, 0, null]) r.editor.gridStepInput(v);
+  r.editor.gridStepEnd();
+  assert.equal(r.editor.drawState.grid, null);
+  r.editor.undo();
+  assert.equal(r.editor.drawState.grid, 25, 'one undo gives the step before the field was typed in');
+  // Nothing else writes while the field holds its entry.
+  r.editor.gridStepStart();
+  r.editor.gridStepInput(5);
+  r.editor.addGuide('v');
+  r.editor.gridStepEnd();
+  assert.deepEqual(r.editor.drawState.guides, [], 'no guide was added into the middle of the entry');
+  assert.equal(r.editor.drawState.grid, 5);
+});
+
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
   const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect id="a" x="10" y="10" width="10" height="10"/>

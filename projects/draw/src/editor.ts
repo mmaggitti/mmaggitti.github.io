@@ -184,6 +184,7 @@ export class Editor {
   /** What moves and handles snap to (the Snap sheet's toggles, a device preference). */
   readonly snap: Store<SnapPrefs> = createStore<SnapPrefs>(SNAP_ALL);
   #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
+  #stepDrag: { drag: Drag; from: DrawState } | null = null; // the Snap sheet's Grid step field, while it is being typed in
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -260,6 +261,7 @@ export class Editor {
       doc = parsed.doc;
     } else doc = input;
     this.#endLive(false);
+    this.#stepDrag = null; // the field's entry belonged to the document that is closing
     const canvas = this.#ports.canvas;
     try {
       canvas.render(doc);
@@ -1307,6 +1309,38 @@ export class Editor {
     this.#dispatch(index === 'all' ? 'Remove all guides' : 'Remove guide', (apply) => writeState(doc, { ...s, guides }, apply));
   }
 
+  /**
+   * The Snap sheet's Grid step field took focus: what is typed there, until it lets go (Done, the dim,
+   * Escape, a blur), is one "Set grid step", as a sheet open on one value is.
+   */
+  gridStepStart(): void {
+    const doc = this.#doc;
+    if (!doc || !this.#session || this.#stepDrag || this.#live || this.#gesture || this.#nudge || !this.#writable()) return;
+    this.#stepDrag = { drag: this.#session.drag('Set grid step'), from: readState(doc) };
+  }
+
+  /** A step typed in the field (null: automatic), written live into the field's one entry; a value that isn't a step is left out. */
+  gridStepInput(step: number | null): void {
+    const doc = this.#doc;
+    if (!this.#stepDrag) this.gridStepStart();
+    const d = this.#stepDrag;
+    if (!doc || !d || (step !== null && !(step > 0 && Number.isFinite(step)))) return;
+    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));
+    this.#show();
+  }
+
+  /** The field let go: its entry is kept (or, `commit` false, undone). */
+  gridStepEnd(commit = true): void {
+    const d = this.#stepDrag;
+    if (!d) return;
+    this.#stepDrag = null;
+    if (commit) d.drag.commit();
+    else d.drag.cancel();
+    this.#bump();
+    this.#changed();
+    this.#show();
+  }
+
   /** The grid's step in root user units, kept in the file; null: automatic (1-2-5). */
   setGridStep(step: number | null): void {
     const doc = this.#doc;
@@ -1496,7 +1530,7 @@ export class Editor {
    * second finger on a panel can't write into the middle of it.
    */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge || this.#stepDrag || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       return true;
@@ -1763,6 +1797,7 @@ export class Editor {
    */
   showSource(text: string, at: number): void {
     this.#endLive(false);
+    this.#stepDrag = null;
     this.#doc = null;
     this.#session = null;
     this.#blocks = new Map();

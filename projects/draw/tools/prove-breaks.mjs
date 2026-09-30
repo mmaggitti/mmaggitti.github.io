@@ -2065,11 +2065,26 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "      for (const it of list ? (r === -1 ? list.items : list.items.slice(0, r)) : []) before = multiply(before, itemMatrix(it));\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element the scale diamond keeps the mirror/,
   },
+  {
+    id: 'B391', what: 'F11: each keystroke in the Grid step field is its own history entry again',
+    file: 'projects/draw/src/editor.ts', from: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n', to: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n    this.gridStepEnd();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ the Snap sheet’s Grid step field is one history entry/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
     file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
     run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms at best/,
+  },
+  {
+    id: 'B392', what: 'F11: each keystroke in the Grid step field is its own history entry again', slow: true, checks: ['theGridStepFieldIsOneEntry'],
+    file: 'projects/draw/src/editor.ts', from: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n', to: '    d.drag.update((apply) => writeState(doc, { ...d.from, grid: step }, apply));\n    this.gridStepEnd();\n',
+    run: DRAW_E2E, expect: /theGridStepFieldIsOneEntry: one undo did not give Auto back/,
+  },
+  {
+    id: 'B393', what: 'F13: the Snap sheet is rendered inside the canvas again (clipped by it, under its chrome and marks)', slow: true, checks: ['theSnapSheetIsReachableOnThePhone'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => setOpen(false)} />}',
+    run: DRAW_E2E, expect: /theSnapSheetIsReachableOnThePhone: (Done is at .* outside the|on top of (Done|the Grid step field) is)/,
   },
   {
     id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],

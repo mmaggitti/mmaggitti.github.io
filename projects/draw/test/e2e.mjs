@@ -215,6 +215,8 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   for (const height of [956, 796]) await check(phoneRulesOnTheSelectionTools, height);
   // The P1-M1 review adds these.
   await check(aLargeSelectionDragsWithoutStalling);
+  await check(theGridStepFieldIsOneEntry);
+  await check(theSnapSheetIsReachableOnThePhone);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -3483,6 +3485,82 @@ async function aLargeSelectionDragsWithoutStalling(browser, origin) {
     must(await page.evaluate((t) => window.drawTest.source() === t, BIG), 'the Delete did not undo to the file');
     must(await listing(), 'after the undo of Delete, the code listing is not the file');
     console.log(`     draw: a drag frame over ${N} selected shapes: ${fastest.toFixed(0)} ms at best`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Snap sheet's Grid step field is one history entry however it is typed (the P1-M1 review,
+// F11): 25, ⌫ and 0.5 (20.5), then Done, write grid="20.5", and one undo gives Auto back (the file as
+// it was); so does 25 closed with the dim while the field still has focus.
+async function theGridStepFieldIsOneEntry(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const state = async () => /<draw:state[^>]*>/.exec(await source())?.[0] ?? null;
+    const start = await source();
+    const field = page.locator('.draw-snap-step input');
+    await page.locator('.draw-snap-btn').tap();
+    await field.tap();
+    await page.keyboard.type('25');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('0.5');
+    await page.locator('.draw-modal-done').tap();
+    must(await state() === '<draw:state version="1" grid="20.5"/>', `typing 25, ⌫, 0.5 then Done wrote ${await state()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set grid step', `the last entry is ${await undo.getAttribute('aria-label')}`);
+    await undo.tap();
+    must(await source() === start, `one undo did not give Auto back (${await state()}): the typing was more than one entry`);
+    must(await undo.isDisabled(), 'the typing left more than one entry');
+    await page.locator('.draw-snap-btn').tap();
+    await field.tap();
+    await page.keyboard.type('25');
+    await page.waitForTimeout(400); // past the dim's guard against the tap that opened the sheet (Sheets.tsx)
+    await page.locator('.draw-scrim').tap({ position: { x: 10, y: 10 } });
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await state() === '<draw:state version="1" grid="25"/>', `typing 25 then the dim wrote ${await state()}`);
+    await undo.tap();
+    must(await source() === start && await undo.isDisabled(), 'closed with the dim, the typing was more than one entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The Snap sheet on the phone (the P1-M1 review, F13): at 440×796 (a Safari tab) with the code at
+// half and six guides, the sheet sits in the viewport over everything the canvas draws: Done lies
+// inside the viewport; on top at Done's centre and at the Grid step field's are those controls, with
+// the overlay's marks made hittable too (the chrome buttons, guides and pills painted over the sheet
+// when it lived in the canvas); and Done closes it.
+async function theSnapSheetIsReachableOnThePhone(browser, origin) {
+  const SIX = `<svg xmlns="${SVG_NS}" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">
+  <metadata draw:made="true"><draw:state version="1" guides="v 10 v 30 v 50 h 20 h 40 h 60"/></metadata>
+  <rect x="10" y="10" width="30" height="30" fill="#2a9d8f"/>
+</svg>
+`;
+  await withPage(browser, origin, 796, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), SIX)).ok, 'test setup: the file did not open');
+    await page.locator('.draw-handle').tap();
+    must(await page.locator('.draw-sheet--half').count() === 1, 'test setup: the code panel is not at half');
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap-step input').waitFor();
+    await twoFrames(page);
+    must(await page.locator('.draw-guide-row').count() === 6, `test setup: the sheet lists ${await page.locator('.draw-guide-row').count()} guides, not 6`);
+    const r = await page.evaluate(() => {
+      const marks = [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-marks *')];
+      for (const m of marks) m.style.pointerEvents = 'auto';
+      const on = (el) => {
+        const b = el.getBoundingClientRect();
+        const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom, top: top === el || el.contains(top) ? 'it' : top ? `${top.tagName} ${top.getAttribute('class')}` : 'nothing' };
+      };
+      const out = { done: on(document.querySelector('.draw-modal-done')), field: on(document.querySelector('.draw-snap-step input')), w: innerWidth, h: innerHeight };
+      for (const m of marks) m.style.pointerEvents = '';
+      return out;
+    });
+    const d = r.done;
+    must(d.x >= 0 && d.y >= 0 && d.right <= r.w && d.bottom <= r.h, `Done is at ${Math.round(d.x)},${Math.round(d.y)}..${Math.round(d.right)},${Math.round(d.bottom)}, outside the ${r.w}×${r.h} viewport`);
+    must(d.top === 'it', `on top of Done is ${d.top}`);
+    must(r.field.top === 'it', `on top of the Grid step field is ${r.field.top}`);
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached', timeout: 5000 });
+    must(await page.locator('.draw-modal').count() === 0, 'Done did not close the Snap sheet');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
