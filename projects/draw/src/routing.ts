@@ -10,10 +10,17 @@
 // go last to first in document order, so each lands before a sibling already in its place. A node
 // moved in or out of a <style> keeps the old route (the <style> is judged whole, and drawn again),
 // and so does one inside a subtree that is being drawn again anyway.
+//
+// A donut's data comment (P1-M3) has number tokens only while its holder is a donut, which depends on
+// the holder's draw: attributes and its slices' d, but an attribute op re-reads only the start tag it
+// changed. So an attribute change on an element or on one of its children also re-reads the element's
+// data comment, when its first child (whitespace aside) is one: Edit as donut, Detach, a detach by the
+// finish hook, an input changed, and their undo and redo.
 
 import type { ChangeSet } from '../../../engine/commands/ops.ts';
 import type { Doc, NodeId } from '../../../engine/model/doc.ts';
 import { NS } from '../../../engine/model/doc.ts';
+import { readData } from '../../../engine/generators/donut.ts';
 
 export interface Route {
   /** Elements whose start tag changed and that are not inside a subtree being re-rendered. */
@@ -66,6 +73,18 @@ function orderOf(doc: Doc): Map<NodeId, number> {
   return order;
 }
 
+/** The element's data comment (a donut holder's first child, whitespace aside, reading as data), or null. */
+export function dataCommentOf(doc: Doc, id: NodeId | null | undefined): NodeId | null {
+  const n = id === null || id === undefined ? undefined : doc.nodes.get(id);
+  if (n?.kind !== 'element') return null;
+  for (const c of n.children) {
+    const k = doc.nodes.get(c);
+    if (k?.kind === 'text' && /^[ \t\r\n]*$/.test(k.raw)) continue;
+    return k?.kind === 'comment' && readData(k.raw) ? c : null;
+  }
+  return null;
+}
+
 export function route(doc: Doc, cs: ChangeSet): Route {
   const roots = new Set<NodeId>();
   for (const id of cs.texts) {
@@ -90,8 +109,16 @@ export function route(doc: Doc, cs: ChangeSet): Route {
   const drawn = new Set([...top, ...moved.filter((id) => order.has(id))]);
   const attrs = [...cs.attrs].filter((id) => attached(doc, id) && !under(doc, id, drawn, true));
   const isMoved = new Set(moved);
+  // A donut's data comment follows its holder's and its slices' attribute changes (see the header).
+  const comments: NodeId[] = [];
+  for (const id of cs.attrs) {
+    for (const h of [id, doc.nodes.get(id)?.parent]) {
+      const c = dataCommentOf(doc, h);
+      if (c !== null && attached(doc, h!)) comments.push(c);
+    }
+  }
   const code = reset
     ? { reset: true as const }
-    : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts])].filter((id) => !isMoved.has(id)), moved, parents: [...cs.structure] };
+    : { reset: false as const, blocks: [...new Set([...cs.attrs, ...cs.texts, ...comments])].filter((id) => !isMoved.has(id)), moved, parents: [...cs.structure] };
   return { attrs, subtrees, moved, code };
 }

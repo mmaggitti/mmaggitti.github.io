@@ -678,3 +678,28 @@ function reverseOne(t: PathText, sub: number): string | null {
   if (!ok) throw new TokenEditError('the reversed subpath would change how the rest of the path reads');
   return text;
 }
+
+// ── an arc's flags (a ghost arc tapped) ────────────────────────────────────────────────────────
+
+/**
+ * Arc segment `index` with its large-arc and sweep flags set: the two flag characters rewritten in
+ * place (packed flags too: `0 01`, `001`), every other byte kept. Throws TokenEditError.
+ */
+export function setArcFlags(raw: string, index: number, large: boolean, sweep: boolean): string {
+  const t = readPathText(raw);
+  const seg = t.p.segs[index];
+  if (!seg || seg.cmd.toUpperCase() !== 'A') throw new TokenEditError('That segment isn’t an arc.');
+  const spans = argSpans(seg);
+  let r = seg.raw;
+  const put = (k: number, v: boolean) => {
+    r = r.slice(0, spans[k].start) + (v ? '1' : '0') + r.slice(spans[k].end); // one character for one
+  };
+  put(3, large);
+  put(4, sweep);
+  const segs = t.p.segs;
+  const out = segs.slice(0, index).map((s) => s.raw).join('') + r + segs.slice(index + 1).map((s) => s.raw).join('') + t.p.tail;
+  const back = parsePath(out);
+  const ok = back.segs.length === segs.length && back.segs.every((s, i) => s.cmd === segs[i].cmd && s.args.every((v, k) => v === (i === index && k === 3 ? +large : i === index && k === 4 ? +sweep : segs[i].args[k])));
+  if (!ok) throw new TokenEditError('the new flags would change how the rest of the path reads');
+  return out;
+}

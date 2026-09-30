@@ -10,7 +10,7 @@ import { Session } from '../../commands/session.ts';
 import { opSetAttrRaw } from '../../commands/ops.ts';
 import { argSpans, parsePath } from '../../path/parse.ts';
 import { toAbsolute, type AbsSeg } from '../../path/abs.ts';
-import { cycleSegment, readsRelative, reverseSubpath, subpathCount, toggleRelative, REFERENCES } from '../../path/segments.ts';
+import { cycleSegment, readsRelative, reverseSubpath, setArcFlags, subpathCount, toggleRelative, REFERENCES } from '../../path/segments.ts';
 import { evaluator } from './helpers.ts';
 import { TokenEditError } from '../../code/edit.ts';
 
@@ -359,4 +359,17 @@ test('Reverse over every subpath of every corpus path: the subpath draws the sam
     }
   }
   assert.ok(n > 700, `only ${n} subpaths reversed (${skipped} had nothing to reverse)`);
+});
+
+// ── an arc's flags ─────────────────────────────────────────────────────────────────────────────
+
+test('setArcFlags writes an arc’s two flag characters in place, packed flags too (0 01, 001), every other byte kept; anything but an arc is refused', () => {
+  const d = dOf(lab('arcs.svg'));
+  assert.equal(d, 'M 24 50\n   A 30 30 0 0 1 76 50');
+  assert.equal(setArcFlags(d, 1, true, true), 'M 24 50\n   A 30 30 0 1 1 76 50');
+  assert.equal(setArcFlags(d, 1, false, false), 'M 24 50\n   A 30 30 0 0 0 76 50');
+  assert.equal(setArcFlags('M 0 0 A 30 30 0 01 76 50', 1, true, false), 'M 0 0 A 30 30 0 10 76 50', 'packed: 0 01');
+  assert.equal(setArcFlags('M0 0a30 30 0 001 76 50', 1, true, true), 'M0 0a30 30 0 111 76 50', 'packed: 001');
+  assert.equal(setArcFlags('M 0 0 A 5 5 0 0 1 10 0 5 5 0 1 1 20 0', 2, false, false), 'M 0 0 A 5 5 0 0 1 10 0 5 5 0 0 0 20 0', 'a letter-less arc');
+  assert.throws(() => setArcFlags(d, 0, true, true), (e) => e instanceof TokenEditError && /isn’t an arc/.test(e.message));
 });

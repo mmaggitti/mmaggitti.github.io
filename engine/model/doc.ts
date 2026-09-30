@@ -360,14 +360,30 @@ export function setTextRaw(doc: Doc, id: NodeId, raw: string): void {
   if (inStyle(doc, n.parent)) doc.styleVersion++;
 }
 
+/** Is `raw` one well-formed XML comment: `<!--`, no `--` inside, not ending in `-`, `-->`? */
+export function isOneComment(raw: string): boolean {
+  if (!raw.startsWith('<!--') || !raw.endsWith('-->') || raw.length < 7) return false;
+  const body = raw.slice(4, -3);
+  return !body.includes('--') && !body.endsWith('-');
+}
+
 /**
- * Replace a text or CDATA leaf's raw text (a CDATA leaf's raw includes its delimiters). Illustrator
- * and CorelDRAW put <style> in CDATA, so code tokens edit both kinds.
+ * Replace a text, CDATA or comment leaf's raw text (a CDATA leaf's and a comment's raw include their
+ * delimiters). Illustrator and CorelDRAW put <style> in CDATA, so code tokens edit both kinds; a
+ * donut's data comment (P1-M3) holds number tokens too, and its new raw must still be one
+ * well-formed comment.
  */
 export function setLeafRaw(doc: Doc, id: NodeId, raw: string): void {
   const n = doc.nodes.get(id);
   if (n?.kind === 'text') return setTextRaw(doc, id, raw);
-  if (!n || n.kind !== 'cdata') throw new Error(`setLeafRaw: node ${id} is not text or CDATA`);
+  if (n?.kind === 'comment') {
+    if (!isOneComment(raw)) throw new Error('setLeafRaw: raw text is not one well-formed comment');
+    n.raw = raw;
+    n.dirty = true;
+    doc.version++;
+    return;
+  }
+  if (!n || n.kind !== 'cdata') throw new Error(`setLeafRaw: node ${id} is not text or CDATA (or a comment)`);
   if (!raw.startsWith('<![CDATA[') || !raw.endsWith(']]>') || raw.length < 12 || raw.slice(9, -3).includes(']]>')) {
     throw new Error('setLeafRaw: raw text is not one CDATA section');
   }

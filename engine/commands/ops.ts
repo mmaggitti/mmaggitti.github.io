@@ -19,7 +19,7 @@ export interface Place {
 
 export type Op =
   | { kind: 'attr'; id: NodeId; ns: string | null; local: string; before: AttrSnap | null; after: AttrSnap | null }
-  | { kind: 'text'; id: NodeId; before: string; after: string } // a text or CDATA leaf's raw text
+  | { kind: 'text'; id: NodeId; before: string; after: string } // a text, CDATA or comment leaf's raw text
   | { kind: 'place'; id: NodeId; before: Place | null; after: Place | null }; // null = detached
 
 /** What an applied batch of ops touched, for the renderer, the code view and the overlay. */
@@ -59,10 +59,10 @@ export function opSetAttrRaw(doc: Doc, id: NodeId, ns: string | null, local: str
   return { kind: 'attr', id, ns, local, before, after: attrSnapshot(doc, id, ns, local) };
 }
 
-/** Replace a text or CDATA leaf's raw text (a CDATA leaf's includes its delimiters). */
+/** Replace a text, CDATA or comment leaf's raw text (a CDATA leaf's and a comment's include their delimiters). */
 export function opSetLeafRaw(doc: Doc, id: NodeId, raw: string): Op {
   const n = doc.nodes.get(id);
-  if (!n || (n.kind !== 'text' && n.kind !== 'cdata')) throw new Error(`opSetLeafRaw: node ${id} is not text or CDATA`);
+  if (!n || (n.kind !== 'text' && n.kind !== 'cdata' && n.kind !== 'comment')) throw new Error(`opSetLeafRaw: node ${id} is not text or CDATA (or a comment)`);
   const before = n.raw;
   setLeafRaw(doc, id, raw);
   return { kind: 'text', id, before, after: raw };

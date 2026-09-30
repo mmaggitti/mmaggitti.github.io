@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { descendants, parseDoc, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
+import { readFileSync } from 'node:fs';
 import { emptyChangeSet, noteChange, opInsert, opRemove, opSetAttr, opSetTextRaw, type Op } from '../../../../engine/commands/ops.ts';
 import { attached, route } from '../../src/routing.ts';
 
@@ -125,4 +126,28 @@ test('a removed element is not patched by attribute: it is taken away alone', ()
   assert.equal(attached(doc, g), true);
   cs.attrs.add(r);
   assert.deepEqual(route(doc, cs), { attrs: [], subtrees: [], moved: [r], code: { reset: false, blocks: [], moved: [r], parents: [g] } });
+});
+
+test('a donut’s data comment is re-read with its holder’s attribute changes (Edit as donut, Detach, an input) and its slices’ (a detach by the hook); a plain comment never is', () => {
+  const read = (f: string) => readFileSync(new URL(`../../../../engine/test/fixtures/corpus/lab/${f}`, import.meta.url), 'utf8');
+  const parse = (src: string): Doc => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    return r.doc;
+  };
+  const commentOf = (doc: Doc) => [...doc.nodes.values()].find((n) => n.kind === 'comment')!.id;
+  const slices = (doc: Doc) => [...descendants(doc, doc.root)].filter((n) => n.kind === 'element' && n.local === 'path').map((n) => n.id);
+  const donut = parse(read('arcs--donut.svg'));
+  const c = commentOf(donut);
+  // Edit as donut: attribute ops on the holder (the root) re-read the comment too.
+  const adopt = route(donut, changes([opSetAttr(donut, donut.root, 'https://mmaggitti.github.io/draw/ns', 'gen', 'donut', 'draw:gen')]));
+  assert.ok(!adopt.code.reset && adopt.code.blocks.includes(c) && adopt.code.blocks.includes(donut.root), 'the holder’s start tag and its data comment');
+  // A slice's d (the hook detaching, or regenerating): the comment too.
+  const slice = route(donut, changes([opSetAttr(donut, slices(donut)[1], null, 'd', 'M 1 1 A 2 2 0 0 1 3 3')]));
+  assert.ok(!slice.code.reset && slice.code.blocks.includes(c));
+  assert.deepEqual(slice.attrs, [slices(donut)[1]], 'the canvas still patches the slice alone');
+  // A plain comment (lab/arcs.svg's teaching comment) is never re-read for an attribute change.
+  const arcs = parse(read('arcs.svg'));
+  const plain = route(arcs, changes([opSetAttr(arcs, slices(arcs)[0], null, 'd', 'M 0 0 L 1 1'), opSetAttr(arcs, arcs.root, null, 'width', '10')]));
+  assert.ok(!plain.code.reset && !plain.code.blocks.includes(commentOf(arcs)));
 });

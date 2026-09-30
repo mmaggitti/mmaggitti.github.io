@@ -17,6 +17,7 @@ import { NAME_PATTERN } from '../xml/lex.ts';
 import { parseColor, parsePaint, type Color } from '../values/color.ts';
 import { decodeFragment } from '../values/url.ts';
 import { argSpans, isFlag, parsePath } from '../path/parse.ts';
+import { VALUE_MAX, VALUE_MIN, donutOf, readData } from '../generators/donut.ts';
 
 export type TokenKind = 'number' | 'color' | 'enum' | 'text' | 'ref';
 
@@ -773,17 +774,23 @@ export function tokenizeAttrRaw(doc: Doc, node: ElementNode, attr: AttrRef, raw:
 }
 
 /**
- * The tokens of a text or CDATA leaf, with offsets into its raw text (which, for CDATA, includes
- * the delimiters): CSS values in <style>, and text runs in <text>, <tspan>, <textPath>, <title>
- * and <desc> (and an <a> inside text).
+ * The tokens of a text, CDATA or comment leaf, with offsets into its raw text (which, for CDATA and
+ * a comment, includes the delimiters): CSS values in <style>, text runs in <text>, <tspan>,
+ * <textPath>, <title> and <desc> (and an <a> inside text), and the values of a donut's data comment.
  */
 export function tokenizeText(doc: Doc, leafId: NodeId): Token[] {
   const n = doc.nodes.get(leafId);
-  return n && (n.kind === 'text' || n.kind === 'cdata') ? tokenizeLeafRaw(doc, n, n.raw) : [];
+  return n && (n.kind === 'text' || n.kind === 'cdata' || n.kind === 'comment') ? tokenizeLeafRaw(doc, n, n.raw) : [];
 }
 
-/** The tokens `raw` would have as this leaf's text (edit.ts checks an edit with it). */
+/**
+ * The tokens `raw` would have as this leaf's text (edit.ts checks an edit with it). A comment has
+ * tokens only when it is the data comment of a donut recognized now (engine/generators/donut.ts,
+ * judged on the document as it is): a number token per value (1 to 100, "value N"), read from `raw`
+ * by the data comment's own grammar. Every other comment stays plain text.
+ */
 export function tokenizeLeafRaw(doc: Doc, leaf: LeafNode, raw: string): Token[] {
+  if (leaf.kind === 'comment') return dataTokens(doc, leaf, raw);
   const parent = leaf.parent === null ? undefined : doc.nodes.get(leaf.parent);
   if (!parent || parent.kind !== 'element') return [];
   const mode = leafMode(doc, parent);
@@ -808,6 +815,17 @@ export function tokenizeLeafRaw(doc: Doc, leaf: LeafNode, raw: string): Token[] 
   if (mode === 'css') css(src.s.slice(a, b), a, emit, 0);
   else textRuns(src, a, b, emit, parent.local);
   return inOrder(out);
+}
+
+// A donut's data comment (P1-M3, code/comment-tokens): its values as number tokens, spans in the raw text.
+function dataTokens(doc: Doc, leaf: LeafNode, raw: string): Token[] {
+  const d = leaf.parent === null ? null : donutOf(doc, leaf.parent);
+  const read = d && d.comment === leaf.id ? readData(raw) : null;
+  if (!read) return [];
+  return read.values.map((value, i): Token => {
+    const { start, end } = read.spans[i];
+    return { kind: 'number', prop: 'data', value, decimals: 0, min: VALUE_MIN, max: VALUE_MAX, label: `value ${i + 1}`, start, end, text: raw.slice(start, end) };
+  });
 }
 
 function leafMode(doc: Doc, parent: ElementNode): 'css' | 'text' | null {

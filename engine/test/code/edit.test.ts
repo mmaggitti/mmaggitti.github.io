@@ -5,6 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc, serialize, descendants, findAttr, detachNode, attachNode, setLeafRaw, type Doc, type ElementNode, type LeafNode } from '../../model/doc.ts';
+import { opSetLeafRaw } from '../../commands/ops.ts';
+import { readFileSync } from 'node:fs';
 import { tokenizeAttr, tokenizeText, type NumberToken, type Token } from '../../code/tokens.ts';
 import { applyTokenEdit, rewriteNumbers, scrubNumber, tokenEdit, tokenTextError, TokenEditError, type TokenTarget } from '../../code/edit.ts';
 import { tokenizeAttrRaw } from '../../code/tokens.ts';
@@ -312,4 +314,36 @@ test('rewriteNumbers refuses what would read differently, overlapping edits, and
   assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: '3' }, { start: 0, end: 3, text: '4' }]), /overlap/);
   assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: '1e3' }]), /plain number/);
   assert.throws(() => rewriteNumbers('1 2', [{ start: 0, end: 1, text: 'x' }]), TokenEditError);
+});
+
+// ── a donut's data comment (P1-M3) ───────────────────────────────────────────────────────────────
+
+test('a donut’s data comment is edited like any token: only the value’s characters change and every other byte stays; a value it can’t hold is refused (under 1, over 100, not whole); setLeafRaw and opSetLeafRaw refuse a raw that isn’t one well-formed comment (holding --, or ending in -)', () => {
+  const lab = readFileSync(new URL('../fixtures/corpus/lab/arcs--donut.svg', import.meta.url), 'utf8');
+  const src = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  const fresh = () => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    const comment = [...r.doc.nodes.values()].find((n) => n.kind === 'comment')!;
+    return { doc: r.doc, comment: comment.id, tokens: tokenizeText(r.doc, comment.id) };
+  };
+  const { doc, comment, tokens } = fresh();
+  assert.equal(tokens.length, 4);
+  applyTokenEdit(doc, comment, { text: true }, tokens[0], '64');
+  assert.equal(serialize(doc), src.replace('<!-- data: 40, 25,', '<!-- data: 64, 25,'), 'the value alone');
+  const t = fresh();
+  assert.equal(tokenEdit(t.doc, t.comment, { text: true }, t.tokens[3], '100'), '<!-- data: 40, 25, 20, 100 -->');
+  assert.throws(() => tokenEdit(t.doc, t.comment, { text: true }, t.tokens[1], '0'), /below the minimum, 1/);
+  assert.throws(() => tokenEdit(t.doc, t.comment, { text: true }, t.tokens[1], '101'), /above the maximum, 100/);
+  assert.throws(() => tokenEdit(t.doc, t.comment, { text: true }, t.tokens[1], '-1'), /below the minimum/);
+  assert.throws(() => tokenEdit(t.doc, t.comment, { text: true }, t.tokens[1], '2.5'), /would change how the rest of the value reads/, 'a value is a whole number');
+  assert.throws(() => tokenEdit(t.doc, t.comment, { text: true }, t.tokens[1], '025'), /would change how the rest of the value reads/, 'written plainly');
+  // The model's own backstop: a comment's raw is one well-formed comment, whatever writes it.
+  assert.throws(() => setLeafRaw(t.doc, t.comment, '<!-- data: 40, 25 -- 20 -->'), /one well-formed comment/);
+  assert.throws(() => setLeafRaw(t.doc, t.comment, '<!-- data: 40, 25--->'), /one well-formed comment/);
+  assert.throws(() => setLeafRaw(t.doc, t.comment, '<!-- data: 40 -- >'), /one well-formed comment/);
+  assert.throws(() => opSetLeafRaw(t.doc, t.comment, '<!-- a -- b -->'), /one well-formed comment/);
+  assert.equal(serialize(t.doc), src, 'nothing was written');
+  setLeafRaw(t.doc, t.comment, '<!---->');
+  assert.equal(serialize(t.doc), src.replace('<!-- data: 40, 25, 20, 15 -->', '<!---->'), 'an empty comment is one');
 });

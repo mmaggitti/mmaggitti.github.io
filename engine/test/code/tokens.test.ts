@@ -4,7 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc, descendants, findAttr, NS, type Doc, type ElementNode, type LeafNode } from '../../model/doc.ts';
-import { ENUMS, decimalsOf, tokenizeAttr, tokenizeText, type AttrRef, type Token } from '../../code/tokens.ts';
+import { ENUMS, decimalsOf, tokenizeAttr, tokenizeText, type AttrRef, type NumberToken, type Token } from '../../code/tokens.ts';
+import { codeBlocks } from '../../code/blocks.ts';
+import { readFileSync } from 'node:fs';
 import { applyTokenEdit } from '../../code/edit.ts';
 
 const SVG = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
@@ -396,4 +398,42 @@ test('a path’s number tokens are labelled as SVG Lab’s dParts labels them: p
     '17:control 2 x', '18:control 2 y', '19:point 7 x', '20:point 7 y', '21:point 8 x', '22:point 8 y',
     '23:rx', '24:ry', '25:rotation', '26:point 9 x', '27:point 9 y',
   ]);
+});
+
+// ── a donut's data comment (P1-M3, code/comment-tokens) ─────────────────────────────────────────
+
+test('a donut’s data comment (draw:gen="donut") has one number token per value, 1 to 100, labelled "value N", spans in the comment’s raw text; lab/arcs.svg’s and lab/arcs--holes.svg’s comments, the lab’s file before Edit as donut, and a donut whose slices differ have none', () => {
+  const read = (f: string) => readFileSync(new URL(`../fixtures/corpus/lab/${f}`, import.meta.url), 'utf8');
+  const commentTokens = (src: string) => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    const out: Token[] = [];
+    for (const n of descendants(r.doc, r.doc.root)) {
+      if (n.kind !== 'comment') continue;
+      for (const t of tokenizeText(r.doc, n.id)) {
+        assert.equal(n.raw.slice(t.start, t.end), t.text);
+        out.push(t);
+      }
+    }
+    return out;
+  };
+  const lab = read('arcs--donut.svg');
+  const adopted = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  const ts = commentTokens(adopted);
+  assert.deepEqual(texts(ts), ['40', '25', '20', '15']);
+  assert.deepEqual(ts.map((t) => (t as NumberToken).label), ['value 1', 'value 2', 'value 3', 'value 4']);
+  assert.deepEqual(ts.map((t) => [t.kind, t.prop, (t as NumberToken).min, (t as NumberToken).max, t.start]), [
+    ['number', 'data', 1, 100, 11], ['number', 'data', 1, 100, 15], ['number', 'data', 1, 100, 19], ['number', 'data', 1, 100, 23],
+  ], 'the span counts from the comment’s <!--');
+  // The code view's block for the comment holds them (blocks.ts, leafBlock).
+  const r = parseDoc(adopted);
+  assert.ok(r.ok);
+  const block = codeBlocks(r.doc).find((b) => r.doc.nodes.get(b.node)!.kind === 'comment')!;
+  assert.deepEqual(block.tokens.map((t) => block.text.slice(t.start, t.end)), ['40', '25', '20', '15']);
+  // Every other comment stays plain.
+  assert.deepEqual(commentTokens(lab), [], 'SVG Lab’s export before Edit as donut');
+  assert.deepEqual(commentTokens(read('arcs.svg')), [], 'lab/arcs.svg: A rx ry rotation large-arc sweep x y');
+  assert.deepEqual(commentTokens(read('arcs--holes.svg')), []);
+  assert.deepEqual(commentTokens(adopted.replace('66.5 72.7" fill="none" stroke="#e76f51"', '66.5 72.8" fill="none" stroke="#e76f51"')), [], 'a slice that differs: not a donut, so a plain comment');
+  assert.deepEqual(commentTokens(adopted.replace('<!-- data: 40, 25, 20, 15 -->', '<!-- data: 40, 25, 20, 15 -->\n  <!-- data: 1, 2 -->')), [], 'two comments: not a donut');
 });
