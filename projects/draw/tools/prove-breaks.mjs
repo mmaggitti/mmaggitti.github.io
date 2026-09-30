@@ -2755,6 +2755,95 @@ const BREAKS = [
     file: 'projects/draw/src/canvas/gestures.ts', append: '// a second copy of the anchor: export const SLOP = 5;\n',
     run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +AMBIG +projects\/draw\/src\/canvas\/gestures\.ts: the anchor matches 2 times/,
   },
+  // P1-M3 S2: arcs, holes and the donut (quick).
+  {
+    id: 'B519', what: 'evenodd counts signed crossings (it reads the winding number, as nonzero does: two same-way loops fill their overlap)',
+    file: 'engine/path/winding.ts', from: "return rule === 'evenodd' ? crossingsOf(polys, x, y) % 2 === 1 : windingOf(polys, x, y) !== 0;", to: "return rule === 'evenodd' ? windingOf(polys, x, y) !== 0 : windingOf(polys, x, y) !== 0;",
+    run: engineTests('path/winding.test.ts'), expect: /✖ lines: a square is inside under both rules/,
+  },
+  {
+    id: 'B520', what: 'Reverse keeps an arc’s sweep flag (the reversed arc bulges the other way)',
+    file: 'engine/path/segments.ts', from: "['sweep', +!g.sweep, g.sweep ? '0' : '1']", to: "['sweep', +g.sweep, g.sweep ? '1' : '0']",
+    run: engineTests('path/segments.test.ts'), expect: /✖ Reverse on lab\/arcs--holes\.svg’s inner subpath gives SVG Lab’s HOLE_REV exactly/,
+  },
+  {
+    id: 'B521', what: 'Reverse doesn’t write the closing line first (a closed subpath’s Z line is lost from the reversed order)',
+    file: 'engine/path/segments.ts', from: '  if (z && !(same(An[0], S[0]) && same(An[1], S[1]))) {', to: '  if (false) {',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Reverse on lab\/arcs--holes\.svg’s inner subpath gives SVG Lab’s HOLE_REV exactly/,
+  },
+  {
+    // lab/arcs.svg's own comment holds no number, so the plant shows on the lab's donut export before Edit as donut.
+    id: 'B522', what: 'a comment gets number tokens without its holder being a donut (SVG Lab’s donut export, before Edit as donut)',
+    file: 'engine/code/tokens.ts', from: '  const read = d && d.comment === leaf.id ? readData(raw) : null;', to: '  const read = readData(raw);',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a donut’s data comment \(draw:gen="donut"\) has one number token per value/,
+  },
+  {
+    id: 'B523', what: 'setLeafRaw takes a comment holding -- (the file would not be well-formed)',
+    file: 'engine/model/doc.ts', from: "  return !body.includes('--') && !body.endsWith('-');", to: "  return !body.endsWith('-');",
+    run: engineTests('code/edit.test.ts'), expect: /✖ a donut’s data comment is edited like any token/,
+  },
+  {
+    id: 'B524', what: 'the large-arc flag is 1 at exactly half (SVG Lab’s is 1 only over half)',
+    file: 'engine/generators/donut.ts', from: '${v / S > 0.5 ? 1 : 0}', to: '${v / S >= 0.5 ? 1 : 0}',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ exact halves: 50 and 50 give large-arc 0/,
+  },
+  {
+    id: 'B525', what: 'the slices start at angle 0 (the right), not at the top',
+    file: 'engine/generators/donut.ts', from: /-Math\.PI \/ 2 \+ \(acc \/ S\)/g, to: '(acc / S)',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ the acceptance test: generating from lab\/arcs--donut\.svg’s comment/,
+  },
+  {
+    id: 'B526', what: 'the finish hook regenerates a donut whose slice’s d was edited by hand (it must detach it)',
+    file: 'engine/generators/index.ts', from: '    if (st && expected && (inputsTouched || dataTouched) && !partsTouched) {', to: '    if (st && expected) {',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ the finish hook: a data edit and an input edit regenerate the slices/,
+  },
+  {
+    id: 'B527', what: 'Edit as donut adopts a holder whose slices differ from the generator’s (the hook would then rewrite them)',
+    file: 'engine/generators/donut.ts', from: '  const want = donutSlices(parts.data.values, cx, cy, r);\n  if (!parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;', to: '  const want = donutSlices(parts.data.values, cx, cy, r);',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ Edit as donut’s candidate/,
+  },
+  {
+    id: 'B528', what: 'a donut boundary drag lets a value reach 0 (the lab clamps each at 1)',
+    file: 'projects/draw/src/editor.ts', from: '      const c = Math.min(Math.max(Math.round(fr * S) - before, 1), pair - 1);', to: '      const c = Math.min(Math.max(Math.round(fr * S) - before, 0), pair);',
+    run: drawTests('editor.test.ts'), expect: /✖ the donut: Edit as donut changes only the holder’s start tag/,
+  },
+  {
+    id: 'B529', what: 'fill-rule is missing from the style table (Inspect’s Fill rule has nowhere to write)',
+    file: 'engine/style/props.ts', from: "  'fill-rule': { initial: 'nonzero', inherited: true }, // P1-M3: Inspect's Fill rule (holes)\n", to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ each property is written where it lives/,
+  },
+  {
+    id: 'B530', what: 'the flag labels are pushed towards the chord, not away from it (they sit on the arcs)',
+    file: 'projects/draw/src/interact/path-marks.ts', from: 'x: clamp(mid.x + dx * 10, 8, canvas.width - 8), y: clamp(mid.y + dy * 10 + 4, 13, canvas.height - 4)', to: 'x: clamp(mid.x - dx * 10, 8, canvas.width - 8), y: clamp(mid.y - dy * 10 + 4, 13, canvas.height - 4)',
+    run: drawTests('path-marks.test.ts'), expect: /✖ ghost arcs: lab\/arcs\.svg’s arc \(0 1\)/,
+  },
+  {
+    id: 'B531', what: 'the inner subpaths’ arrows take the outer colour (draw-dir--in is never set)',
+    file: 'projects/draw/src/interact/path-marks.ts', from: 'inner: s.sub > 0', to: 'inner: false',
+    run: drawTests('path-marks.test.ts'), expect: /✖ direction arrows: lab\/arcs--holes\.svg’s outer arrows/,
+  },
+  {
+    id: 'B532', what: 'the route doesn’t re-read a donut’s data comment after its holder’s draw: change (Edit as donut leaves the comment without tokens)',
+    file: 'projects/draw/src/routing.ts', from: 'blocks: [...new Set([...cs.attrs, ...cs.texts, ...comments])]', to: 'blocks: [...new Set([...cs.attrs, ...cs.texts])]',
+    run: drawTests('routing.test.ts'), expect: /✖ a donut’s data comment is re-read with its holder’s attribute changes/,
+  },
+  // P1-M3 S2 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B533', what: 'the ghost arcs skip toHost (drawn in the path’s units, not where the other flag pairs draw)', slow: true, checks: ['ghostArcsSwitchTheFlags'],
+    file: 'projects/draw/src/interact/path-marks.ts', from: '.map(([x1, y1, x2, y2, x, y]): [Point, Point, Point] => [h(x1, y1), h(x2, y2), h(x, y)]);\n      ghosts.push({ flags: text, start: h(a.x0, a.y0), cubics });', to: '.map(([x1, y1, x2, y2, x, y]): [Point, Point, Point] => [{ x: x1, y: y1 }, { x: x2, y: y2 }, { x, y }]);\n      ghosts.push({ flags: text, start: { x: a.x0, y: a.y0 }, cubics });',
+    run: DRAW_E2E, expect: /ghostArcsSwitchTheFlags: lab\/arcs\.svg: the \d \d ghost passes [\d.]+ px from the arc those flags draw/,
+  },
+  {
+    id: 'B534', what: 'the direction arrows skip toHost (drawn at the path’s own numbers, not on it)', slow: true, checks: ['holesCutTwoWays'],
+    file: 'projects/draw/src/interact/path-marks.ts', from: '    const c = host(toHost, { x: m.p[0], y: m.p[1] });', to: '    const c = { x: m.p[0], y: m.p[1] };',
+    run: DRAW_E2E, expect: /holesCutTwoWays: the arrow near \(50, 14\) is/,
+  },
+  {
+    // Planted in the editor's call of route (routing.ts's own rule stays, so its unit test is green): only the browser's code view shows it.
+    id: 'B535', what: 'the editor routes a change without the data comment’s re-read, so after Edit as donut the code shows the comment without tokens', slow: true, checks: ['theDonutRegeneratesFromItsData'],
+    file: 'projects/draw/src/editor.ts', from: '      r = route(session.doc, cs);\n', to: "      r = route(session.doc, cs);\n      if (!r.code.reset) r.code.blocks = r.code.blocks.filter((id) => session.doc.nodes.get(id)?.kind !== 'comment' || cs.texts.has(id));\n",
+    run: DRAW_E2E, expect: /theDonutRegeneratesFromItsData: the comment's block holds the number tokens \[\]/,
+  },
 ];
 
 const args = process.argv.slice(2);
