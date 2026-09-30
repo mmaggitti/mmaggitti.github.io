@@ -1309,6 +1309,55 @@ test('a lock on the root is not Draw’s: its shapes can still be tapped, dragge
   assert.deepEqual(layerRows(doc(r)).map((row) => row.lockedBy).filter(Boolean), [], 'the root’s lock locks no row');
 });
 
+test('an edit from a panel during a handle or guide drag is refused quietly, and the drag carries on to one entry', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  r.editor.select([a]);
+  const corner = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  r.editor.pointerDown(corner.at, [a], { add: false });
+  r.editor.pointerDrag({ x: corner.at.x + 20, y: corner.at.y + 20 });
+  const panel = () => {
+    r.editor.setHidden(b, true);
+    r.editor.setLocked(b, true);
+    r.editor.addGuide('v');
+    r.editor.setGridStep(5);
+  };
+  assert.doesNotThrow(panel, 'Hide, Lock, a guide and the grid step during a handle drag');
+  r.editor.pointerUp({ x: corner.at.x + 20, y: corner.at.y + 20 });
+  assert.equal(r.editor.history.get().undoLabel, 'Resize');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'the resize was the only entry; nothing else was written');
+  // A guide's pill drag likewise.
+  r.editor.addGuide('v');
+  const withGuide = r.editor.source();
+  const pill = r.editor.overlayModel().guides[0].pill;
+  r.editor.pointerDown(pill, [], { add: false });
+  r.editor.pointerDrag({ x: pill.x + 30, y: pill.y + 5 });
+  assert.doesNotThrow(panel, 'the same during a guide drag');
+  r.editor.pointerUp({ x: pill.x + 30, y: pill.y + 5 });
+  assert.equal(r.editor.history.get().undoLabel, 'Move guide');
+  r.editor.undo();
+  assert.equal(r.editor.source(), withGuide);
+});
+
+test('a corner drag gathers its snap targets once, when it starts, not on every frame', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  r.editor.open(SHAPES);
+  const [a, b] = ['a', 'b'].map((id) => idOf(r, id));
+  r.editor.select([a]);
+  const corner = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  measured.length = 0;
+  r.editor.pointerDown(corner.at, [a], { add: false });
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: corner.at.x + 3 * i, y: corner.at.y + 2 * i });
+  r.editor.pointerUp({ x: corner.at.x + 18, y: corner.at.y + 12 });
+  assert.equal(r.editor.history.get().undoLabel, 'Resize');
+  // Only the snap targets measure the other shapes (the overlay measures the selection).
+  const gathers = measured.filter((ids) => ids.includes(b)).length;
+  assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
+});
+
 test('a marquee and Select all pass by a shape visibility hides (inherited; a child can show itself again), as the canvas draws nothing there; Layers never writes visibility', () => {
   const V = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect id="a" x="10" y="10" width="10" height="10"/>

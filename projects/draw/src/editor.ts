@@ -1019,7 +1019,7 @@ export class Editor {
     const pm = measured.get(parent);
     if (!m || !pm) return;
     const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : 'Resize';
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null };
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null };
     if (kind === 'Resize') {
       hd.corner = g.handle as Corner;
       hd.uniform = movesBy(doc, id) === 'translate' || n.local === 'use';
@@ -1032,6 +1032,7 @@ export class Editor {
       if (!hd.toUnits) return;
       const [a, b, c, d] = hd.toUnits;
       hd.step = snapStep(1 / Math.sqrt(Math.abs(a * d - b * c)));
+      hd.targets = this.#snapTargets([id]); // once for the drag, as a move gathers them
     } else {
       const p = this.#pivots(id, m);
       if (kind === 'Scale' && !p.scale) return;
@@ -1083,8 +1084,8 @@ export class Editor {
     const box = this.#box;
     const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
     const inv = toHost && invert(toHost);
-    const targets = this.#snapTargets([hd.id]);
-    if (!toHost || !inv) return to;
+    const targets = hd.targets;
+    if (!toHost || !inv || !targets) return to;
     const [rx, ry] = applyM(inv, g.at.x, g.at.y);
     const tol = SNAP_PX / Math.sqrt(Math.abs(toHost[0] * toHost[3]));
     const sx = snapAxis([rx], 0, targets.x, targets.grid, tol);
@@ -1479,9 +1480,13 @@ export class Editor {
     return false;
   }
 
-  /** Run one named transaction; a refused edit becomes the notice and changes nothing. */
+  /**
+   * Run one named transaction; a refused edit becomes the notice and changes nothing. While a drag
+   * holds the history (a scrub or sheet, a move, a handle or guide drag, a nudge) it does nothing: a
+   * second finger on a panel can't write into the middle of it.
+   */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || this.#gesture?.move || this.#nudge || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       return true;
@@ -1914,6 +1919,7 @@ interface HandleDrag {
   local: Rect | null; // the element's own box at the start (rotate's pivot for text and use)
   tip: string | null;
   refused: string | null;
+  targets: SnapTargets | null; // a corner's snap targets, gathered once when the drag starts
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];

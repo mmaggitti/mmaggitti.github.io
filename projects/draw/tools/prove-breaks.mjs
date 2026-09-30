@@ -2040,6 +2040,16 @@ const BREAKS = [
     file: 'engine/model/draw-state.ts', from: "n && n.kind === 'element' && n.id !== doc.root;", to: "n && n.kind === 'element';",
     run: drawTests('editor.test.ts'), expect: /✖ a lock on the root is not Draw’s/,
   },
+  {
+    id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge', to: 'this.#gesture?.move || this.#nudge',
+    run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
+  },
+  {
+    id: 'B387', what: 'F6: a corner drag gathers its snap targets on every frame again',
+    file: 'projects/draw/src/editor.ts', from: '    const targets = hd.targets;\n', to: '    const targets = this.#snapTargets([hd.id]);\n',
+    run: drawTests('editor.test.ts'), expect: /✖ a corner drag gathers its snap targets once/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
