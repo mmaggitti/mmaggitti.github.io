@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { descendants, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { localBounds } from '../../../../engine/geometry/bounds.ts';
-import { userCtm } from '../../../../engine/geometry/ctm.ts';
+import { inDrawnTree, lineage, placement, userCtm } from '../../../../engine/geometry/ctm.ts';
 import { multiply } from '../../../../engine/values/affine.ts';
 import { Editor, type EditorPorts, type Measured } from '../../src/editor.ts';
 import { rootToHostMatrix } from '../../src/interact/overlay-model.ts';
@@ -22,8 +22,11 @@ export const REM_PX = 12;
 /**
  * The canvas's measure port, answered by the engine: each element's box (bounds.ts) and its units →
  * host px (ctm.ts, then the editor's camera box), as the DOM's getBBox and getScreenCTM give them.
+ * `referenced`: like the browser, also measure an element that draws only where it is referenced
+ * (in a clipPath or defs), through its parents' placements, so only the editor's own rule keeps it
+ * from being outlined.
  */
-export function measureWith(editor: Editor, ids: readonly NodeId[]): Map<NodeId, Measured> {
+export function measureWith(editor: Editor, ids: readonly NodeId[], referenced = false): Map<NodeId, Measured> {
   const out = new Map<NodeId, Measured>();
   const doc = editor.doc;
   const { viewport, M, box } = editor.rootBox;
@@ -32,7 +35,14 @@ export function measureWith(editor: Editor, ids: readonly NodeId[]): Map<NodeId,
   const toHost = rootToHostMatrix(box, viewport, M);
   for (const id of ids) {
     const b = localBounds(doc, id, ctx);
-    const m = b && userCtm(doc, id, ctx, (x) => localBounds(doc, x, ctx));
+    let m = b && userCtm(doc, id, ctx, (x) => localBounds(doc, x, ctx));
+    if (b && !m && referenced && !inDrawnTree(doc, id)) {
+      m = [1, 0, 0, 1, 0, 0];
+      for (const n of lineage(doc, id).slice(1)) {
+        const p = placement(doc, n.id, ctx, () => localBounds(doc, n.id, ctx));
+        m = p && m && multiply(m, p);
+      }
+    }
     if (b && m) out.set(id, { box: b, toHost: multiply(toHost, m) });
   }
   return out;

@@ -43,6 +43,11 @@ const drawTests = (file) => ['node', ['--test', '--test-reporter=spec', `test/un
 // The e2e evidence gate after the site e2e, as `npm run verify` and CI run it. The smoke test is
 // expected to fail for some of these breaks; the break is caught only if ledger-check then fails.
 const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .smoke/draw-e2e-evidence.jsonl';
+// A Draw e2e break that names its `checks`: Draw's bundle alone, rebuilt without its unit tests (one
+// may catch the same plant first; this proves the e2e check can) into the last built _site, then
+// just those checks. It needs a built _site; the run puts Draw's own bundle back afterwards.
+const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && node tools/library-index.mjs >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
+const DRAW_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && E2E=draw node scripts/smoke-test.mjs`], REPO];
 const SITE_E2E_EVIDENCE = ['sh', ['-c', `node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && { E2E=draw node scripts/smoke-test.mjs; ${E2E_EVIDENCE}; }`], REPO];
 
 const BREAKS = [
@@ -748,7 +753,7 @@ const BREAKS = [
   },
   {
     id: 'B131', what: 'the end of a scrub or a sheet is never saved',
-    file: 'projects/draw/src/editor.ts', from: '    this.#bump();\n    this.#changed();\n', to: '    this.#bump();\n',
+    file: 'projects/draw/src/editor.ts', from: '    else live.drag.cancel();\n    this.#bump();\n    this.#changed();\n', to: '    else live.drag.cancel();\n    this.#bump();\n',
     run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
   },
   {
@@ -1789,47 +1794,47 @@ const BREAKS = [
   {
     id: 'B336', what: 'a move rounds its delta to 2 units', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
     file: 'projects/draw/src/editor.ts', from: '    this.#applyMove(m, { x: toStep(rx, m.step), y: toStep(ry, m.step) });', to: '    this.#applyMove(m, { x: toStep(rx, 2), y: toStep(ry, 2) });',
-    run: SITE_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the drag did not move the circle by/,
+    run: DRAW_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the drag did not move the circle by/,
   },
   {
     id: 'B337', what: 'the tooltip is drawn under the finger', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
     file: 'projects/draw/src/interact/overlay-model.ts', from: 'top: t.below ? t.finger.y + TIP_BELOW : t.finger.y - TIP_ABOVE - height', to: 'top: t.finger.y',
-    run: SITE_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the tooltip's bottom edge is/,
+    run: DRAW_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the tooltip's bottom edge is/,
   },
   {
     id: 'B338', what: 'a marquee takes what it touches, not what it encloses', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
     file: 'projects/draw/src/editor.ts', from: '      return b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.width <= r.x + r.width + 0.5 && b.y + b.height <= r.y + r.height + 0.5;', to: '      return b.x <= r.x + r.width && b.y <= r.y + r.height && b.x + b.width >= r.x && b.y + b.height >= r.y;',
-    run: SITE_E2E, expect: /aMarqueeSelectsWhatItEncloses: a marquee around A, with B half inside it, selected AB/,
+    run: DRAW_E2E, expect: /aMarqueeSelectsWhatItEncloses: a marquee around A, with B half inside it, selected AB/,
   },
   {
     id: 'B339', what: 'a hold-drag on a shape moves it', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
     file: 'projects/draw/src/editor.ts', from: '    if (held || g.target === null) {', to: '    if (g.target === null) {',
-    run: SITE_E2E, expect: /aMarqueeSelectsWhatItEncloses: a hold-drag from B (drew no marquee|moved it)/,
+    run: DRAW_E2E, expect: /aMarqueeSelectsWhatItEncloses: a hold-drag from B (drew no marquee|moved it)/,
   },
   {
     id: 'B340', what: 'the code view rebuilds every block on a structure change', slow: true, checks: ['zOrderAndDeletePatchOnlyWhatMoved'],
     file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
-    run: SITE_E2E, expect: /zOrderAndDeletePatchOnlyWhatMoved: Bring forward: new code blocks/,
+    run: DRAW_E2E, expect: /zOrderAndDeletePatchOnlyWhatMoved: Bring forward: new code blocks/,
   },
   {
     id: 'B341', what: 'the arrows nudge while a code token has focus', slow: true, checks: ['arrowsNudgeOnlyTheCanvasSelection'],
     file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = 'input, textarea, select';",
-    run: SITE_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
+    run: DRAW_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
   },
   {
     id: 'B342', what: 'the grid draws past the paper', slow: true, checks: ['theGridToggleShowsTheGrid'],
     file: 'projects/draw/src/interact/overlay-model.ts', from: '  const over = intersect(paper, { x: 0, y: 0, width: host.width, height: host.height });', to: '  const over = { x: 0, y: 0, width: host.width, height: host.height };',
-    run: SITE_E2E, expect: /theGridToggleShowsTheGrid: .*runs past the paper/,
+    run: DRAW_E2E, expect: /theGridToggleShowsTheGrid: .*runs past the paper/,
   },
   {
     id: 'B343', what: "the engine's geometry ignores a nested svg's viewBox", slow: true, checks: ['geometryMatchesTheBrowser'],
     file: 'engine/geometry/ctm.ts', from: '  const inner = vb ? viewportTransform(vb, parOf(doc, n), vp.width, vp.height) : IDENTITY;', to: '  const inner = IDENTITY;',
-    run: SITE_E2E, expect: /geometryMatchesTheBrowser: \d+ element\(s\) whose box differs/,
+    run: DRAW_E2E, expect: /geometryMatchesTheBrowser: \d+ element\(s\) whose box differs/,
   },
   {
     id: 'B344', what: "the renderer supplies the camera as the root's viewBox again", slow: true, checks: ['percentLengthsKeepTheirSizeUnderZoom'],
     file: 'projects/draw/src/canvas/renderer.ts', from: '    if (!doc || !c || hasOwnViewBox(doc)) return null;', to: '    if (!doc || !c) return null;',
-    run: SITE_E2E, expect: /percentLengthsKeepTheirSizeUnderZoom: .*(viewBox is|the 100% rect measures)/,
+    run: DRAW_E2E, expect: /percentLengthsKeepTheirSizeUnderZoom: .*(viewBox is|the 100% rect measures)/,
   },
 ];
 
@@ -1917,5 +1922,6 @@ for (const b of chosen) {
   if (!caught) undetected++;
   console.log(`${caught ? 'red ✓' : 'GREEN ✗'}  ${b.id}  ${b.what}${caught ? '' : `\n        expected ${b.expect} in:\n${out.split('\n').slice(-8).map((l) => '        ' + l).join('\n')}`}`);
 }
+if (chosen.some((b) => b.run === DRAW_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
 console.log(undetected ? `\n${undetected} break(s) went undetected.` : `\nAll ${chosen.length} break(s) went red.`);
 process.exitCode = undetected ? 1 : 0;

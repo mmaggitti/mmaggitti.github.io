@@ -56,7 +56,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
     clear: () => log.push('canvas clear'),
     motion: () => 'still',
     play: () => {},
-    measure: (ids) => measureWith(r.editor, ids),
+    measure: (ids) => measureWith(r.editor, ids, true), // as the browser does, defs content too
     ...over,
   };
   const r: Rig = {
