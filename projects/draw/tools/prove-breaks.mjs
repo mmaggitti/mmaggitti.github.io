@@ -2620,6 +2620,129 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)), apply);\n', to: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)).reverse(), apply).reverse();\n',
     run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a selection write exactly what they write one shape at a time/,
   },
+  // P1-M3 S1: the path engine (quick).
+  {
+    id: 'B494', what: 'an anchor drag moves a Q control with it (SVG Lab moves only C controls)',
+    file: 'engine/path/nodes.ts', from: "    if (g.type === 'C') {\n      g.x2 += dx; // the incoming C's or S's second control follows", to: "    if (g.type === 'Q') {\n      g.x1 += dx;\n      g.y1 += dy;\n    }\n    if (g.type === 'C') {\n      g.x2 += dx; // the incoming C's or S's second control follows",
+    run: engineTests('path/nodes.test.ts'), expect: /✖ the lab’s numbers: a bend drag writes Q with control 2·f − mid/,
+  },
+  {
+    id: 'B495', what: 'a closed subpath’s linked last anchor gets a handle of its own (the heart shows five anchors)',
+    file: 'engine/path/nodes.ts', from: '    if (linked.has(k)) return;\n', to: '',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ pathNodes on the lab’s files/,
+  },
+  {
+    id: 'B496', what: 'a relative segment after a moved point isn’t compensated (its numbers stay offsets from the old start, so its end moves)',
+    file: 'engine/path/segments.ts', from: '      if (rel && X_ROLES.has(r)) v -= cx;\n      if (rel && Y_ROLES.has(r)) v -= cy;', to: '      if (rel && X_ROLES.has(r)) v -= t.abs[i].x0;\n      if (rel && Y_ROLES.has(r)) v -= t.abs[i].y0;',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ corpus property: every handle of every corpus path/,
+  },
+  {
+    id: 'B497', what: 'an H keeps its letter when its row changes (and a V its column): the end moves with the new start',
+    file: 'engine/path/segments.ts', from: "    if ((U === 'H' && !same(g.y, cy)) || (U === 'V' && !same(g.x, cx))) {", to: '    if (false) {',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ corpus property: every handle of every corpus path/,
+  },
+  {
+    id: 'B498', what: 'L → Q puts its control on the other side of the normal',
+    file: 'engine/path/segments.ts', from: 'onStep((x0 + x1) / 2 + (-dy / len) * off, opts.step), onStep((y0 + y1) / 2 + (dx / len) * off, opts.step)', to: 'onStep((x0 + x1) / 2 + (dy / len) * off, opts.step), onStep((y0 + y1) / 2 + (-dx / len) * off, opts.step)',
+    run: engineTests('path/segments.test.ts'), expect: /✖ the letter cycle on lab\/paths\.svg at step 1/,
+  },
+  {
+    id: 'B499', what: 'Q → C elevates by ½ instead of ⅔',
+    file: 'engine/path/segments.ts', from: 'x1: onStep(a.x0 + (2 / 3) * (a.x1 - a.x0), opts.step)', to: 'x1: onStep(a.x0 + (1 / 2) * (a.x1 - a.x0), opts.step)',
+    run: engineTests('path/segments.test.ts'), expect: /✖ the letter cycle on lab\/paths\.svg at step 1/,
+  },
+  {
+    id: 'B500', what: 'a letter-less segment after a cycled one never gets its letter written (it would read as the new command)',
+    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));', to: '    else text = inPlace(seg, spans, texts, seg.implicit ? null : cmd, out.slice(-1));',
+    run: engineTests('path/segments.test.ts'), expect: /✖ an implicit segment that followed the cycled one gets its old letter written/,
+  },
+  {
+    id: 'B501', what: 'a following S or T isn’t written out when its implied control would change (it changes shape)',
+    file: 'engine/path/segments.ts', from: "    if (U !== 'S' && U !== 'T') continue;", to: '    continue;',
+    run: engineTests('path/segments.test.ts'), expect: /✖ a following S or T whose implied control would change is written out/,
+  },
+  {
+    id: 'B502', what: 'Make relative leaves the first M uppercase (the lab writes m)',
+    file: 'engine/path/segments.ts', from: '    const cmd = s.implicit ? impliedAfter(prev) : toRel ? s.cmd.toLowerCase() : s.cmd.toUpperCase();', to: '    const cmd = s.implicit ? impliedAfter(prev) : toRel && i > 0 ? s.cmd.toLowerCase() : s.cmd.toUpperCase();',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Make relative on lab\/arcs--smooth\.svg writes the lab’s relative spelling exactly/,
+  },
+  {
+    id: 'B503', what: 'relative numbers are always written with 3 decimals (19.75 becomes 19.750)',
+    file: 'engine/path/segments.ts', from: '      return was !== undefined && same(was, v) ? oldText.get(r)! : exactText(v);', to: '      return was !== undefined && same(was, v) ? oldText.get(r)! : rel ? v.toFixed(3) : exactText(v);',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Relative and Absolute on mixed letters, implicit segments, arcs/,
+  },
+  {
+    id: 'B504', what: 'a letter-less segment gets a letter token too (over its first number’s first character)',
+    file: 'engine/code/tokens.ts', from: "    if (letters && !seg.implicit && 'LQC'.includes(U)) {", to: "    if (letters && 'LQC'.includes(U)) {",
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a <path>’s written L, l, Q, q, C and c letters are enum tokens/,
+  },
+  {
+    id: 'B505', what: 'transformPath counts the letter tokens again (every path with an L, Q or C refuses to move)',
+    file: 'engine/geometry/write.ts', from: ".filter((t) => !(t.kind === 'enum' && t.segment !== undefined));", to: ';',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path whose letters are tokens still moves, resizes and rotates as before/,
+  },
+  // P1-M3 S1: the Pen, the Node tool and the path marks (quick).
+  {
+    id: 'B506', what: 'the Pen’s first tap inserts a path (a zero-length one), where it should write nothing',
+    file: 'projects/draw/src/editor.ts', from: '    if (!pen.anchors.length) {\n      pen.anchors.push(anchor);\n      return this.#penChanged();\n    }', to: '    if (!pen.anchors.length) {\n      pen.anchors.push(anchor);\n      return this.#addAnchor(anchor);\n    }',
+    run: drawTests('pen.test.ts'), expect: /✖ Pen taps: the first writes nothing/,
+  },
+  {
+    id: 'B507', what: 'a dragged anchor’s in-handle isn’t reflected (it is the out-handle itself)',
+    file: 'projects/draw/src/interact/pen.ts', from: '(a.out ? { x: 2 * a.at.x - a.out.x, y: 2 * a.at.y - a.out.y } : null)', to: '(a.out ? { x: a.out.x, y: a.out.y } : null)',
+    run: drawTests('pen.test.ts'), expect: /✖ Pen drags: a drag makes a Q leaving the point along the drag/,
+  },
+  {
+    id: 'B508', what: 'the Pen doesn’t take the shared colour counter (every path is the first colour)',
+    file: 'projects/draw/src/editor.ts', from: 'colour: penColour(this.#shapes)', to: 'colour: penColour(0)',
+    run: drawTests('pen.test.ts'), expect: /✖ the colour cycle is SVG Lab’s pen colours/,
+  },
+  {
+    id: 'B509', what: 'Undo point undoes two entries',
+    file: 'projects/draw/src/editor.ts', from: '      this.#session.undo();\n      pen.anchors.pop();', to: '      this.#session.undo();\n      this.#session.undo();\n      pen.anchors.pop();',
+    run: drawTests('pen.test.ts'), expect: /✖ Undo point and ⌘Z walk back through the anchors to nothing/,
+  },
+  {
+    id: 'B510', what: 'node handles show in the Select tool too (M1’s corners go from a path)',
+    file: 'projects/draw/src/editor.ts', from: "    if (!doc || this.tool.get() !== 'node' || id === doc.root", to: '    if (!doc || id === doc.root',
+    run: drawTests('editor.test.ts'), expect: /✖ node handles show only in the Node tool/,
+  },
+  {
+    id: 'B511', what: 'a node drag gathers its snap targets on every frame (every shape measured again)',
+    file: 'projects/draw/src/editor.ts', from: "      if (nd.kind === 'anchor' || nd.kind === 'start') to = this.#cornerPoint(g, hd, f);", to: "      if (nd.kind === 'anchor' || nd.kind === 'start') to = this.#cornerPoint(g, { ...hd, targets: this.#snapTargets([hd.id]) }, f);",
+    run: drawTests('editor.test.ts'), expect: /✖ a node drag gathers its snap targets once/,
+  },
+  {
+    id: 'B512', what: 'a panel edit during a node drag is taken (dispatched into the drag: it throws)',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd', to: 'this.#gesture?.move || this.#gesture?.gd',
+    run: drawTests('editor.test.ts'), expect: /✖ a panel edit during a node drag is refused, quietly/,
+  },
+  {
+    id: 'B513', what: 'the S’s mirror is reflected about the segment’s end instead of its start',
+    file: 'engine/path/nodes.ts', from: 'mirrors.push({ from: p0, at: c1, to: null })', to: 'mirrors.push({ from: p0, at: P(2 * s.x - (2 * s.x0 - c1.x), 2 * s.y - (2 * s.y0 - c1.y)), to: null })',
+    run: drawTests('path-marks.test.ts'), expect: /✖ mirror guides: lab\/arcs--smooth\.svg’s S implies \(60, 90\)/,
+  },
+  // P1-M3 S1 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B514', what: 'the Pen’s points skip the camera (host px taken as root units): the path isn’t under the taps', slow: true, checks: ['thePenTapsLinesAndDragsCurves'],
+    file: 'projects/draw/src/editor.ts', from: '    if (m.every((v, i) => Math.abs(v - root[i]) <= 1e-9)) return this.#snapRoot(at, this.#snapTargets(pen.id !== null ? [pen.id] : []), this.#penStep()).p;', to: '    if (m.every((v, i) => Math.abs(v - root[i]) <= 1e-9)) return { x: toStep(at.x, this.#penStep()), y: toStep(at.y, this.#penStep()) };',
+    run: DRAW_E2E, expect: /thePenTapsLinesAndDragsCurves: the second tap did not insert exactly the lab's path/,
+  },
+  {
+    id: 'B515', what: 'node handles are placed through the parent’s matrix, not the path’s own (a rotated path’s handles off it)', slow: true, checks: ['nodeHandlesSitOnTheAnchorsAndControls'],
+    file: 'projects/draw/src/editor.ts', from: '        const [x, y] = applyM(m.toHost, h.at.x, h.at.y);', to: '        const [x, y] = applyM(this.#ports.canvas.measure([n.parent!]).get(n.parent!)?.toHost ?? m.toHost, h.at.x, h.at.y);',
+    run: DRAW_E2E, expect: /nodeHandlesSitOnTheAnchorsAndControls: the turned wave: the a0 handle is/,
+  },
+  {
+    id: 'B516', what: 'a letter token’s tap goes through tokenEdit (refused: a letter change adds arguments), so no Q', slow: true, checks: ['theLetterCycleAndRelativeKeepTheRestOfThePath'],
+    file: 'projects/draw/src/editor.ts', from: '        if (t.segment !== undefined) return void this.cycleSegment(ref.node, t.segment);\n', to: '',
+    run: DRAW_E2E, expect: /theLetterCycleAndRelativeKeepTheRestOfThePath: the L tap wrote/,
+  },
+  {
+    id: 'B517', what: 'the Node tool’s bar has a button under 44 pt (Relative shrinks to 1.5rem)', slow: true, checks: ['phoneRulesOnThePenAndNodeTools'],
+    file: 'projects/draw/src/panels/ContextBar.tsx', from: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} onClick={() => editor.toggleRelative()}>", to: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} style={{ width: '1.5rem', minWidth: 0, height: '1.5rem', minHeight: 0 }} onClick={() => editor.toggleRelative()}>",
+    run: DRAW_E2E, expect: /phoneRulesOnThePenAndNodeTools \(956\): 440×956:[\s\S]*the Node tool: Relative is \d+×\d+/,
+  },
 ];
 
 const args = process.argv.slice(2);
