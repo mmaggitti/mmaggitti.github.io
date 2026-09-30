@@ -118,6 +118,13 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ a deep chain of tiny entities hits the depth limit/,
   },
   {
+    // P1-M0 review (F1): the budget counts work as well as output, in parsing and in Edit source.
+    id: 'B300', what: 'an entity expansion costs only what it writes again (a bomb of entities that expand to nothing runs free)',
+    file: 'engine/xml/entities.ts', from: "    budget.left -= 1 + (rep.includes('&') ? rep.length : 0);\n", to: '',
+    run: ['node', ['--test', '--test-reporter=spec', '../../engine/test/xml.test.ts', '../../engine/test/fragment.test.ts'], DRAW],
+    expect: /^(?=[\s\S]*✖ an entity bomb that expands to nothing fails within the entity budget[\s\S]*an expansion to nothing is charged\b)(?=[\s\S]*✖ Edit source refuses an entity bomb that expands to nothing, within the budget[\s\S]*an expansion to nothing is charged to the document)/,
+  },
+  {
     id: 'B16', what: 'the number formatter falls back to exponent notation',
     file: 'engine/values/number-format.ts', from: 'if (Math.abs(n) >= 1e21) return BigInt(n).toString();', to: '',
     run: engineTests('values/number-format.test.ts'), expect: /✖ fmt never writes -0 or an exponent/,

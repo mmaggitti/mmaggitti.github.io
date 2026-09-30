@@ -4,7 +4,8 @@
 // - The five predefined entities and numeric references always decode.
 // - General entities declared in the DOCTYPE's internal subset (Illustrator declares its namespace
 //   URIs this way) expand, with a total budget and a depth limit, so a billion-laughs file fails
-//   instead of exhausting memory.
+//   instead of exhausting memory. The budget counts the work of expanding as well as the output,
+//   so a bomb of entities that expand to nothing fails as fast.
 // - External and parameter entities are never fetched or expanded; a reference to one is left as
 //   written and reported.
 // - An entity whose replacement text holds markup ('<') is refused: the model cannot represent
@@ -19,7 +20,9 @@
 //   one under a DOCTYPE that names an XHTML DTD, where browsers supply HTML's named references
 //   (&nbsp;, &copy;…) themselves and Draw doesn't.
 
-export const ENTITY_BUDGET = 1_000_000; // characters produced by expansion, per document
+// Characters produced by expansion, per document, plus the work of expanding (see decode): one per
+// expansion, and the replacement text an expansion reads for references.
+export const ENTITY_BUDGET = 1_000_000;
 export const ENTITY_DEPTH = 8;
 
 const PREDEFINED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -227,6 +230,10 @@ export function decode(s: string, table: EntityTable = NO_ENTITIES, budget: Budg
     if (rep.includes('<')) throw new EntityMarkupError(`entity &${ref}; expands to markup`);
     const bad = entityError(ref, table, attr, []);
     if (bad && bad.kind === undefined) throw new EntityWellFormednessError(bad.message);
+    // An expansion costs work as well as output, or one that makes nothing is free and a bomb of
+    // empty entities runs fan^depth expansions: one for the expansion, and its replacement text when
+    // it holds references (read again at every use; text without them is output, charged below).
+    budget.left -= 1 + (rep.includes('&') ? rep.length : 0);
     const out = decode(rep, table, budget, depth + 1, unresolved, attr);
     budget.left -= out.length;
     if (budget.left < 0) throw new EntityBudgetError(`entity expansion over ${ENTITY_BUDGET} characters`);

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { parseDoc, serialize, serializeNode, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { parseFragment } from '../model/fragment.ts';
+import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
 
@@ -82,6 +83,27 @@ test('every element of every corpus file survives a round trip through Edit sour
   assert.ok(n > 300, `only ${n} elements`);
 });
 
+// The document declares a bomb of entities that expand to nothing and never uses it, so it opens;
+// Edit source then uses it. Expanding costs work as well as output, so the text is refused within
+// the document's budget, fast, and a refused text spends nothing (it used to take 34 s here).
+test('Edit source refuses an entity bomb that expands to nothing, within the budget', () => {
+  let subset = '<!ENTITY e0 "">';
+  for (let d = 1; d <= 8; d++) subset += `<!ENTITY e${d} "${`&e${d - 1};`.repeat(10)}">`;
+  const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><g/></svg>`);
+  assert.ok(r.ok);
+  const doc = r.doc;
+  assert.ok(parseFragment(doc, doc.root, '<text>&e1;</text>').ok);
+  assert.ok(doc.budget.left < ENTITY_BUDGET, 'an expansion to nothing is charged to the document');
+  const left = doc.budget.left;
+  const t0 = performance.now();
+  const f = parseFragment(doc, doc.root, '<text>&e8;</text>');
+  const ms = performance.now() - t0;
+  assert.ok(!f.ok, 'parsed');
+  assert.match(f.error.message, /entity expansion over 1000000 characters/);
+  assert.ok(ms < 1000, `took ${ms.toFixed(0)} ms`);
+  assert.equal(doc.budget.left, left, 'a refused text spends nothing');
+});
+
 // Put what a fragment parses to at the end of `scope`, as Edit source would (one transaction).
 function insertAll(doc: Doc, scope: NodeId, nodes: NodeId[]): void {
   const at = el(doc, scope).children.length;
@@ -89,7 +111,8 @@ function insertAll(doc: Doc, scope: NodeId, nodes: NodeId[]): void {
 }
 
 test('Edit source spends what the document has left of its limits, so the file always opens again', () => {
-  // Entities: the file spends 600,000 of its 1,000,000 on open; each &d; costs 40,000 more.
+  // Entities: the file spends 644,445 of its 1,000,000 on open (what each expansion writes, plus one
+  // for it and the references it reads); each &d; costs 44,441 more.
   const ten = (n: string) => `&${n};`.repeat(10);
   const subset = `<!ENTITY a "aaaaaaaaaa"><!ENTITY b "${ten('a')}"><!ENTITY c "${ten('b')}"><!ENTITY d "${ten('c')}"><!ENTITY e "${ten('d')}"><!ENTITY f "&e;">`;
   const r = parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg"><desc>&f;</desc></svg>`);
@@ -104,7 +127,7 @@ test('Edit source spends what the document has left of its limits, so the file a
     }
     insertAll(doc, doc.root, f.nodes);
   }
-  assert.equal(fitted, 10, 'ten fit in what the document had left, and the eleventh is refused');
+  assert.equal(fitted, 8, 'eight fit in what the document had left, and the ninth is refused');
   const again = parseDoc(serialize(doc));
   assert.ok(again.ok, `the saved file reopens: ${!again.ok && again.error.message}`);
   // Depth: from where the text goes in, not from the fragment's own top.

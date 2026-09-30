@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { lex } from '../xml/lex.ts';
 import { parseCst, serializeCst } from '../xml/cst.ts';
-import { decode, readEntityTable, EntityBudgetError, EntityWellFormednessError, newBudget } from '../xml/entities.ts';
+import { decode, readEntityTable, EntityBudgetError, EntityWellFormednessError, newBudget, ENTITY_BUDGET } from '../xml/entities.ts';
 import { parseDoc, serialize, el, setAttr, removeAttr, attrValue, href, textContent, NS, descendants } from '../model/doc.ts';
 
 const CORPUS = new URL('./fixtures/corpus/', import.meta.url).pathname;
@@ -171,6 +171,27 @@ test('a billion-laughs document fails within the entity budget', () => {
   for (let i = 1; i <= 9; i++) subset += `<!ENTITY lol${i} "${`&lol${i === 1 ? '' : i - 1};`.repeat(10)}">`;
   const t = readEntityTable(subset);
   assert.throws(() => decode('&lol9;', t), EntityBudgetError);
+});
+
+// An expansion that makes nothing still costs (one for it, and the replacement text it reads for
+// references), so a bomb of empty entities fails as fast as one that makes text. It used to run
+// fan^depth expansions without spending anything: 34 s for this 535-byte file.
+test('an entity bomb that expands to nothing fails within the entity budget', () => {
+  let subset = '<!ENTITY e0 "">';
+  for (let d = 1; d <= 8; d++) subset += `<!ENTITY e${d} "${`&e${d - 1};`.repeat(10)}">`;
+  const budget = newBudget();
+  assert.equal(decode('&e1;', readEntityTable(subset), budget), '');
+  assert.ok(budget.left < ENTITY_BUDGET, 'an expansion to nothing is charged to the budget');
+  for (const body of ['<text>&e8;</text>', '<g id="&e8;"/>']) {
+    const src = `<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+    const t0 = performance.now();
+    const r = parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(!r.ok, `${body}: parsed`);
+    assert.equal(r.error.kind, 'limit', body);
+    assert.match(r.error.message, /entity expansion over 1000000 characters/, body);
+    assert.ok(ms < 1000, `${body}: took ${ms.toFixed(0)} ms`);
+  }
 });
 
 // The billion laughs above nests 10 deep, so the depth limit alone stops it. Each limit gets its
