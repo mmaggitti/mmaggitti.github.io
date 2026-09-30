@@ -58,8 +58,16 @@ export function tokenTextError(token: Token, text: string): string | null {
     case 'ref':
       return idError(text);
     case 'text':
-      return null;
+      return token.url === undefined ? null : urlTextError(text, token.url);
   }
+}
+
+// A URL inside url(…) (a text token with `url`) holds a URL and nothing else, or it would end the
+// url(…) and go on as CSS: unquoted, no whitespace, quote, parenthesis, backslash or DEL (the CSS
+// tokenizer's bad-url characters); inside quotes, no line break, that quote or backslash.
+function urlTextError(text: string, quote: '' | '"' | "'"): string | null {
+  const bad = (quote === '' ? /[ \t\n\r\f"'()\\\x7f]/ : quote === '"' ? /["\\\n\r\f]/ : /['\\\n\r\f]/).exec(text);
+  return bad ? `A URL in url(${quote}…${quote}) can't hold ${JSON.stringify(bad[0])}` : null;
 }
 
 /** Decimal places in a step or delta as fmt would write it ('0.15' → 2), at most 10. */

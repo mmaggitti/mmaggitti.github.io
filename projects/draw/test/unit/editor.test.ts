@@ -14,11 +14,12 @@ import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-vi
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
-import type { OverlayModel } from '../../src/interact/overlay-model.ts';
+import { rootToHostMatrix, type OverlayModel } from '../../src/interact/overlay-model.ts';
 import { measureWith } from './fakes.ts';
 import { layerRows } from '../../src/panels/layer-rows.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
+import { starPoints as starPointsOf } from '../../../../engine/generators/radial.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -1245,13 +1246,12 @@ test('Ungroup is refused, with the reason, when the group holds an animation tha
   assert.equal(o.editor.source(), other.replace('<g id="g" transform="translate(1 2)">', '').replace('</g>', '').replace('<circle r="2"/>', '<circle r="2" transform="translate(1 2)"/>'));
 });
 
-test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform, or to anything inside one; not when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
+test('Ungroup is refused, with the reason, when a use, an href or a url(#…) refers to a child that takes the group’s transform (the child itself); a reference to a shape inside one (Illustrator’s clipPath and use, defined and used in a nested group) ungroups with every screen box in place; not refused when the group has no transform, when what is referred to moves out as it is, or for an ARIA reference', () => {
   const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
   const refused: [string, string][] = [
     [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), 'k'], // a use elsewhere
     [svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/><use xlink:href="#k" x="20"/></g>'), 'k'], // a use beside it, by xlink:href
-    [svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // inside a child
-    [svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), 'lg'], // a url(#…) into a child
+    [svg('<g id="g" transform="translate(5 5)"><path id="p" d="M0 0h50"/></g><text><textPath href="#p">on a path</textPath></text>'), 'p'], // a textPath: the path's own transform counts
   ];
   for (const [file, id] of refused) {
     const r = rig();
@@ -1262,10 +1262,73 @@ test('Ungroup is refused, with the reason, when a use, an href or a url(#…) re
     assert.equal(r.editor.source(), file, `${file}: nothing was written`);
     assert.equal(r.editor.history.get().canUndo, false, file);
   }
+  // Every drawn element's screen quad (a clip's or defs' content draws where it is referred to, so it isn't one).
+  const quads = (r: Rig): Map<NodeId, number[]> => {
+    const d = doc(r);
+    const ids = [...descendants(d, d.root)].filter((n) => n.kind === 'element' && n.id !== d.root).map((n) => n.id);
+    return new Map([...measureWith(r.editor, ids)].map(([id, m]) => {
+      const { x, y, width: w, height: h } = m.box;
+      const t = m.toHost;
+      return [id, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].flatMap(([px, py]) => [t[0] * px + t[2] * py + t[4], t[1] * px + t[3] * py + t[5]])];
+    }));
+  };
+  const ILLUSTRATOR = svg(`
+  <g id="g" transform="translate(10 5) rotate(15)">
+    <g>
+      <defs><rect id="SVGID_1_" x="0" y="0" width="40" height="30"/></defs>
+      <clipPath id="SVGID_2_"><use xlink:href="#SVGID_1_" style="overflow:visible;"/></clipPath>
+      <rect x="5" y="5" width="50" height="50" clip-path="url(#SVGID_2_)" fill="#e76f51"/>
+      <use href="#dot" x="8" y="4"/>
+      <circle id="dot" cx="10" cy="10" r="3"/>
+    </g>
+  </g>`);
   for (const file of [
+    ILLUSTRATOR,
+    svg('<g id="g" transform="translate(5 5)"><g><path id="p" d="M0 0h50"/></g></g><text><textPath href="#p">on a path</textPath></text>'), // inside a child: its own transform is what counts
+    svg('<g id="g" transform="translate(5 5)"><g><linearGradient id="lg"><stop offset="0"/></linearGradient><rect width="5" height="5"/></g></g><rect width="5" height="5" fill="url(#lg)"/>'), // a url(#…) into a child: used where it is referred to
     svg('<g id="g"><rect id="k" width="5" height="5"/></g><use href="#k" x="20"/>'), // no transform: nothing is pushed
     svg('<g id="g" transform="translate(5 5)"><clipPath id="c"><circle r="3"/></clipPath><rect width="5" height="5" clip-path="url(#c)"/></g>'), // the clip moves out as it is
     svg('<g id="g" transform="translate(5 5)"><rect id="k" width="5" height="5"/></g><text aria-labelledby="k">x</text>'), // an ARIA reference draws nothing
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    const before = quads(r);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${file}: ${r.editor.notice.get()}`);
+    const after = quads(r);
+    assert.ok(after.size >= before.size - 1 && after.size > 0, `${file}: test setup: ${after.size} measured after, ${before.size} before`);
+    for (const [id, q] of after) {
+      const was = before.get(id);
+      assert.ok(was && q.every((v, i) => Math.abs(v - was[i]) < 1e-6), `${file}: <${(doc(r).nodes.get(id) as ElementNode).qname}> moved on screen: ${was} → ${q}`);
+    }
+    r.editor.undo();
+    assert.equal(r.editor.source(), file, `${file}: one undo gives the file back`);
+  }
+});
+
+test('Ungroup is refused, with the reason, when an animateTransform sets the transform of a child that would take the group’s (one inside the child, or one whose href names it); not for one that animates another attribute, names another element, or a group with no transform', () => {
+  const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">${body}</svg>`;
+  const spin = (extra = '') => `<animateTransform${extra} attributeName="transform" type="rotate" from="0 5 5" to="360 5 5" dur="2s"/>`;
+  for (const [file, name] of [
+    [svg(`<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10">${spin()}</rect></g>`), '#k'], // inside the child
+    [svg(`<g id="g" transform="translate(5 5)"><rect width="10" height="10">${spin()}</rect></g>`), '<rect>'], // one with no id is named by its tag
+    [svg(`<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"/></g>${spin(' href="#k"')}`), '#k'], // elsewhere, by href
+    [svg(`<g id="g" transform="translate(5 5)"><circle id="k" r="4"/>${spin(' xlink:href="#k"')}</g>`), '#k'], // beside it, by xlink:href
+  ]) {
+    const r = rig();
+    r.editor.open(file);
+    r.editor.select([idOf(r, 'g')]);
+    r.editor.ungroup();
+    assert.equal(r.editor.notice.get(), `An animation on ${name} sets its transform; ungrouping can’t push the group’s into it.`, file);
+    assert.equal(r.editor.source(), file, `${file}: nothing was written`);
+    assert.equal(r.editor.history.get().canUndo, false, file);
+  }
+  for (const file of [
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"><animate attributeName="x" to="9" dur="1s"/></rect></g>'), // another attribute
+    svg('<g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10"><animateTransform attributeName="gradientTransform" type="rotate" to="30" dur="1s"/></rect></g>'), // not its transform
+    svg(`<rect id="o" width="4" height="4"/><g id="g" transform="translate(5 5)"><rect id="k" width="10" height="10">${spin(' href="#o"')}</rect></g>`), // it names another element
+    svg(`<g id="g"><rect id="k" width="10" height="10">${spin()}</rect></g>`), // no transform to push
   ]) {
     const r = rig();
     r.editor.open(file);
@@ -1644,4 +1707,262 @@ test('no raw items: every rendered element, use, image, foreignObject and text i
       r.editor.nudgeEnd();
     }, (s) => s === RAW.replace(nudged[name][0], nudged[name][1]));
   }
+});
+
+// ── P1-M2 S1: the Shapes tool, shape handles and generated shapes ────────────────────────────────
+
+const STAR5 = (cx = 50, cy = 50, r = 20) => `<polygon id="s" points="${starPointsOf(cx, cy, r, 0.4, 5)}" fill="#e76f51" stroke="none" draw:gen="star" draw:cx="${cx}" draw:cy="${cy}" draw:r="${r}" draw:inner="0.4" draw:tips="5"/>`;
+const GEN = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">\n  ${body}\n</svg>`;
+const handleIds = (r: Rig) => r.editor.overlayModel().handles.map((h) => h.id);
+
+test('the overlay gives circles, ellipses, lines, polygons, polylines and generated shapes their own handles and no corners; rect, image, foreignObject, nested svg, path, g, use and text keep the corners', () => {
+  // The engine doesn't measure a use or a text (the browser's getBBox does): a stand-in box for those.
+  const r: Rig = rig(HOST, {
+    measure: (ids) => {
+      const m = measureWith(r.editor, ids, true);
+      const { box, viewport, M } = r.editor.rootBox;
+      for (const id of ids) {
+        const n = doc(r).nodes.get(id);
+        if (!m.has(id) && n?.kind === 'element' && (n.local === 'use' || n.local === 'text')) m.set(id, { box: { x: 50, y: 85, width: 20, height: 12 }, toHost: rootToHostMatrix(box!, viewport, M) });
+      }
+      return m;
+    },
+  });
+  r.editor.open(GEN(`<circle id="c" cx="20" cy="20" r="8"/><ellipse id="e" cx="50" cy="20" rx="12" ry="6"/><line id="l" x1="70" y1="10" x2="90" y2="30" stroke="#000"/><polygon id="p" points="10,40 30,40 20,55"/><polyline id="q" points="40,40 50,55 60,40" fill="none" stroke="#000"/>${STAR5(80, 50, 10)}<rect id="r" x="5" y="65" width="20" height="20"/><image id="i" x="30" y="65" width="20" height="20" href="data:image/png;base64,AAAA"/><foreignObject id="f" x="55" y="65" width="20" height="20"/><svg id="n" x="78" y="62" width="20" height="20"><rect width="20" height="20"/></svg><path id="d" d="M5 90h20v8H5z"/><g id="g"><rect x="30" y="90" width="20" height="8"/></g><use id="u" href="#r" x="50"/><text id="t" x="60" y="96">Hi</text>`));
+  const corners = ['tl', 'tr', 'br', 'bl'];
+  for (const [id, own] of [['c', ['r']], ['e', ['rx', 'ry']], ['l', ['p1', 'p2']], ['p', ['v0', 'v1', 'v2']], ['q', ['v0', 'v1', 'v2']], ['s', ['r', 'inner']]] as const) {
+    r.editor.select([idOf(r, id)]);
+    const ids = handleIds(r);
+    assert.ok(own.every((h) => ids.includes(h)) && ids.includes('center'), `#${id}: ${ids}`);
+    assert.ok(!ids.some((h) => corners.includes(h)), `#${id} has no corners: ${ids}`);
+  }
+  for (const id of ['r', 'i', 'f', 'n', 'd', 'g', 'u', 't']) {
+    r.editor.select([idOf(r, id)]);
+    assert.ok(corners.every((h) => handleIds(r).includes(h)), `#${id} keeps its corners: ${handleIds(r)}`);
+  }
+  // The star's centre handle sits on its own centre (draw:cx, draw:cy), not its box's.
+  r.editor.select([idOf(r, 's')]);
+  const c = r.editor.overlayModel().handles.find((h) => h.id === 'center')!.at;
+  const want = hostAt(r, 80, 50);
+  assert.ok(Math.hypot(c.x - want.x, c.y - want.y) < 0.01, `the star's centre handle ${JSON.stringify(c)} is on (80, 50) ${JSON.stringify(want)}`);
+  // With the Shapes tool on, no handles at all.
+  r.editor.pickTool('shapes');
+  assert.deepEqual(handleIds(r), []);
+});
+
+test('a handle drag keeps the grab: a radius handle or a corner grabbed 20 px off moves by the finger’s movement, never jumping to it', () => {
+  const r = rig();
+  const F = GEN('<circle id="c" cx="30" cy="30" r="10"/>\n  <rect id="a" x="50" y="50" width="30" height="30"/>');
+  r.editor.open(F);
+  r.editor.snap.set(NO_SNAP);
+  const k = pxPerUnit(r);
+  r.editor.select([idOf(r, 'c')]);
+  const h = r.editor.overlayModel().handles.find((x) => x.id === 'r')!.at;
+  const press = { x: h.x + 0.5 * k, y: h.y + 20 }; // off the handle, still within 26 px
+  r.editor.pointerDown(press, [], { add: false });
+  r.editor.pointerDrag({ x: press.x + 3 * k, y: press.y });
+  r.editor.pointerUp({ x: press.x + 3 * k, y: press.y });
+  assert.equal(r.editor.history.get().undoLabel, 'Set r');
+  assert.ok(r.editor.source().includes('r="13"'), `the radius moved by the finger's 3 units: ${r.editor.source()}`);
+  r.editor.undo();
+  r.editor.select([idOf(r, 'a')]);
+  const br = r.editor.overlayModel().handles.find((x) => x.id === 'br')!.at;
+  const p2 = { x: br.x + 14, y: br.y + 14 }; // 20 px off, down and right
+  r.editor.pointerDown(p2, [], { add: false });
+  r.editor.pointerDrag({ x: p2.x - 5 * k, y: p2.y - 5 * k });
+  r.editor.pointerUp({ x: p2.x - 5 * k, y: p2.y - 5 * k });
+  assert.equal(r.editor.history.get().undoLabel, 'Resize');
+  assert.ok(r.editor.source().includes('<rect id="a" x="50" y="50" width="25" height="25"/>'), `the corner moved by the finger's (−5, −5), not to the finger: ${r.editor.source()}`);
+});
+
+test('shape handles: a circle’s radius from the distance, a line end on the snapped point, a star’s radius redrawn from draw:r; one entry each, the tooltip saying the value', () => {
+  const F = GEN(`<circle id="c" cx="30" cy="30" r="10"/>\n  <line id="l" x1="10" y1="80" x2="40" y2="80" stroke="#000"/>\n  ${STAR5(70, 60, 15)}`);
+  const r = rig();
+  r.editor.open(F);
+  r.editor.addGuide('v'); // x 50
+  const withGuide = r.editor.source();
+  const drag = (id: string, handle: string, to: { x: number; y: number }) => {
+    r.editor.select([idOf(r, id)]);
+    const h = r.editor.overlayModel().handles.find((x) => x.id === handle)!.at;
+    r.editor.pointerDown(h, [], { add: false });
+    r.editor.pointerDrag({ x: (h.x + to.x) / 2, y: (h.y + to.y) / 2 });
+    r.editor.pointerDrag(to);
+    const tip = r.editor.overlayModel().tip?.text;
+    r.editor.pointerUp(to);
+    return tip;
+  };
+  assert.equal(drag('c', 'r', hostAt(r, 45.2, 30)), 'r 15');
+  assert.equal(r.editor.source(), withGuide.replace('r="10"', 'r="15"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set r');
+  r.editor.undo();
+  assert.equal(drag('l', 'p2', hostAt(r, 49.2, 76.3)), 'x 50, y 76');
+  assert.equal(r.editor.source(), withGuide.replace('x2="40" y2="80"', 'x2="50" y2="76"'), 'the end snapped to the guide at x 50, whole units in y');
+  assert.equal(r.editor.history.get().undoLabel, 'Move end');
+  r.editor.undo();
+  assert.equal(drag('s', 'r', hostAt(r, 70, 60 - 25.3)), 'r 25');
+  assert.equal(r.editor.source(), withGuide.replace(STAR5(70, 60, 15), STAR5(70, 60, 25)), 'draw:r and the points it generates, one entry');
+  assert.equal(r.editor.history.get().undoLabel, 'Set r');
+  r.editor.undo();
+  assert.equal(r.editor.source(), withGuide);
+});
+
+test('a shape-handle drag gathers its snap targets once, when it starts, not on every frame', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  r.editor.open(SHAPES);
+  const [l, b] = ['l', 'b'].map((id) => idOf(r, id));
+  r.editor.select([l]);
+  const end = r.editor.overlayModel().handles.find((h) => h.id === 'p2')!;
+  measured.length = 0;
+  r.editor.pointerDown(end.at, [l], { add: false });
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: end.at.x - 3 * i, y: end.at.y - 2 * i });
+  r.editor.pointerUp({ x: end.at.x - 18, y: end.at.y - 12 });
+  assert.equal(r.editor.history.get().undoLabel, 'Move end');
+  const gathers = measured.filter((ids) => ids.includes(b)).length;
+  assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
+});
+
+test('on a mirrored element, and inside a mirrored group, a radius or end handle stays under the finger and its length grows outward, with no sign flipped and no transform changed', () => {
+  const F = GEN('<circle id="c" cx="-30" cy="30" r="10" transform="scale(-1 1)"/>\n  <g transform="matrix(-1 0 0 1 100 0)"><line id="l" x1="10" y1="80" x2="40" y2="80" stroke="#000"/></g>');
+  const r = rig();
+  r.editor.open(F);
+  r.editor.snap.set(NO_SNAP);
+  const drag = (id: string, handle: string, to: { x: number; y: number }) => {
+    r.editor.select([idOf(r, id)]);
+    const h = r.editor.overlayModel().handles.find((x) => x.id === handle)!.at;
+    r.editor.pointerDown(h, [], { add: false });
+    r.editor.pointerDrag(to);
+    r.editor.pointerUp(to);
+    return r.editor.overlayModel().handles.find((x) => x.id === handle)!.at;
+  };
+  // The circle is drawn at x 30; its radius handle on its left (the mirror), dragged further left.
+  const c0 = r.editor.overlayModel();
+  r.editor.select([idOf(r, 'c')]);
+  const rh = r.editor.overlayModel().handles.find((x) => x.id === 'r')!.at;
+  assert.ok(Math.abs(rh.x - hostAt(r, 20, 30).x) < 0.01, 'the radius handle sits on the mirrored side, at x 20');
+  void c0;
+  const to = hostAt(r, 15, 30);
+  const after = drag('c', 'r', to);
+  assert.ok(r.editor.source().includes('<circle id="c" cx="-30" cy="30" r="15" transform="scale(-1 1)"/>'), r.editor.source());
+  assert.ok(Math.hypot(after.x - to.x, after.y - to.y) < 0.5, `the handle ${JSON.stringify(after)} is under the finger ${JSON.stringify(to)}`);
+  // The line in the mirrored group: its second end is drawn at x 60.
+  const end = hostAt(r, 55, 70);
+  const got = drag('l', 'p2', end);
+  assert.ok(r.editor.source().includes('<line id="l" x1="10" y1="80" x2="45" y2="70" stroke="#000"/>'), r.editor.source());
+  assert.ok(Math.hypot(got.x - end.x, got.y - end.y) < 0.5, `the end ${JSON.stringify(got)} is under the finger ${JSON.stringify(end)}`);
+  assert.ok(r.editor.source().includes('transform="scale(-1 1)"') && r.editor.source().includes('transform="matrix(-1 0 0 1 100 0)"'), 'the transforms are as written');
+});
+
+test('an edit from a panel during a draw or a shape-handle drag is refused quietly, and the gesture carries on to one entry', () => {
+  const r = rig();
+  const F = GEN('<circle id="c" cx="30" cy="30" r="10"/>\n  <rect id="b" x="60" y="60" width="10" height="10"/>');
+  r.editor.open(F);
+  const b = idOf(r, 'b');
+  const panel = () => {
+    r.editor.setHidden(b, true);
+    r.editor.setLocked(b, true);
+    r.editor.addGuide('v');
+    r.editor.setGridStep(5);
+    r.editor.stepInput('tips', 1);
+  };
+  r.editor.pickTool('shapes');
+  const a = hostAt(r, 20, 60);
+  r.editor.pointerDown(a, [], { add: false });
+  r.editor.pointerDrag(hostAt(r, 40, 80));
+  assert.doesNotThrow(panel, 'Hide, Lock, a guide, the grid step and a generator input during a draw');
+  r.editor.pointerUp(hostAt(r, 40, 80));
+  assert.equal(r.editor.history.get().undoLabel, 'Add rectangle');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, 'the draw was the only entry');
+  r.editor.select([idOf(r, 'c')]);
+  const h = r.editor.overlayModel().handles.find((x) => x.id === 'r')!.at;
+  r.editor.pointerDown(h, [], { add: false });
+  r.editor.pointerDrag({ x: h.x + 20, y: h.y });
+  assert.doesNotThrow(panel, 'the same during a shape-handle drag');
+  r.editor.pointerUp({ x: h.x + 20, y: h.y });
+  assert.equal(r.editor.history.get().undoLabel, 'Set r');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('with the Shapes tool on, a press never selects or moves, a second finger cancels a draw (the file as it was, nothing recorded), and Escape ends a draw first, then the tool', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  r.editor.pickTool('shapes');
+  assert.equal(r.editor.notice.get(), 'Tap to place, or drag to draw.');
+  const on = hostAt(r, 15, 15); // on rect a
+  r.editor.pointerDown(on, [a], { add: false });
+  r.editor.pointerDrag(hostAt(r, 30, 30));
+  r.editor.pointerCancel(); // the Stage's second finger
+  assert.equal(r.editor.source(), SHAPES, 'a second finger cancels the draw');
+  assert.equal(r.editor.history.get().canUndo, false);
+  assert.equal(r.editor.selection.get().size, 0, 'nothing was selected');
+  r.editor.pointerDown(on, [a], { add: false });
+  r.editor.pointerDrag(hostAt(r, 30, 30));
+  r.editor.escape();
+  assert.equal(r.editor.source(), SHAPES, 'Escape cancels the draw in progress');
+  assert.equal(r.editor.tool.get(), 'shapes', 'and keeps the tool');
+  r.editor.escape();
+  assert.equal(r.editor.tool.get(), 'select', 'a second Escape returns to Select');
+});
+
+test('generated shapes: the Tips field, typed "12", draws 24 points after each keystroke that reads and is one "Set tips" entry that one undo takes back; − and + are one entry each; a hand edit of the points detaches with a notice; Detach does it on purpose', () => {
+  const F = GEN(STAR5());
+  const r = rig();
+  r.editor.open(F);
+  const s = idOf(r, 's');
+  r.editor.select([s]);
+  assert.equal(r.editor.generated()?.label, 'Star');
+  assert.deepEqual(r.editor.generated()!.inputs.map((i) => `${i.name}=${i.text}`), ['cx=50', 'cy=50', 'r=20', 'inner=0.4', 'tips=5']);
+  const points = () => (doc(r).nodes.get(s) as ElementNode).attrs.find((x) => x.local === 'points')!.raw.split(' ').length;
+  r.editor.fieldStart({ kind: 'input', name: 'tips' });
+  assert.match(r.editor.fieldInput('1') ?? '', /^Tips takes whole numbers from 3 to 24$/, '"1" doesn\'t read');
+  assert.equal(points(), 10, 'the last good value stays (the 5-tip star)');
+  assert.equal(r.editor.fieldInput('12'), null);
+  assert.equal(points(), 24, '"12" draws 24 points at once');
+  r.editor.fieldEnd();
+  assert.equal(r.editor.history.get().undoLabel, 'Set tips');
+  assert.equal(r.editor.source(), F.replace(STAR5(), STAR5().replace(starPointsOf(50, 50, 20, 0.4, 5), starPointsOf(50, 50, 20, 0.4, 12)).replace('draw:tips="5"', 'draw:tips="12"')));
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, 'one undo gives back the 5-tip star');
+  // Keystrokes that each read: the Inner field typed 0.6, then 0.65, is still one entry.
+  r.editor.fieldStart({ kind: 'input', name: 'inner' });
+  for (const text of ['0', '0.', '0.6', '0.65']) r.editor.fieldInput(text);
+  r.editor.fieldEnd();
+  assert.ok(r.editor.source().includes('draw:inner="0.65"'), `the Inner field wrote ${r.editor.source()}`);
+  assert.equal(r.editor.history.get().undoLabel, 'Set inner');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, 'one undo gives back the inner radius from before the field: typing in it was one entry');
+  r.editor.stepInput('tips', 1);
+  r.editor.stepInput('inner', -1);
+  assert.equal(r.editor.history.get().undoLabel, 'Set inner');
+  assert.ok(r.editor.source().includes('draw:inner="0.35" draw:tips="6"'), r.editor.source());
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, '− and + are one entry each');
+  // A code scrub of one of its numbers: plain, with the notice, in that one entry.
+  const t = tokenIn(r, s, 'number', 2);
+  r.editor.scrubStart(t.block, t.token);
+  r.editor.scrub(3);
+  r.editor.scrubEnd(true);
+  assert.equal(r.editor.generated(), null, 'plain now');
+  assert.ok(!r.editor.source().includes('draw:'), 'every draw: input gone, and the declaration with them');
+  assert.equal(r.editor.notice.get(), 'It’s a plain shape now: its generator inputs were dropped.');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F, 'one undo brings the inputs back byte for byte');
+  r.editor.notice.set(null);
+  r.editor.detach();
+  assert.equal(r.editor.history.get().undoLabel, 'Detach');
+  assert.equal(r.editor.source(), F.replace(' draw:gen="star" draw:cx="50" draw:cy="50" draw:r="20" draw:inner="0.4" draw:tips="5"', '').replace(' xmlns:draw="https://mmaggitti.github.io/draw/ns"', ''));
+  // A move keeps it generated: only draw:cx, draw:cy and the points.
+  r.editor.undo();
+  r.editor.snap.set(NO_SNAP);
+  const c = r.editor.overlayModel().handles.find((x) => x.id === 'center')!.at;
+  const k = pxPerUnit(r);
+  r.editor.pointerDown(c, [s], { add: false });
+  r.editor.pointerDrag({ x: c.x + 7 * k, y: c.y - 3 * k });
+  r.editor.pointerUp({ x: c.x + 7 * k, y: c.y - 3 * k });
+  assert.equal(r.editor.source(), F.replace(STAR5(), STAR5(57, 47)));
+  assert.ok(r.editor.generated(), 'still generated');
 });

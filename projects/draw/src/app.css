@@ -133,6 +133,11 @@
 /* SVG Lab's marks (its .selbox, .gd, .gt, .hd and .tip), in screen px. */
 .draw-marquee { fill: rgb(0 163 224 / 0.08); stroke: #00a3e0; stroke-width: 1; stroke-dasharray: 4 3; }
 .draw-coord, .draw-rot-guide { fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4; }
+/* Edit on canvas (P1-M2): a gradient's guides, SVG Lab's .gd (its line and circle), .bb (the unit
+   box of a bounding-box gradient) and .arm (centre to focus). */
+.draw-grad-guide { fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.draw-grad-box { fill: none; stroke: #8d99ae; stroke-width: 1; stroke-dasharray: 2 3; }
+.draw-grad-arm { stroke: #e6007e; stroke-width: 1; opacity: 0.75; }
 .draw-mark-label {
   fill: #006f99;
   font: 700 var(--text-sm) / 1 var(--font-ui);
@@ -308,6 +313,67 @@
 }
 .draw-empty { margin: 0; padding: var(--space-4); }
 .draw-attrs { margin: var(--space-3); }
+/* Inspect (P1-M2): sections of 44 pt rows above the attribute list. */
+.draw-inspect { padding: 0 var(--space-3) var(--space-3); }
+.draw-inspect > .draw-subhead { margin-left: 0; }
+.draw-inspect .draw-attrs { margin: var(--space-2) 0 0; }
+.draw-inspect-section { display: flex; flex-direction: column; gap: var(--space-2); }
+/* Each style section under a hairline, its name bold, so it reads apart from the rows' names. */
+.draw-inspect-section + .draw-inspect-section { border-top: 1px solid var(--line); }
+.draw-inspect-section > .draw-subhead { margin: var(--space-3) 0 0; font-weight: 600; }
+.draw-inspect-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-inspect-name { flex: 1 1 6rem; min-width: 0; font-size: var(--text-md); }
+.draw-inspect-row .draw-stepper { flex: 0 1 auto; min-width: 0; }
+.draw-inspect-field { width: 7rem; flex: 0 1 7rem; }
+.draw-inspect-btn { min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-inspect-error { flex: 1 0 100%; margin: 0; color: var(--text-muted); }
+/* Style rows (P1-M2): segments take their own line under the name, and wrap into two rows where one
+   doesn't fit (shape-rendering); every control keeps the 44 pt floor, fields the 16 px one. */
+.draw-inspect-note { flex: 1 0 100%; margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.draw-inspect-row > .ds-seg { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+.draw-inspect-seg > button { min-width: 0; padding: 0 var(--space-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.draw-inspect-seg--two > button { flex: 1 1 40%; }
+.draw-inspect-swatch {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  min-height: max(var(--tap-min), var(--control-h-sm));
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}
+.draw-inspect-chip {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.5rem 0.5rem;
+}
+.draw-inspect-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.draw-inspect-range { flex: 1 1 8rem; min-width: 0; margin: 0; }
+.draw-inspect-value { flex: 0 0 auto; min-width: 3rem; font-size: var(--text-sm); text-align: right; }
+.draw-inspect-switch {
+  min-width: max(var(--tap-min), 5rem);
+  min-height: max(var(--tap-min), var(--control-h-sm));
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}
+.draw-inspect-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-inspect button:disabled, .draw-inspect input:disabled { opacity: 0.5; }
+/* A gradient paint's section (P1-M2 S3), set in under its paint row; each stop's rows together. */
+.draw-inspect-gradient { display: flex; flex-direction: column; gap: var(--space-2); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.draw-inspect-stop { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
 
 /* Over the code: the legend, Tidy and Copy, kept in view while the code scrolls. */
 .draw-code-bar {
@@ -454,6 +520,8 @@
 .draw-ctx-btn svg { width: 1.5rem; height: 1.5rem; }
 .draw-ctx-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .draw-ctx-btn:disabled { color: var(--text-muted); opacity: 0.5; }
+/* The Shapes tool's kind picker: seven 44 pt buttons spaced as the bar spaces Cancel after them. */
+.draw-shape-kinds { display: flex; gap: var(--space-2); flex: 0 0 auto; }
 /* The More sheet: one full-width row per command, at least 44 pt tall. */
 .draw-more { display: flex; flex-direction: column; gap: var(--space-2); }
 .draw-more .ds-btn { flex: 0 0 auto; width: 100%; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; }
@@ -558,15 +626,63 @@
   font-size: var(--text-sm);
   touch-action: manipulation;
 }
-.draw-picker {
-  flex: 0 0 auto;
-  width: max(var(--tap-min), var(--control-h));
-  height: max(var(--tap-min), var(--control-h));
-  padding: 0;
+/* The Colour sheet's picker (P1-M2): its title and Done stay put while its body scrolls. The HSV
+   square takes the pointer itself (touch-action: none), so a drag on it never pans the page. */
+.draw-modal:has(> .draw-color) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-color { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.draw-color .draw-custom { margin-top: var(--space-3); }
+.draw-hsv {
+  position: relative;
+  height: 10rem;
+  margin-top: var(--space-1);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: none;
+  touch-action: none;
+  cursor: crosshair;
 }
+.draw-hsv:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.draw-hsv-thumb {
+  position: absolute;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: -0.875rem 0 0 -0.875rem;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+.draw-hue, .draw-alpha { -webkit-appearance: none; appearance: none; background: transparent; }
+.draw-hue::-webkit-slider-runnable-track, .draw-alpha::-webkit-slider-runnable-track { height: 1.25rem; border-radius: 0.625rem; border: 1px solid var(--line); }
+.draw-hue::-moz-range-track, .draw-alpha::-moz-range-track { height: 1.25rem; border-radius: 0.625rem; border: 1px solid var(--line); }
+.draw-hue::-webkit-slider-runnable-track { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.draw-hue::-moz-range-track { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.draw-alpha::-webkit-slider-runnable-track { background: linear-gradient(to right, transparent, var(--draw-alpha-to, #000)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem; }
+.draw-alpha::-moz-range-track { background: linear-gradient(to right, transparent, var(--draw-alpha-to, #000)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem; }
+.draw-hue::-webkit-slider-thumb, .draw-alpha::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-top: -0.3125rem;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+.draw-hue::-moz-range-thumb, .draw-alpha::-moz-range-thumb { width: 1.5rem; height: 1.5rem; border: 3px solid #fff; border-radius: 50%; background: transparent; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6); }
+.draw-preview {
+  display: flex;
+  height: 2.5rem;
+  margin-top: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem;
+}
+.draw-preview > span { flex: 1; }
+.draw-preview-none { background: linear-gradient(to top right, transparent calc(50% - 1px), var(--draw-danger) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), var(--surface); }
+.draw-width { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.draw-width .draw-range { flex: 1 1 auto; min-width: 0; margin: 0; }
+.draw-width-name, .draw-width-value { flex: 0 0 auto; font-size: var(--text-sm); }
 .draw-source {
   display: block;
   width: 100%;

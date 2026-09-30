@@ -6,11 +6,17 @@
 // The selection's actions at 440 pt (P1-M1): the label, then six 44 pt icon buttons: Deselect,
 // Select more (a toggle), Bring forward, Send back, Delete and More. With only the root selected
 // (from the code), Forward, Back and Delete are disabled. Edit source doesn't fit beside them, so
-// it lives in the More sheet, with Duplicate, Group, Ungroup, Select group, Select all, Align (six
-// ways) and Distribute (two).
+// it lives in the More sheet, with Fill… and Stroke… (the Colour sheet over the selection, P1-M2),
+// Gloss (SVG Lab's, on or off, P1-M2), Duplicate, Group, Ungroup, Select group, Select all, Align
+// (six ways) and Distribute (two).
+//
+// While the Shapes tool is on (P1-M2), the bar is its kind picker instead: seven 44 pt icon buttons
+// (Rectangle, Circle, Ellipse, Line, Polygon, Star, Spiral), the chosen one pressed, then Cancel,
+// which returns to Select.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Editor } from '../editor.ts';
+import { SHAPE_KINDS, SHAPE_NAMES, type ShapeKind } from '../interact/shapes-tool.ts';
 import type { Unparsed } from '../workspace.ts';
 import { elementLabel } from './label.ts';
 import { Modal } from './Sheets.tsx';
@@ -29,12 +35,23 @@ const FORWARD = icon(<path d="M12 20V5M6 11l6-6 6 6" />);
 const BACK = icon(<path d="M12 4v15M6 13l6 6 6-6" />);
 const DELETE = icon(<><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /><path d="M10 11v6M14 11v6" /></>);
 const MORE = icon(<><circle cx="5" cy="12" r="1.25" /><circle cx="12" cy="12" r="1.25" /><circle cx="19" cy="12" r="1.25" /></>);
+const KIND_ICONS: Record<ShapeKind, ReactNode> = {
+  rect: icon(<rect x="4" y="6" width="16" height="12" />),
+  circle: icon(<circle cx="12" cy="12" r="8" />),
+  ellipse: icon(<ellipse cx="12" cy="12" rx="9" ry="5.5" />),
+  line: icon(<path d="M5 19L19 5" />),
+  polygon: icon(<path d="M12 3.5l8.1 5.9-3.1 9.6H7l-3.1-9.6z" />),
+  star: icon(<path d="M12 3.5l2.4 5.6 6.1.5-4.6 4 1.4 5.9L12 16.3l-5.3 3.2 1.4-5.9-4.6-4 6.1-.5z" />),
+  spiral: icon(<path d="M12 12c0-1 1.5-1 1.5 0s-1 2.5-3 2.5-3-2-3-3.5 2-4.5 4.5-4.5 5.5 2.5 5.5 5.5-3 7-7 7-8-3.5-8-7.5" />),
+};
 
 export function ContextBar({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed | null; files: () => void }) {
   const focus = useStore(editor.focus);
   const selection = useStore(editor.selection);
   const notice = useStore(editor.notice);
   const selectMore = useStore(editor.selectMore);
+  const tool = useStore(editor.tool);
+  const kind = useStore(editor.shapeKind);
   const [more, setMore] = useState(false);
   useStore(editor.version);
 
@@ -79,6 +96,21 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
           Done
         </button>
       </div>
+    );
+  } else if (tool === 'shapes') {
+    body = (
+      <>
+        <div className="draw-shape-kinds" role="group" aria-label="Shape">
+          {SHAPE_KINDS.map((k) => (
+            <button key={k} type="button" className="draw-key draw-ctx-btn draw-shape-kind" aria-label={SHAPE_NAMES[k]} aria-pressed={k === kind} onClick={() => editor.pickShape(k)}>
+              {KIND_ICONS[k]}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="draw-key draw-ctx-btn draw-shapes-cancel" aria-label="Cancel" onClick={() => editor.pickTool('select')}>
+          {DESELECT}
+        </button>
+      </>
     );
   } else if (ids.length) {
     const rootOnly = ids.length === 1 && ids[0] === editor.doc?.root;
@@ -141,6 +173,9 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
             Edit source
           </button>
         )}
+        {row('Fill…', () => editor.openStyleSheet('fill'))}
+        {row('Stroke…', () => editor.openStyleSheet('stroke'))}
+        {row('Gloss', () => editor.toggleGloss())}
         {row('Duplicate', () => editor.duplicate())}
         {row('Group', () => editor.group())}
         {row('Ungroup', () => editor.ungroup())}

@@ -19,8 +19,8 @@ import { NS, findAttr, type Attr, type Doc, type ElementNode, type LeafNode, tex
 import { decodeAttr } from '../../../../engine/xml/entities.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
 import {
-  animatesAttribute, attrKey, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue,
-  smilTargetAllowed,
+  animatesAttribute, attrKey, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, isAnimation, renderValue,
+  smilHrefLost, smilTargetAllowed,
 } from '../../../../engine/policy/render-policy.ts';
 
 // DOMPurify's own instance, so no other code can change its config. ADD_ATTR widens its allowlist
@@ -147,15 +147,21 @@ export function sinkElement(doc: Doc, node: ElementNode, ctx: ElementContext): {
   return dropped === null || !smilOk(doc, node, el, ctx) ? null : { el, dropped };
 }
 
-// An attribute animation renders only if what it animates renders on every element it can drive.
-// Its target is read from what was just set (the plain href wins over xlink:href only when both
-// are on the element), so the judge and the browser resolve the same one.
+// A SMIL element whose href the policy dropped (a URL to another file) goes with it, animateMotion
+// as much as the attribute animations: in the file alone that href names nothing here, so nothing
+// animates, while the canvas, left with no href, would animate the parent. An href of exactly "" is
+// the parent in both engines, so it stays (render-policy.ts smilHrefLost). An attribute animation
+// then renders only if what it animates renders on every element it can drive. Its target is read
+// from what was just set (the policy keeps at most one of href and xlink:href: never xlink:href
+// beside an href, SVG 2), so the judge and the browser resolve the same one.
 function smilOk(doc: Doc, node: ElementNode, el: Element, ctx: ElementContext): boolean {
+  if (!isAnimation(node)) return true;
+  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');
+  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;
   if (!animatesAttribute(node)) return true;
   const a = findAttr(node, null, 'attributeName');
   const name = a ? decodeAttr(a.raw, doc.entities) : '';
   if (!ctx.smilTargets) return smilTargetAllowed(node, name);
-  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');
   const targets = ctx.smilTargets(node, kept === null ? null : hrefFragmentIds(kept));
   return targets !== null && targets.every((t) => smilTargetAllowed(node, name, t));
 }

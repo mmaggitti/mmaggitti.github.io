@@ -1,5 +1,5 @@
 // Fresh ids, and renaming ids with every reference to them: what Duplicate gives its copies and
-// what Layers' Rename does.
+// what Layers' Rename does; and SVG Lab's numbered ids (gloss-1, linear-2) for Draw's gradients.
 //
 // - freshId: the first of `base`, `base-2`, `base-3`, … that no element's id (or xml:id) uses and
 //   `taken` doesn't hold, so one batch can reserve several. A batch reads the ids in use once
@@ -28,6 +28,32 @@ export function freshId(doc: Doc, base: string, taken: ReadonlySet<string> = new
     const id = `${base}-${k}`;
     if (!used.has(id) && !taken.has(id)) return id;
   }
+}
+
+/**
+ * `prefix-N`, N the first positive integer no element's id uses (`used`) and `taken` doesn't hold:
+ * SVG Lab's numbered ids (gloss-1, linear-2), which freshId's base, base-2 scheme wouldn't give.
+ */
+export function numberedId(doc: Doc, prefix: string, taken: ReadonlySet<string> = new Set(), used: ReadonlySet<string> = idsInUse(doc)): string {
+  for (let n = 1; ; n++) {
+    const id = `${prefix}-${n}`;
+    if (!used.has(id) && !taken.has(id)) return id;
+  }
+}
+
+/**
+ * numberedId for a whole command: the ids in use read once, each id handed out reserved, and each
+ * prefix's count carried on, so a command over many shapes stays linear (a Gloss over 1,000 shapes
+ * doesn't search from 1 a thousand times).
+ */
+export function numberedIds(doc: Doc, used: ReadonlySet<string> = idsInUse(doc)): (prefix: string) => string {
+  const next = new Map<string, number>();
+  return (prefix) => {
+    let n = next.get(prefix) ?? 1;
+    while (used.has(`${prefix}-${n}`)) n++;
+    next.set(prefix, n + 1);
+    return `${prefix}-${n}`;
+  };
 }
 
 // References as refs.ts reads them, matched on the raw text so only the id's characters change.

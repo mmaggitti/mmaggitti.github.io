@@ -280,3 +280,49 @@ test('10k seeded random edit sequences, with undo and redo mixed in, restore byt
   assert.equal(sequences, 10_000);
   assert.ok(steps > 30_000, `only ${steps} steps`);
 });
+
+// The finish hook (P1-M2): after a transaction's own ops, and after each drag frame's, it sees them
+// and what it applies joins them, so one undo takes both back; a throw from it rolls the whole run
+// back; undo and redo replay what was recorded and never call it.
+test('the finish hook: its ops join the transaction and the drag frame, a throw from it rolls the whole run back, and undo and redo never call it', () => {
+  const doc = load();
+  const rect = find(doc, 'rect');
+  const seen: Op[][] = [];
+  let fail = false;
+  const s = new Session(doc, {
+    finish: (d, ops, apply) => {
+      seen.push([...ops]);
+      if (fail) throw new Error('the hook failed');
+      // Mirror y into data-y, as a generator mirrors its inputs into its geometry.
+      if (ops.some((op) => op.kind === 'attr' && op.id === rect.id && op.local === 'y')) apply(opSetAttr(d, rect.id, null, 'data-y', find(d, 'rect').attrs.find((a) => a.local === 'y')!.raw));
+    },
+  });
+  s.dispatch('Set y', (apply) => apply(opSetAttr(doc, rect.id, null, 'y', '7')));
+  assert.equal(seen.length, 1, 'called once per transaction');
+  assert.deepEqual(seen[0].map((op) => op.kind === 'attr' && op.local), ['y'], 'it sees the transaction’s own ops');
+  const one = serialize(doc);
+  assert.equal(one, SRC.replace('y="2"\twidth="3"', 'y="7"\twidth="3" data-y="7"'));
+  s.undo();
+  assert.equal(serialize(doc), SRC, 'one undo takes the hook’s op back with the edit’s');
+  s.redo();
+  assert.equal(serialize(doc), one);
+  assert.equal(seen.length, 1, 'undo and redo never call it');
+  s.undo();
+  // A drag: each frame's ops, and the hook's, from the state before the drag; one entry.
+  const drag = s.drag('Drag y');
+  for (const v of ['3', '4', '5']) drag.update((apply) => apply(opSetAttr(doc, rect.id, null, 'y', v)));
+  assert.equal(seen.length, 4, 'called once per frame');
+  assert.equal(serialize(doc), SRC.replace('y="2"\twidth="3"', 'y="5"\twidth="3" data-y="5"'), 'the last frame, with its hook op');
+  drag.commit();
+  assert.equal(s.undoLabel, 'Drag y');
+  s.undo();
+  assert.equal(serialize(doc), SRC, 'the drag’s one entry holds the hook’s op');
+  // A throw from the hook rolls back the build's ops too, and records nothing.
+  fail = true;
+  assert.throws(() => s.dispatch('Set y', (apply) => apply(opSetAttr(doc, rect.id, null, 'y', '9'))), /the hook failed/);
+  assert.equal(serialize(doc), SRC, 'the build’s op was rolled back');
+  assert.equal(s.canUndo, false, 'nothing was recorded');
+  // With no hook, a Session is as before.
+  const plain = new Session(load());
+  assert.ok(plain.doc);
+});

@@ -55,6 +55,11 @@ export interface RefToken extends Span {
 
 export interface TextToken extends Span {
   kind: 'text';
+  /**
+   * The URL inside a paint's url(…) (value:url/relative): the quote it is written in ('' when
+   * unquoted), which decides what it may hold (code/edit.ts tokenTextError): a URL, never CSS.
+   */
+  url?: '' | '"' | "'";
 }
 
 export type Token = NumberToken | ColorToken | EnumToken | RefToken | TextToken;
@@ -165,8 +170,9 @@ const OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(Object.entries(E
  * The decoded text of a raw value, with each decoded character's raw offset. Characters that came
  * from a reference (or a bare '&', or a CDATA delimiter) are `bad`: no token may include them.
  * Literal characters are one raw code unit each, so a token of good characters maps back exactly.
+ * Exported for style/where.ts, which maps a style="" declaration's value span back the same way.
  */
-interface Src {
+export interface Src {
   raw: string;
   s: string;
   map: number[] | null; // null: s === raw
@@ -175,7 +181,7 @@ interface Src {
 
 const REF = new RegExp(`&(#x[0-9a-fA-F]+|#\\d+|${NAME_PATTERN});`, 'y');
 
-function decodedSrc(doc: Doc, raw: string, attr: boolean): Src {
+export function decodedSrc(doc: Doc, raw: string, attr: boolean): Src {
   if (!raw.includes('&')) return { raw, s: raw, map: null, bad: null };
   let s = '';
   const map: number[] = [];
@@ -408,13 +414,19 @@ const color: Grammar = (v, at, emit, prop) => colorValue(v, at, emit, prop, []);
 
 const URL_HEAD = /^url\([ \t\n\r\f]*(?:"([^"]*)"|'([^']*)'|([^ \t\n\r\f"'()]+))[ \t\n\r\f]*\)/di;
 
-/** The id inside url(#id), url('#id') or url("#id") at the start of `t`, if there is one. */
-function urlRef(t: string, at: number, emit: Emit, prop: string): number {
+/**
+ * The id inside url(#id), url('#id') or url("#id") at the start of `t`, if there is one. With
+ * `relative` (a paint's url), a URL naming another file (value:url/relative: never followed, never
+ * rendered) is one text token over its own characters, inside the quotes or the parentheses, which
+ * the Text sheet edits; a data: URL gets none.
+ */
+function urlRef(t: string, at: number, emit: Emit, prop: string, relative = false): number {
   const m = URL_HEAD.exec(t);
   if (!m?.indices) return 0;
   const g = m[1] !== undefined ? 1 : m[2] !== undefined ? 2 : 3;
   const [s, e] = m.indices[g]!;
   if (e - s >= 2 && t[s] === '#') emit(at + s + 1, at + e, { kind: 'ref', prop, id: decodeFragment(t.slice(s + 1, e)) });
+  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop, url: g === 1 ? '"' : g === 2 ? "'" : '' });
   return m[0].length;
 }
 
@@ -423,9 +435,19 @@ const paint: Grammar = (v, at, emit, prop) => {
   const [a, b] = trim(v);
   const t = v.slice(a, b);
   const p = parsePaint(t);
-  if (!p) return;
+  if (!p) {
+    // A url() naming another file (value:url/relative), which parsePaint doesn't take: its URL is
+    // a text token, and its fallback a colour.
+    const m = URL_HEAD.exec(t);
+    const arg = m ? (m[1] ?? m[2] ?? m[3]) : undefined;
+    if (arg !== undefined && !arg.startsWith('#')) {
+      const head = urlRef(t, at + a, emit, prop, true);
+      if (head < t.length) colorValue(t.slice(head), at + a + head, emit, prop, FALLBACK_KEYWORDS);
+    }
+    return;
+  }
   if (p.kind !== 'url') return colorValue(v, at, emit, prop, PAINT_KEYWORDS);
-  const head = urlRef(t, at + a, emit, prop);
+  const head = urlRef(t, at + a, emit, prop, true);
   if (head < t.length) colorValue(t.slice(head), at + a + head, emit, prop, FALLBACK_KEYWORDS);
 };
 
@@ -440,6 +462,17 @@ const refs: Grammar = (v, at, emit, prop) => {
 const href: Grammar = (v, at, emit, prop) => {
   const [a, b] = trim(v);
   if (b - a >= 2 && v[a] === '#') emit(at + a + 1, at + b, { kind: 'ref', prop, id: decodeFragment(v.slice(a + 1, b)) });
+};
+
+/**
+ * A gradient's href or xlink:href: "#id" a reference, and a URL naming another file
+ * (value:url/relative: never followed as a template, never rendered) one text token over its own
+ * characters, inside the attribute's whitespace, which the Text sheet edits. A data: URL gets none.
+ */
+const gradientHref: Grammar = (v, at, emit, prop) => {
+  const [a, b] = trim(v);
+  if (b - a >= 2 && v[a] === '#') emit(at + a + 1, at + b, { kind: 'ref', prop, id: decodeFragment(v.slice(a + 1, b)) });
+  else if (b > a && v[a] !== '#' && !/^data:/i.test(v.slice(a, b))) emit(at + a, at + b, { kind: 'text', prop });
 };
 
 const enumOf =
@@ -546,6 +579,7 @@ function animation(doc: Doc, node: ElementNode, local: string): Grammar | null {
 
 function grammarFor(doc: Doc, node: ElementNode, attr: AttrRef): Grammar | 'text' | null {
   const { ns, local } = attr;
+  if (local === 'href' && (ns === null || ns === NS.xlink) && node.ns === NS.svg && (node.local === 'linearGradient' || node.local === 'radialGradient')) return gradientHref;
   if (ns === NS.xlink) return local === 'href' ? href : null;
   if (ns === NS.xml) return local === 'space' ? enumOf(ENUMS['xml:space']) : null;
   if (ns !== null) return null;

@@ -74,7 +74,9 @@ test('namespaces resolve by URI, not prefix', () => {
 
 // An element's namespace declarations hold for it and what it holds, and no further: the one map in
 // scope is set on the way in and put back on the way out. It used to be copied for every element
-// that declares one: 255 nested elements declaring 150 prefixes each took 1.4 s, 600 each 7 s.
+// that declares one: 255 nested elements declaring 150 prefixes each took 1.4 s, 600 each 7 s. The
+// cost is held as a ratio, so a loaded runner can't fail it (P1-M1 follow-up): four times as many
+// nested elements, each declaring 600 prefixes, cost about 4× (under 6×); the copy cost about 16×.
 test('namespace declarations hold for their element only, at no cost per element', () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:p="urn:outer">';
   const r = parseDoc(`${svg}<g xmlns:p="urn:inner" xmlns="urn:x"><p:a/><b/></g><p:c/><d/></svg>`);
@@ -83,23 +85,36 @@ test('namespace declarations hold for their element only, at no cost per element
   assert.deepEqual(ns, { svg: NS.svg, g: 'urn:x', a: 'urn:inner', b: 'urn:x', c: 'urn:outer', d: NS.svg }, 'each resolves in its own scope');
   const out = parseDoc(`${svg}<g xmlns:q="urn:q"/><q:e/></svg>`);
   assert.ok(!out.ok && out.error.message === 'the prefix q of <q:e> is not declared', 'a declaration ends with its element');
-  for (const [k, limit] of [[150, 1000], [600, 1500]]) {
+  const k = 600;
+  const nested = (depth: number): string => {
     let open = '', close = '';
-    for (let d = 0; d < 255; d++) {
+    for (let d = 0; d < depth; d++) {
       let x = '';
       for (let j = 0; j < k; j++) x += ` xmlns:q${d}_${j}="urn:${d}"`;
       open += `<g${x}>`;
       close += '</g>';
     }
-    const src = `<svg xmlns="http://www.w3.org/2000/svg">${open}<q254_0:rect q0_0:k="1"/>${close}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg">${open}<q${depth - 1}_0:rect q0_0:k="1"/>${close}</svg>`;
+  };
+  const cost = (depth: number, src: string): number => {
     const t0 = performance.now();
     const deep = parseDoc(src);
     const ms = performance.now() - t0;
     assert.ok(deep.ok, !deep.ok ? deep.error.message : '');
     const rect = [...descendants(deep.doc, deep.doc.root)].find((n) => n.kind === 'element' && n.local === 'rect');
-    assert.ok(rect?.kind === 'element' && rect.ns === 'urn:254' && rect.attrs[0].ns === 'urn:0', 'the innermost declaration, and one from the top');
-    assert.ok(ms < limit, `255 nested elements declaring ${k} prefixes each took ${ms.toFixed(0)} ms`);
+    assert.ok(rect?.kind === 'element' && rect.ns === `urn:${depth - 1}` && rect.attrs[0].ns === 'urn:0', 'the innermost declaration, and one from the top');
+    return ms;
+  };
+  const [small, big] = [nested(63), nested(252)];
+  cost(63, small); // warm the parser up
+  let a = cost(63, small);
+  let b = cost(252, big);
+  // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest run of each size counts.
+  for (let again = 0; again < 2 && b >= 6 * a; again++) {
+    a = Math.min(a, cost(63, small));
+    b = Math.min(b, cost(252, big));
   }
+  assert.ok(b < 6 * a, `252 nested elements declaring ${k} prefixes each took ${b.toFixed(0)} ms, ${(b / a).toFixed(1)}× the ${a.toFixed(0)} ms 63 took (linear is 4×, the most 6×)`);
 });
 
 test('entities: predefined and numeric decode; internal expand; external never', () => {

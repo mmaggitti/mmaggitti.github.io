@@ -49,8 +49,10 @@ export function buildRefIndex(doc: Doc): RefIndex {
     for (const c of n.children) walk(c);
   };
   walk(doc.root);
+  // A loop, not push(...list): a call's arguments are capped (V8 throws at about 120,000), and a file
+  // can hold that many references to one missing id.
   const dangling: Ref[] = [];
-  for (const [id, list] of refs) if (!ids.has(id)) dangling.push(...list);
+  for (const [id, list] of refs) if (!ids.has(id)) for (const r of list) dangling.push(r);
   return { ids, refs, dangling };
 }
 

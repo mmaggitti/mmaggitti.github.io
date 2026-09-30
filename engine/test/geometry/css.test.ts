@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { descendants, el, parseDoc, type Doc, type ElementNode } from '../../model/doc.ts';
-import { cssSets, declarations, inlineDecl } from '../../geometry/css.ts';
+import { cssSets, declarations, inlineDecl, sheetSets } from '../../geometry/css.ts';
 import { opInsert, opRemove, opSetAttr, opSetLeafRaw, undoOp } from '../../commands/ops.ts';
 import { parseFragment } from '../../model/fragment.ts';
 
@@ -100,4 +100,43 @@ test('the sheets are read again whenever what a <style> says can change (its tex
   assert.equal(cssSets(doc, r, 'y'), 'sheet', 'a group holding a <style> inserted');
   undoOp(doc, put);
   assert.equal(cssSets(doc, r, 'y'), 'no', 'and taken out again');
+});
+
+test('declarations: each value’s span in the text given (trimmed; !important and the comments around it left out) and its importance', () => {
+  const css = '  fill :  #2a9d8f  !important ;stroke-width:2 ; x: /*a*/ 1 /*b*/;y:;z: a/*c*/b ! IMPORTANT';
+  const ds = declarations(css);
+  assert.deepEqual(ds.map((d) => [d.name, d.value, d.important, css.slice(d.start, d.end)]), [
+    ['fill', '#2a9d8f', true, '#2a9d8f'],
+    ['stroke-width', '2', false, '2'],
+    ['x', '1', false, '1'],
+    ['y', '', false, ''],
+    ['z', 'a b', true, 'a/*c*/b'],
+  ]);
+  assert.equal(ds[3].start, css.indexOf('y:;') + 2, 'an empty value sits right after its colon');
+});
+
+// A backslash escapes the next character, as the CSS tokenizer reads it: inside url(…) it carries
+// the url on past a ")" (Chromium computes fill:url(#a\);stroke:blue as one fill, url("#a);stroke:blue"),
+// and stroke none), inside a string past its quote, and outside both it makes a ";" a name's.
+test('declarations: a backslash escapes the next character, as the browser splits a declaration block: an escaped ")" carries a url on and swallows what follows it, as an escaped quote does in a string, and so does an escaped ";" at the top level', () => {
+  const split = (css: string) => declarations(css).map((d) => [d.name, d.value]);
+  assert.deepEqual(split('fill:url(#a\\);stroke:blue'), [['fill', 'url(#a\\);stroke:blue']]);
+  assert.deepEqual(split("fill:url('#a\\') red;stroke:blue"), [['fill', "url('#a\\') red;stroke:blue"]]);
+  assert.deepEqual(split('fill:red\\;stroke:blue'), [['fill', 'red\\;stroke:blue']]);
+  assert.deepEqual(split('fill:url(#a\\29);stroke:blue'), [['fill', 'url(#a\\29)'], ['stroke', 'blue']], 'a hex escape is one character: the url still ends at its ")"');
+  assert.deepEqual(split('fill:url(#a);stroke:blue'), [['fill', 'url(#a)'], ['stroke', 'blue']]);
+});
+
+test('sheetSets: whether a <style> rule may set the property whatever style="" says, and whether one that may marks it !important', () => {
+  const doc = svg(`<style>.k { fill: red } .i { fill: red !important } .i2 { fill: blue } #other { stroke: red !important } .s { stroke: red }
+    text { font: 12px serif !important } @keyframes spin { to { opacity: 0 } } .a { animation: spin 1s }</style>
+    <rect id="k" class="k" style="fill:blue"/><rect id="i" class="i i2"/><rect id="s" class="s"/><text id="t"/><rect id="a" class="a"/><rect id="n"/>`);
+  assert.equal(cssSets(doc, byId(doc, 'k'), 'fill'), 'inline', 'cssSets answers style="" first, as before');
+  assert.equal(sheetSets(doc, byId(doc, 'k'), 'fill'), 'rule', 'the sheets alone');
+  assert.equal(sheetSets(doc, byId(doc, 'i'), 'fill'), 'important', 'a later rule without !important doesn’t hide it');
+  assert.equal(sheetSets(doc, byId(doc, 's'), 'stroke'), 'rule', 'an !important rule for another element is not one');
+  assert.equal(sheetSets(doc, byId(doc, 't'), 'font-size'), 'important', 'through a shorthand');
+  assert.equal(sheetSets(doc, byId(doc, 'a'), 'opacity'), 'rule', 'an animation counts as a rule');
+  assert.equal(sheetSets(doc, byId(doc, 'n'), 'fill'), 'no');
+  assert.equal(cssSets(doc, byId(doc, 'i'), 'fill'), 'sheet', 'cssSets keeps its answers');
 });

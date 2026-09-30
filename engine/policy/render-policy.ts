@@ -129,6 +129,28 @@ const ATTRIBUTE_ANIMATIONS: ReadonlySet<string> = new Set(['animate', 'set', 'an
 /** Is this an SVG animation of a named attribute (animate, set, animateTransform, animateColor)? */
 export const animatesAttribute = (el: ElementNode): boolean => el.ns === NS.svg && ATTRIBUTE_ANIMATIONS.has(el.local);
 
+// Every SMIL element: each targets its parent, or the element its href names. (animateColor and
+// discard don't render today; listed so the rule below holds if they ever do.)
+const ANIMATIONS: ReadonlySet<string> = new Set(['animate', 'set', 'animateTransform', 'animateMotion', 'animateColor', 'discard']);
+
+/** Is this an SVG animation element (animate, set, animateTransform, animateMotion, animateColor, discard)? */
+export const isAnimation = (el: ElementNode): boolean => el.ns === NS.svg && ANIMATIONS.has(el.local);
+
+/**
+ * Does the canvas lose this SMIL element's target: an animation (animateMotion as much as the
+ * attribute ones) whose href the canvas dropped (`kept` is the href it kept, or null), while the
+ * file's own names something? The href that decides is the file's href, else its xlink:href (SVG
+ * 2: href wins). Exactly "" names the parent, as both engines read it, so it loses nothing; any
+ * other value the canvas dropped (a URL to another file, or " ") names nothing, so in the file
+ * alone nothing animates, while the canvas, left with no href, would animate the parent: such an
+ * animation goes with its href. `value` reads an attribute's decoded value.
+ */
+export function smilHrefLost(el: ElementNode, kept: string | null, value: (a: Attr) => string): boolean {
+  if (!isAnimation(el) || kept !== null) return false;
+  const href = el.attrs.find((a) => a.ns === null && a.local === 'href') ?? el.attrs.find((a) => a.ns === NS.xlink && a.local === 'href');
+  return href !== undefined && value(href) !== '';
+}
+
 /**
  * May this SMIL animation be rendered? `targetAttr` is its attributeName (decoded); `target` is an
  * element it animates (its parent, or an element its kept href can name: the sink asks for each).
@@ -166,6 +188,11 @@ export function extensionsSupported(value: string): boolean {
  */
 export function renderValue(el: ElementNode, attr: Attr, value: string): string | null {
   if (!attributeRenders(el.ns, el.local, attr.ns, attr.local)) return null;
+  // SVG 2: href wins and xlink:href is ignored, even when the href can't be used. Dropping it here
+  // keeps a browser from following xlink:href where the policy dropped a relative href, so the
+  // canvas, Draw's gradient chain (paint/gradients.ts) and the file alone agree. It drops more than
+  // before, never less.
+  if (attr.ns === NS.xlink && attr.local === 'href' && el.attrs.some((a) => a.ns === null && a.local === 'href')) return null;
   if (URL_ATTRIBUTES.has(attrKey(attr.ns, attr.local)!)) return urlAllowed(el.local, attr.local, value) ? value : null;
   if (attr.ns === null && attr.local === 'style' && !cssAllowed(value)) return null;
   return cssUrlsLocal(value) ? value : null;

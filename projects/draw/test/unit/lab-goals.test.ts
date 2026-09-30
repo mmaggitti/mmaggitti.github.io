@@ -10,6 +10,8 @@ import { attrValue, descendants, textContent, type Doc, type ElementNode, type N
 import { Editor } from '../../src/editor.ts';
 import type { ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { bind, corpus, fakePorts } from './fakes.ts';
+import { dashPresets, paintKinds } from '../../src/style-edit.ts';
+import { colorChoices, styleSlot, PALETTE } from '../../src/color-choices.ts';
 
 interface Rig {
   editor: Editor;
@@ -264,4 +266,284 @@ test('the house\'s transform tokens scrub, and its three children\'s fills chang
     r.editor.closeSheet();
   }
   assert.deepEqual(kids.map((k) => attrValue(doc(r), k, null, 'fill')), ['#111111', '#222222', '#333333']);
+});
+
+// ── P1-M2 S1: the Shapes, Create and Vector goals the Shapes tool and shape handles reach ──────────
+
+/** A tap with the Shapes tool at a root point. */
+function place(r: Rig, kind: 'rect' | 'circle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'spiral', x: number, y: number) {
+  r.editor.pickTool('shapes');
+  r.editor.pickShape(kind);
+  const at = hostOf(r, x, y);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+}
+
+test('lab/shapes.svg: the rect’s x, y, width, height and rx tokens each step and scrub, one entry each and only their bytes, and the Number sheet takes the lab’s ranges (x, y −50–150, width and height 0–200, rx 0–100), which the artboard-scaled slider spans', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  assert.equal(r.editor.extent(), 100, 'the slider spans −100 to 200 on the 100-unit board');
+  for (const [attr, was, lo, hi] of [['x', '20', '-50', '150'], ['y', '25', '-50', '150'], ['width', '60', '0', '200'], ['height', '50', '0', '200'], ['rx', '0', '0', '100']] as const) {
+    const t = token(r, rect.id, 'number', `${attr}=`);
+    r.editor.tapToken(t.block, t.token);
+    r.editor.stepFocus(1);
+    assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${Number(was) + 1}"`), `${attr}: a step`);
+    oneEntry(r, r.editor.history.get().undoLabel!);
+    r.editor.undo();
+    const s = token(r, rect.id, 'number', `${attr}=`);
+    r.editor.scrubStart(s.block, s.token);
+    r.editor.scrub(3);
+    r.editor.scrubEnd(true);
+    assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${Number(was) + 3}"`), `${attr}: a scrub`);
+    oneEntry(r, r.editor.history.get().undoLabel!);
+    r.editor.undo();
+    for (const v of [lo, hi]) {
+      setNumber(r, rect.id, `${attr}=`, v);
+      assert.equal(r.editor.source(), edited(r.file, `${attr}="${was}"`, `${attr}="${v}"`), `${attr}: the Number sheet takes ${v}`);
+      r.editor.undo();
+    }
+  }
+  assert.equal(r.editor.source(), r.file);
+});
+
+test('lab goal "Round the corners" (shapes): the rx token’s Number sheet sets 6, one entry', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  setNumber(r, rect.id, 'rx=', '6');
+  assert.ok(num(r, rect, 'rx') >= 6, 'the goal: rx >= 6');
+  assert.equal(r.editor.source(), edited(r.file, 'rx="0"', 'rx="6"'));
+  oneEntry(r, r.editor.history.get().undoLabel!);
+});
+
+test('lab goal "Ellipse into a circle" (shapes): the Shapes tool places an ellipse, and its ry handle dragged level with rx makes it round; the ellipse selected, one entry each', () => {
+  const r = open('lab/shapes.svg');
+  place(r, 'ellipse', 50, 50);
+  const e = element(r, 'ellipse');
+  assert.deepEqual([...r.editor.selection.get()], [e.id], 'the new ellipse is selected');
+  assert.equal(r.editor.history.get().undoLabel, 'Add ellipse');
+  const placed = r.editor.source();
+  assert.equal(placed, edited(r.file, '\n</svg>', '\n  <ellipse cx="50" cy="50" rx="26" ry="14" fill="#e76f51" stroke="none"/>\n</svg>'));
+  gesture(r, handleAt(r, 'ry'), hostOf(r, 50, 50 + 26.3));
+  assert.ok(near(num(r, e, 'rx'), num(r, e, 'ry'), 0.5), `the goal: rx ${num(r, e, 'rx')} ≈ ry ${num(r, e, 'ry')}`);
+  assert.deepEqual([...r.editor.selection.get()], [e.id], 'the ellipse is still selected (the lab’s cur)');
+  assert.equal(r.editor.source(), placed.replace('ry="14"', 'ry="26"'), 'only ry changed');
+  assert.equal(r.editor.history.get().undoLabel, 'Set ry');
+  r.editor.undo();
+  assert.equal(r.editor.source(), placed);
+});
+
+test('lab goal "Add 3 shapes" (create): three taps with the Shapes tool on lab/create.svg leave three shapes, three entries', () => {
+  const r = open('lab/create.svg');
+  place(r, 'rect', 30, 30);
+  place(r, 'circle', 70, 30);
+  place(r, 'line', 50, 70);
+  const items = [...descendants(doc(r), doc(r).root)].filter((n) => n.kind === 'element' && n.id !== doc(r).root);
+  assert.equal(items.length, 3, 'the goal: items.length >= 3');
+  const labels = [];
+  while (r.editor.history.get().canUndo) {
+    labels.push(r.editor.history.get().undoLabel);
+    r.editor.undo();
+  }
+  assert.deepEqual(labels, ['Add line', 'Add circle', 'Add rectangle'], 'three entries, one per shape');
+  assert.equal(r.editor.source(), r.file);
+});
+
+test('lab/vector.svg: the circle’s r token steps and its Number sheet reaches 10 and 50 (circle-radius); a two-finger pan moves the view and never the file (pan); a vertex handle on the star, a plain polygon, moves one pair (star-polygon)', () => {
+  const r = open('lab/vector.svg');
+  const circle = element(r, 'circle');
+  const t = token(r, circle.id, 'number', 'r=');
+  r.editor.tapToken(t.block, t.token);
+  r.editor.stepFocus(-1);
+  assert.equal(r.editor.source(), edited(r.file, 'r="42"', 'r="41"'));
+  oneEntry(r, r.editor.history.get().undoLabel!);
+  r.editor.undo();
+  for (const v of ['10', '50']) {
+    setNumber(r, circle.id, 'r=', v);
+    assert.equal(num(r, circle, 'r'), Number(v));
+    r.editor.undo();
+  }
+  // Pan: two fingers moved together 60 pt right and 30 down.
+  const was = r.editor.view;
+  r.editor.navStart();
+  r.editor.navigate({ x: 150, y: 200 }, { x: 250, y: 200 }, { x: 210, y: 230 }, { x: 310, y: 230 });
+  r.editor.navEnd();
+  const now = r.editor.view;
+  assert.ok(now.cx !== was.cx && now.cy !== was.cy && Math.abs(now.scale - was.scale) < 1e-9, `the view panned: ${JSON.stringify(was)} → ${JSON.stringify(now)}`);
+  assert.equal(r.editor.source(), r.file, 'a pan never touches the file');
+  r.editor.fitToScreen();
+  // The star's second point, a vertex handle, dragged 3 units right and 2 up.
+  const star = element(r, 'polygon');
+  r.editor.select([star.id]);
+  assert.ok(r.editor.overlayModel().handles.some((h) => h.id === 'v9'), 'a handle per vertex (10)');
+  const v1 = handleAt(r, 'v1');
+  const k = hostOf(r, 1, 0).x - hostOf(r, 0, 0).x;
+  gesture(r, v1, { x: v1.x + 3 * k, y: v1.y - 2 * k });
+  assert.equal(r.editor.source(), edited(r.file, '50,23 57,43 79,44', '50,23 60,41 79,44'), 'only that pair');
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+});
+
+// ── P1-M2 S2: the goals and style rows Inspect reaches (lab/vector.svg, lab/shapes.svg, lab/style.svg) ──
+
+/** One style edit's entry: its label, and one undo gives `was` back. */
+function oneStyleEntry(r: Rig, label: string, was: string) {
+  assert.equal(r.editor.history.get().undoLabel, label);
+  r.editor.undo();
+  assert.equal(r.editor.source(), was, 'one undo gives the file back');
+}
+/** The Colour sheet over the selection for `prop` (Inspect's swatch): `text` taken, then closed, one entry. */
+function sheetSets(r: Rig, prop: string, text: string) {
+  r.editor.openStyleSheet(prop);
+  assert.equal(r.editor.sheet.get()?.kind, 'style');
+  assert.ok('text' in r.editor.sheetInput(text), `${prop}: ${text} is taken`);
+  r.editor.closeSheet();
+}
+
+test('lab/vector.svg: the star’s fill through Inspect (colors): the Colour sheet over the selection sets it, only its bytes, one entry', () => {
+  const r = open('lab/vector.svg');
+  const star = element(r, 'polygon');
+  r.editor.select([star.id]);
+  assert.equal(r.editor.styleRow('fill')?.value, '#f1faee');
+  sheetSets(r, 'fill', PALETTE[5]);
+  assert.equal(attrValue(doc(r), star, null, 'fill'), '#e76f51', 'the star’s fill differs from #f1faee');
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#f1faee"', 'fill="#e76f51"'), 'only its bytes changed');
+  oneStyleEntry(r, 'Set fill', r.file);
+});
+
+test('lab/shapes.svg: the rect’s fill by a palette swatch, by None and by a colour typed in (fill), one entry each, only its bytes', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  r.editor.select([rect.id]);
+  assert.deepEqual(paintKinds('fill', ['rect']), ['none', 'color', 'linear', 'radial'], 'Fill offers None and Colour (and the gradients)');
+  sheetSets(r, 'fill', PALETTE[1]);
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#f4a261"', 'fill="#2a9d8f"'), 'a swatch');
+  oneStyleEntry(r, 'Set fill', r.file);
+  r.editor.setStyle('fill', 'none');
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#f4a261"', 'fill="none"'), 'None');
+  oneStyleEntry(r, 'Set fill', r.file);
+  sheetSets(r, 'fill', 'rgb(38 70 83)');
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#f4a261"', 'fill="rgb(38 70 83)"'), 'a colour of your own');
+  oneStyleEntry(r, 'Set fill', r.file);
+});
+
+test('lab/shapes.svg: a line placed with the Shapes tool (line-stroke): Inspect shows it no Fill row, its stroke offers no None (nor does the stroke sheet), and its width and Cap write, one entry each', () => {
+  const r = open('lab/shapes.svg');
+  place(r, 'line', 50, 50);
+  const line = element(r, 'line');
+  const placed = r.editor.source();
+  assert.deepEqual([...r.editor.selection.get()], [line.id]);
+  assert.equal(paintKinds('fill', ['line']), null, 'no Fill row for a line (SVG Lab’s styleAttrs)');
+  assert.deepEqual(paintKinds('stroke', ['line']), ['color', 'linear', 'radial'], 'its stroke has no None');
+  assert.ok(!colorChoices(styleSlot('stroke', ['line']), '#e76f51').chips.some((c) => c.value === 'none'), 'nor has its stroke sheet');
+  sheetSets(r, 'stroke', PALETTE[0]);
+  assert.equal(r.editor.source(), placed.replace('stroke="#e76f51"', 'stroke="#264653"'));
+  oneStyleEntry(r, 'Set stroke', placed);
+  r.editor.fieldStart({ kind: 'style', prop: 'stroke-width' });
+  assert.equal(r.editor.fieldInput('12'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), placed.replace('stroke-width="4"', 'stroke-width="12"'), 'the width field (the lab’s 0–40)');
+  oneStyleEntry(r, 'Set stroke-width', placed);
+  r.editor.setStyle('stroke-linecap', 'butt');
+  assert.equal(r.editor.source(), placed.replace('stroke-linecap="round"', 'stroke-linecap="butt"'), 'Cap');
+  oneStyleEntry(r, 'Set stroke-linecap', placed);
+});
+
+test('lab/style.svg: the circle’s fill (fill), its stroke, None and width (stroke), and its opacity to 0.5 by the slider, whose 0.01 steps hold the lab’s 0.05 ones (opacity); one entry each, only their bytes', () => {
+  const r = open('lab/style.svg');
+  const circle = element(r, 'circle');
+  r.editor.select([circle.id]);
+  sheetSets(r, 'fill', PALETTE[1]);
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#e9c46a"', 'fill="#2a9d8f"'), 'fill');
+  oneStyleEntry(r, 'Set fill', r.file);
+  // The stroke sheet: a colour and its width slider (the lab's 0–20), one visit.
+  r.editor.openStyleSheet('stroke');
+  assert.ok('text' in r.editor.sheetInput(PALETTE[5]));
+  assert.ok('text' in r.editor.sheetInput('12', 'stroke-width'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(edited(r.file, 'stroke="#264653"', 'stroke="#e76f51"'), 'stroke-width="4"', 'stroke-width="12"'), 'stroke and width');
+  oneStyleEntry(r, 'Set stroke', r.file);
+  r.editor.setStyle('stroke', 'none');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke="#264653"', 'stroke="none"'), 'stroke or none');
+  oneStyleEntry(r, 'Set stroke', r.file);
+  // Opacity: one press of the slider through the lab's steps to 0.5.
+  assert.ok(r.editor.styleDrag('opacity'));
+  for (const v of ['0.95', '0.8', '0.65', '0.5']) assert.equal(r.editor.styleInput(v), null, `the slider takes ${v}`);
+  r.editor.styleDragEnd();
+  assert.equal(r.editor.source(), edited(r.file, 'opacity="1"', 'opacity="0.5"'), 'opacity 0.5');
+  oneStyleEntry(r, 'Set opacity', r.file);
+});
+
+test('lab/style.svg: the polyline’s stroke and width (polyline-stroke) and its Cap (linecap) through Inspect; the Dash presets cycle none → "10 6" → "2 6" → "16 4 2 4" (dasharray), and "Dashed line" is met at "10 6" (goal-dashed); one entry each, only their bytes', () => {
+  const r = open('lab/style.svg');
+  const line = element(r, 'polyline');
+  r.editor.select([line.id]);
+  assert.equal(paintKinds('fill', ['polyline'])?.includes('none'), true, 'a polyline keeps its Fill row, None included');
+  sheetSets(r, 'stroke', PALETTE[0]);
+  assert.equal(r.editor.source(), edited(r.file, 'stroke="#e76f51"', 'stroke="#264653"'), 'stroke');
+  oneStyleEntry(r, 'Set stroke', r.file);
+  r.editor.fieldStart({ kind: 'style', prop: 'stroke-width' });
+  assert.equal(r.editor.fieldInput('2'), null);
+  assert.equal(r.editor.fieldInput('20'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="8"', 'stroke-width="20"'), 'width');
+  oneStyleEntry(r, 'Set stroke-width', r.file);
+  for (const cap of ['butt', 'square']) {
+    r.editor.setStyle('stroke-linecap', cap);
+    assert.equal(r.editor.source(), edited(r.file, 'stroke-linecap="round"', `stroke-linecap="${cap}"`), `Cap ${cap}`);
+    oneStyleEntry(r, 'Set stroke-linecap', r.file);
+  }
+  const presets = dashPresets(r.editor.styleCtx.k);
+  assert.deepEqual(presets, ['none', '10 6', '2 6', '16 4 2 4'], 'the lab’s presets on its 100-unit board');
+  const dash = () => attrValue(doc(r), line, null, 'stroke-dasharray');
+  assert.equal(dash(), 'none', 'the goal is not met at first');
+  let steps = 0;
+  for (const p of presets.slice(1)) {
+    r.editor.setStyle('stroke-dasharray', p);
+    steps++;
+    assert.equal(r.editor.source(), edited(r.file, 'stroke-dasharray="none"', `stroke-dasharray="${p}"`), p);
+    assert.equal(r.editor.history.get().undoLabel, 'Set stroke-dasharray');
+    if (p === '10 6') assert.ok(dash() !== 'none', 'the goal "Dashed line": dash !== none, at "10 6"');
+  }
+  assert.equal(steps, 3);
+  for (let i = 0; i < 3; i++) r.editor.undo();
+  assert.equal(r.editor.source(), r.file, 'one entry each');
+});
+
+// ── P1-M2 S3: the Style lesson's gradient (lab/style.svg) ────────────────────────────────────────
+
+test('lab goal "Gradient fill" (style): Inspect’s Linear on the circle writes SVG Lab’s top-to-bottom gradient (x1 0, y1 0, x2 0, y2 1) with a fresh numbered id into a new Draw-made <defs>, the fill url(#linear-1); one entry, and Colour gives the file back', () => {
+  const r = open('lab/style.svg');
+  const circle = element(r, 'circle');
+  r.editor.select([circle.id]);
+  const isGradient = () => /^url\(#[^)]+\)$/.test(attrValue(doc(r), circle, null, 'fill') ?? '');
+  assert.equal(isGradient(), false, 'the goal is not met at first');
+  r.editor.setPaintKind('fill', 'linear');
+  assert.ok(isGradient(), 'the goal: the circle’s fill is a gradient');
+  const text = r.editor.source();
+  assert.ok(text.includes('<defs draw:made="true"><linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#e9c46a"/><stop offset="1" stop-color="#e76f51"/></linearGradient></defs>\n  <circle'), text);
+  assert.equal(r.editor.paintInfo('fill')?.kind, 'linear', 'Inspect reads it as Linear');
+  oneEntry(r, 'Set fill');
+  r.editor.setPaintKind('fill', 'color');
+  assert.equal(r.editor.source(), r.file, 'Colour: the first stop’s colour, and what Draw made goes');
+});
+
+test('lab/style.svg’s gradient stops (gradient-stops): their offsets step by 0.05, one entry each, and their colours take no none (the stop’s Colour sheet offers no none chip and refuses it)', () => {
+  const r = open('lab/style.svg');
+  r.editor.select([element(r, 'circle').id]);
+  r.editor.setPaintKind('fill', 'linear');
+  const made = r.editor.source();
+  const [a, b] = r.editor.paintInfo('fill')!.stops;
+  r.editor.stepStopOffset(a.id, 1);
+  r.editor.stepStopOffset(b.id, -1);
+  assert.deepEqual(r.editor.paintInfo('fill')!.stops.map((x) => x.offset), [0.05, 0.95]);
+  assert.equal(r.editor.source(), made.replace('<stop offset="0" ', '<stop offset="0.05" ').replace('<stop offset="1" ', '<stop offset="0.95" '));
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), made, 'one entry each');
+  assert.deepEqual(colorChoices(styleSlot('stop-color', ['stop']), a.colour).chips.map((c) => c.value), ['currentColor'], 'no none chip');
+  r.editor.openStyleSheet('stop-color', [a.id]);
+  assert.deepEqual(r.editor.sheetInput('none'), { error: '"none" is not a colour' }, 'none is refused');
+  assert.ok('text' in r.editor.sheetInput(PALETTE[0]));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), made.replace('stop-color="#e9c46a"', 'stop-color="#264653"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set stop-color');
 });

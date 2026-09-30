@@ -17,14 +17,16 @@
 // - Whitespace, so a removal gives the bytes back: an inserted element brings a copy of the
 //   whitespace before the sibling it goes in front of (or the last element child, appending), and
 //   a removed one takes the whitespace just before it.
-// - Per-element state is draw:* attributes: M1 writes draw:locked="true" (Layers).
+// - Per-element state is draw:* attributes, written through setDrawAttr: draw:locked="true" (Layers,
+//   P1-M1) and a generated shape's inputs (engine/generators/, P1-M2).
 // - stripDrawState is the file without any of it (the As-is export and Copy): the file itself, byte
 //   for byte, when it has none.
 
 import { NS, attrValue, el, findAttr, serialize, type Doc, type ElementNode, type NodeId } from './doc.ts';
 import { parseFragment } from './fragment.ts';
 import { DRAW_NS, isDrawMadeEmpty } from './draw-ns.ts';
-import { opInsert, opRemove, opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
+import { opInsert, opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
+import { removeWithSpace } from './space.ts';
 import { rewriteNumbers } from '../code/edit.ts';
 import { stripNamespaces } from '../export/clean.ts';
 import { decodeAttr } from '../xml/entities.ts';
@@ -208,6 +210,27 @@ export function undeclareIfUnused(doc: Doc, apply: Apply): void {
   if (p !== null && !hasDrawItems(doc)) apply(opSetAttr(doc, doc.root, NS.xmlns, p, null));
 }
 
+/**
+ * One draw:<local> attribute of an element set (declaring Draw's namespace on the root first, with
+ * its prefix) or, with null, removed (and the declaration with it when that was Draw's last item):
+ * Lock and Unlock, generator inputs, draw:made.
+ */
+export function setDrawAttr(doc: Doc, id: NodeId, local: string, value: string | null, apply: Apply): void {
+  if (value !== null) {
+    const p = declare(doc, apply);
+    apply(opSetAttr(doc, id, DRAW_NS, local, value, `${p}:${local}`));
+    return;
+  }
+  if (findAttr(el(doc, id), DRAW_NS, local)) apply(opSetAttr(doc, id, DRAW_NS, local, null));
+  undeclareIfUnused(doc, apply);
+}
+
+/** Several draw: attributes removed from one element (the declaration too when nothing of Draw's is left, unless `undeclare` is false: a caller removing from many elements asks once, at the end). */
+export function dropDrawAttrs(doc: Doc, id: NodeId, locals: readonly string[], apply: Apply, undeclare = true): void {
+  for (const local of locals) if (findAttr(el(doc, id), DRAW_NS, local)) apply(opSetAttr(doc, id, DRAW_NS, local, null));
+  if (undeclare) undeclareIfUnused(doc, apply);
+}
+
 /** Insert `id` (detached) at `index` under `parent`, with a copy of the whitespace `ws` before it. */
 function insertWithSpace(doc: Doc, id: NodeId, parent: NodeId, index: number, ws: NodeId | null, apply: Apply): void {
   if (ws !== null) {
@@ -220,14 +243,6 @@ function insertWithSpace(doc: Doc, id: NodeId, parent: NodeId, index: number, ws
   apply(opInsert(doc, id, parent, index));
 }
 
-/** Remove `id` and the whitespace just before it. */
-function removeWithSpace(doc: Doc, id: NodeId, apply: Apply): void {
-  const parent = doc.nodes.get(id)!.parent!;
-  const kids = el(doc, parent).children;
-  const before = kids[kids.indexOf(id) - 1];
-  if (blank(doc, before)) apply(opRemove(doc, before));
-  apply(opRemove(doc, id));
-}
 
 /**
  * Make the file's document state `next`, in the caller's transaction: <draw:state> written,

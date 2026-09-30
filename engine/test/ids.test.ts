@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { NS, descendants, el, parseDoc, serialize, serializeNode, type Attr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { parseFragment } from '../model/fragment.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
-import { freshId, idsInUse, renameIdsIn } from '../model/ids.ts';
+import { freshId, idsInUse, numberedId, numberedIds, renameIdsIn } from '../model/ids.ts';
 import { opInsert } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
 
@@ -81,4 +81,16 @@ test('over the corpus, duplicating an element with ids and renaming them in the 
     }
   }
   assert.ok(copies > 100, `only ${copies} copies`);
+});
+
+test('numberedId: prefix-N, N the first positive integer no id uses nor the batch reserved (gloss-1, not freshId’s gloss); numberedIds hands out rising ids for a whole command', () => {
+  const r = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"><rect id="gloss-1"/><rect id="gloss-3"/><rect id="linear"/></svg>');
+  assert.ok(r.ok);
+  const doc = r.doc;
+  assert.equal(numberedId(doc, 'gloss'), 'gloss-2');
+  assert.equal(numberedId(doc, 'gloss', new Set(['gloss-2'])), 'gloss-4');
+  assert.equal(numberedId(doc, 'linear'), 'linear-1', 'a bare "linear" doesn’t count');
+  assert.equal(freshId(doc, 'radial'), 'radial', 'freshId’s scheme is another one');
+  const next = numberedIds(doc);
+  assert.deepEqual([next('gloss'), next('gloss'), next('linear'), next('gloss')], ['gloss-2', 'gloss-4', 'linear-1', 'gloss-5']);
 });

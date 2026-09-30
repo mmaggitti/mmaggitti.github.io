@@ -10,6 +10,8 @@ import type { Overlay } from '../canvas/overlay/index.ts';
 import type { CodeView } from '../codeview/code-view.ts';
 import { sinkReady } from '../canvas/safe-sink.ts';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 export class Views {
   renderer: Renderer | null = null;
   overlay: Overlay | null = null;
@@ -57,7 +59,10 @@ export class Views {
 
   // Each drawn graphics element's getBBox, and its getScreenCTM less the host's offset: its own
   // units → host px, and whether visibility hides it. An element with no box (not rendered, in
-  // <defs>) is left out.
+  // <defs>) is left out. A <foreignObject> is measured by its own x, y, width and height instead:
+  // WebKit's getBBox leaves its x and y out (the box comes back at 0,0; CI run 34), so Safari
+  // outlined it at its parent's origin. Its getScreenCTM maps the units x and y are in, in every
+  // engine, so this is right everywhere and no engine is sniffed.
   #measure(ids: readonly NodeId[]): Map<NodeId, Measured> {
     const out = new Map<NodeId, Measured>();
     if (!this.renderer || !this.host || !ids.length) return out;
@@ -66,9 +71,13 @@ export class Views {
       const el = this.renderer.nodeFor(id);
       if (!el || el.nodeType !== 1 || !('getBBox' in el)) continue;
       const g = el as SVGGraphicsElement;
-      let b: DOMRect;
+      let b: { x: number; y: number; width: number; height: number };
       try {
         b = g.getBBox();
+        if (g.localName === 'foreignObject' && g.namespaceURI === SVG_NS) {
+          const f = g as SVGForeignObjectElement;
+          b = { x: f.x.baseVal.value, y: f.y.baseVal.value, width: f.width.baseVal.value, height: f.height.baseVal.value };
+        }
       } catch {
         continue;
       }

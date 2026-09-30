@@ -33,7 +33,7 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 Signed: ______  Date: ______  Device / iOS: ______
 
-## P1 — Select and transform
+## P1 — Select, transform, shapes and colour
 
 The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
 To take the house's group: tap the roof, then More → Select group.
@@ -48,5 +48,12 @@ To take the house's group: tap the roof, then More → Select group.
 | 26 | The checkerboard | Switch the phone between light and dark: the paper behind the drawing is the same light checkerboard in both, and the drawing's own colours don't change | ☐ |
 | 27 | Layers: hide and lock | Code panel → Layers: Hide a shape and it disappears, Show brings it back; Lock one and taps and marquees go past it to what's under it; Unlock it | ☐ |
 | 28 | iPad keys (optional) | With a keyboard on the iPad: ⌫ deletes the selection, Esc deselects, the arrows nudge it by 1 and ⇧ by 10, ⌘A selects all, and none of them act while you type in the code or a sheet | ☐ |
+| 29 | Place and draw | Shapes tool: a tap puts the shape under your finger, centred on it; a drag draws it from where you pressed, and snaps to a guide (Snap → add one) when you pass near it | ☐ |
+| 30 | Shape handles | Grab a circle's radius, an ellipse's rx and ry, a line's end and a polygon's vertex with your thumb, each first try, at the fit and zoomed in to about 4×; each moves only what it should | ☐ |
+| 31 | Generators | Place a star: Inspect's Tips and Inner redraw it as you type; place a spiral and change its Turns; edit one of the star's points numbers in the code: it becomes a plain shape (the notice says so), and Undo brings the star back | ☐ |
+| 32 | The colour picker | Open a fill's Colour sheet: the square and the Hue and Alpha sliders follow your thumb with no page scroll; tap the text field: the keyboard comes up and Done stays in reach | ☐ |
+| 33 | Inspect at 440 pt | With one shape and then three selected, open Inspect at half and full: every row can be reached by scrolling, nothing scrolls sideways, and the segments are easy to hit with a thumb | ☐ |
+| 34 | Gradient handles | Give a shape a Linear fill, then Edit on canvas: the handles sit on the gradient and drag it; turn the shape (the ring) and try again: they still sit where the gradient draws | ☐ |
+| 35 | Gloss | More → Gloss on a rounded rect: it looks like SVG Lab's Create gloss on the same shape; More → Gloss again takes it off | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

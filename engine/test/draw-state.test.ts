@@ -184,3 +184,23 @@ test('a state with 10⁶ guides reads its first 100 in under 50 ms, once per ver
   session.undo();
   assert.equal(serialize(session.doc), text, 'and each undoes to the file');
 });
+
+test('the exports and Draw’s <defs> and gradients: a gradient Draw made stays (drawing content) without its draw:made; Draw’s <defs> goes when only whitespace is left in it, and stays with a comment; a <defs> or gradient marked anything but exactly "true" keeps its content (As-is and Clean)', () => {
+  const NS = `xmlns="http://www.w3.org/2000/svg" xmlns:draw="${DRAW_NS}"`;
+  const svg = (body: string) => `<svg ${NS} viewBox="0 0 100 100">\n  ${body}\n  <rect x="10" y="10" width="10" height="10" fill="url(#g)"/>\n</svg>`;
+  const plain = (text: string) => text.replace(` xmlns:draw="${DRAW_NS}"`, '');
+  const grad = (made: string) => `<linearGradient id="g"${made}><stop offset="0" stop-color="red"/></linearGradient>`;
+  const cases: [string, string][] = [
+    [`<defs draw:made="true">${grad(' draw:made="true"')}</defs>`, `<defs>${grad('')}</defs>`],
+    [`<defs draw:made="true"><!-- mine -->${grad(' draw:made="true"')}</defs>`, `<defs><!-- mine -->${grad('')}</defs>`],
+    [`<defs draw:made="yes">${grad(' draw:made="yes"')}</defs>`, `<defs>${grad('')}</defs>`],
+    [`<defs draw:made="true">\n  </defs>${grad(' draw:made="true"')}`, grad('')],
+    [`<linearGradient id="g" draw:made="true"/>`, '<linearGradient id="g"/>'],
+  ];
+  for (const [body, kept] of cases) {
+    const doc = load(svg(body));
+    const want = plain(svg(kept)).replace('\n  <linearGradient', body.startsWith('<defs draw:made="true">\n') ? '<linearGradient' : '\n  <linearGradient');
+    assert.equal(stripDrawState(doc), want, `As-is: ${body}`);
+    assert.equal(cleanExport(doc).text, want, `Clean: ${body}`);
+  }
+});

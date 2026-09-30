@@ -117,7 +117,7 @@ const BREAKS = [
     // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
     id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
     file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
-    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*255 nested elements declaring (150|600) prefixes each took \d+ ms/,
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*252 nested elements declaring 600 prefixes each took \d+ ms, [\d.]+× the \d+ ms 63 took/,
   },
   {
     id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
@@ -342,9 +342,12 @@ const BREAKS = [
   },
   // P0-M2 review: the canvas's edges and fidelity (site e2e).
   {
-    id: 'B51', what: 'SMIL is judged by the first href in the model, not the one the sink kept', slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: "const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');", to: "const kept = findAttr(node, null, 'href') ? el.getAttributeNS(null, 'href') : el.getAttributeNS(NS.xlink, 'href');",
-    run: SITE_E2E, expect: /a dropped href leaves xlink:href to decide: <animate> is on the canvas/,
+    id: 'B51', what: 'an animation whose href the policy dropped (a URL to another file) animates its parent on the canvas, where the file alone animates nothing', slow: true, checks: ['moreEdges'],
+    // P1-M2: re-planted. Its first fault (SMIL judged by the model's first href, not the one the sink
+    // kept) can't happen since decision 5: the policy keeps at most one of href and xlink:href.
+    // P1-M2 fix (F2): re-planted on the refusal's new call, the same fault.
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;\n', to: '',
+    run: DRAW_E2E, expect: /an href to another file (beside a fragment xlink:href )?animates nothing: <animate> is on the canvas/,
   },
   {
     id: 'B52', what: 'SMIL is judged against the first element with the id only', slow: true,
@@ -755,7 +758,7 @@ const BREAKS = [
   },
   {
     id: 'B131', what: 'the end of a scrub or a sheet is never saved',
-    file: 'projects/draw/src/editor.ts', from: '    else live.drag.cancel();\n    this.#bump();\n    this.#changed();\n', to: '    else live.drag.cancel();\n    this.#bump();\n',
+    file: 'projects/draw/src/editor.ts', from: "    if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);\n    this.#bump();\n    this.#changed();\n", to: "    if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);\n    this.#bump();\n",
     run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
   },
   {
@@ -1716,7 +1719,7 @@ const BREAKS = [
   },
   {
     id: 'B321', what: 'cssSets never reports a <style> rule',
-    file: 'engine/geometry/css.ts', from: "  if (sheet.rules.some((r) => r.decls.some((d) => names.includes(d)) && r.selectors.some((s) => mayMatch(s, doc, node)))) return 'sheet';\n", to: '',
+    file: 'engine/geometry/css.ts', from: "  return sheetSets(doc, id, prop) === 'no' ? 'no' : 'sheet';", to: "  return 'no';",
     run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
   },
   {
@@ -1877,7 +1880,8 @@ const BREAKS = [
   {
     id: 'B352', what: 'stripNamespaces leaves an empty Draw-made <metadata>',
     // P1-M1 fix (F1): re-anchored; what Draw made is judged by draw-ns.ts's one rule.
-    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
+    // P1-M2: re-anchored (Draw's <defs> joins the holders an export may drop; a gradient never).
+    file: 'engine/export/clean.ts', from: '    if (isAttached(copy, m) && isHolderKind(m) && holdsOnlyDrawItems(copy, m)) drop(m);', to: '    void m;',
     run: engineTests('draw-state.test.ts'), expect: /✖ stripDrawState gives every corpus file back byte for byte/,
   },
   {
@@ -2032,7 +2036,12 @@ const BREAKS = [
   },
   {
     id: 'B384', what: 'F1: any element marked draw:made counts as Draw’s own (a shape so marked leaves the As-is export)',
-    file: 'engine/model/draw-ns.ts', from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some(', to: '  return n.attrs.some(',
+    // P1-M2: re-anchored. The exports now also ask isHolderKind (a gradient Draw made stays), which
+    // alone kept a marked shape, so the fault is planted in both: any element marked draw:made is
+    // Draw's, and a holder unless it is a gradient.
+    file: 'engine/model/draw-ns.ts',
+    from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some((a) => a.ns === DRAW_NS && a.local === \'made\' && a.raw === \'true\');\n}\n\n/** Is this a kind Draw makes only to hold things (a <metadata> or <defs>, in the SVG namespace)? The exports ask before its draw:made goes. */\nexport function isHolderKind(n: ElementNode): boolean {\n  return n.ns === NS.svg && MADE_HOLDERS.has(n.local);\n',
+    to: '  return n.attrs.some((a) => a.ns === DRAW_NS && a.local === \'made\' && a.raw === \'true\');\n}\n\n/** Is this a kind Draw makes only to hold things (a <metadata> or <defs>, in the SVG namespace)? The exports ask before its draw:made goes. */\nexport function isHolderKind(n: ElementNode): boolean {\n  return n.local !== \'linearGradient\' && n.local !== \'radialGradient\';\n',
     run: engineTests('draw-state.test.ts'), expect: /✖ only Draw’s own empty <metadata> is taken away/,
   },
   {
@@ -2042,7 +2051,7 @@ const BREAKS = [
   },
   {
     id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
-    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#nudge', to: 'this.#gesture?.move || this.#nudge',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#nudge',
     run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
   },
   {
@@ -2072,7 +2081,7 @@ const BREAKS = [
   },
   {
     id: 'B394', what: 'F10: a move of an element whose transform flattens it is not refused',
-    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse('Its transform flattens it, so its geometry can’t move.');\n", to: '',
+    file: 'engine/geometry/write.ts', from: "      if (!inv) return refuse(FLATTENS);\n", to: '',
     run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
   },
   {
@@ -2169,6 +2178,446 @@ const BREAKS = [
     id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
     file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
     run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup gave the clip the group's transform/,
+  },
+  // P1-M2 S0: what M1 left. B307 (above) is item 4's break: the namespace timing test is a ratio now.
+  {
+    id: 'B409', what: 'the reference index spreads each missing id’s references into push() again (a file with 200,000 references to one missing id throws)',
+    file: 'engine/model/refs.ts', from: 'for (const [id, list] of refs) if (!ids.has(id)) for (const r of list) dangling.push(r);', to: 'for (const [id, list] of refs) if (!ids.has(id)) dangling.push(...list);',
+    run: engineTests('refs.test.ts'), expect: /✖ a file with 200,000 references to one missing id builds its reference index/,
+  },
+  {
+    id: 'B410', what: 'Ungroup refuses a reference to anything inside a child again (Illustrator’s clipPath and use in a nested group are refused)',
+    file: 'projects/draw/src/interact/structure.ts', from: "      if (k?.kind === 'element' && drawnInPlace(k)) pushed.add(c);\n", to: "      if (k?.kind === 'element' && drawnInPlace(k)) for (const d of descendants(doc, c)) if (d.kind === 'element') pushed.add(d.id);\n",
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when a use, an href or a url\(#…\) refers to a child that takes the group’s transform \(the child itself\)/,
+  },
+  {
+    id: 'B411', what: 'Ungroup pushes the group’s transform into a child whose transform an animateTransform sets',
+    file: 'projects/draw/src/interact/structure.ts', from: "      if ([...own, ...byHref].some((a) => a.kind === 'element' && setsTransform(doc, a))) {", to: '      if (false) {',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup is refused, with the reason, when an animateTransform sets the transform of a child/,
+  },
+  {
+    id: 'B412', what: 'a foreignObject is measured by getBBox again (WebKit’s leaves its x and y out: Safari outlines it at its parent’s origin)', slow: true, checks: ['aForeignObjectIsOutlinedWhereItDraws'],
+    file: 'projects/draw/src/panels/views.ts', from: "        if (g.localName === 'foreignObject' && g.namespaceURI === SVG_NS) {", to: '        if (false) {',
+    run: DRAW_E2E, expect: /aForeignObjectIsOutlinedWhereItDraws: with WebKit's getBBox: the foreignObject's outline .* is not on it/,
+  },
+  // P1-M2 S1: the Shapes tool, shape handles and generators (quick).
+  {
+    id: 'B413', what: 'the star’s inner points take the tips’ angles',
+    file: 'engine/generators/radial.ts', from: 'at(cx, cy, r * inner, t + 180 / tips)', to: 'at(cx, cy, r * inner, t)',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ each generator writes exactly its points or path for fixed inputs/,
+  },
+  {
+    id: 'B414', what: 'the spiral’s controls are Δ/2 along the tangent, not Δ/3 (not a cubic Hermite)',
+    file: 'engine/generators/spiral.ts', from: '    const h = dt / 3;', to: '    const h = dt / 2;',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ each generator writes exactly its points or path for fixed inputs/,
+  },
+  {
+    id: 'B415', what: 'the finish hook redraws a shape whose geometry was edited by hand, instead of detaching it',
+    file: 'engine/generators/index.ts', from: '    if (expected !== null && inputsTouched && !geometryTouched) {', to: '    if (expected !== null) {',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: an input edit regenerates and a geometry edit detaches/,
+  },
+  {
+    id: 'B416', what: 'the finish hook’s ops are applied but not recorded with the transaction (one undo leaves them behind)',
+    file: 'engine/commands/session.ts', from: 'if (this.finish) this.finish(this.doc, ops.slice(), (op) => ops.push(op));', to: 'if (this.finish) this.finish(this.doc, ops.slice(), () => {});',
+    run: engineTests('commands/commands.test.ts'), expect: /✖ the finish hook: its ops join the transaction and the drag frame/,
+  },
+  {
+    id: 'B417', what: 'planMove moves a generated shape’s points, not its inputs (the hook then detaches it)',
+    file: 'engine/geometry/write.ts', from: '  if (generatorOf(doc, id)) {', to: '  if (false) {',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: a move rewrites only draw:cx, draw:cy and the geometry/,
+  },
+  {
+    id: 'B418', what: 'a radius (or rx, ry) handle has no minimum: dragged onto the centre it writes 0',
+    file: 'engine/geometry/shape-handles.ts', from: '  const length = (d: number) => Math.max(1, onStep(d, opts.step));', to: '  const length = (d: number) => onStep(d, opts.step);',
+    run: engineTests('geometry/shape-handles.test.ts'), expect: /✖ a drag writes the lab’s numbers/,
+  },
+  {
+    id: 'B419', what: 'a vertex drag writes the whole points list again (its separators and precision lost)',
+    file: 'engine/geometry/shape-handles.ts', from: '      return next.length ? one(rewrite(doc, n, \'points\', a.raw, next)) : { edits };',
+    to: "      return one({ id: n.id, ns: null, local: 'points', raw: tokens.map((t, j) => (j === 2 * i ? fmt(to.x, 2) : j === 2 * i + 1 ? fmt(to.y, 2) : fmt(t.value, 2))).join(' '), add: false });",
+    run: engineTests('geometry/shape-handles.test.ts'), expect: /✖ over every corpus circle, ellipse, line, polygon and polyline, a handle moved by \(3, −2\) changes exactly the number tokens it owns/,
+  },
+  {
+    id: 'B420', what: 'the Shapes tool ignores the artboard’s size (k is always 1)',
+    file: 'projects/draw/src/interact/shapes-tool.ts', from: '(board && board.width > 0 && board.height > 0 ? Math.min(board.width, board.height) / 100 : 1)', to: '1',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ on a 24 × 24 artboard \(k = 0\.24\) a tap places a 10 × 7 rect/,
+  },
+  {
+    id: 'B421', what: 'the colour cycle restarts for every shape',
+    file: 'projects/draw/src/editor.ts', from: '    this.#shapes++;\n', to: '',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
+  },
+  {
+    id: 'B422', what: 'a new shape in an empty root goes after the root’s closing whitespace, not before it',
+    file: 'engine/model/space.ts', from: "  return { parent: p.id, index: p.children.length - 1, lead: /[\\r\\n]/.test(w) ? `${w}  ` : '', trail: '' };", to: "  return { parent: p.id, index: p.children.length, lead: '', trail: '' };",
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
+  },
+  {
+    id: 'B423', what: 'the ry handle writes rx',
+    file: 'engine/geometry/shape-handles.ts', from: "      return one(lengthEdit(doc, n, 'ry', 'y', { to: length(Math.abs(to.y - centre!.y)) }, opts));", to: "      return one(lengthEdit(doc, n, 'rx', 'x', { to: length(Math.abs(to.y - centre!.y)) }, opts));",
+    run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Ellipse into a circle" \(shapes\)/,
+  },
+  {
+    id: 'B424', what: 'a draw gathers its snap targets on every frame (every shape measured again)',
+    file: 'projects/draw/src/editor.ts', from: '    const b = this.#snapRoot(g.at, d.targets, d.step);', to: '    const b = this.#snapRoot(g.at, this.#snapTargets([]), d.step);',
+    run: drawTests('shapes-tool.test.ts'), expect: /✖ a drag gathers its snap targets once, when it starts/,
+  },
+  {
+    id: 'B425', what: 'a shape handle’s drag gathers its snap targets on every frame',
+    file: 'projects/draw/src/editor.ts', from: "      if (shape.role === 'position') to = this.#cornerPoint(g, hd, f);", to: "      if (shape.role === 'position') to = this.#cornerPoint(g, { ...hd, targets: this.#snapTargets([hd.id]) }, f);",
+    run: drawTests('editor.test.ts'), expect: /✖ a shape-handle drag gathers its snap targets once/,
+  },
+  {
+    id: 'B426', what: 'shape handles are placed through the parent’s matrix, not the element’s own (a mirrored element’s radius handle on the wrong side)',
+    file: 'projects/draw/src/editor.ts', from: '      const [x, y] = applyM(m.toHost, q.x, q.y);', to: '      const [x, y] = applyM(this.#ports.canvas.measure([n.parent!]).get(n.parent!)?.toHost ?? rootToHostMatrix(this.#box!, this.#viewport, this.#M), q.x, q.y);',
+    run: drawTests('editor.test.ts'), expect: /✖ on a mirrored element, and inside a mirrored group, a radius or end handle stays under the finger/,
+  },
+  {
+    id: 'B427', what: 'each keystroke that reads in a Generator field is its own history entry (Inner typed 0.6, then 0.65, makes two)',
+    file: 'projects/draw/src/editor.ts', from: '    f.drag.update((apply) => apply(this.#inputOp(f.ids[0], name, v)));\n', to: '    f.drag.update((apply) => apply(this.#inputOp(f.ids[0], name, v)));\n    this.fieldEnd();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ generated shapes: the Tips field, typed "12"/,
+  },
+  {
+    id: 'B428', what: 'a handle grabbed off its centre jumps to the finger again (decision 1: every handle keeps the grab)',
+    file: 'projects/draw/src/editor.ts', from: '    const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };', to: '    const grab = { x: 0, y: 0 };',
+    run: drawTests('editor.test.ts'), expect: /✖ a handle drag keeps the grab/,
+  },
+  {
+    id: 'B429', what: 'M1’s resize corners still show on a circle (and every shape-handle kind)',
+    file: 'projects/draw/src/editor.ts', from: 'corners: sh === null && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
+    run: drawTests('editor.test.ts'), expect: /✖ the overlay gives circles, ellipses, lines, polygons, polylines and generated shapes their own handles and no corners/,
+  },
+  // P1-M2 S1 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B430', what: 'a Shapes tap places at the canvas’s top-left, not under the finger', slow: true, checks: ['aTapPlacesTheLabsDefaultScaledToTheArtboard'],
+    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
+    run: DRAW_E2E, expect: /aTapPlacesTheLabsDefaultScaledToTheArtboard: the rect is not exactly the lab's, centred on \(50, 50\)/,
+  },
+  {
+    id: 'B431', what: 'a draw ignores the snap targets (the guide at x 40 isn’t taken)', slow: true, checks: ['aDragDrawsTheShapeWithSnapping'],
+    file: 'projects/draw/src/editor.ts', from: '      d.targets = this.#snapTargets([]);', to: '      d.targets = null;',
+    run: DRAW_E2E, expect: /aDragDrawsTheShapeWithSnapping: the drag from \(38\.6, 20\.2\) to \(70\.3, 45\.8\) did not snap/,
+  },
+  {
+    id: 'B432', what: 'shape handles are placed through the root’s matrix: the rotated ellipse’s rx handle ignores its transform', slow: true, checks: ['shapeHandlesEditTheLabsShapes'],
+    file: 'projects/draw/src/editor.ts', from: '      const [x, y] = applyM(m.toHost, q.x, q.y);', to: '      const [x, y] = applyM(rootToHostMatrix(this.#box!, this.#viewport, this.#M), q.x, q.y);',
+    run: DRAW_E2E, expect: /shapeHandlesEditTheLabsShapes: the ellipse's rx handle is at .* not its own \(90, 30\) through its transform/,
+  },
+  {
+    id: 'B433', what: 'an Inspect input edit doesn’t redraw the generated shape (the hook leaves the old points)', slow: true, checks: ['generatorsRegenerateAndDetach'],
+    file: 'engine/generators/index.ts', from: '      apply(opSetAttr(doc, id, null, g.attr, expected));\n', to: '',
+    run: DRAW_E2E, expect: /generatorsRegenerateAndDetach: Tips \+ did not draw 12 points/,
+  },
+  // P1-M2 S2: Inspect and colour. The style engine and the colour notations first (quick).
+  {
+    id: 'B434', what: 'a style="" declaration’s value is written without the spacing around it (its neighbours’ bytes change)',
+    file: 'engine/style/write.ts', from: 'raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };', to: 'raw: raw.slice(0, d.start).trimEnd() + escape(v, a.quote) + raw.slice(d.end).trimStart(), add: false };',
+    run: engineTests('style/style.test.ts'), expect: /✖ a declaration among others is rewritten alone/,
+  },
+  {
+    id: 'B435', what: 'a value a <style> rule sets is written as the attribute anyway (it changes nothing on screen)',
+    file: 'engine/style/write.ts', from: "  if (s.sheet === 'rule' && s.at !== 'style') return RULE_SETS(prop);\n", to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ refused, with the reason, and nothing written/,
+  },
+  {
+    id: 'B436', what: 'a style="" declaration’s !important is dropped when its value is written (the span runs over it)',
+    file: 'engine/geometry/css.ts', from: '    if (bang) end = bang.index;\n', to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ a declaration among others is rewritten alone/,
+  },
+  {
+    id: 'B437', what: 'the width-2 rule writes a width over the one the shape has',
+    file: 'engine/style/write.ts', from: '      if (w.value === null || parseFloat(w.value) === 0) {', to: '      if (true) {',
+    run: engineTests('style/style.test.ts'), expect: /✖ the width-2 rule/,
+  },
+  {
+    id: 'B438', what: 'the rule scan drops !important again (a rule’s !important no longer refuses)',
+    file: 'engine/geometry/css.ts', from: 'map((d) => ({ name: d.name, important: d.important }))', to: 'map((d) => ({ name: d.name, important: false }))',
+    run: engineTests('style/style.test.ts'), expect: /✖ refused, with the reason, and nothing written/,
+  },
+  {
+    id: 'B439', what: 'writeColor writes a modern rgb() with commas (the legacy family’s)',
+    file: 'engine/values/color.ts', from: "return notation === 'rgb' ? legacy('rgb', v) : modern('rgb', v);", to: "return legacy('rgb', v);",
+    run: engineTests('values/color.test.ts'), expect: /✖ writeColor: each family writes in its own notation/,
+  },
+  {
+    id: 'B440', what: 'a named colour is written back as a name when the picker lands on one',
+    file: 'engine/values/color.ts', from: "    case 'named':\n    case 'transparent':\n", to: "    case 'named':\n      return [...NAMED_COLORS].find(([, h]) => h === toHex(srgb))?.[0] ?? toHex(srgb)!;\n    case 'transparent':\n",
+    run: engineTests('values/color.test.ts'), expect: /✖ writeColor: each family writes in its own notation/,
+  },
+  // P1-M2 S2: the editor's style edits and the picker (quick).
+  {
+    id: 'B441', what: 'a multi-selection style edit is one entry per element',
+    file: 'projects/draw/src/editor.ts', from: "    const done = this.#dispatch(`Set ${prop}`, (apply) => {\n      const plan = planStyle(doc, ids, prop, c.text, ctx);", to: "    let done = false;\n    for (const one of ids) done = this.#dispatch(`Set ${prop}`, (apply) => {\n      const plan = planStyle(doc, [one], prop, c.text, ctx);",
+    run: drawTests('inspect.test.ts'), expect: /✖ a multi-selection edit is one entry/,
+  },
+  {
+    id: 'B442', what: 'an Inspect field is one entry per keystroke ("25" makes two)',
+    file: 'projects/draw/src/editor.ts', from: '      f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));\n', to: '      f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));\n      this.fieldEnd();\n      this.fieldStart(f.field);\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ one entry per editing session, per kind/,
+  },
+  {
+    id: 'B443', what: 'the Dash presets ignore k (SVG Lab’s numbers on any artboard)',
+    file: 'projects/draw/src/style-edit.ts', from: 'p.map((v) => fmt(v * k, 2))', to: 'p.map((v) => fmt(v, 2))',
+    run: drawTests('inspect.test.ts'), expect: /✖ the Dash presets are SVG Lab/,
+  },
+  {
+    id: 'B444', what: 'planStyle reads the stylesheets for every element instead of the cached sheet',
+    file: 'engine/geometry/css.ts', from: '  if (hit && hit.version === doc.styleVersion) return hit.sheet;', to: '  if (hit && false) return hit.sheet;',
+    run: drawTests('inspect.test.ts'), expect: /✖ a style edit over a large selection takes linear time/,
+  },
+  {
+    id: 'B445', what: 'the picker writes alpha 1 (rgba(…, 1) where the colour is opaque)',
+    file: 'engine/values/color.ts', from: '  const A = a >= 1 ? null : ', to: '  const A = a > 1 ? null : ',
+    run: drawTests('color-picker.test.ts'), expect: /✖ each move is written in the opening family/,
+  },
+  {
+    id: 'B446', what: 'the picker loses its hue at zero saturation or brightness',
+    file: 'projects/draw/src/color-picker.ts', from: '({ ...p, s: unit(s), v: unit(v) });', to: '({ ...p, h: unit(s) && unit(v) ? p.h : 0, s: unit(s), v: unit(v) });',
+    run: drawTests('color-picker.test.ts'), expect: /✖ the picker keeps its own hue through grey and black/,
+  },
+  // P1-M2 S2 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B447', what: 'Inspect writes the attribute where a style="" declaration holds the value (the declaration still wins, so the drawing wouldn’t change)', slow: true, checks: ['inspectWritesWhereEachValueLives'],
+    file: 'engine/style/write.ts', from: "  if (s.at === 'style') {", to: '  if (false) {',
+    run: DRAW_E2E, expect: /inspectWritesWhereEachValueLives: the circle’s fill declaration: the source is not the value written where it lives/,
+  },
+  {
+    id: 'B448', what: 'the picker writes hex for an hsl() value (out of its notation family)', slow: true, checks: ['theColourPickerKeepsTheNotation'],
+    file: 'projects/draw/src/color-picker.ts', from: "family: own && own.kind === 'color' ? notationOf(own) : 'hex'", to: "family: own && own.kind === 'color' && notationOf(own) !== 'hsl-modern' ? notationOf(own) : 'hex'",
+    run: DRAW_E2E, expect: /theColourPickerKeepsTheNotation: hsl\(12 76% 61%\): the square wrote #[0-9a-f]+, out of its family/,
+  },
+  {
+    id: 'B449', what: 'a multi-selection fill from the Colour sheet makes one entry per shape', slow: true, checks: ['aMultiSelectionEditIsOneEntry'],
+    file: 'projects/draw/src/editor.ts', from: '    if (commit) live.drag.commit();\n',
+    to: "    if (commit && live.kind === 'style' && live.ids.length > 1) {\n      live.drag.cancel();\n      for (const id of live.ids) for (const [p, v] of live.last) this.#session!.dispatch(`Set ${p}`, (apply) => applyPlan(this.#doc!, planStyle(this.#doc!, [id], p, v, this.styleCtx), apply));\n    } else if (commit) live.drag.commit();\n",
+    run: DRAW_E2E, expect: /aMultiSelectionEditIsOneEntry: one undo did not give all three back byte for byte/,
+  },
+  {
+    id: 'B450', what: 'the Colour sheet’s HSV square shrinks under 44 pt (2rem: 24 px)', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
+    file: 'projects/draw/src/app.css', from: '.draw-hsv {\n  position: relative;\n  height: 10rem;', to: '.draw-hsv {\n  position: relative;\n  height: 2rem;',
+    run: DRAW_E2E, expect: /the Saturation and brightness square is \d+×24, under 44pt/,
+  },
+  {
+    id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
+    file: 'projects/draw/src/panels/Sheets.tsx',
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
+  },
+  // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).
+  {
+    id: 'B452', what: 'a linear gradient takes x1 from a radial template',
+    file: 'engine/paint/gradients.ts', from: '  for (const name of GEOMETRY[kind]) take(name, kind);', to: '  for (const name of GEOMETRY[kind]) take(name);',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the chain: href before xlink:href/,
+  },
+  {
+    id: 'B453', what: 'the stops come from the gradient the paint names even when it has none (not from its template)',
+    file: 'engine/paint/gradients.ts', from: 'const holder = chain.find((n) => n.children.some((c) => isStop(doc, c))) ?? null;', to: 'const holder = chain[0];',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the chain: href before xlink:href/,
+  },
+  {
+    id: 'B454', what: 'a new gradient is named by freshId’s scheme ("linear", not SVG Lab’s "linear-1")',
+    file: 'engine/model/ids.ts', from: '    next.set(prefix, n + 1);\n    return `${prefix}-${n}`;', to: '    next.set(prefix, n + 1);\n    return n === 1 ? prefix : `${prefix}-${n}`;',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Linear on lab\/style\.svg’s circle/,
+  },
+  {
+    id: 'B455', what: 'a Draw-made <defs> left empty stays when its last gradient goes',
+    file: 'engine/paint/gradients.ts', from: "    if (n?.kind === 'element' && n.parent !== null && isDrawMadeEmpty(doc, n)) removeWithSpace(doc, h, apply);\n", to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Linear on lab\/style\.svg’s circle/,
+  },
+  {
+    id: 'B456', what: 'Make unique keeps the template link (the copy still takes from its template)',
+    file: 'engine/paint/gradients.ts', from: "  let content = '';\n", to: "  const link = templateLink(el(doc, r.id));\n  if (link) parts.push(`${link.qname}=\"${link.raw}\"`);\n  let content = '';\n",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique/,
+  },
+  {
+    id: 'B457', what: 'Make unique re-points every user of the gradient, not only this paint',
+    file: 'engine/paint/gradients.ts', from: '  const why = repoint(doc, id, prop, own.url, gid, apply);\n', to: "  const why = repoint(doc, id, prop, own.url, gid, apply);\n  for (const u of gradientUsers(doc).of([r.id])) if (u.prop !== 'rule') repoint(doc, u.el, u.prop, own.url, gid, apply);\n", // P1-M2 fix (F7): the users' new API, the same fault
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique/,
+  },
+  {
+    id: 'B458', what: 'the gradient handles apply gradientTransform outside the bounding-box mapping (T·U, not U·T)',
+    file: 'engine/paint/handles.ts', from: '  const M = multiply(geo.toHost, multiply(U, T));', to: '  const M = multiply(geo.toHost, multiply(T, U));',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ linear and radial handles sit at toHost · U · T · p/,
+  },
+  {
+    id: 'B459', what: 'fixF is gone: a written focus is left outside 0.96 r',
+    file: 'engine/paint/handles.ts', from: '    if (d > 0.96 * rr && d > 0) {', to: '    if (false) {',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ fixF/,
+  },
+  {
+    id: 'B460', what: 'bounding-box gradient handles round to whole units (not 0.01)',
+    file: 'engine/paint/handles.ts', from: ': f.obb ? fmt(n, 2) :', to: ': f.obb ? fmt(n, 0) :',
+    run: engineTests('paint/handles.test.ts'), expect: /✖ linear and radial handles sit at toHost · U · T · p/,
+  },
+  {
+    id: 'B461', what: 'Add stop puts the new stop at the next stop’s offset (the end), not the midpoint',
+    file: 'engine/paint/stops.ts', from: '  const mid = (o1 + o2) / 2;', to: '  const mid = o2;',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the stop editor/,
+  },
+  {
+    id: 'B462', what: 'Gloss writes r 0.5, not SVG Lab’s 0.8',
+    file: 'engine/paint/gloss.ts', from: `export const GLOSS_ATTRS = 'cx="0.35" cy="0.3" r="0.8"';`, to: `export const GLOSS_ATTRS = 'cx="0.35" cy="0.3" r="0.5"';`,
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Gloss on lab\/create-icon\.svg’s rect/,
+  },
+  {
+    id: 'B463', what: 'Gloss off leaves the gloss gradient (and its <defs>) behind',
+    file: 'engine/paint/gloss.ts', from: '  dropUnused(doc, dropped, apply);\n', to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Gloss on lab\/create-icon\.svg’s rect/,
+  },
+  {
+    id: 'B464', what: 'the template chain follows a relative href (other.svg#a) as if it were #a',
+    file: 'engine/paint/gradients.ts', from: "  if (v.length < 2 || !v.startsWith('#')) return null; // another file (value:url/relative): never followed\n  const t = ids.get(decodeFragment(v.slice(1)));", to: "  const t = ids.get(decodeFragment(v.slice(v.indexOf('#') + 1)));",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a relative URL is not followed/,
+  },
+  {
+    id: 'B465', what: 'a relative URL in a paint’s url() gets no token (the code can’t edit it)',
+    // P1-M2 fix (F5): re-planted on the token's new data (its url flag), the same fault.
+    file: 'engine/code/tokens.ts', from: "  else if (relative && e > s && t[s] !== '#' && !/^data:/i.test(t.slice(s, e))) emit(at + s, at + e, { kind: 'text', prop, url: g === 1 ? '\"' : g === 2 ? \"'\" : '' });\n", to: '',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a relative URL \(value:url\/relative\)/,
+  },
+  {
+    id: 'B466', what: 'the Draw-made test takes any draw:made value ("yes" counts as Draw’s)',
+    file: 'engine/model/draw-ns.ts', from: "a.local === 'made' && a.raw === 'true'", to: "a.local === 'made'",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the Draw-made predicate/,
+  },
+  {
+    id: 'B467', what: 'the Draw-made test takes a gradient holding a comment (Draw would take the file’s comment away)',
+    file: 'engine/model/draw-ns.ts', from: '  if (!isDrawMade(n) || isHolderKind(n)) return false;\n  return n.children.every((c) => {', to: '  if (!isDrawMade(n) || isHolderKind(n)) return false;\n  return true || n.children.every((c) => {',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the Draw-made predicate/,
+  },
+  {
+    id: 'B468', what: 'decision 5: the render policy keeps xlink:href beside href again (the canvas follows a template the file alone never uses)',
+    file: 'engine/policy/render-policy.ts', from: "  if (attr.ns === NS.xlink && attr.local === 'href' && el.attrs.some((a) => a.ns === null && a.local === 'href')) return null;\n", to: '',
+    run: POLICY_TESTS, expect: /✖ SVG 2: href wins/,
+  },
+  // P1-M2 S3: the editor (quick).
+  {
+    id: 'B469', what: 'a stop’s offset field is one entry per keystroke, not per editing session',
+    file: 'projects/draw/src/editor.ts', from: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n', to: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n      this.fieldEnd();\n      this.fieldStart(f.field);\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ the stop editor, one entry per editing session/,
+  },
+  // P1-M2 S3 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B470', what: 'the gradient handles ignore gradientTransform (the pixel under the end handle isn’t the last stop’s colour)', slow: true, checks: ['gradientHandlesSitWhereTheGradientDraws'],
+    file: 'engine/paint/handles.ts', from: "  const T = parseTransform(valueOf(r, 'gradientTransform'))?.matrix ?? IDENTITY; // an unreadable list draws as none", to: '  const T = IDENTITY;',
+    run: DRAW_E2E, expect: /gradientHandlesSitWhereTheGradientDraws: \(b\): the pixel under the (start|end) handle/,
+  },
+  {
+    id: 'B471', what: 'Spread writes spreadMethod on the gradient’s template even where the gradient sets its own (which still wins)', slow: true, checks: ['gradientHandlesSitWhereTheGradientDraws'],
+    file: 'engine/paint/gradients.ts', from: '  return a ? opSetAttr(doc, a.from, null, name, value) : opSetAttr(doc, r.id, null, name, value);', to: '  return opSetAttr(doc, r.chain[r.chain.length - 1], null, name, value);',
+    run: DRAW_E2E, expect: /gradientHandlesSitWhereTheGradientDraws: Reflect: at t = 1\.75/,
+  },
+  {
+    id: 'B472', what: 'Linear makes a second Draw <defs> instead of using the root’s first', slow: true, checks: ['gradientsGoInDefsWithFreshIds'],
+    file: 'engine/paint/gradients.ts', from: '  const defs = rootDefs(doc);', to: '  const defs = null;',
+    run: DRAW_E2E, expect: /gradientsGoInDefsWithFreshIds: the polyline's Linear/,
+  },
+  {
+    id: 'B473', what: 'a stop edit on a shared gradient quietly makes it unique first (only one rect changes)', slow: true, checks: ['glossAndMakeUnique'],
+    file: 'projects/draw/src/panels/Inspect.tsx', from: "onClick={() => editor.openStyleSheet('stop-color', [stop.id])}", to: "onClick={() => { if ((editor.paintInfo(prop)?.shared ?? 0) > 0) editor.makeUnique(prop); editor.openStyleSheet('stop-color', [editor.paintInfo(prop)!.stops[n - 1].id]); }}",
+    run: DRAW_E2E, expect: /glossAndMakeUnique: a stop colour edit on the shared gradient did not change both rects/,
+  },
+  {
+    id: 'B474', what: 'Gloss off leaves xmlns:draw on the root (the file isn’t given back)', slow: true, checks: ['glossAndMakeUnique'],
+    file: 'engine/paint/gradients.ts', from: '  undeclareIfUnused(doc, apply);\n', to: '',
+    run: DRAW_E2E, expect: /glossAndMakeUnique: Gloss off did not give the file back/,
+  },
+  // P1-M2 fix (the review's findings): quick unless marked, each slow one naming its checks.
+  {
+    id: 'B475', what: 'F8: Gloss and Linear put each shape’s gradient in with a fragment parse of its own (which reads the whole document), so a command over many shapes is quadratic again',
+    file: 'engine/paint/gradients.ts', from: '  if (!markups.length) return [];\n', to: '  if (!markups.length) return [];\n  if (markups.length > 1) return markups.flatMap((m) => insertGradients(doc, [m], apply));\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a large selection take linear time/,
+  },
+  {
+    id: 'B476', what: 'F9: the <style> scan is skipped, so Draw takes away a gradient a stylesheet rule still paints with (and the rule is no user)',
+    file: 'engine/geometry/css.ts', from: '    for (const rule of textContent(doc, n.id).split(/[{}]/)) {', to: '    for (const rule of [] as string[]) {',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a gradient a <style> rule still paints with stays/,
+  },
+  {
+    id: 'B477', what: 'F2: only the attribute animations go with an href the canvas dropped (an animateMotion keeps moving its parent)',
+    file: 'engine/policy/render-policy.ts', from: '  if (!isAnimation(el) || kept !== null) return false;', to: '  if (!animatesAttribute(el) || kept !== null) return false;',
+    run: POLICY_TESTS, expect: /✖ SMIL: an animation whose href the canvas dropped goes with it/,
+  },
+  {
+    id: 'B478', what: 'F3: an empty href counts as one the canvas dropped (an animation of its parent vanishes)',
+    file: 'engine/policy/render-policy.ts', from: "  return href !== undefined && value(href) !== '';", to: '  return href !== undefined;',
+    run: POLICY_TESTS, expect: /✖ SMIL: an animation whose href the canvas dropped goes with it/,
+  },
+  {
+    id: 'B479', what: 'F2 and F3 on the canvas: the reviewed rule back (judged after the attribute animations’ early return, and any href counted): an animateMotion to another file moves its parent, and an animate or set with href="" vanishes', slow: true, checks: ['moreEdges'],
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: "  if (!isAnimation(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;\n  if (!animatesAttribute(node)) return true;\n", to: "  if (!animatesAttribute(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;\n",
+    run: DRAW_E2E, expect: /(?=[\s\S]*an animateMotion with an href to another file moves nothing: <animateMotion> is on the canvas)(?=[\s\S]*an empty href animates the parent: <animate> is not on the canvas)(?=[\s\S]*a <set> with an empty href sets the parent: <set> is not on the canvas)/,
+  },
+  {
+    id: 'B480', what: 'F10: the gradient section ignores a <style> rule that decides the paint (Inspect shows and edits the losing gradient; Edit on canvas shows its handles)',
+    file: 'projects/draw/src/editor.ts', from: '    return doc && id !== undefined ? ruleWhy(styleSource(doc, id, prop), prop) : null;', to: '    return null;',
+    run: drawTests('inspect.test.ts'), expect: /✖ a <style> rule that decides the paint wins over the gradient the element names/,
+  },
+  {
+    id: 'B481', what: 'F1: parsePaint takes a backslash inside url() again (a typed url(#a\\) runs on past its end and swallows the declarations after it)',
+    file: 'engine/values/color.ts', from: "  const u = /^url\\([ \\t\\n\\r\\f]*(?:\"([^\"\\\\]*)\"|'([^'\\\\]*)'|([^ \\t\\n\\r\\f\"'()\\\\]+))[ \\t\\n\\r\\f]*\\)([^]*)$/i.exec(s);", to: "  const u = /^url\\([ \\t\\n\\r\\f]*(?:\"([^\"]*)\"|'([^']*)'|([^ \\t\\n\\r\\f\"'()]+))[ \\t\\n\\r\\f]*\\)([^]*)$/i.exec(s);",
+    run: drawTests('inspect.test.ts'), expect: /✖ a typed paint with a backslash inside url\(\) is refused/,
+  },
+  {
+    id: 'B482', what: 'F1: declarations() ignores an escape inside parentheses again (it splits fill:url(#a\\);stroke:blue in two, where the browser reads one declaration)',
+    file: 'engine/geometry/css.ts', from: "    else if (c === '\\\\') k += 2; // an escape: the next character is part of a name or url, never a parenthesis\n", to: '',
+    run: engineTests('geometry/css.test.ts'), expect: /✖ declarations: a backslash escapes the next character/,
+  },
+  {
+    id: 'B483', what: 'F5: the relative URL token takes any one-line text again (#x);stroke:none closes the url() and writes CSS)',
+    file: 'engine/code/edit.ts', from: '      return token.url === undefined ? null : urlTextError(text, token.url);', to: '      return null;',
+    run: drawTests('inspect.test.ts'), expect: /✖ the relative URL inside a paint’s url\(\) holds a URL and nothing else/,
+  },
+  {
+    id: 'B484', what: 'F4: the gradient editor resolves xml:id again (Inspect and the handles edit a gradient the canvas never draws)',
+    file: 'engine/paint/gradients.ts', from: "      if (a.local !== 'id' || a.ns !== null) continue;", to: "      if (a.local !== 'id' || (a.ns !== null && a.ns !== NS.xml)) continue;",
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ the gradient editor resolves a plain id only/,
+  },
+  {
+    id: 'B485', what: 'F6: the finish hook descends into moved nodes again (Group detaches a stale generated shape it only moved)',
+    file: 'engine/generators/index.ts', from: '    for (const c of n.children) if (fresh.get(c) !== false) add(c);', to: '    for (const c of n.children) add(c);',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ the finish hook: Group moves a stale generated shape/,
+  },
+  {
+    id: 'B486', what: 'F7: gradientUsers resolves each paint’s whole chain again (selecting a shape at the end of a long template chain is quadratic)',
+    file: 'engine/paint/gradients.ts', from: '      if (g !== null) push(direct, g, { el: n.id, prop });', to: '      if (g !== null) {\n        resolveGradient(doc, g);\n        push(direct, g, { el: n.id, prop });\n      }',
+    run: drawTests('inspect.test.ts'), expect: /✖ Shared with N reads a long chain of templates in linear time/,
+  },
+  {
+    id: 'B487', what: 'N1: checkStyle takes any text for the keyword properties again (a stroke-linecap of "round; fill: red" is written)',
+    file: 'projects/draw/src/style-edit.ts', from: "  if (words) return words.some((w) => w.toLowerCase() === text.toLowerCase()) ? { text } : { error: `${JSON.stringify(input)} is not one of ${words.join(', ')}` };\n", to: '',
+    run: drawTests('inspect.test.ts'), expect: /✖ the keyword properties take only their own keywords/,
+  },
+  {
+    id: 'B488', what: 'N3: a new gradient’s stop writes a reference-written colour decoded again (Gloss off and Colour give back #e76f51 for fill="&accent;")',
+    file: 'engine/paint/gradients.ts', from: 'stop-color="${c.raw ?? escape(c.value, \'"\')}"', to: 'stop-color="${escape(c.value, \'"\')}"',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ a colour written with a reference is carried as written/,
+  },
+  {
+    id: 'B489', what: 'N4: planStyleOne re-serializes the whole style attribute (every declaration re-spaced), not only the value’s span',
+    file: 'engine/style/write.ts', from: 'raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };', to: "raw: (raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end)).split(';').map((x) => x.trim()).filter(Boolean).join('; '), add: false };",
+    run: engineTests('style/style.test.ts'), expect: /✖ corpus property: planStyle over every element of every corpus file/,
+  },
+  {
+    id: 'B490', what: 'N5: the picker rounds an alpha nobody moved again (rgba(255, 0, 0, 0.333) becomes 0.33 the moment the square moves)',
+    file: 'projects/draw/src/color-picker.ts', from: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent, p.alphaText);', to: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent);',
+    run: drawTests('color-picker.test.ts'), expect: /✖ an alpha the Alpha slider hasn’t moved keeps its own text/,
+  },
+  {
+    id: 'B491', what: 'N6: Inspect’s Join row never offers arcs or miter-clip, even when that is the value',
+    file: 'projects/draw/src/style-edit.ts', from: "  return !row.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv]] : [...JOINS];", to: '  return [...JOINS];',
+    run: drawTests('inspect.test.ts'), expect: /✖ what Inspect’s rows show for the finer cases/,
+  },
+  {
+    id: 'B492', what: 'N7: Make unique copies the ids inside the gradient verbatim again (the copy’s stop can take #s1 from the original)',
+    file: 'engine/paint/gradients.ts', from: '  renameIdsIn(doc, copy, fresh, apply);\n', to: '',
+    run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique gives each id inside the copy a fresh one/,
+  },
+  {
+    id: 'B493', what: 'F8: the batch puts its gradients into the file’s <defs> in reverse order (each shape still names its own, but the file differs from one shape at a time)',
+    file: 'engine/paint/gradients.ts', from: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)), apply);\n', to: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)).reverse(), apply).reverse();\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a selection write exactly what they write one shape at a time/,
   },
 ];
 

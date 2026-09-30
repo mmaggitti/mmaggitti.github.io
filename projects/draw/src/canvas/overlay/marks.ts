@@ -1,6 +1,7 @@
 // The overlay's SVG marks, drawn from the model (src/interact/overlay-model.ts): selection outlines,
 // the marquee, coordinate guides, snap lines, the user's guides and their pills, the local grid,
-// the rotation guide and the handles, with SVG Lab's look. The model is in host px; every
+// the rotation guide, a gradient's guides (Edit on canvas: its unit box, line, circle and focus
+// arm) and the handles, with SVG Lab's look. The model is in host px; every
 // coordinate written here is in the overlay's own px (the host's offset added), so an outline's
 // points read as where it is drawn. Every element is reused between frames (a drag frame changes
 // attributes, never the element list), and only what changed is written.
@@ -69,6 +70,10 @@ export class Marks {
   #guides: Pool;
   #marquee: Pool;
   #rotGuide: Pool;
+  #gradBox: Pool;
+  #gradLine: Pool;
+  #gradRing: Pool;
+  #gradArm: Pool;
   #pills: Pool;
   #squares: Pool;
   #circles: Pool;
@@ -87,6 +92,10 @@ export class Marks {
     this.#guides = new Pool(r, 'line', 'draw-guide');
     this.#marquee = new Pool(r, 'rect', 'draw-marquee');
     this.#rotGuide = new Pool(r, 'line', 'draw-rot-guide');
+    this.#gradBox = new Pool(r, 'polygon', 'draw-grad-box');
+    this.#gradLine = new Pool(r, 'line', 'draw-grad-guide');
+    this.#gradRing = new Pool(r, 'polygon', 'draw-grad-guide');
+    this.#gradArm = new Pool(r, 'line', 'draw-grad-arm');
     this.#pills = new Pool(r, 'rect', 'draw-pill');
     this.#squares = new Pool(r, 'rect', 'draw-hd');
     this.#circles = new Pool(r, 'circle', 'draw-hd');
@@ -117,6 +126,15 @@ export class Marks {
       put(m, 'height', n2(model.marquee.height));
     }
     this.#lines(this.#rotGuide, model.rotGuide ? [model.rotGuide] : []);
+    const grad = model.gradient;
+    const poly = (pool: Pool, pts: readonly Point[] | null) => {
+      const [el] = pool.take(pts ? 1 : 0);
+      if (el && pts) put(el, 'points', pts.map((p) => `${X(p.x)},${Y(p.y)}`).join(' '));
+    };
+    poly(this.#gradBox, grad?.box ?? null);
+    poly(this.#gradRing, grad?.ring ?? null);
+    this.#lines(this.#gradLine, grad?.line ? [grad.line] : []);
+    this.#lines(this.#gradArm, grad?.arm ? [grad.arm] : []);
     const pills = this.#pills.take(model.guides.length);
     model.guides.forEach((g, i) => {
       const [w, h] = g.axis === 'v' ? [20, 44] : [44, 20];
@@ -128,7 +146,7 @@ export class Marks {
       put(pills[i], 'class', g.active ? 'draw-pill on' : 'draw-pill');
     });
     this.#handles(model.handles);
-    this.#text([...(model.coords?.labels ?? []), ...(local?.labels ?? [])]);
+    this.#text([...(model.coords?.labels ?? []), ...(local?.labels ?? []), ...(grad?.labels ?? [])]);
   }
 
   #lines(pool: Pool, lines: readonly Line[]): void {
