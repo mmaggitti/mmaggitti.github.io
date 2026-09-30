@@ -229,11 +229,20 @@ export function quadOf(box: Rect, toHost: Affine): Quad {
   return [at(box.x, box.y), at(box.x + box.width, box.y), at(box.x + box.width, box.y + box.height), at(box.x, box.y + box.height)];
 }
 
-/** The axis-aligned box around quads (host px), or null. */
+/**
+ * The axis-aligned box around quads (host px), or null. A loop, not Math.min(...all): a call's
+ * arguments are capped (V8 throws at about 150,000), and a large selection has four corners a shape.
+ */
 export function unionBox(quads: readonly Quad[]): Rect | null {
-  const pts = quads.flat();
-  if (!pts.length) return null;
-  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-  const x = Math.min(...xs), y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+  let n = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of quads) {
+    for (const p of q) {
+      n++;
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x);
+      y1 = Math.max(y1, p.y);
+    }
+  }
+  return n ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
 }

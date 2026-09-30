@@ -1968,9 +1968,16 @@ interface HandleDrag {
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
-const unionRect = (bs: readonly Rect[]): Rect => {
-  const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));
-  return { x, y, width: Math.max(...bs.map((b) => b.x + b.width)) - x, height: Math.max(...bs.map((b) => b.y + b.height)) - y };
+/** The box around boxes (Align's target), by a loop: a spread call's arguments are capped (overlay-model's unionBox). */
+export const unionRect = (bs: readonly Rect[]): Rect => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of bs) {
+    x0 = Math.min(x0, b.x);
+    y0 = Math.min(y0, b.y);
+    x1 = Math.max(x1, b.x + b.width);
+    y1 = Math.max(y1, b.y + b.height);
+  }
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 };
 /** How the notices name an element: its id, else its tag. */
 function elementName(doc: Doc, id: NodeId): string {

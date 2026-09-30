@@ -2105,6 +2105,19 @@ const BREAKS = [
     file: 'engine/geometry/write.ts', from: '    const vp = nestedViewport(doc, n, opts.ctx);', to: '    const vp = localBounds(doc, id, opts.ctx);',
     run: engineTests('geometry/write.test.ts'), expect: /✖ corner resizes of a nested svg, an image and a foreignObject/,
   },
+  // P1-M1 follow-ups.
+  {
+    id: 'B403', what: 'the overlay’s union box spreads every corner into Math.min again (a selection of 50,000 shapes throws)',
+    file: 'projects/draw/src/interact/overlay-model.ts', from: 'export function unionBox(quads: readonly Quad[]): Rect | null {\n',
+    to: 'export function unionBox(quads: readonly Quad[]): Rect | null {\n  const pts = quads.flat();\n  if (!pts.length) return null;\n  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);\n  const x = Math.min(...xs), y = Math.min(...ys);\n  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };\n',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the union boxes take 200,000 boxes without throwing/,
+  },
+  {
+    id: 'B404', what: 'Align’s union box spreads every box into Math.min again (Align over 200,000 shapes throws)',
+    file: 'projects/draw/src/editor.ts', from: 'export const unionRect = (bs: readonly Rect[]): Rect => {\n',
+    to: 'export const unionRect = (bs: readonly Rect[]): Rect => {\n  const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));\n  return { x, y, width: Math.max(...bs.map((b) => b.x + b.width)) - x, height: Math.max(...bs.map((b) => b.y + b.height)) - y };\n',
+    run: drawTests('overlay-model.test.ts'), expect: /✖ the union boxes take 200,000 boxes without throwing/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],

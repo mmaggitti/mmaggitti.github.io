@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
 import { DIAMOND_PX, HANDLE_PICK_PX, RING_PX, handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from '../../src/interact/handles.ts';
 import { CENTRE_DOT_R, HANDLE } from '../../src/canvas/overlay/marks.ts';
+import { unionRect } from '../../src/editor.ts';
 
 const HOST = { width: 400, height: 300 };
 
@@ -74,6 +75,18 @@ test('quads come from a local box through its matrix, and a union box holds them
   assert.deepEqual(q, [{ x: 100, y: 50 }, { x: 100, y: 60 }, { x: 80, y: 60 }, { x: 80, y: 50 }]);
   assert.deepEqual(unionBox([q, quadOf({ x: 0, y: 0, width: 1, height: 1 }, [1, 0, 0, 1, 0, 0])]), { x: 0, y: 0, width: 100, height: 60 });
   assert.equal(unionBox([]), null);
+});
+
+// Every selected shape's corners go into one union box (the P1-M1 follow-up): a spread call such as
+// Math.min(...xs) throws past about 150,000 arguments in V8, so both unions are loops.
+test('the union boxes take 200,000 boxes without throwing, and hold them all: the overlay’s unionBox and Align’s unionRect', () => {
+  // A grid of 1 × 1 boxes (x 0 to 1998 by 2, y 0 to 597 by 3), with the extremes in the middle of the list.
+  const boxes = Array.from({ length: 200_000 }, (_, i) => ({ x: (i % 1000) * 2, y: Math.floor(i / 1000) * 3, width: 1, height: 1 }));
+  boxes[70_001] = { x: -7.5, y: 12, width: 1, height: 1 };
+  boxes[130_002] = { x: 40, y: -3, width: 2, height: 700 };
+  const want = { x: -7.5, y: -3, width: 2006.5, height: 700 };
+  assert.deepEqual(unionBox(boxes.map((b) => quadOf(b, [1, 0, 0, 1, 0, 0]))), want, 'unionBox over 800,000 corners');
+  assert.deepEqual(unionRect(boxes), want, 'unionRect over 200,000 boxes');
 });
 
 // ── handles (src/interact/handles.ts) ─────────────────────────────────────────────────────────
