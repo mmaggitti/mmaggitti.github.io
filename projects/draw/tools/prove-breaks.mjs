@@ -188,7 +188,7 @@ const BREAKS = [
   {
     id: 'B303', what: 'the sink stops asking the DOM whether it takes a name, in the app (a file with data-😀 fails to draw; Edit source adding one blanks the canvas)', slow: true,
     file: 'projects/draw/src/canvas/safe-sink.ts', from: ' || !domTakesName(attr.ns, key)', to: '',
-    run: SITE_E2E, expect: /data-\* names the DOM refuses: did not render \(InvalidCharacterError[\s\S]*editSourceRoundTrip: Edit source adding data-\S+: \{"broken":"[^"]*is not a valid attribute name/,
+    run: SITE_E2E, expect: /data-\* names the DOM refuses: did not render \(InvalidCharacterError[\s\S]*editSourceRoundTrip: Edit source adding data-\S+: \{"broken":"[^"]*is not a valid attribute name[^}]*"takes":false\}/,
   },
   {
     id: 'B24', what: 'the sink stops asking DOMPurify', slow: true,

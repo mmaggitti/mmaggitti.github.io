@@ -34,7 +34,9 @@
 // browser's own: every corpus file parses in both to the same canonical tree (xml-canon.mjs, after
 // its KNOWN differences), and probe by probe, what the browser refuses the engine refuses, and what
 // the engine refuses as not well-formed the browser refuses too. The canvas draws the ledger's
-// pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do.
+// pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do. The
+// P1-M0 review adds: a data-* name the DOM refuses is dropped, never thrown on, in a file and in Edit
+// source; and six more parser probes (entity names, an entity declared twice, an unparsed entity).
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -408,9 +410,11 @@ const MORE_EDGES = [
   { label: "Illustrator's <switch> shows its artwork, not its private data", text: readFileSync(join(CORPUS, 'tools', 'illustrator-cs6-entities-pgf.svg'), 'utf8'), absent: 'switch > foreignObject', firstInSwitch: 'g' },
   // Ids that happen to name document properties keep working.
   { label: 'ids named blur and close', text: svgDoc('<filter id="blur"><feGaussianBlur stdDeviation="6"/></filter><symbol id="close" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol><use href="#close" width="20" height="20"/><rect width="10" height="10" filter="url(#blur)"/>'), ids: ['blur', 'close'], draws: 'use', skipped: 0 },
-  // A data-* name the pattern and DOMPurify admit but the DOM refuses to create (data-😀, data-⁰x:
-  // setAttribute throws on them) is dropped and counted like any other; the element still draws.
-  { label: 'data-* names the DOM refuses', text: svgDoc('<rect width="10" height="10" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/>'), attrs: { rect: 'data-a height width' }, dropped: 2, skipped: 0 },
+  // A data-* name the pattern and DOMPurify admit but the DOM refuses to create (data-😀, data-⁰x in
+  // Chromium: setAttribute throws on them) is dropped and counted like any other; the element still
+  // draws. Each engine's DOM judges its own names (WebKit's rule is unverified), so the canvas must
+  // hold exactly the ones it takes; Chromium's refusals are pinned, so the case can't go vacuous.
+  { label: 'data-* names the DOM refuses', text: svgDoc('<rect width="10" height="10" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/>'), attrs: { rect: 'data-a height width' }, dom: { sel: 'rect', names: ['data-\u{1F600}', 'data-\u2070x'], refusedIn: { chromium: 2 } }, skipped: 0 },
   // The document's own CSS can't size the root away from the host.
   { label: 'a root sized by its own CSS', text: svgDoc('<style>svg { width: 48px; height: 48px }</style><rect width="10" height="10"/>', ' style="width: 24px; height: 24px"'), fills: true, skipped: 0 },
   // A size that overflows once converted still renders; it just gets no viewBox.
@@ -421,9 +425,10 @@ const MORE_EDGES = [
 ];
 
 async function moreEdges(browser, origin) {
+  const engine = browser.browserType().name();
   await withPage(browser, origin, 956, async (page, errors, context) => {
     const quiet = watch(page, context, origin);
-    const problems = await page.evaluate((cases) => cases.flatMap((c) => {
+    const problems = await page.evaluate(({ cases, engine }) => cases.flatMap((c) => {
       const out = [];
       let stats;
       try {
@@ -441,8 +446,16 @@ async function moreEdges(browser, origin) {
       if (c.unparsed) return !stats.ok && stats.error === c.unparsed && stats.rendered === 0 ? [] : [`${c.label}: the canvas reports ${JSON.stringify(stats)}, not the parser's refusal (${c.unparsed})`];
       if (!stats.ok) return [`${c.label}: did not render (${stats.error})`];
       if (c.skipped !== undefined && stats.skippedElements !== c.skipped) out.push(`skipped ${stats.skippedElements} element(s), not ${c.skipped}`);
-      if (c.dropped !== undefined && stats.droppedAttributes !== c.dropped) out.push(`dropped ${stats.droppedAttributes} attribute(s), not ${c.dropped}`);
-      for (const [sel, want] of Object.entries(c.attrs ?? {})) {
+      const attrs = { ...c.attrs };
+      if (c.dom) {
+        // Names only this engine's DOM can judge: drawn where it takes them, dropped and counted where not.
+        const takes = (n) => { try { document.createAttribute(n); return true; } catch { return false; } };
+        const refused = c.dom.names.filter((n) => !takes(n)).length;
+        attrs[c.dom.sel] = [...attrs[c.dom.sel].split(' '), ...c.dom.names.filter(takes)].sort().join(' ');
+        if (stats.droppedAttributes !== refused) out.push(`dropped ${stats.droppedAttributes} attribute(s), not the ${refused} the DOM refuses`);
+        if (c.dom.refusedIn[engine] !== undefined && refused !== c.dom.refusedIn[engine]) out.push(`${engine}'s DOM refuses ${refused} of the names, not ${c.dom.refusedIn[engine]}: the case no longer tests the guard`);
+      }
+      for (const [sel, want] of Object.entries(attrs)) {
         const got = q(sel) ? [...q(sel).attributes].map((a) => a.name).sort().join(' ') : null;
         if (got !== want) out.push(`<${sel}> is on the canvas as [${got}], not [${want}]`);
       }
@@ -458,7 +471,7 @@ async function moreEdges(browser, origin) {
       }
       if (c.noViewBox && q('svg')?.hasAttribute('viewBox')) out.push(`the root got viewBox="${q('svg').getAttribute('viewBox')}"`);
       return out.map((m) => `${c.label}: ${m}`);
-    }), MORE_EDGES);
+    }), { cases: MORE_EDGES, engine });
     must(problems.length === 0, `the canvas's edges:\n${problems.join('\n')}`);
     await quiet('more edges');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
@@ -1063,6 +1076,7 @@ async function sheetsRefuseWhatTheyCantWrite(browser, origin) {
 // transaction (one undo restores it byte for byte); markup that doesn't parse says where and
 // changes nothing.
 async function editSourceRoundTrip(browser, origin) {
+  const engine = browser.browserType().name();
   await withPage(browser, origin, 956, async (page, errors) => {
     // A tap on the root's end tag selects it, and Edit source, which can't replace the root, is not offered.
     await showCode(page);
@@ -1106,13 +1120,22 @@ async function editSourceRoundTrip(browser, origin) {
     await page.locator('.draw-modal').waitFor({ state: 'detached' });
     const odd = await page.evaluate(() => {
       const c = document.querySelector('.draw-host').shadowRoot.querySelector('circle');
+      let takes = true; // this engine's DOM judges the name (Chromium refuses it; WebKit's rule is unverified)
+      try {
+        document.createAttribute('data-\u{1F600}');
+      } catch {
+        takes = false;
+      }
       return {
         broken: document.querySelector('.draw-broken')?.textContent ?? null,
         circle: c ? [...c.attributes].map((a) => a.name).sort().join(' ') : null,
         kept: window.drawTest.source().includes('data-\u{1F600}="1"'),
+        takes,
       };
     });
-    must(odd.broken === null && odd.circle === 'cx cy fill r' && odd.kept, `Edit source adding data-\u{1F600}: ${JSON.stringify(odd)}, not the circle drawn as [cx cy fill r] with the name kept in the file`);
+    const want = odd.takes ? 'cx cy data-\u{1F600} fill r' : 'cx cy fill r';
+    must(odd.broken === null && odd.circle === want && odd.kept, `Edit source adding data-\u{1F600}: ${JSON.stringify(odd)}, not the circle drawn as [${want}] with the name kept in the file`);
+    must(engine !== 'chromium' || !odd.takes, "Chromium's DOM takes data-\u{1F600} now: the Edit source case no longer tests the guard");
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

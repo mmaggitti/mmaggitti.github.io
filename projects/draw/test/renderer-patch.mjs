@@ -32,7 +32,7 @@ export default async function rendererPatch({ browser, origin }) {
     const page = await context.newPage();
     if (origin) await page.goto(`${origin}/draw/`, { waitUntil: 'networkidle' });
     await page.evaluate(code);
-    const results = await page.evaluate(cases);
+    const results = await page.evaluate(cases, browser.browserType().name());
     const failed = results.filter((r) => r.problems.length);
     if (failed.length) {
       throw new Error(`keyed patching differs from a fresh render in ${failed.length} of ${results.length} case(s):\n${failed.map((r) => `${r.label}\n    ${r.problems.join('\n    ')}`).join('\n')}`);
@@ -43,7 +43,7 @@ export default async function rendererPatch({ browser, origin }) {
 }
 
 // Runs in the page.
-function cases() {
+function cases(engine) {
   const { attrSnapshot, el, parseDoc, setAttr, removeAttr, restoreAttr, Renderer, sinkReady } = window.drawHarness;
   const SVG = 'http://www.w3.org/2000/svg';
   const host = () => {
@@ -279,10 +279,16 @@ function cases() {
   {
     const problems = [];
     try {
+      // Each engine's DOM judges its own names (Chromium refuses both; WebKit's rule is unverified).
+      const odd = ['data-\u{1F600}', 'data-\u2070x'];
+      const takes = (n) => { try { document.createAttribute(n); return true; } catch { return false; } };
+      const want = ['data-a', 'height', 'width', ...odd.filter(takes)].sort().join(' ');
+      const refused = odd.filter((n) => !takes(n)).length;
+      if (engine === 'chromium' && refused !== 2) problems.push(`Chromium's DOM refuses ${refused} of the names, not 2: the case no longer tests the guard`);
       const { r, root, doc } = setup(`<svg xmlns="${SVG}" viewBox="0 0 100 100"><rect width="5" height="5" data-\u{1F600}="1" data-\u2070x="1" data-a="1"/><circle id="c1" r="3"/></svg>`);
       const drawn = [...(root.querySelector('rect')?.attributes ?? [])].map((a) => a.name).sort().join(' ');
-      if (drawn !== 'data-a height width') problems.push(`the rect is drawn as [${drawn}], not [data-a height width]`);
-      if (r.stats().droppedAttributes !== 2) problems.push(`stats ${JSON.stringify(r.stats())}, not 2 dropped attributes`);
+      if (drawn !== want) problems.push(`the rect is drawn as [${drawn}], not [${want}]`);
+      if (r.stats().droppedAttributes !== refused) problems.push(`stats ${JSON.stringify(r.stats())}, not ${refused} dropped attribute(s)`);
       const circle = byId(doc, 'c1');
       setAttr(doc, circle.id, null, 'data-\u200Cx', '1');
       r.patchAttributes(circle.id);
