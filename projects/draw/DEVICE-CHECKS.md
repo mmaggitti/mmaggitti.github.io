@@ -58,5 +58,8 @@ To take the house's group: tap the roof, then More → Select group.
 | 36 | The Pen by thumb | Pen tool: tap three points, then drag a fourth: a tap never makes a curve, and even a short drag does, leaving the point along your drag; Undo point takes the last one back, and a tap on the first point (from three) closes the path | ☐ |
 | 37 | Reaching nodes | Node tool on a curvy path: grab an anchor, a control and a line's bend handle with your thumb, each first try, at the fit and zoomed in to about 4×; each moves only what it should, and Undo puts it back | ☐ |
 | 38 | The path's bar | Node tool with a path selected, a node tapped: Smooth, Close and Relative sit in the bottom bar within easy reach of your thumb, above the home indicator, and each does what it says in one tap | ☐ |
+| 39 | Ghost arcs by thumb | Open the file SVG Lab's Arcs lesson exports in arc mode, and select its path in the Node tool: tap each dashed ghost arc with your thumb; the one you meant takes over first try, and its "L S" label turns pink | ☐ |
+| 40 | The donut's ring | Open the file the Arcs lesson exports in donut mode, tap a slice, Inspect → Edit as donut, then drag a boundary between two slices all the way round the ring: the handle stays under your thumb, the "a \| b" tooltip is readable above it, and the % labels follow | ☐ |
+| 41 | Direction arrows | Open the file the Arcs lesson exports in holes mode, and select its path in the Node tool at the fit: every arrowhead is readable, the inner ones pink; tap an inner point, then Reverse: the inner arrows turn, and the hole opens | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

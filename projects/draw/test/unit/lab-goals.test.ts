@@ -15,7 +15,10 @@ import { colorChoices, styleSlot, PALETTE } from '../../src/color-choices.ts';
 import { parsePath } from '../../../../engine/path/parse.ts';
 import { toAbsolute } from '../../../../engine/path/abs.ts';
 import { lastClosed } from '../../../../engine/path/segments.ts';
-import { tokenizeAttr } from '../../../../engine/code/tokens.ts';
+import { tokenizeAttr, tokenizeText } from '../../../../engine/code/tokens.ts';
+import { arcCenter, arcPoint, type ArcCenter } from '../../../../engine/path/arc.ts';
+import { insideAt } from '../../../../engine/path/winding.ts';
+import { donutOf, donutSlices } from '../../../../engine/generators/donut.ts';
 
 interface Rig {
   editor: Editor;
@@ -780,4 +783,161 @@ test('Edit source takes a pasted path of every command, letter-less, packed and 
   const flag = token(r, pasted.id, 'enum', 'a5');
   r.editor.tapToken(flag.block, flag.token);
   assert.equal(r.editor.history.get().undoLabel, 'Set d');
+});
+
+// ── P1-M3 S2: the Arcs lesson's arc, holes and donut goals ─────────────────────────────────────
+
+/** The one arc of lab/arcs.svg's path, as the file reads now: its flags "L S". */
+const arcFlags = (r: Rig) => {
+  const a = toAbsolute(parsePath(dOf(r))).find((s) => s.type === 'A')!;
+  return a.type === 'A' ? `${+a.large} ${+a.sweep}` : '';
+};
+
+test('lab/arcs.svg: every number of the arc is a token and each flag a keyword token, and its teaching comment has none (arc-command); a tap on a flag token flips it, one entry each (large-arc-flag, sweep-flag); the stroke and its width 1–12 by Inspect and the width token (arc-stroke)', () => {
+  const r = open('lab/arcs.svg');
+  const path = element(r, 'path');
+  const ts = tokenizeAttr(doc(r), path.id, { ns: null, local: 'd' });
+  assert.deepEqual(ts.map((t) => (t.kind === 'number' ? t.label : t.text)), ['point 1 x', 'point 1 y', 'rx', 'ry', 'rotation', '0', '1', 'point 2 x', 'point 2 y']);
+  assert.deepEqual(ts.filter((t) => t.kind === 'enum').map((t) => t.kind === 'enum' && t.options.join('/')), ['0/1', '0/1']);
+  const comment = [...doc(r).nodes.values()].find((n) => n.kind === 'comment')!;
+  assert.equal(r.listing.get(`${comment.id}:leaf`)?.tokens.length, 0, 'the comment "A rx ry rotation large-arc sweep x y" stays plain');
+  assert.deepEqual(tokenizeText(doc(r), comment.id), []);
+  const flag = (i: number) => {
+    const block = r.listing.get(`${path.id}:start`)!;
+    return { block, token: block.tokens.filter((t) => t.kind === 'enum')[i] };
+  };
+  const large = flag(0);
+  r.editor.tapToken(large.block, large.token);
+  assert.equal(r.editor.source(), edited(r.file, 'A 30 30 0 0 1 76 50', 'A 30 30 0 1 1 76 50'), 'the large-arc flag, in place');
+  assert.equal(arcFlags(r), '1 1');
+  oneEntry(r, 'Set d');
+  r.editor.undo();
+  const sweep = flag(1);
+  r.editor.tapToken(sweep.block, sweep.token);
+  assert.equal(r.editor.source(), edited(r.file, 'A 30 30 0 0 1 76 50', 'A 30 30 0 0 0 76 50'), 'the sweep flag, in place');
+  oneEntry(r, 'Set d');
+  r.editor.undo();
+  r.editor.select([path.id]);
+  sheetSets(r, 'stroke', PALETTE[5]);
+  assert.equal(r.editor.source(), edited(r.file, 'stroke="#264653"', 'stroke="#e76f51"'));
+  oneStyleEntry(r, 'Set stroke', r.file);
+  setNumber(r, path.id, 'stroke-width=', '12');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="3"', 'stroke-width="12"'), 'the lab’s width 12');
+  r.editor.undo();
+  setNumber(r, path.id, 'stroke-width=', '1');
+  assert.equal(r.editor.source(), edited(r.file, 'stroke-width="3"', 'stroke-width="1"'), 'and 1');
+});
+
+test('lab/arcs.svg, goal "Try all 4 arcs": in the Node tool a tap on each ghost in turn sets its flag pair, one entry each, and the pairs seen reach 4 (the file starts at 0 1)', () => {
+  const r = open('lab/arcs.svg');
+  const path = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([path.id]);
+  const seen = new Set([arcFlags(r)]);
+  assert.deepEqual([...seen], ['0 1']);
+  for (const want of ['0 0', '1 0', '1 1']) {
+    const ghost = r.editor.overlayModel().paths!.ghosts.find((g) => g.flags === want);
+    assert.ok(ghost, `a ghost for ${want}`);
+    const [L, S] = want.split(' ').map((f) => f === '1');
+    const c = arcCenter(24, 50, 30, 30, 0, L, S, 76, 50) as ArcCenter;
+    const [x, y] = arcPoint(c, c.t1 + c.dt / 2);
+    tapAt(r, x, y);
+    assert.equal(r.editor.history.get().undoLabel, 'Set arc flags');
+    assert.equal(arcFlags(r), want);
+    seen.add(arcFlags(r));
+  }
+  assert.ok(seen.size >= 4, 'the goal: all four arcs');
+  assert.equal(r.editor.source(), edited(r.file, 'A 30 30 0 0 1 76 50', 'A 30 30 0 1 1 76 50'), 'only the flags changed');
+});
+
+test('lab/arcs--holes.svg, goal "Cut the hole 2 ways": Inspect’s Fill rule to evenodd empties the keyhole at (50, 55), back to nonzero fills it, and Reverse on the inner subpath empties it again; the fill by its token and Inspect (holes-fill); one entry each', () => {
+  const r = open('lab/arcs--holes.svg');
+  const path = element(r, 'path');
+  const holes = new Set<string>();
+  const inside = (x: number, y: number) => insideAt(toAbsolute(parsePath(dOf(r))), x, y, attrValue(doc(r), path, null, 'fill-rule') === 'evenodd' ? 'evenodd' : 'nonzero');
+  r.editor.pickTool('node');
+  r.editor.select([path.id]);
+  assert.ok(inside(50, 55) && inside(50, 20), 'both clockwise, nonzero: the keyhole is filled');
+  r.editor.setStyle('fill-rule', 'evenodd');
+  assert.equal(r.editor.source(), edited(r.file, 'fill-rule="nonzero"', 'fill-rule="evenodd"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set fill-rule');
+  assert.ok(!inside(50, 55) && inside(50, 20), 'evenodd: a hole');
+  holes.add('evenodd');
+  r.editor.setStyle('fill-rule', 'nonzero');
+  assert.equal(r.editor.source(), r.file);
+  assert.ok(inside(50, 55), 'nonzero again: filled');
+  tapHandle(r, 'a6'); // an inner anchor (the end of L 61 66)
+  r.editor.reverse();
+  assert.equal(r.editor.source(), edited(r.file, 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z', 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z'), 'SVG Lab’s HOLE_REV');
+  assert.equal(r.editor.history.get().undoLabel, 'Reverse');
+  assert.ok(!inside(50, 55) && inside(50, 20), 'the inner reversed: a hole under nonzero too');
+  holes.add('reverse');
+  assert.ok(holes.size >= 2, 'the goal: the hole cut two ways');
+  r.editor.undo();
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), r.file);
+  // The fill: its colour token, and Inspect's swatch.
+  const fill = token(r, path.id, 'color', 'fill=');
+  r.editor.tapToken(fill.block, fill.token);
+  assert.ok('text' in r.editor.sheetInput('#2a9d8f'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#264653"', 'fill="#2a9d8f"'));
+  oneEntry(r, 'Set fill');
+  r.editor.undo();
+  r.editor.select([path.id]);
+  sheetSets(r, 'fill', PALETTE[5]);
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#264653"', 'fill="#e76f51"'));
+  oneStyleEntry(r, 'Set fill', r.file);
+});
+
+const DONUT_ATTRS = ' xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28"';
+
+test('lab/arcs--donut.svg, goal "A slice over half": Edit as donut, then boundary 0 dragged round to 70% of the turn: the values read 64, 1, 20, 15 (64 is the pair − 1), the first slice is drawn the long way round, and 64/100 > 0.5; one entry each', () => {
+  const r = open('lab/arcs--donut.svg');
+  const slices = [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'path');
+  r.editor.select([slices[0].id]);
+  r.editor.adoptDonut();
+  const adopted = edited(r.file, 'viewBox="0 0 100 100">', `viewBox="0 0 100 100"${DONUT_ATTRS}>`);
+  assert.equal(r.editor.source(), adopted, 'only the root’s start tag');
+  oneEntry(r, 'Edit as donut');
+  const ring = (f: number) => hostOf(r, 50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI));
+  gesture(r, handleAt(r, 'donut-b0'), ring(0.7));
+  assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
+  const d = donutOf(doc(r), doc(r).root)!;
+  assert.deepEqual(d.values, [64, 1, 20, 15]);
+  const total = d.values.reduce((a, b) => a + b, 0);
+  assert.ok(d.values.some((v) => v / total > 0.5), 'the goal: a slice over half');
+  assert.equal(attrValue(doc(r), slices[0], null, 'd'), donutSlices([64, 1, 20, 15], 50, 50, 28)[0]);
+  assert.match(attrValue(doc(r), slices[0], null, 'd')!, /^M 50 22 A 28 28 0 1 1 /, 'large-arc 1');
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted, 'one entry');
+});
+
+test('lab/arcs--donut.svg: a slice’s colour by its stroke token and by Inspect leaves the donut a donut (donut-colors); after Edit as donut its data comment’s values are number tokens, and a value set by the Number sheet draws the slices again, one entry (donut-data)', () => {
+  const r = open('lab/arcs--donut.svg');
+  const slices = [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'path');
+  r.editor.select([slices[1].id]);
+  r.editor.adoptDonut();
+  const adopted = r.editor.source();
+  const stroke = token(r, slices[1].id, 'color', 'stroke=');
+  r.editor.tapToken(stroke.block, stroke.token);
+  assert.ok('text' in r.editor.sheetInput('#6d597a'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(adopted, 'stroke="#2a9d8f"', 'stroke="#6d597a"'), 'the stroke token: only its bytes');
+  assert.ok(donutOf(doc(r), doc(r).root), 'still a donut');
+  r.editor.undo();
+  sheetSets(r, 'stroke', PALETTE[0]);
+  assert.equal(r.editor.source(), edited(adopted, 'stroke="#2a9d8f"', `stroke="${PALETTE[0]}"`), 'Inspect’s stroke');
+  assert.ok(donutOf(doc(r), doc(r).root), 'still a donut');
+  r.editor.undo();
+  const comment = [...doc(r).nodes.values()].find((n) => n.kind === 'comment')!;
+  const block = r.listing.get(`${comment.id}:leaf`)!;
+  assert.deepEqual(block.tokens.map((t) => [t.kind, block.text.slice(t.start, t.end)]), [['number', '40'], ['number', '25'], ['number', '20'], ['number', '15']], 'the comment’s values are tokens now');
+  setNumber(r, comment.id, 'data: ', '55');
+  assert.ok(r.editor.source().includes('<!-- data: 55, 25, 20, 15 -->'));
+  assert.deepEqual(slices.map((s) => attrValue(doc(r), s, null, 'd')), donutSlices([55, 25, 20, 15], 50, 50, 28), 'the slices drawn again from it');
+  assert.equal(r.editor.history.get().undoLabel, 'Set data');
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted);
 });
