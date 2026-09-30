@@ -1490,7 +1490,7 @@ const BREAKS = [
   // P1-M0: the engine refuses what a browser's XML parser refuses, each at its place.
   {
     id: 'B278', what: 'an attribute written twice is accepted',
-    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>` };\n', to: '',
+    file: 'engine/xml/lex.ts', from: '    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>`, attrs };\n', to: '',
     run: XML_TESTS, expect: /✖ strict well-formedness: what a browser refuses, Draw refuses, each with its place/,
   },
   {
@@ -1544,6 +1544,22 @@ const BREAKS = [
     id: 'B293', what: 'an entity an XHTML DOCTYPE brings (browsers supply it) is reported as not well-formed',
     file: 'engine/xml/entities.ts', from: "    } else if (table.xhtmlDtd) {\n      return { at: i, message: `the entity &${ref}; is not declared; a browser takes it from the XHTML DTD the DOCTYPE names, which Draw doesn't read`, kind: 'limit' };\n", to: '',
     run: XML_TESTS, expect: /✖ an entity an XHTML DOCTYPE brings is over Draw's limits, not malformed/,
+  },
+  // P1-M0 review (F8): with several errors, the first is reported, as a browser's parser stops there.
+  {
+    id: 'B304', what: "the lexer's or the tree's error is reported before an earlier reference or namespace error again",
+    file: 'engine/model/doc.ts', from: '    return first && !first.ok ? first : { ok: false, error: parsed.error };', to: '    return { ok: false, error: parsed.error };',
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*a bare & \(line 2\), then an attribute written twice \(line 3\)/,
+  },
+  {
+    id: 'B305', what: 'the attributes a tag read before the lexer stopped inside it go unchecked',
+    file: 'engine/xml/lex.ts', from: "    if ('message' in r) return fail(r.at, r.message, r.attrs);", to: "    if ('message' in r) return fail(r.at, r.message);",
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one tag, a reference \(line 2\), then an attribute written twice \(line 4\)/,
+  },
+  {
+    id: 'B306', what: 'the text before a character XML doesn\'t allow goes unchecked',
+    file: 'engine/xml/lex.ts', from: "      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });\n", to: '',
+    run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one text, a reference \(line 2\), then U\+0001 \(line 3\)/,
   },
   {
     // Edit source parses its text with the document's DOCTYPE and namespaces in scope.

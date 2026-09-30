@@ -43,7 +43,17 @@ export interface LexError {
   kind?: 'limit';
 }
 
-export type LexResult = { ok: true; tokens: Tok[] } | { ok: false; error: LexError };
+export type LexResult = { ok: true; tokens: Tok[] } | { ok: false; error: LexError; before: Before };
+
+/**
+ * What the lexer read before a failure, for the checks that come after it (model/doc.ts reports an
+ * earlier reference or namespace error first, as a browser does): the tokens that end before it (a
+ * text token it falls inside, up to it), and the attributes a start tag it stops inside had read.
+ */
+export interface Before {
+  tokens: Tok[];
+  attrs: AttrTok[];
+}
 
 // XML Name, simplified to what SVG files use, but permissive about non-ASCII letters.
 const NAME = /[A-Za-z_:À-￿][\w.:\-·À-￿]*/y;
@@ -71,9 +81,28 @@ export function lex(src: string): LexResult {
   const bad = NOT_XML_CHAR.exec(src);
   if (bad && (r.ok || r.error.at >= bad.index)) {
     const cp = bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0');
-    return { ok: false, error: { at: bad.index, message: `the character U+${cp} is not allowed in XML` } };
+    return { ok: false, error: { at: bad.index, message: `the character U+${cp} is not allowed in XML` }, before: cut(r.ok ? { tokens: r.tokens, attrs: [] } : r.before, bad.index) };
   }
   return r;
+}
+
+/** Where an attribute ends in the source: after its closing quote. */
+const attrEnd = (a: AttrTok): number => a.at + a.name.length + a.eq.length + a.raw.length + 2;
+
+// What was read before `at`: the tokens that end by it, the text of one it falls inside up to it,
+// and the attributes that end before it in a start tag it falls inside (or that the lexer stopped in).
+function cut(before: Before, at: number): Before {
+  const tokens: Tok[] = [];
+  let attrs = before.attrs.filter((a) => attrEnd(a) <= at);
+  for (const t of before.tokens) {
+    if (t.end <= at) tokens.push(t);
+    else {
+      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });
+      if (t.start < at && t.kind === 'start') attrs = t.attrs.filter((a) => attrEnd(a) <= at);
+      break;
+    }
+  }
+  return { tokens, attrs };
 }
 
 function scan(src: string): LexResult {
@@ -81,7 +110,7 @@ function scan(src: string): LexResult {
   const n = src.length;
   let i = 0;
   let cdataEnd = src.indexOf(']]>'); // the next ']]>' at or after i, or -1
-  const fail = (at: number, message: string): LexResult => ({ ok: false, error: { at, message } });
+  const fail = (at: number, message: string, attrs: AttrTok[] = []): LexResult => ({ ok: false, error: { at, message }, before: { tokens, attrs } });
 
   while (i < n) {
     const lt = src.indexOf('<', i);
@@ -141,7 +170,7 @@ function scan(src: string): LexResult {
       continue;
     }
     const r = scanStartTag(src, i);
-    if ('message' in r) return fail(r.at, r.message);
+    if ('message' in r) return fail(r.at, r.message, r.attrs);
     tokens.push(r);
     i = r.end;
   }
@@ -150,38 +179,39 @@ function scan(src: string): LexResult {
 
 type StartTok = Extract<Tok, { kind: 'start' }>;
 
-function scanStartTag(src: string, i: number): StartTok | LexError {
-  const name = matchAt(NAME, src, i + 1);
-  if (!name) return { at: i, message: "'<' not followed by a tag name" };
-  if (badQName(name)) return { at: i + 1, message: qnameMessage(name) };
-  let k = i + 1 + name.length;
+// A failure carries the attributes the tag had read before it (see Before).
+function scanStartTag(src: string, i: number): StartTok | (LexError & { attrs: AttrTok[] }) {
   const attrs: AttrTok[] = [];
+  const name = matchAt(NAME, src, i + 1);
+  if (!name) return { at: i, message: "'<' not followed by a tag name", attrs };
+  if (badQName(name)) return { at: i + 1, message: qnameMessage(name), attrs };
+  let k = i + 1 + name.length;
   const seen = new Set<string>();
   for (;;) {
     const lead = matchAt(WS, src, k) ?? '';
     k += lead.length;
     if (src.startsWith('/>', k)) return { kind: 'start', start: i, end: k + 2, name, attrs, tail: lead, selfClosing: true };
     if (src[k] === '>') return { kind: 'start', start: i, end: k + 1, name, attrs, tail: lead, selfClosing: false };
-    if (k >= src.length) return { at: i, message: `unterminated start tag <${name}>` };
-    if (!lead) return { at: k, message: `attributes of <${name}> must be separated by whitespace` };
+    if (k >= src.length) return { at: i, message: `unterminated start tag <${name}>`, attrs };
+    if (!lead) return { at: k, message: `attributes of <${name}> must be separated by whitespace`, attrs };
     const an = matchAt(NAME, src, k);
-    if (!an) return { at: k, message: `bad attribute name in <${name}>` };
-    if (badQName(an)) return { at: k, message: qnameMessage(an) };
-    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>` };
+    if (!an) return { at: k, message: `bad attribute name in <${name}>`, attrs };
+    if (badQName(an)) return { at: k, message: qnameMessage(an), attrs };
+    if (seen.has(an)) return { at: k, message: `attribute ${an} is written twice in <${name}>`, attrs };
     seen.add(an);
     let e = k + an.length;
     const w1 = matchAt(WS, src, e) ?? '';
     e += w1.length;
-    if (src[e] !== '=') return { at: e, message: `attribute ${an} in <${name}> has no value` };
+    if (src[e] !== '=') return { at: e, message: `attribute ${an} in <${name}> has no value`, attrs };
     e += 1;
     const w2 = matchAt(WS, src, e) ?? '';
     e += w2.length;
     const q = src[e];
-    if (q !== '"' && q !== "'") return { at: e, message: `attribute ${an} in <${name}> is not quoted` };
+    if (q !== '"' && q !== "'") return { at: e, message: `attribute ${an} in <${name}> is not quoted`, attrs };
     const close = src.indexOf(q, e + 1);
-    if (close === -1) return { at: e, message: `unterminated value of ${an} in <${name}>` };
+    if (close === -1) return { at: e, message: `unterminated value of ${an} in <${name}>`, attrs };
     const raw = src.slice(e + 1, close);
-    if (raw.includes('<')) return { at: e, message: `'<' in the value of ${an} in <${name}>` };
+    if (raw.includes('<')) return { at: e, message: `'<' in the value of ${an} in <${name}>`, attrs };
     attrs.push({ at: k, lead, name: an, eq: w1 + '=' + w2, quote: q, raw });
     k = close + 1;
   }

@@ -85,6 +85,30 @@ test('a file a browser refuses (a bare &, an undefined entity, a duplicate attri
   }
 });
 
+// A browser's parser stops at its first error, so Draw marks its first: a reference or namespace
+// error before the place the lexer or the tree stops at is the one reported, in a tag the lexer
+// stops inside and in text before a character XML doesn't allow too. Each case's line is
+// Chromium's (P1-M0 review, F8).
+test("a file with several errors opens as read-only source at the first, where a browser's parser stops", async () => {
+  const ed = fakeEditor();
+  ed.open(SAMPLE);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const [label, text, message, line, column] of [
+    ['a bare & (line 2), then an attribute written twice (line 3)', `${svg}\n  <text>Fish & chips</text>\n  <rect width="4" height="4" fill="red" fill="blue"/>\n</svg>\n`, 'a bare & (write &amp; for the character itself)', 2, 14],
+    ['an unbound prefix (line 2), then -- in a comment (line 3)', `${svg}\n  <p:g/>\n  <!-- a -- b -->\n</svg>\n`, 'the prefix p of <p:g> is not declared', 2, 4],
+    ['an undeclared entity (line 2), then an unclosed tag (line 3)', `${svg}\n  <text>&nbsp;</text>\n  <g>\n</svg>\n`, 'the entity &nbsp; is not declared', 2, 9],
+    ['in one tag, a reference (line 2), then an attribute written twice (line 4)', `${svg}\n  <rect id="&x;"\n        fill="red"\n        fill="blue"/>\n</svg>\n`, 'the entity &x; is not declared', 2, 13],
+    ['in one text, a reference (line 2), then U+0001 (line 3)', `${svg}\n  <text>&x;\n    \u0001</text>\n</svg>\n`, 'the entity &x; is not declared', 2, 9],
+  ] as const) {
+    const r = await importSvg(ed, { via: 'file', name: 'x.svg', text });
+    assert.ok(!r.ok, `${label}: opened`);
+    assert.equal(r.message, message, label);
+    assert.deepEqual([r.line, r.column], [line, column], label);
+    assert.equal(r.source?.text, text, `${label}: its text, for the read-only source view`);
+    assert.equal(ed.source(), SAMPLE, 'the drawing that was open stays');
+  }
+});
+
 test("a well-formed file over Draw's limits opens nowhere, not even as source: it says so and where, and the open drawing stays", async () => {
   const ed = fakeEditor();
   ed.open(SAMPLE);

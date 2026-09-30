@@ -17,7 +17,7 @@
 //   written twice under two prefixes of one namespace.
 
 import type { AttrTok, LexError, Quote } from '../xml/lex.ts';
-import { parseCst, DEFAULT_LIMITS, type CstElement, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
+import { parseCst, DEFAULT_LIMITS, type CstElement, type CstLeaf, type CstNode, type Limits, type LeafTok } from '../xml/cst.ts';
 import { decodeAttr, decodeText, escape, readEntityTable, newBudget, normalizeEol, wellFormedRefs, EntityBudgetError, EntityMarkupError, EntityWellFormednessError, type Budget, type EntityTable } from '../xml/entities.ts';
 
 export type NodeId = number;
@@ -96,8 +96,22 @@ export type BuildResult = { ok: true; doc: Doc } | { ok: false; error: LexError 
 /** Parse a document; `budget` is the entity expansion it may spend (a fragment passes what its document has left). */
 export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget: Budget = newBudget()): BuildResult {
   const parsed = parseCst(source, limits);
-  if (!parsed.ok) return parsed;
-  const { cst } = parsed;
+  if (!parsed.ok) {
+    // A browser stops at the first error. The lexer and the CST stop at theirs before the model's
+    // checks (references, namespaces) run, so those run over what parsed before it: one found there
+    // comes first.
+    const first = parsed.before ? build(source, parsed.before, budget) : null;
+    return first && !first.ok ? first : { ok: false, error: parsed.error };
+  }
+  return build(source, parsed.cst, budget);
+}
+
+/**
+ * The model over a parsed tree: a whole document, or what parsed before a failure (the elements
+ * still open, and the attributes a start tag had read when the lexer stopped inside it, which are
+ * checked, not built).
+ */
+function build(source: string, cst: { prolog: CstLeaf[]; root: CstElement | null; epilog: CstLeaf[]; attrs?: AttrTok[] }, budget: Budget): BuildResult {
   const nodes = new Map<NodeId, Node>();
   const doctype = cst.prolog.find((l) => l.tok.kind === 'doctype')?.tok;
   const entities = doctype?.kind === 'doctype' ? readEntityTable(doctype.subset, publicId(source.slice(doctype.start, doctype.end))) : readEntityTable(null);
@@ -125,20 +139,26 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
     return id;
   };
 
+  // An attribute's value, and a namespace declaration's own rules: the URI it declares, or undefined.
+  const attribute = (a: AttrTok): string | undefined => {
+    check(a.raw, valueAt(a), true);
+    if (a.name !== 'xmlns' && !a.name.startsWith('xmlns:')) return undefined;
+    const uri = decodeAttr(a.raw, entities);
+    const bad = declarationError(a.name === 'xmlns' ? '' : a.name.slice(6), uri);
+    if (bad) throw new ParseFail(a.at, bad);
+    return uri;
+  };
+
   const element = (el: CstElement, parent: NodeId | null, scope: Map<string, string | null>): NodeId => {
     const id = newId();
     const tag = el.start.name;
     // namespace declarations on this element apply to its own name and attributes
     let map = scope;
     for (const a of el.start.attrs) {
-      check(a.raw, valueAt(a), true);
-      if (a.name === 'xmlns' || a.name.startsWith('xmlns:')) {
-        const declared = a.name === 'xmlns' ? '' : a.name.slice(6);
-        const uri = decodeAttr(a.raw, entities);
-        const bad = declarationError(declared, uri);
-        if (bad) throw new ParseFail(a.at, bad);
+      const uri = attribute(a);
+      if (uri !== undefined) {
         if (map === scope) map = new Map(scope);
-        map.set(declared, uri || null);
+        map.set(a.name === 'xmlns' ? '' : a.name.slice(6), uri || null);
       }
     }
     const bound = (p: string): boolean => p === 'xml' || !!map.get(p);
@@ -184,8 +204,9 @@ export function parseDoc(source: string, limits: Limits = DEFAULT_LIMITS, budget
 
   try {
     doc.prolog = cst.prolog.map((l) => leaf(l.tok, null));
-    doc.root = element(cst.root, null, new Map([['', null]]));
+    if (cst.root) doc.root = element(cst.root, null, new Map([['', null]]));
     doc.epilog = cst.epilog.map((l) => leaf(l.tok, null));
+    for (const a of cst.attrs ?? []) attribute(a);
   } catch (e) {
     if (e instanceof ParseFail) return { ok: false, error: e.kind ? { at: e.at, message: e.message, kind: e.kind } : { at: e.at, message: e.message } };
     throw e;
