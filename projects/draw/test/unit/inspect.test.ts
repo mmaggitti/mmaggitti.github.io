@@ -435,8 +435,8 @@ test('Edit on canvas: the gradient’s handles instead of the shape’s, with it
 
 // Gloss, Gloss off, Linear and None over a large selection read every shape before writing, and put
 // every new gradient in with one fragment parse (which reads the whole document), so they cost time
-// in proportion to the selection. Measured in node over 1,000 and 4,000 rects: Gloss about 0.12 and
-// 0.27 s, Gloss off 0.12 and 0.25 s, Linear 0.09 and 0.34 s, None 0.06 and 0.17 s; with a fragment
+// in proportion to the selection. Measured in node over 1,000 and 4,000 rects: Gloss about 0.07 and
+// 0.3 s, Gloss off 0.04 and 0.18 s, Linear 0.06 and 0.27 s, None 0.03 and 0.14 s; with a fragment
 // parse and an id map per shape, 1.5 and 37 s, 0.6 and 12 s, 1.7 and 39 s, 0.6 and 13 s.
 test('Gloss, Gloss off, Linear and None over a large selection take linear time: over 4,000 rects each costs under 6× what it costs over 1,000, and under 2 s', () => {
   const rects = (n: number, fill: (i: number) => string) => Array.from({ length: n }, (_, i) => `<rect x="${(i % 100) * 10}" y="${Math.floor(i / 100) * 10}" width="8" height="8" fill="${fill(i)}"/>`).join('\n  ');
@@ -463,20 +463,21 @@ test('Gloss, Gloss off, Linear and None over a large selection take linear time:
   };
   for (const [, label, file, act] of acts) cost(200, file, label, act); // warm the engine up
   for (const [what, label, file, act] of acts) {
-    // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest
-    // run of each size counts. A quadratic command costs over a second at 1,000 already, so then
-    // 4,000 isn't waited for.
-    let small = Infinity;
-    let big = Infinity;
-    for (let run = 0; run < 3; run++) {
-      small = Math.min(small, cost(1000, file, label, act));
-      if (small >= LIMIT / 4) continue;
-      big = Math.min(big, cost(4000, file, label, act));
-      if (big < 6 * small && big < LIMIT) break;
+    // A pause of the runner's can land in one run: a miss is measured twice more, and one run
+    // without a miss passes. A run times 1,000 and then 4,000 back to back, so both sizes see the
+    // same runner. (Each shape makes or drops a gradient and its stops, and the collector's share
+    // grows with the heap: under the parallel unit run, the fastest 1,000 over the fastest 4,000 from
+    // different runs came to ×6.9, and a run's own pair to ×4.8 at most.) A quadratic command costs
+    // over a second at 1,000 already, so then 4,000 isn't waited for.
+    const runs: string[] = [];
+    let passed = false;
+    for (let run = 0; run < 3 && !passed; run++) {
+      const small = cost(1000, file, label, act);
+      const big = small < LIMIT / 4 ? cost(4000, file, label, act) : Infinity;
+      passed = big < 6 * small && big < LIMIT;
+      runs.push(big === Infinity ? `${small.toFixed(0)} ms over 1,000 (the limit is ${LIMIT / 4})` : `${small.toFixed(0)} and ${big.toFixed(0)} ms (×${(big / small).toFixed(1)})`);
     }
-    assert.ok(small < LIMIT / 4, `${what}: ${small.toFixed(0)} ms over 1,000 rects (the limit is ${LIMIT / 4})`);
-    assert.ok(big < 6 * small, `${what}: ${small.toFixed(0)} ms over 1,000 rects, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
-    assert.ok(big < LIMIT, `${what}: ${big.toFixed(0)} ms over 4,000 rects (the limit is ${LIMIT})`);
+    assert.ok(passed, `${what} over 1,000 and 4,000 rects: ${runs.join('; ')} (linear is ×4, the most ×6, and the limit over 4,000 is ${LIMIT} ms)`);
   }
 });
 
