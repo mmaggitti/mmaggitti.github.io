@@ -149,18 +149,23 @@ function build(source: string, cst: { prolog: CstLeaf[]; root: CstElement | null
     return uri;
   };
 
-  const element = (el: CstElement, parent: NodeId | null, scope: Map<string, string | null>): NodeId => {
+  // The namespace declarations in scope, in one map: an element sets its own on the way in and puts
+  // back what they covered on the way out (a copy per declaring element was quadratic).
+  const scope = new Map<string, string | null>([['', null]]);
+  const element = (el: CstElement, parent: NodeId | null): NodeId => {
     const id = newId();
     const tag = el.start.name;
     // namespace declarations on this element apply to its own name and attributes
-    let map = scope;
+    const covered: [string, string | null | undefined][] = [];
     for (const a of el.start.attrs) {
       const uri = attribute(a);
       if (uri !== undefined) {
-        if (map === scope) map = new Map(scope);
-        map.set(a.name === 'xmlns' ? '' : a.name.slice(6), uri || null);
+        const declared = a.name === 'xmlns' ? '' : a.name.slice(6);
+        covered.push([declared, scope.get(declared)]);
+        scope.set(declared, uri || null);
       }
     }
+    const map = scope; // what is in scope here, this element's own declarations included
     const bound = (p: string): boolean => p === 'xml' || !!map.get(p);
     const [prefix, local] = splitName(tag);
     if (prefix !== null && !bound(prefix)) throw new ParseFail(el.start.start + 1, `the prefix ${prefix} of <${tag}> is not declared`);
@@ -198,13 +203,17 @@ function build(source: string, cst: { prolog: CstLeaf[]; root: CstElement | null
       childrenDirty: false,
     };
     nodes.set(id, node);
-    node.children = el.children.map((c: CstNode) => (c.type === 'element' ? element(c, id, map) : leaf(c.tok, id)));
+    node.children = el.children.map((c: CstNode) => (c.type === 'element' ? element(c, id) : leaf(c.tok, id)));
+    for (const [prefix, uri] of covered.reverse()) {
+      if (uri === undefined) scope.delete(prefix);
+      else scope.set(prefix, uri);
+    }
     return id;
   };
 
   try {
     doc.prolog = cst.prolog.map((l) => leaf(l.tok, null));
-    if (cst.root) doc.root = element(cst.root, null, new Map([['', null]]));
+    if (cst.root) doc.root = element(cst.root, null);
     doc.epilog = cst.epilog.map((l) => leaf(l.tok, null));
     for (const a of cst.attrs ?? []) attribute(a);
   } catch (e) {

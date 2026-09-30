@@ -103,6 +103,17 @@ const BREAKS = [
     run: XML_TESTS, expect: /✖ every corpus file round-trips/,
   },
   {
+    // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
+    id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
+    file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*255 nested elements declaring (150|600) prefixes each took \d+ ms/,
+  },
+  {
+    id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
+    file: 'engine/model/doc.ts', from: '      if (uri === undefined) scope.delete(prefix);\n      else scope.set(prefix, uri);\n', to: '',
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*each resolves in its own scope/,
+  },
+  {
     id: 'B13', what: 'an attribute edit re-spaces the whole start tag',
     file: 'engine/model/doc.ts', from: 's += `${a.lead}${a.qname}', to: 's += ` ${a.qname}',
     run: XML_TESTS, expect: /✖ one attribute edit changes exactly that attribute/,

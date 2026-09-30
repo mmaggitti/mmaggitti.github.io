@@ -72,6 +72,36 @@ test('namespaces resolve by URI, not prefix', () => {
   assert.equal(el(r.doc, nodes[3].id).local, 'g');
 });
 
+// An element's namespace declarations hold for it and what it holds, and no further: the one map in
+// scope is set on the way in and put back on the way out. It used to be copied for every element
+// that declares one: 255 nested elements declaring 150 prefixes each took 1.4 s, 600 each 7 s.
+test('namespace declarations hold for their element only, at no cost per element', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:p="urn:outer">';
+  const r = parseDoc(`${svg}<g xmlns:p="urn:inner" xmlns="urn:x"><p:a/><b/></g><p:c/><d/></svg>`);
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const ns = Object.fromEntries([...descendants(r.doc, r.doc.root)].flatMap((n) => (n.kind === 'element' ? [[n.local, n.ns]] : [])));
+  assert.deepEqual(ns, { svg: NS.svg, g: 'urn:x', a: 'urn:inner', b: 'urn:x', c: 'urn:outer', d: NS.svg }, 'each resolves in its own scope');
+  const out = parseDoc(`${svg}<g xmlns:q="urn:q"/><q:e/></svg>`);
+  assert.ok(!out.ok && out.error.message === 'the prefix q of <q:e> is not declared', 'a declaration ends with its element');
+  for (const [k, limit] of [[150, 1000], [600, 1500]]) {
+    let open = '', close = '';
+    for (let d = 0; d < 255; d++) {
+      let x = '';
+      for (let j = 0; j < k; j++) x += ` xmlns:q${d}_${j}="urn:${d}"`;
+      open += `<g${x}>`;
+      close += '</g>';
+    }
+    const src = `<svg xmlns="http://www.w3.org/2000/svg">${open}<q254_0:rect q0_0:k="1"/>${close}</svg>`;
+    const t0 = performance.now();
+    const deep = parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(deep.ok, !deep.ok ? deep.error.message : '');
+    const rect = [...descendants(deep.doc, deep.doc.root)].find((n) => n.kind === 'element' && n.local === 'rect');
+    assert.ok(rect?.kind === 'element' && rect.ns === 'urn:254' && rect.attrs[0].ns === 'urn:0', 'the innermost declaration, and one from the top');
+    assert.ok(ms < limit, `255 nested elements declaring ${k} prefixes each took ${ms.toFixed(0)} ms`);
+  }
+});
+
 test('entities: predefined and numeric decode; internal expand; external never', () => {
   const t = readEntityTable('<!ENTITY ns_svg "http://www.w3.org/2000/svg"><!ENTITY ext SYSTEM "http://evil.example/x"><!ENTITY % p "x">');
   assert.equal(decode('&ns_svg;', t), 'http://www.w3.org/2000/svg');
