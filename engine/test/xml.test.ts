@@ -112,6 +112,68 @@ test('entities: predefined and numeric decode; internal expand; external never',
   assert.ok(t.parameter.has('p'));
 });
 
+// An entity's name is a name like any other (the lexer's pattern): declared, referenced and
+// expanded alike, non-ASCII letters and the middle dot included. A declared &é; used to be refused
+// as undeclared, a file Chromium opens (P1-M0 review, F6).
+test('an entity name may hold any character a name may, declared, referenced and expanded alike', () => {
+  const t = readEntityTable('<!ENTITY é "x"><!ENTITY café "red"><!ENTITY a·b "&é;y">');
+  assert.deepEqual([...t.internal.keys()], ['é', 'café', 'a·b']);
+  assert.equal(decode('&é;', t), 'x');
+  assert.equal(decode('&a·b;', t), 'xy');
+  const r = parseDoc('<!DOCTYPE svg [<!ENTITY é "x"><!ENTITY café "red">]><svg xmlns="http://www.w3.org/2000/svg"><text>&é;</text><rect fill="&café;"/></svg>');
+  assert.ok(r.ok, !r.ok ? r.error.message : '');
+  const rect = [...descendants(r.doc, r.doc.root)].find((n) => n.kind === 'element' && n.local === 'rect')!;
+  assert.equal(attrValue(r.doc, el(r.doc, rect.id), null, 'fill'), 'red');
+  assert.equal(textContent(r.doc, r.doc.root), 'x');
+  const undeclared = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"><text>&é;</text></svg>');
+  assert.ok(!undeclared.ok && undeclared.error.message === 'the entity &é; is not declared', 'one never declared is still refused');
+});
+
+// XML binds an entity's first declaration and ignores later ones, which a browser does too, so the
+// canvas draws what the file shows on its own. General entities (internal or external) share names;
+// parameter entities have their own (P1-M0 review, F7).
+test('an entity declared twice keeps its first declaration', () => {
+  const doc = (subset: string, body: string) => parseDoc(`<!DOCTYPE svg [${subset}]><svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`);
+  const fill = (subset: string) => {
+    const r = doc(subset, '<rect fill="&c;"/>');
+    if (!r.ok) return `refused: ${r.error.message}`;
+    const rect = el(r.doc, el(r.doc, r.doc.root).children[0]);
+    return attrValue(r.doc, rect, null, 'fill');
+  };
+  assert.equal(fill('<!ENTITY c "red"><!ENTITY c "blue">'), 'red');
+  assert.equal(fill('<!ENTITY c "red"><!ENTITY c SYSTEM "c.txt">'), 'red', 'an external declaration after an internal one is ignored');
+  assert.equal(fill('<!ENTITY c SYSTEM "c.txt"><!ENTITY c "red">'), "refused: the external entity &c; can't be used in an attribute value", 'and an internal one after an external one');
+  assert.equal(fill('<!ENTITY % c "blue"><!ENTITY c "red">'), 'red', 'a parameter entity is no general entity of its name');
+  // The checks read the first too: well-formed first, then not, opens; the other way round doesn't.
+  assert.ok(doc('<!ENTITY a "x"><!ENTITY a "&#38;">', '<text>&a;</text>').ok, 'the first is well-formed');
+  const bad = doc('<!ENTITY a "&#38;"><!ENTITY a "x">', '<text>&a;</text>');
+  assert.ok(!bad.ok && /&a; expands to text that isn't well-formed: a bare &/.test(bad.error.message), 'the first is not');
+});
+
+// An unparsed entity (declared NDATA: a file that isn't XML, such as an image) may be named only
+// by an attribute of type ENTITY, which Draw doesn't read; a reference to one is not well-formed
+// anywhere (XML's Parsed Entity rule), and Chromium refuses it (P1-M0 review, F9).
+test('a reference to an unparsed (NDATA) entity is refused, in text, in a value and through another entity', () => {
+  const subset = '<!NOTATION gif SYSTEM "image/gif"><!ENTITY logo SYSTEM "logo.gif" NDATA gif><!ENTITY pub PUBLIC "-//x//y" "a.gif" NDATA gif><!ENTITY w "&logo;">';
+  const t = readEntityTable(subset);
+  assert.deepEqual([[...t.external], [...t.unparsed]], [['logo', 'pub'], ['logo', 'pub']], 'an unparsed entity is an external one too (listed, never fetched)');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+  for (const [body, at, message] of [
+    ['<text>&logo;</text>', '&logo;', /^the entity &logo; is unparsed \(declared NDATA\): no reference may name it$/],
+    ['<text>&pub;</text>', '&pub;', /^the entity &pub; is unparsed/],
+    ['<g id="&logo;"/>', '&logo;', /^the entity &logo; is unparsed/],
+    ['<text>&w;</text>', '&w;', /^the entity &w; expands to text that isn't well-formed: the entity &logo; is unparsed/],
+  ] as const) {
+    const src = `<!DOCTYPE svg [${subset}]>${svg}${body}</svg>`;
+    const r = parseDoc(src);
+    assert.ok(!r.ok, `${body}: parsed`);
+    assert.equal(r.error.kind, undefined, body);
+    assert.equal(r.error.at, src.indexOf(at, src.indexOf('<svg')), body);
+    assert.match(r.error.message, message, body);
+  }
+  assert.ok(parseDoc(`<!DOCTYPE svg [${subset}]>${svg}<text>x</text></svg>`).ok, 'declared and never referenced: well-formed');
+});
+
 // XML lets a parameter entity in the internal subset declare more entities. Draw records them and
 // never expands one (neither do browsers: they refuse such a DOCTYPE), so nothing a parameter
 // entity declares ever reaches a value; a reference to an entity one may declare is over Draw's

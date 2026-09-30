@@ -20,6 +20,8 @@
 //   one under a DOCTYPE that names an XHTML DTD, where browsers supply HTML's named references
 //   (&nbsp;, &copy;…) themselves and Draw doesn't.
 
+import { NAME_PATTERN } from './lex.ts';
+
 // Characters produced by expansion, per document, plus the work of expanding (see decode): one per
 // expansion, and the replacement text an expansion reads for references.
 export const ENTITY_BUDGET = 1_000_000;
@@ -30,6 +32,7 @@ const PREDEFINED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '
 export interface EntityTable {
   internal: Map<string, string>; // name → replacement text (itself possibly containing references)
   external: Set<string>; // declared SYSTEM/PUBLIC: never fetched
+  unparsed: Set<string>; // the external ones declared NDATA (a non-XML file): no reference may name one
   parameter: Set<string>; // %name; declarations: never expanded
   /** The subset references a parameter entity (a %name; outside literals and comments). */
   hasPERefs: boolean;
@@ -37,7 +40,7 @@ export interface EntityTable {
   xhtmlDtd: boolean;
 }
 
-export const NO_ENTITIES: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: false };
+export const NO_ENTITIES: EntityTable = { internal: new Map(), external: new Set(), unparsed: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: false };
 
 /**
  * The public identifiers under which a browser's XML parser supplies HTML's named character
@@ -72,7 +75,10 @@ const charRef = (ref: string): string => {
   return isXmlChar(cp) ? String.fromCodePoint(cp) : '\uFFFD';
 };
 
-const PE_REF = /%[A-Za-z_:][\w.:-]*;/y;
+const PE_REF = new RegExp(`%${NAME_PATTERN};`, 'y');
+// An external identifier runs to the declaration's '>' through its literals, never past a '<': an
+// unterminated declaration can't send the scan on to the end of the subset from every one.
+const DECLARATION = new RegExp(`<!ENTITY\\s+(%\\s+)?(${NAME_PATTERN})\\s+(?:(SYSTEM|PUBLIC)\\b((?:[^<>"']|"[^"]*"|'[^']*')*)|"([^"]*)"|'([^']*)')\\s*>`, 'g');
 
 /**
  * Read <!ENTITY …> declarations from a DOCTYPE internal subset (not from its comments or processing
@@ -83,18 +89,20 @@ const PE_REF = /%[A-Za-z_:][\w.:-]*;/y;
  * names, if any.
  */
 export function readEntityTable(subset: string | null, publicId: string | null = null): EntityTable {
-  const table: EntityTable = { internal: new Map(), external: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: publicId !== null && XHTML_DTDS.has(publicId) };
+  const table: EntityTable = { internal: new Map(), external: new Set(), unparsed: new Set(), parameter: new Set(), hasPERefs: false, xhtmlDtd: publicId !== null && XHTML_DTDS.has(publicId) };
   if (!subset) return table;
   const { declarations, hasPERefs } = readSubset(subset);
   table.hasPERefs = hasPERefs;
-  // An external identifier runs to the declaration's '>' through its literals, never past a '<': an
-  // unterminated declaration can't send the scan on to the end of the subset from every one (F2).
-  const re = /<!ENTITY\s+(%\s+)?([A-Za-z_:][\w.:-]*)\s+(?:(SYSTEM|PUBLIC)\b(?:[^<>"']|"[^"]*"|'[^']*')*|"([^"]*)"|'([^']*)')\s*>/g;
-  for (const m of declarations.matchAll(re)) {
+  for (const m of declarations.matchAll(DECLARATION)) {
     const name = m[2];
+    // XML binds an entity's first declaration and ignores later ones. General entities (internal,
+    // external, unparsed) share their names; parameter entities have their own.
+    if (m[1] ? table.parameter.has(name) : table.internal.has(name) || table.external.has(name)) continue;
     if (m[1]) table.parameter.add(name);
-    else if (m[3]) table.external.add(name);
-    else table.internal.set(name, normalizeEol(m[4] ?? m[5] ?? '').replace(CHAR_REF, (whole, ref: string) => (isXmlChar(codePoint(ref)) ? charRef(ref) : whole)));
+    else if (m[3]) {
+      table.external.add(name);
+      if (/\bNDATA\b/.test(m[4].replace(/"[^"]*"|'[^']*'/g, ''))) table.unparsed.add(name);
+    } else table.internal.set(name, normalizeEol(m[5] ?? m[6] ?? '').replace(CHAR_REF, (whole, ref: string) => (isXmlChar(codePoint(ref)) ? charRef(ref) : whole)));
   }
   return table;
 }
@@ -149,7 +157,7 @@ export interface RefError {
   kind?: 'limit';
 }
 
-const REF = /&(#x[0-9a-fA-F]+|#[0-9]+|[A-Za-z_:À-￿][\w.:\-·À-￿]*)?(;?)/y;
+const REF = new RegExp(`&(#x[0-9a-fA-F]+|#[0-9]+|${NAME_PATTERN})?(;?)`, 'y');
 
 /**
  * The first reference in raw text (a text leaf's or an attribute value's, as written) that a
@@ -172,6 +180,8 @@ function refError(raw: string, table: EntityTable, inAttr: boolean, open: string
     else if (table.internal.has(ref)) {
       const inner = entityError(ref, table, inAttr, open);
       if (inner) return { ...inner, at: i };
+    } else if (table.unparsed.has(ref)) {
+      return { at: i, message: `the entity &${ref}; is unparsed (declared NDATA): no reference may name it` };
     } else if (table.external.has(ref)) {
       if (inAttr) return { at: i, message: `the external entity &${ref}; can't be used in an attribute value` };
     } else if (table.hasPERefs) {
@@ -204,6 +214,8 @@ function entityError(name: string, table: EntityTable, inAttr: boolean, open: st
   return out;
 }
 
+const DECODE = new RegExp(`&(#x[0-9a-fA-F]+|#\\d+|${NAME_PATTERN});`, 'g');
+
 /** A per-document budget shared by every decode of that document. */
 export interface Budget {
   left: number;
@@ -221,7 +233,7 @@ export function decode(s: string, table: EntityTable = NO_ENTITIES, budget: Budg
   if (attr) s = s.replace(/[\t\n\r]/g, ' '); // literal whitespace only: character references come after
   if (!s.includes('&')) return s;
   if (depth > ENTITY_DEPTH) throw new EntityBudgetError(`entities nested deeper than ${ENTITY_DEPTH}`);
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[A-Za-z_:][\w.:-]*);/g, (whole, ref: string) => {
+  return s.replace(DECODE, (whole, ref: string) => {
     if (ref[0] === '#') return charRef(ref.slice(1));
     if (Object.hasOwn(PREDEFINED, ref)) return PREDEFINED[ref];
     const rep = table.internal.get(ref);

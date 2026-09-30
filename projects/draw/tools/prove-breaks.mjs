@@ -1271,7 +1271,7 @@ const BREAKS = [
   {
     // P1-M0 review (F2): an unterminated declaration's scan stops at the next '<'.
     id: 'B301', what: "an external entity's declaration is scanned to the next '>' again (quadratic over unterminated declarations)",
-    file: 'engine/xml/entities.ts', from: `(SYSTEM|PUBLIC)\\b(?:[^<>"']|"[^"]*"|'[^']*')*`, to: '(SYSTEM|PUBLIC)\\b[^>]*',
+    file: 'engine/xml/entities.ts', from: `(SYSTEM|PUBLIC)\\\\b((?:[^<>"']|"[^"]*"|'[^']*')*)`, to: '(SYSTEM|PUBLIC)\\\\b([^>]*)',
     run: XML_TESTS, expect: /✖ a DOCTYPE full of unterminated entity declarations is read in linear time[\s\S]*250 KB of unterminated declarations took \d+ ms/,
   },
   {
@@ -1571,6 +1571,22 @@ const BREAKS = [
     id: 'B306', what: 'the text before a character XML doesn\'t allow goes unchecked',
     file: 'engine/xml/lex.ts', from: "      if (t.start < at && t.kind === 'text') tokens.push({ ...t, end: at });\n", to: '',
     run: drawTests('import.test.ts'), expect: /✖ a file with several errors opens as read-only source at the first[\s\S]*in one text, a reference \(line 2\), then U\+0001 \(line 3\)/,
+  },
+  // P1-M0 review: one name pattern for entities (F6), the first declaration binds (F7), an unparsed entity is never referenced (F9).
+  {
+    id: 'B309', what: "an entity's declaration takes ASCII names only again (a declared &é; reads as undeclared)",
+    file: 'engine/xml/entities.ts', from: '(%\\\\s+)?(${NAME_PATTERN})', to: '(%\\\\s+)?([A-Za-z_:][\\\\w.:-]*)',
+    run: XML_TESTS, expect: /✖ an entity name may hold any character a name may, declared, referenced and expanded alike/,
+  },
+  {
+    id: 'B310', what: 'the last declaration of an entity binds again (fill="&c;" reads blue where a browser draws red)',
+    file: 'engine/xml/entities.ts', from: '    if (m[1] ? table.parameter.has(name) : table.internal.has(name) || table.external.has(name)) continue;\n', to: '',
+    run: XML_TESTS, expect: /✖ an entity declared twice keeps its first declaration/,
+  },
+  {
+    id: 'B311', what: 'a reference to an unparsed (NDATA) entity is accepted in text',
+    file: 'engine/xml/entities.ts', from: "    } else if (table.unparsed.has(ref)) {\n      return { at: i, message: `the entity &${ref}; is unparsed (declared NDATA): no reference may name it` };\n", to: '',
+    run: XML_TESTS, expect: /✖ a reference to an unparsed \(NDATA\) entity is refused[\s\S]*<text>&logo;<\/text>: parsed/,
   },
   {
     // Edit source parses its text with the document's DOCTYPE and namespaces in scope.

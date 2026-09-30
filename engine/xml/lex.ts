@@ -55,8 +55,11 @@ export interface Before {
   attrs: AttrTok[];
 }
 
-// XML Name, simplified to what SVG files use, but permissive about non-ASCII letters.
-const NAME = /[A-Za-z_:À-￿][\w.:\-·À-￿]*/y;
+// XML Name, simplified to what SVG files use, but permissive about non-ASCII letters. The one name
+// pattern: elements and attributes here, and entities (declared, referenced and expanded) in
+// entities.ts and the code view.
+export const NAME_PATTERN = '[A-Za-z_:À-￿][\\w.:\\-·À-￿]*';
+const NAME = new RegExp(NAME_PATTERN, 'y');
 const WS = /[ \t\r\n]+/y;
 // A character outside XML 1.0's Char, written as itself (engine/code/edit.ts refuses one in an edit).
 const NOT_XML_CHAR = /[^\t\n\r\x20-\u{D7FF}\u{E000}-\u{FFFD}\u{10000}-\u{10FFFF}]/u;

@@ -270,6 +270,14 @@ export const PROBES = [
   accepted('a parameter entity declared and never referenced', `<!DOCTYPE svg [<!ENTITY % p "x">]>${SVG}<text>hi</text></svg>`),
   accepted('a leading BOM (the engine is given it)', `\u{FEFF}${SVG}</svg>`),
   accepted(']]> in a value', '<g id="a]]>b"/>'),
+  // The P1-M0 review: an entity's name is any name (F6); the first of two declarations binds (F7); an
+  // unparsed (NDATA) entity is never referenced (F9).
+  accepted('a non-ASCII entity name, declared', `<!DOCTYPE svg [<!ENTITY \u00E9 "x">]>${SVG}<text>&\u00E9;</text></svg>`),
+  accepted('a non-ASCII entity name in a value', `<!DOCTYPE svg [<!ENTITY caf\u00E9 "red">]>${SVG}<rect fill="&caf\u00E9;" width="1" height="1"/></svg>`),
+  accepted('a middle dot in an entity name', `<!DOCTYPE svg [<!ENTITY a\u00B7b "x">]>${SVG}<text>&a\u00B7b;</text></svg>`),
+  accepted('an entity declared twice, the first well-formed', `<!DOCTYPE svg [<!ENTITY a "x"><!ENTITY a "&#38;">]>${SVG}<text>&a;</text></svg>`),
+  refused('an entity declared twice, the first not well-formed', `<!DOCTYPE svg [<!ENTITY a "&#38;"><!ENTITY a "x">]>${SVG}<text>&a;</text></svg>`),
+  refused('a reference to an unparsed (NDATA) entity', `<!DOCTYPE svg [<!NOTATION gif SYSTEM "image/gif"><!ENTITY logo SYSTEM "logo.gif" NDATA gif>]>${SVG}<text>&logo;</text></svg>`),
   // Browsers supply HTML's named references under an XHTML DOCTYPE; Draw doesn't read DTDs.
   { label: 'an HTML entity under an XHTML DOCTYPE', text: `${XHTML_DOCTYPE}${SVG}<text>a&nbsp;b</text></svg>`, draw: 'limit', browser: both('accept') },
 ];
