@@ -148,14 +148,18 @@ export function sinkElement(doc: Doc, node: ElementNode, ctx: ElementContext): {
 }
 
 // An attribute animation renders only if what it animates renders on every element it can drive.
-// Its target is read from what was just set (the plain href wins over xlink:href only when both
-// are on the element), so the judge and the browser resolve the same one.
+// Its target is read from what was just set (the policy keeps at most one of href and xlink:href:
+// never xlink:href beside an href, SVG 2), so the judge and the browser resolve the same one. An
+// href the policy dropped (a URL to another file) takes the animation with it: in the file alone
+// it names nothing here, so nothing animates, while the canvas, left with no href, would animate
+// the parent.
 function smilOk(doc: Doc, node: ElementNode, el: Element, ctx: ElementContext): boolean {
   if (!animatesAttribute(node)) return true;
+  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');
+  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;
   const a = findAttr(node, null, 'attributeName');
   const name = a ? decodeAttr(a.raw, doc.entities) : '';
   if (!ctx.smilTargets) return smilTargetAllowed(node, name);
-  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');
   const targets = ctx.smilTargets(node, kept === null ? null : hrefFragmentIds(kept));
   return targets !== null && targets.every((t) => smilTargetAllowed(node, name, t));
 }

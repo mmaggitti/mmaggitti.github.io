@@ -466,8 +466,11 @@ const MORE_EDGES = [
   { label: 'fill written twice', text: svgDoc('<rect width="10" height="10" fill="red" fill="blue"/>'), unparsed: 'attribute fill is written twice in <rect>' },
   { label: 'attributeName written twice', text: svgDoc('<rect width="10" height="10"><animate attributeName="opacity" attributeName="width" values="1;2" dur="1s"/></rect>'), unparsed: 'attribute attributeName is written twice in <animate>' },
   // SMIL is judged against what the browser animates: through the href the canvas keeps, every
-  // element the fragment can name (drawn or not), never xml:id, and never "some element".
-  { label: 'a dropped href leaves xlink:href to decide', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" xlink:href="#t" attributeName="width" values="1;2" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animate', skipped: 1 },
+  // element the fragment can name (drawn or not), never xml:id, and never "some element". An href
+  // the canvas drops (a URL to another file) names nothing, in the file alone too, so the animation
+  // goes with it rather than falling to its parent; beside an href, xlink:href is ignored (SVG 2).
+  { label: 'an href to another file beside a fragment xlink:href animates nothing', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" xlink:href="#t" attributeName="width" values="1;2" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animate', skipped: 1 },
+  { label: 'an href to another file animates nothing', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" attributeName="width" values="1;2" dur="1s"/></rect>'), absent: 'animate', skipped: 1 },
   { label: 'an xml:id before the id', text: svgDoc(`<rect xml:id="t" width="10" height="10"/><circle id="t" r="5"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 1 },
   { label: 'the first id inside a refused element', text: svgDoc(`<x:g xmlns:x="urn:example:app-data"><rect id="t" width="10" height="10"/></x:g><circle id="t" r="5"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 2 },
   { label: 'a fragment that names nothing', text: svgDoc(`<rect width="10" height="10"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 1 },

@@ -342,9 +342,11 @@ const BREAKS = [
   },
   // P0-M2 review: the canvas's edges and fidelity (site e2e).
   {
-    id: 'B51', what: 'SMIL is judged by the first href in the model, not the one the sink kept', slow: true,
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: "const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');", to: "const kept = findAttr(node, null, 'href') ? el.getAttributeNS(null, 'href') : el.getAttributeNS(NS.xlink, 'href');",
-    run: SITE_E2E, expect: /a dropped href leaves xlink:href to decide: <animate> is on the canvas/,
+    id: 'B51', what: 'an animation whose href the policy dropped (a URL to another file) animates its parent on the canvas, where the file alone animates nothing', slow: true, checks: ['moreEdges'],
+    // P1-M2: re-planted. Its first fault (SMIL judged by the model's first href, not the one the sink
+    // kept) can't happen since decision 5: the policy keeps at most one of href and xlink:href.
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: "  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;\n", to: '',
+    run: DRAW_E2E, expect: /an href to another file (beside a fragment xlink:href )?animates nothing: <animate> is on the canvas/,
   },
   {
     id: 'B52', what: 'SMIL is judged against the first element with the id only', slow: true,
