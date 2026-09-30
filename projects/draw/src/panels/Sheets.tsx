@@ -6,10 +6,20 @@
 //
 // The Number sheet is SVG Lab's: − and + step (hold one to repeat: repeat.ts), the field takes a
 // typed value, and a slider spans the value's range (token-edit.ts sliderRange).
+//
+// The Colour sheet (a code token's colour, or Inspect's style sheet over the selection, P1-M2):
+// the palette, the slot's chips, an HSV square with Hue and Alpha sliders (color-picker.ts: each
+// move written in the notation the value was written in), a before and now preview, and the text
+// field, which always shows the text that will be written. Its body scrolls under a head that
+// keeps Done. The stroke's style sheet adds the stroke-width slider, written in the same visit.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Editor, Sheet, SourceError } from '../editor.ts';
-import { colorChoices, pickerHex } from '../color-choices.ts';
+import { colorChoices, styleSlot, type ColorSlot } from '../color-choices.ts';
+import { hueCss, pickAlpha, pickHue, pickSV, pickText, pickerCss, pickerStart, pickerText, type Picker } from '../color-picker.ts';
+import { widthRange } from '../style-edit.ts';
+import { parseColor } from '../../../../engine/values/color.ts';
+import { fmt } from '../../../../engine/values/number-format.ts';
 import { keyboardInset } from '../detents.ts';
 import { negated, sliderRange, sliderText, steppedFrom } from '../token-edit.ts';
 import { Repeat } from '../repeat.ts';
@@ -20,9 +30,9 @@ const GHOST_CLICK_MS = 350; // the tap that opened a sheet must not close it thr
 export function Sheets({ editor }: { editor: Editor }) {
   const sheet = useStore(editor.sheet);
   if (!sheet) return null;
-  const key = sheet.kind === 'source' ? `source:${sheet.node}` : `${sheet.kind}:${sheet.ref.node}:${sheet.ref.index}`;
+  const key = sheet.kind === 'source' ? `source:${sheet.node}` : sheet.kind === 'style' ? `style:${sheet.prop}:${sheet.ids.join(',')}` : `${sheet.kind}:${sheet.ref.node}:${sheet.ref.index}`;
   const close = () => (sheet.kind === 'source' ? editor.closeSource() : editor.closeSheet());
-  const title = sheet.kind === 'source' ? 'Edit source' : sheet.token.prop;
+  const title = sheet.kind === 'source' ? 'Edit source' : sheet.kind === 'style' ? sheet.prop : sheet.token.prop;
   return (
     <Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>
       <Body editor={editor} sheet={sheet} close={close} />
@@ -35,7 +45,11 @@ function Body({ editor, sheet, close }: { editor: Editor; sheet: Sheet; close: (
     case 'number':
       return <NumberBody editor={editor} sheet={sheet} close={close} />;
     case 'color':
-      return <ColorBody editor={editor} sheet={sheet} />;
+      return <ColorBody editor={editor} slot={sheet.token} text={sheet.token.text} />;
+    case 'style': {
+      const locals = sheet.ids.map((id) => editor.doc?.nodes.get(id)).flatMap((n) => (n?.kind === 'element' ? [n.local] : []));
+      return <ColorBody editor={editor} slot={styleSlot(sheet.prop, locals)} text={sheet.text} width={sheet.prop === 'stroke'} />;
+    }
     case 'text':
       return <TextBody editor={editor} sheet={sheet} close={close} />;
     case 'source':
@@ -177,19 +191,27 @@ function NumberBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'numbe
   );
 }
 
-function ColorBody({ editor, sheet }: { editor: Editor; sheet: Of<'color'> }) {
-  const [current, setCurrent] = useState(sheet.token.text);
-  const [custom, setCustom] = useState(sheet.token.text);
+function ColorBody({ editor, slot, text, width = false }: { editor: Editor; slot: ColorSlot; text: string; width?: boolean }) {
+  const [current, setCurrent] = useState(text); // the value written now (its choice is ringed)
+  const [custom, setCustom] = useState(text); // the field: the text that will be written
+  const [picker, setPicker] = useState(() => pickerStart(text));
+  const latest = useRef(picker); // what the next move starts from, between renders
+  const [before] = useState(() => (parseColor(text)?.kind === 'color' ? pickerCss(pickerStart(text)) : null));
   const [problem, setProblem] = useState<string | null>(null);
-  const put = (t: string) => {
+  const put = (t: string, next?: Picker) => {
     const r = editor.sheetInput(t);
     if ('error' in r) return setProblem(r.error);
     setProblem(null);
     setCurrent(r.text);
+    setCustom(r.text);
+    latest.current = next ?? pickText(latest.current, r.text);
+    setPicker(latest.current);
   };
-  const { swatches, chips } = colorChoices(sheet.token, current);
+  const move = (p: Picker) => put(pickerText(p), p);
+  const { swatches, chips } = colorChoices(slot, current);
+  const now = parseColor(current)?.kind === 'color' ? pickerCss(picker) : null;
   return (
-    <>
+    <div className="draw-color">
       <div className="draw-swatches" role="group" aria-label="Palette">
         {swatches.map((c) => (
           <button key={c.value} type="button" className="draw-swatch" style={{ background: c.value }} aria-label={c.value} aria-pressed={c.current} onClick={() => put(c.value)} />
@@ -204,6 +226,32 @@ function ColorBody({ editor, sheet }: { editor: Editor; sheet: Of<'color'> }) {
           ))}
         </div>
       )}
+      <HsvSquare picker={picker} onPick={(sat, val) => move(pickSV(latest.current, sat, val))} />
+      <input
+        type="range"
+        className="draw-range draw-hue"
+        aria-label="Hue"
+        min={0}
+        max={360}
+        step={1}
+        value={Math.round(picker.h)}
+        onChange={(e) => move(pickHue(latest.current, Number(e.target.value)))}
+      />
+      <input
+        type="range"
+        className="draw-range draw-alpha"
+        aria-label="Alpha"
+        min={0}
+        max={100}
+        step={1}
+        value={Math.round(picker.a * 100)}
+        style={{ '--draw-alpha-to': pickerCss(picker, false) } as CSSProperties}
+        onChange={(e) => move(pickAlpha(latest.current, Number(e.target.value) / 100))}
+      />
+      <div className="draw-preview" aria-hidden="true">
+        <span className={before ? undefined : 'draw-preview-none'} style={before ? { backgroundColor: before } : undefined} />
+        <span className={now ? undefined : 'draw-preview-none'} style={now ? { backgroundColor: now } : undefined} />
+      </div>
       <div className="draw-custom">
         <input
           className="draw-field ds-mono"
@@ -220,10 +268,78 @@ function ColorBody({ editor, sheet }: { editor: Editor; sheet: Of<'color'> }) {
         <button type="button" className="draw-key draw-use" onClick={() => put(custom)}>
           Use
         </button>
-        <input type="color" className="draw-picker" aria-label="Pick a colour" value={pickerHex(current)} onChange={(e) => (setCustom(e.target.value), put(e.target.value))} />
       </div>
+      {width && <WidthSlider editor={editor} />}
       <Problem message={problem} />
-    </>
+    </div>
+  );
+}
+
+/**
+ * The HSV square: saturation left to right, brightness bottom to top. A press sets it and a drag
+ * follows (the pointer captured, so the drag never reaches the canvas); the arrows move it 0.01,
+ * with Shift 0.1.
+ */
+function HsvSquare({ picker, onPick }: { picker: Picker; onPick: (s: number, v: number) => void }) {
+  const at = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    onPick((e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height);
+  };
+  const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+  return (
+    <div
+      className="draw-hsv"
+      role="slider"
+      tabIndex={0}
+      aria-label="Saturation and brightness"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(picker.s * 100)}
+      aria-valuetext={`saturation ${Math.round(picker.s * 100)}%, brightness ${Math.round(picker.v * 100)}%`}
+      style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hueCss(picker.h)})` }}
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        at(e);
+      }}
+      onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && at(e)}
+      onPointerUp={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && e.currentTarget.releasePointerCapture(e.pointerId)}
+      onKeyDown={(e) => {
+        const d = ARROWS[e.key];
+        if (!d) return;
+        e.preventDefault();
+        const n = e.shiftKey ? 0.1 : 0.01;
+        onPick(picker.s + d[0] * n, picker.v + d[1] * n);
+      }}
+    >
+      <span className="draw-hsv-thumb" style={{ left: `${picker.s * 100}%`, top: `${(1 - picker.v) * 100}%` }} />
+    </div>
+  );
+}
+
+/** The stroke sheet's stroke-width: 0 to 20k by the snap step, written in the same visit as the stroke. */
+function WidthSlider({ editor }: { editor: Editor }) {
+  useStore(editor.version);
+  const row = editor.styleRow('stroke-width');
+  const range = widthRange(editor.styleCtx);
+  const v = parseFloat(row?.value ?? '');
+  const value = Number.isFinite(v) ? Math.min(range.max, Math.max(0, v)) : 1;
+  return (
+    <div className="draw-width">
+      <span className="draw-width-name">stroke-width</span>
+      <input
+        type="range"
+        className="draw-range"
+        aria-label="stroke-width"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={value}
+        disabled={!!row?.disabled}
+        onChange={(e) => editor.sheetInput(fmt(Number(e.target.value), 10), 'stroke-width')}
+      />
+      <span className="draw-width-value ds-mono">{row?.mixed ? 'Mixed' : fmt(value, 2)}</span>
+    </div>
   );
 }
 

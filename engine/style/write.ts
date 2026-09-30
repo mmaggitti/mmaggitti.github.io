@@ -24,7 +24,7 @@ import { el, findAttr, type Doc, type NodeId } from '../model/doc.ts';
 import { escape } from '../xml/entities.ts';
 import { fmt } from '../values/number-format.ts';
 import type { AttrEdit } from '../geometry/write.ts';
-import { ruleWins, styleSource } from './where.ts';
+import { ruleWins, styleSource, type StyleSource } from './where.ts';
 
 export interface StyleCtx {
   /** min(W, H) / 100 of the artboard (1 with none). */
@@ -42,13 +42,21 @@ export const RULE_IMPORTANT = (prop: string) => `Its ${prop} is set by a <style>
 export const RULE_SETS = (prop: string) => `Its ${prop} is set by a <style> rule, which wins over the attribute. Editing stylesheets arrives in P2.`;
 export const REFERENCE = (prop: string) => `Its ${prop} in style="" is written with a character reference; edit it in the code.`;
 
+/** Why a <style> rule keeps `prop` from being written where `s` says it lives (rules 1 and 3), or null. */
+export function ruleWhy(s: StyleSource, prop: string): string | null {
+  if (s.sheet === 'important' && !(s.at === 'style' && s.decl?.important)) return RULE_IMPORTANT(prop);
+  if (s.sheet === 'rule' && s.at !== 'style') return RULE_SETS(prop);
+  return null;
+}
+
 /**
  * One element's edit for `prop` = `value` (see the header): an attribute edit, a refusal, or null
  * (nothing to do). `styleRaw` reads style="" as an earlier edit in the same plan left it.
  */
 export function planStyleOne(doc: Doc, id: NodeId, prop: string, value: string, styleRaw?: string): AttrEdit | { refused: string } | null {
   const s = styleSource(doc, id, prop, styleRaw);
-  if (s.sheet === 'important' && !(s.at === 'style' && s.decl?.important)) return { refused: RULE_IMPORTANT(prop) };
+  const why = ruleWhy(s, prop);
+  if (why) return { refused: why };
   const v = value.trim();
   if (s.at === 'style') {
     const d = s.decl!;
@@ -58,7 +66,6 @@ export function planStyleOne(doc: Doc, id: NodeId, prop: string, value: string, 
     const raw = styleRaw ?? a.raw;
     return { id, ns: null, local: 'style', raw: raw.slice(0, d.start) + escape(v, a.quote) + raw.slice(d.end), add: false };
   }
-  if (s.sheet === 'rule') return { refused: RULE_SETS(prop) };
   if (s.at === 'attr') {
     if (s.value === v) return null;
     const a = findAttr(el(doc, id), null, prop)!;

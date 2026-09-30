@@ -571,15 +571,63 @@
   font-size: var(--text-sm);
   touch-action: manipulation;
 }
-.draw-picker {
-  flex: 0 0 auto;
-  width: max(var(--tap-min), var(--control-h));
-  height: max(var(--tap-min), var(--control-h));
-  padding: 0;
+/* The Colour sheet's picker (P1-M2): its title and Done stay put while its body scrolls. The HSV
+   square takes the pointer itself (touch-action: none), so a drag on it never pans the page. */
+.draw-modal:has(> .draw-color) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-color { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.draw-color .draw-custom { margin-top: var(--space-3); }
+.draw-hsv {
+  position: relative;
+  height: 10rem;
+  margin-top: var(--space-1);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: none;
+  touch-action: none;
+  cursor: crosshair;
 }
+.draw-hsv:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.draw-hsv-thumb {
+  position: absolute;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: -0.875rem 0 0 -0.875rem;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+.draw-hue, .draw-alpha { -webkit-appearance: none; appearance: none; background: transparent; }
+.draw-hue::-webkit-slider-runnable-track, .draw-alpha::-webkit-slider-runnable-track { height: 1.25rem; border-radius: 0.625rem; border: 1px solid var(--line); }
+.draw-hue::-moz-range-track, .draw-alpha::-moz-range-track { height: 1.25rem; border-radius: 0.625rem; border: 1px solid var(--line); }
+.draw-hue::-webkit-slider-runnable-track { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.draw-hue::-moz-range-track { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.draw-alpha::-webkit-slider-runnable-track { background: linear-gradient(to right, transparent, var(--draw-alpha-to, #000)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem; }
+.draw-alpha::-moz-range-track { background: linear-gradient(to right, transparent, var(--draw-alpha-to, #000)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem; }
+.draw-hue::-webkit-slider-thumb, .draw-alpha::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-top: -0.3125rem;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+.draw-hue::-moz-range-thumb, .draw-alpha::-moz-range-thumb { width: 1.5rem; height: 1.5rem; border: 3px solid #fff; border-radius: 50%; background: transparent; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6); }
+.draw-preview {
+  display: flex;
+  height: 2.5rem;
+  margin-top: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 0.75rem 0.75rem;
+}
+.draw-preview > span { flex: 1; }
+.draw-preview-none { background: linear-gradient(to top right, transparent calc(50% - 1px), var(--draw-danger) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), var(--surface); }
+.draw-width { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.draw-width .draw-range { flex: 1 1 auto; min-width: 0; margin: 0; }
+.draw-width-name, .draw-width-value { flex: 0 0 auto; font-size: var(--text-sm); }
 .draw-source {
   display: block;
   width: 100%;

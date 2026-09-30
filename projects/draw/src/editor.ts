@@ -23,6 +23,10 @@
 //   snapped as a dragged corner is; the new shape is selected and the tool returns to Select.
 // - Generated shapes (engine/generators/): the Session's finish hook regenerates or detaches them in
 //   the same transaction as the edit, and a notice says when one became a plain shape.
+// - Style (P1-M2, engine/style/): Inspect writes a value over the whole selection where each
+//   element holds it, in one entry; a segment is one dispatch, a slider one drag per press, a field
+//   one drag while it has focus, and the style sheet (the Colour sheet over the selection) one drag
+//   per visit. Elements a <style> rule decides are left as they are, and one notice names them.
 
 import { NS, attrValue, el, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
@@ -67,6 +71,10 @@ import { apply as applyM, invert, multiply, translate as shift } from '../../../
 import { itemMatrix, parseTransform } from '../../../engine/values/transform.ts';
 import { fmt } from '../../../engine/values/number-format.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
+import { planStyle, ruleWhy, type StyleCtx } from '../../../engine/style/write.ts';
+import { shownValue, styleSource } from '../../../engine/style/where.ts';
+import { checkStyle } from './style-edit.ts';
+import { elementLabel } from './panels/label.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
 
@@ -152,8 +160,24 @@ export type Sheet =
   | { kind: 'number'; ref: TokenRef; token: NumberToken }
   | { kind: 'color'; ref: TokenRef; token: ColorToken }
   | { kind: 'text'; ref: TokenRef; token: TextToken }
-  | { kind: 'source'; node: NodeId; text: string };
+  | { kind: 'source'; node: NodeId; text: string }
+  /** The Colour sheet over the selection for a style property (Inspect's swatches, More's Fill… and Stroke…). */
+  | { kind: 'style'; prop: string; ids: NodeId[]; text: string };
 type TokenSheet = Extract<Sheet, { ref: TokenRef }>;
+
+/** What Inspect shows for a style property over the selection (engine/style/where.ts shownValue). */
+export interface StyleRow {
+  /** The first selected element's value as written where it comes from ('' when a <style> rule may decide it). */
+  value: string;
+  /** The selected elements show different values ("Mixed"). */
+  mixed: boolean;
+  /** Where the first one's comes from: its own, an ancestor's, the default, or a <style> rule's. */
+  from: 'own' | 'ancestor' | 'default' | 'rule';
+  /** What Inspect says about it: '', "from <g#badge>", "default", "set by a <style> rule". */
+  note: string;
+  /** When a <style> rule decides it for every selected element: why nothing can be written (the control is disabled). */
+  disabled: string | null;
+}
 
 const NO_STATS: RenderStats = { rendered: 0, skippedElements: 0, droppedAttributes: 0 };
 export const READ_ONLY = 'This drawing is open in another tab, so it is read-only here';
@@ -165,12 +189,24 @@ export function lineColumn(text: string, at: number): { line: number; column: nu
   return { line: lines.length, column: lines[lines.length - 1].length + 1 };
 }
 
-interface Live {
+// A drag held open on the history: a code token's scrub or sheet, or a style edit (a slider's
+// press, or a style sheet's visit).
+interface TokenLive {
+  kind: 'token';
   drag: Drag;
   ref: TokenRef;
   token: Token; // as it read before the drag: every frame starts from there
   last: string | null; // the last text written, kept when a later one is refused
 }
+interface StyleLive {
+  kind: 'style';
+  drag: Drag;
+  prop: string;
+  ids: NodeId[];
+  last: Map<string, string>; // each property's last good value in this drag (the stroke sheet's width joins its stroke)
+  refused: { id: NodeId; why: string }[]; // the last frame's
+}
+type Live = TokenLive | StyleLive;
 
 export class Editor {
   readonly history: Store<HistoryState> = createStore(NO_HISTORY);
@@ -1469,18 +1505,27 @@ export class Editor {
    * or a blur), is one history entry, written live as each keystroke that reads is typed.
    */
   fieldStart(field: Field): void {
-    const g = this.generated();
-    if (!this.#session || this.#field || this.#stepDrag || this.#live || this.#gesture || this.#nudge || !g || !this.#writable()) return;
-    this.#field = { field, id: g.id, drag: this.#drag(`Set ${field.name}`) };
+    if (!this.#session || this.#field || this.#stepDrag || this.#live || this.#gesture || this.#nudge) return;
+    const ids = field.kind === 'input' ? [this.generated()?.id].filter((id) => id !== undefined) : this.#styleIds();
+    if (!ids.length || !this.#writable()) return;
+    if (field.kind === 'style' && this.styleRow(field.prop)?.disabled) return;
+    this.#field = { field, ids, drag: this.#drag(`Set ${field.kind === 'input' ? field.name : field.prop}`), refused: [] };
   }
 
   /** Text typed in the focused field: written into its entry when it reads as a value; else why not (the last good value stays). */
   fieldInput(text: string): string | null {
     const f = this.#field;
     if (!f) return 'No field is being edited';
-    const v = this.#inputValue(f.field.name, text);
+    if (f.field.kind === 'style') {
+      const c = checkStyle(f.field.prop, text);
+      if ('error' in c) return c.error;
+      f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));
+      return null;
+    }
+    const name = f.field.name;
+    const v = this.#inputValue(name, text);
     if (typeof v === 'string') return v;
-    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));
+    f.drag.update((apply) => apply(this.#inputOp(f.ids[0], name, v)));
     this.#show();
     return null;
   }
@@ -1492,9 +1537,136 @@ export class Editor {
     this.#field = null;
     if (commit) f.drag.commit();
     else f.drag.cancel();
+    if (commit && f.field.kind === 'style') this.#kept(f.field.prop, f.ids, f.refused);
     this.#bump();
     this.#changed();
     this.#show();
+  }
+
+  // ── style: Inspect's properties, its sliders and fields, and the style sheet (P1-M2) ─────────
+
+  // What Inspect's properties edit: every selected element.
+  #styleIds(): NodeId[] {
+    const doc = this.#doc;
+    return doc ? [...this.selection.get()].filter((id) => doc.nodes.get(id)?.kind === 'element') : [];
+  }
+
+  /** k (the artboard's min(W, H) / 100) and the snap step at this zoom: the width-2 rule, the width slider and the Dash presets scale by them. */
+  get styleCtx(): StyleCtx {
+    return { k: boardScale(this.#board), step: this.#rootStep() };
+  }
+
+  /**
+   * What Inspect shows for `prop` over the selection: the first element's value and where it comes
+   * from, whether the others differ (Mixed), and, when a <style> rule decides it for every one of
+   * them, why nothing can be written. Null with nothing selected.
+   */
+  styleRow(prop: string): StyleRow | null {
+    const doc = this.#doc;
+    const ids = this.#styleIds();
+    if (!doc || !ids.length) return null;
+    const first = shownValue(doc, ids[0], prop);
+    const key = (v: string | null) => (v === null ? null : v.toLowerCase());
+    let mixed = false;
+    let ruled = first.from === 'rule';
+    for (let i = 1; i < ids.length; i++) {
+      const s = shownValue(doc, ids[i], prop);
+      if (key(s.value) !== key(first.value)) mixed = true;
+      if (s.from !== 'rule') ruled = false;
+      if (mixed && !ruled) break;
+    }
+    const label = first.holder === null ? null : elementLabel(doc, first.holder);
+    const note = first.from === 'ancestor' ? (first.value === null ? `from ${label}, set by a <style> rule` : `from ${label}`) : first.from === 'default' ? 'default' : first.from === 'rule' ? 'set by a <style> rule' : '';
+    return { value: first.value ?? '', mixed, from: first.from, note: mixed ? '' : note, disabled: ruled ? ruleWhy(styleSource(doc, ids[0], prop), prop) : null };
+  }
+
+  /** A segment, preset or switch in Inspect: `prop` = `value` over the selection, one entry ("Set fill"); the elements a rule decides keep theirs, and one notice names them. */
+  setStyle(prop: string, value: string): void {
+    const doc = this.#doc;
+    const ids = this.#styleIds();
+    if (!doc || !ids.length) return;
+    const c = checkStyle(prop, value);
+    if ('error' in c) return void this.notice.set(c.error);
+    let refused: { id: NodeId; why: string }[] = [];
+    const ctx = this.styleCtx;
+    const done = this.#dispatch(`Set ${prop}`, (apply) => {
+      const plan = planStyle(doc, ids, prop, c.text, ctx);
+      refused = plan.refused;
+      applyPlan(doc, plan, apply);
+    });
+    if (done) this.#kept(prop, ids, refused);
+  }
+
+  /** A slider pressed (opacity, stroke-width): one entry per press ("Set opacity"), each move written live by styleInput from the file as it was before the press, kept by styleDragEnd. */
+  styleDrag(prop: string): boolean {
+    const ids = this.#styleIds();
+    if (!this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return false;
+    if (this.styleRow(prop)?.disabled) return false;
+    this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
+    return true;
+  }
+
+  /** A slider's move: its value written into the press's entry; else why not (the last good value stays). */
+  styleInput(value: string): string | null {
+    const live = this.#live;
+    if (live?.kind !== 'style' || this.sheet.get()?.kind === 'style') return 'No slider is held';
+    const r = this.#styleInput(live, live.prop, value);
+    return 'error' in r ? r.error : null;
+  }
+
+  /** The slider let go: its one entry kept (or, `commit` false, undone). */
+  styleDragEnd(commit = true): void {
+    if (this.#live?.kind === 'style' && this.sheet.get()?.kind !== 'style') this.#endLive(commit);
+  }
+
+  /** Inspect's swatch, or the More sheet's Fill… and Stroke…: the Colour sheet for `prop` over the selection, one entry per visit. */
+  openStyleSheet(prop: string): void {
+    const doc = this.#doc;
+    const ids = this.#styleIds();
+    if (!doc || !this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return;
+    const row = this.styleRow(prop)!;
+    if (row.disabled) return void this.notice.set(row.disabled);
+    this.focus.set(null);
+    this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
+    this.sheet.set({ kind: 'style', prop, ids, text: row.value || (STYLE_INITIAL[prop] ?? '') });
+    this.#bump();
+  }
+
+  // A value for the style drag held open: checked, then every value of the drag written again.
+  #styleInput(live: StyleLive, prop: string, input: string): Checked {
+    const c = checkStyle(prop, input);
+    if ('error' in c) return c;
+    live.last.set(prop, c.text);
+    live.refused = this.#styleFrame(live.drag, live.ids, live.last);
+    return c;
+  }
+
+  // One frame of a style drag: each value (in the order first written) planned over the elements
+  // from the file as it was before the drag, so a later value sees the earlier one's edit (the
+  // width-2 rule, then the width slider). Returns the frame's refusals.
+  #styleFrame(drag: Drag, ids: readonly NodeId[], values: ReadonlyMap<string, string>): { id: NodeId; why: string }[] {
+    const doc = this.#doc!;
+    const ctx = this.styleCtx;
+    const refused: { id: NodeId; why: string }[] = [];
+    drag.update((apply) => {
+      refused.length = 0;
+      for (const [prop, value] of values) {
+        const plan = planStyle(doc, ids, prop, value, ctx);
+        for (const r of plan.refused) if (!refused.some((x) => x.id === r.id)) refused.push(r);
+        applyPlan(doc, plan, apply);
+      }
+    });
+    this.#show();
+    return refused;
+  }
+
+  // After a style edit: one notice naming what kept its value ("1 of 4 kept their fill (<polygon#k>): why"), or the reason when all did.
+  #kept(prop: string, ids: readonly NodeId[], refused: readonly { id: NodeId; why: string }[]): void {
+    if (!refused.length) return;
+    if (refused.length === ids.length) return void this.notice.set(refused[0].why);
+    const doc = this.#doc!;
+    const names = refused.slice(0, 3).map((r) => elementLabel(doc, r.id)).join(', ') + (refused.length > 3 ? ', …' : '');
+    this.notice.set(`${refused.length} of ${ids.length} kept their ${prop} (${names}): ${refused[0].why}`);
   }
 
   // ── rem (decision 13) ────────────────────────────────────────────────────────────────────────
@@ -1943,12 +2115,12 @@ export class Editor {
     const own = elementOf(doc, hit.ref.node);
     if (own !== null) this.select([own]);
     this.focus.set({ ref: hit.ref, token: t }); // the Scrub strip follows the number being scrubbed
-    this.#live = { drag: this.#drag(labelFor('Scrub', t)), ref: hit.ref, token: t, last: null };
+    this.#live = { kind: 'token', drag: this.#drag(labelFor('Scrub', t)), ref: hit.ref, token: t, last: null };
   }
 
   scrub(steps: number): void {
     const live = this.#live;
-    if (live?.token.kind !== 'number') return;
+    if (live?.kind !== 'token' || live.token.kind !== 'number') return;
     this.#write(stepped(live.token, steps));
   }
 
@@ -1958,20 +2130,23 @@ export class Editor {
 
   #openSheet(sheet: TokenSheet): void {
     if (!this.#session || this.#live || this.#nudge || !this.#writable()) return;
-    this.#live = { drag: this.#drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
+    this.#live = { kind: 'token', drag: this.#drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
     this.sheet.set(sheet);
     this.#bump();
   }
 
   /**
-   * A value typed or picked in the open Number, Color or Text sheet. It is checked against the
-   * token first; refused text is never written (the message says why) and the last good value
-   * stays. The sheet's edits are one history entry, committed when it closes.
+   * A value typed or picked in the open Number, Color or Text sheet, or the style sheet. It is
+   * checked against the token (or the property) first; refused text is never written (the message
+   * says why) and the last good value stays. The sheet's edits are one history entry, committed
+   * when it closes. `prop` names another property the style sheet writes in the same visit (the
+   * stroke sheet's stroke-width slider).
    */
-  sheetInput(input: string): Checked {
+  sheetInput(input: string, prop?: string): Checked {
     const live = this.#live;
     const sheet = this.sheet.get();
     if (!live || !sheet || sheet.kind === 'source') return { error: 'No value is open' };
+    if (live.kind === 'style') return this.#styleInput(live, prop ?? live.prop, input);
     const t = live.token;
     const c = t.kind === 'number' ? checkNumber(t, input) : t.kind === 'color' ? checkColor(t, input) : t.kind === 'text' ? checkText(t, input) : { error: 'This value has no sheet' };
     if ('error' in c) return c;
@@ -1986,11 +2161,11 @@ export class Editor {
     this.sheet.set(null);
   }
 
-  // Write one frame of the live drag. A refused edit writes the last good text again.
+  // Write one frame of the live token drag. A refused edit writes the last good text again.
   #write(text: string): string | null {
     const live = this.#live;
     const doc = this.#doc;
-    if (!live || !doc) return 'Nothing is being edited';
+    if (live?.kind !== 'token' || !doc) return 'Nothing is being edited';
     let why: string | null = null;
     live.drag.update((apply) => {
       try {
@@ -2011,8 +2186,10 @@ export class Editor {
     this.#live = null;
     if (commit) live.drag.commit();
     else live.drag.cancel();
+    if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);
     this.#bump();
     this.#changed();
+    if (live.kind === 'style') this.#show();
   }
 
   // ── Edit source ────────────────────────────────────────────────────────────────────────────
@@ -2219,12 +2396,15 @@ export const THIN_PX = 22;
 export type Tool = 'select' | 'shapes';
 /** The notice when an edit makes a generated shape plain. */
 export const DETACHED = 'It’s a plain shape now: its generator inputs were dropped.';
-/** An Inspect field that is one history entry while it is typed in (S1: a generator input). */
-export type Field = { kind: 'input'; name: string };
+// A style sheet opened on a value a rule may decide for the first element starts from the initial one.
+const STYLE_INITIAL: Readonly<Record<string, string>> = { fill: 'black', stroke: 'none', color: 'black', 'stop-color': 'black' };
+/** An Inspect field that is one history entry while it is typed in: a generator input (S1), or a style property over the selection (S2). */
+export type Field = { kind: 'input'; name: string } | { kind: 'style'; prop: string };
 interface FieldSession {
   field: Field;
-  id: NodeId;
+  ids: NodeId[]; // the generated shape, or the selection
   drag: Drag;
+  refused: { id: NodeId; why: string }[]; // a style field's last frame's
 }
 const CORNERS = new Set(['tl', 'tr', 'br', 'bl']);
 const SLOP_PX = 5; // a marquee under this in either direction takes nothing

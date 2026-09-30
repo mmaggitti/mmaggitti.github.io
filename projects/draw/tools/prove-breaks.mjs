@@ -755,7 +755,7 @@ const BREAKS = [
   },
   {
     id: 'B131', what: 'the end of a scrub or a sheet is never saved',
-    file: 'projects/draw/src/editor.ts', from: '    else live.drag.cancel();\n    this.#bump();\n    this.#changed();\n', to: '    else live.drag.cancel();\n    this.#bump();\n',
+    file: 'projects/draw/src/editor.ts', from: "    if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);\n    this.#bump();\n    this.#changed();\n", to: "    if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);\n    this.#bump();\n",
     run: drawTests('editor.test.ts'), expect: /✖ change listeners \(the draft autosave\) hear every change last/,
   },
   {
@@ -2265,7 +2265,7 @@ const BREAKS = [
   },
   {
     id: 'B427', what: 'each keystroke that reads in a Generator field is its own history entry (Inner typed 0.6, then 0.65, makes two)',
-    file: 'projects/draw/src/editor.ts', from: '    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));\n', to: '    f.drag.update((apply) => apply(this.#inputOp(f.id, f.field.name, v)));\n    this.fieldEnd();\n',
+    file: 'projects/draw/src/editor.ts', from: '    f.drag.update((apply) => apply(this.#inputOp(f.ids[0], name, v)));\n', to: '    f.drag.update((apply) => apply(this.#inputOp(f.ids[0], name, v)));\n    this.fieldEnd();\n',
     run: drawTests('editor.test.ts'), expect: /✖ generated shapes: the Tips field, typed "12"/,
   },
   {
@@ -2307,7 +2307,7 @@ const BREAKS = [
   },
   {
     id: 'B435', what: 'a value a <style> rule sets is written as the attribute anyway (it changes nothing on screen)',
-    file: 'engine/style/write.ts', from: "  if (s.sheet === 'rule') return { refused: RULE_SETS(prop) };\n", to: '',
+    file: 'engine/style/write.ts', from: "  if (s.sheet === 'rule' && s.at !== 'style') return RULE_SETS(prop);\n", to: '',
     run: engineTests('style/style.test.ts'), expect: /✖ refused, with the reason, and nothing written/,
   },
   {
@@ -2334,6 +2334,37 @@ const BREAKS = [
     id: 'B440', what: 'a named colour is written back as a name when the picker lands on one',
     file: 'engine/values/color.ts', from: "    case 'named':\n    case 'transparent':\n", to: "    case 'named':\n      return [...NAMED_COLORS].find(([, h]) => h === toHex(srgb))?.[0] ?? toHex(srgb)!;\n    case 'transparent':\n",
     run: engineTests('values/color.test.ts'), expect: /✖ writeColor: each family writes in its own notation/,
+  },
+  // P1-M2 S2: the editor's style edits and the picker (quick).
+  {
+    id: 'B441', what: 'a multi-selection style edit is one entry per element',
+    file: 'projects/draw/src/editor.ts', from: "    const done = this.#dispatch(`Set ${prop}`, (apply) => {\n      const plan = planStyle(doc, ids, prop, c.text, ctx);", to: "    let done = false;\n    for (const one of ids) done = this.#dispatch(`Set ${prop}`, (apply) => {\n      const plan = planStyle(doc, [one], prop, c.text, ctx);",
+    run: drawTests('inspect.test.ts'), expect: /✖ a multi-selection edit is one entry/,
+  },
+  {
+    id: 'B442', what: 'an Inspect field is one entry per keystroke ("25" makes two)',
+    file: 'projects/draw/src/editor.ts', from: '      f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));\n', to: '      f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));\n      this.fieldEnd();\n      this.fieldStart(f.field);\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ one entry per editing session, per kind/,
+  },
+  {
+    id: 'B443', what: 'the Dash presets ignore k (SVG Lab’s numbers on any artboard)',
+    file: 'projects/draw/src/style-edit.ts', from: 'p.map((v) => fmt(v * k, 2))', to: 'p.map((v) => fmt(v, 2))',
+    run: drawTests('inspect.test.ts'), expect: /✖ the Dash presets are SVG Lab/,
+  },
+  {
+    id: 'B444', what: 'planStyle reads the stylesheets for every element instead of the cached sheet',
+    file: 'engine/geometry/css.ts', from: '  if (hit && hit.version === doc.styleVersion) return hit.sheet;', to: '  if (hit && false) return hit.sheet;',
+    run: drawTests('inspect.test.ts'), expect: /✖ a style edit over a large selection takes linear time/,
+  },
+  {
+    id: 'B445', what: 'the picker writes alpha 1 (rgba(…, 1) where the colour is opaque)',
+    file: 'engine/values/color.ts', from: '  const A = a >= 1 ? null : ', to: '  const A = a > 1 ? null : ',
+    run: drawTests('color-picker.test.ts'), expect: /✖ each move is written in the opening family/,
+  },
+  {
+    id: 'B446', what: 'the picker loses its hue at zero saturation or brightness',
+    file: 'projects/draw/src/color-picker.ts', from: '({ ...p, s: unit(s), v: unit(v) });', to: '({ ...p, h: unit(s) && unit(v) ? p.h : 0, s: unit(s), v: unit(v) });',
+    run: drawTests('color-picker.test.ts'), expect: /✖ the picker keeps its own hue through grey and black/,
   },
 ];
 
