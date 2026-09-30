@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { descendants, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import type { Editor } from '../../src/editor.ts';
 import { RULE_SETS } from '../../../../engine/style/write.ts';
-import { checkStyle, dashPresets, paintKinds } from '../../src/style-edit.ts';
+import { ORDERS, checkStyle, dashPresets, joinSegments, paintKinds, showsMiterlimit, unlisted } from '../../src/style-edit.ts';
 import { colorChoices, styleSlot } from '../../src/color-choices.ts';
 import { pickAlpha, pickHue, pickSV, pickerStart, pickerText } from '../../src/color-picker.ts';
 import { bind, fakeEditor, fakePorts } from './fakes.ts';
@@ -697,4 +697,33 @@ test('the keyword properties take only their own keywords: a stroke-linecap of "
   for (const [prop, text] of good) assert.deepEqual(checkStyle(prop, text), { text }, `${prop}: ${text}`);
   e.setStyle('stroke-linecap', 'round');
   assert.equal(e.source(), F.replace('fill="#e76f51"/>', 'fill="#e76f51" stroke-linecap="round"/>'), 'a segment’s value is written');
+});
+
+test('what Inspect’s rows show for the finer cases: paint-order="markers stroke" as written, no segment pressed, and kept through another edit; stroke-linejoin="arcs" (or miter-clip) adds its own segment; the miter limit shows only while the join is miter or miter-clip; a fill of url(#g) red is shown with its fallback', () => {
+  const F = svg(`<defs><linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient></defs>
+  <rect id="a" x="5" y="5" width="20" height="20" fill="url(#g) red" stroke="#264653" paint-order="markers stroke" stroke-linejoin="arcs"/>
+  <rect id="b" x="30" y="5" width="20" height="20" stroke="#264653" stroke-linejoin="round"/>
+  <rect id="c" x="55" y="5" width="20" height="20" stroke="#264653" stroke-linejoin="miter-clip"/>
+  <rect id="d" x="80" y="5" width="15" height="20" stroke="#264653"/>`);
+  const e = opened(F);
+  select(e, 'a');
+  assert.equal(unlisted(e.styleRow('paint-order')!, ORDERS), 'markers stroke', 'shown as written: no segment is it');
+  e.setStyle('stroke-linecap', 'round');
+  assert.equal(e.source(), F.replace('stroke-linejoin="arcs"/>', 'stroke-linejoin="arcs" stroke-linecap="round"/>'), 'another edit keeps it byte for byte');
+  assert.equal(unlisted(e.styleRow('paint-order')!, ORDERS), 'markers stroke');
+  e.undo();
+  const arcs = e.styleRow('stroke-linejoin')!;
+  assert.deepEqual(joinSegments(arcs).map(([v]) => v), ['miter', 'round', 'bevel', 'arcs'], 'arcs gets a segment of its own');
+  assert.equal(unlisted(arcs, joinSegments(arcs)), null, 'so it isn’t shown beside them');
+  assert.equal(showsMiterlimit(arcs), false);
+  const fill = e.styleRow('fill')!;
+  assert.deepEqual([fill.value, e.paintInfo('fill')?.kind], ['url(#g) red', 'linear'], 'the paint row shows the value as written, fallback and all');
+  select(e, 'b');
+  assert.deepEqual([joinSegments(e.styleRow('stroke-linejoin')!).length, showsMiterlimit(e.styleRow('stroke-linejoin')!)], [3, false], 'round: no extra segment, no miter limit');
+  select(e, 'c');
+  assert.deepEqual([joinSegments(e.styleRow('stroke-linejoin')!).map(([v]) => v).at(-1), showsMiterlimit(e.styleRow('stroke-linejoin')!)], ['miter-clip', true], 'miter-clip: its segment, and the miter limit');
+  select(e, 'd');
+  assert.deepEqual([joinSegments(e.styleRow('stroke-linejoin')!).length, showsMiterlimit(e.styleRow('stroke-linejoin')!)], [3, true], 'the default, miter: the miter limit');
+  select(e, 'b', 'c');
+  assert.equal(showsMiterlimit(e.styleRow('stroke-linejoin')!), true, 'Mixed: shown');
 });

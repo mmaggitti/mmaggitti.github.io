@@ -2604,6 +2604,11 @@ const BREAKS = [
     file: 'projects/draw/src/color-picker.ts', from: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent, p.alphaText);', to: '  return writeColor(hsvToRgb(p.h, p.s, p.v), p.a, p.family, p.percent);',
     run: drawTests('color-picker.test.ts'), expect: /✖ an alpha the Alpha slider hasn’t moved keeps its own text/,
   },
+  {
+    id: 'B491', what: 'N6: Inspect’s Join row never offers arcs or miter-clip, even when that is the value',
+    file: 'projects/draw/src/style-edit.ts', from: "  return !row.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv]] : [...JOINS];", to: '  return [...JOINS];',
+    run: drawTests('inspect.test.ts'), expect: /✖ what Inspect’s rows show for the finer cases/,
+  },
 ];
 
 const args = process.argv.slice(2);

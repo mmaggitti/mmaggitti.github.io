@@ -25,7 +25,7 @@ import { fmt } from '../../../../engine/values/number-format.ts';
 import { STYLE_PROPS } from '../../../../engine/style/props.ts';
 import type { Editor, Field, PaintInfo, StyleRow } from '../editor.ts';
 import { INPUT_UI } from '../interact/shapes-tool.ts';
-import { dashPresets, paintKinds, widthRange, type PaintKind } from '../style-edit.ts';
+import { ORDERS, dashPresets, joinSegments, paintKinds, showsMiterlimit, unlisted, widthRange, type PaintKind } from '../style-edit.ts';
 import { elementLabel } from './label.ts';
 import { useStore } from './store.ts';
 
@@ -77,8 +77,6 @@ export function Inspect({ editor }: { editor: Editor }) {
 // ── style ────────────────────────────────────────────────────────────────────────────────────
 
 const CAPS: [string, string][] = [['butt', 'Butt'], ['round', 'Round'], ['square', 'Square']];
-const JOINS: [string, string][] = [['miter', 'Miter'], ['round', 'Round'], ['bevel', 'Bevel']];
-const ORDERS: [string, string][] = [['normal', 'Fill first'], ['stroke', 'Stroke first']];
 const RENDERING: [string, string][] = [['auto', 'auto'], ['crispEdges', 'crispEdges'], ['geometricPrecision', 'geometricPrecision'], ['optimizeSpeed', 'optimizeSpeed']];
 const UNIT = { min: 0, max: 1, step: 0.01 };
 
@@ -86,9 +84,8 @@ function StyleSections({ editor, locals }: { editor: Editor; locals: readonly st
   const row = (prop: string) => editor.styleRow(prop)!;
   const ctx = editor.styleCtx;
   const join = row('stroke-linejoin');
-  const jv = join.value.toLowerCase();
-  const joins = !join.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv] as [string, string]] : JOINS;
-  const miter = join.mixed || jv === 'miter' || jv === 'miter-clip';
+  const joins = joinSegments(join);
+  const miter = showsMiterlimit(join);
   const fillKinds = paintKinds('fill', locals);
   // Each paint's gradient read once per render (it walks the document's gradient users).
   const fill = fillKinds ? editor.paintInfo('fill') : null;
@@ -334,12 +331,12 @@ function GradientField({ editor, prop, name, text }: { editor: Editor; prop: 'fi
 }
 
 /** A keyword property's segments: a tap is one entry. A value outside them is shown as written (no segment pressed) and kept. */
-function SegRow({ editor, prop, label, row, options, two = false }: { editor: Editor; prop: string; label: string; row: StyleRow; options: readonly [string, string][]; two?: boolean }) {
+function SegRow({ editor, prop, label, row, options, two = false }: { editor: Editor; prop: string; label: string; row: StyleRow; options: readonly (readonly [string, string])[]; two?: boolean }) {
   const v = row.mixed ? null : row.value.toLowerCase().replace(/[\s,]+/g, ' ');
-  const known = options.some(([o]) => o.toLowerCase() === v);
+  const shown = unlisted(row, options);
   return (
     <Row label={label} row={row}>
-      {!known && v !== null && <span className="draw-inspect-value ds-mono">{row.value}</span>}
+      {shown !== null && <span className="draw-inspect-value ds-mono">{shown}</span>}
       <div className={`ds-seg draw-inspect-seg${two ? ' draw-inspect-seg--two' : ''}`} role="group" aria-label={prop}>
         {options.map(([value, text]) => (
           <button key={value} type="button" aria-pressed={v === value.toLowerCase()} disabled={!!row.disabled} onClick={() => editor.setStyle(prop, value)}>

@@ -92,6 +92,30 @@ export function paintKinds(prop: 'fill' | 'stroke', locals: readonly string[]): 
   return lines ? ['color', 'linear', 'radial'] : ['none', 'color', 'linear', 'radial'];
 }
 
+// ── what Inspect's keyword rows show (Inspect.tsx), pure so the unit tests see it ────────────────
+
+/** Line joins and paint orders Inspect offers as segments ([value, label]). */
+export const JOINS: readonly [string, string][] = [['miter', 'Miter'], ['round', 'Round'], ['bevel', 'Bevel']];
+export const ORDERS: readonly [string, string][] = [['normal', 'Fill first'], ['stroke', 'Stroke first']];
+
+/** The Join segments for a row: miter, round and bevel, and miter-clip or arcs only while the value is that one. */
+export function joinSegments(row: { value: string; mixed: boolean }): [string, string][] {
+  const jv = row.value.toLowerCase();
+  return !row.mixed && (jv === 'miter-clip' || jv === 'arcs') ? [...JOINS, [jv, jv]] : [...JOINS];
+}
+
+/** Whether the Miter limit field shows: while the join is miter or miter-clip (or Mixed). */
+export function showsMiterlimit(row: { value: string; mixed: boolean }): boolean {
+  const jv = row.value.toLowerCase();
+  return row.mixed || jv === 'miter' || jv === 'miter-clip';
+}
+
+/** A keyword row's value when none of its segments is it, shown as written beside them; null when one is (or Mixed). */
+export function unlisted(row: { value: string; mixed: boolean }, options: readonly (readonly [string, string])[]): string | null {
+  const v = row.mixed ? null : row.value.toLowerCase().replace(/[\s,]+/g, ' ');
+  return v !== null && !options.some(([o]) => o.toLowerCase() === v) ? row.value : null;
+}
+
 /** The Dash presets on this artboard: none, then SVG Lab's three, each number × k. */
 export function dashPresets(k: number): string[] {
   return DASH_PRESETS.map((p) => (p === null ? 'none' : p.map((v) => fmt(v * k, 2)).join(' ')));
