@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
+import { coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
 import { DIAMOND_PX, HANDLE_PICK_PX, RING_PX, handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from '../../src/interact/handles.ts';
 
 const HOST = { width: 400, height: 300 };
@@ -108,4 +108,17 @@ test('a press takes the nearest handle within 26 px, the one drawn last on a tie
   assert.equal(HANDLE_PICK_PX, 26);
   assert.deepEqual([47, 49, 41, 40, 181.4, -2, 7, 8].map(magneticAngle), [45, 45, 45, 40, 180, 0, 7, 8]);
   assert.deepEqual([2, 2.02, 2.03, 0.1, 5, 1.234].map(scaleStep), [2, 2, 2.05, 0.2, 4, 1.25]);
+});
+
+test('a transformed element’s local grid: lines every 1-2-5 step of its own units through its CTM, over its box grown by one step, and its axes from its origin', () => {
+  const box = { x: -18, y: -22, width: 36, height: 38 }; // lab/transform.svg's house
+  const g = localGridModel(box, [4, 0, 0, 4, 200, 200]); // translate(50 50), 4 px a unit
+  assert.equal(g.step, 5, '5 units are 20 px (2 would be 8, under 12)');
+  const xs = g.lines.filter((l) => l.from.x === l.to.x).map((l) => l.from.x);
+  assert.ok(xs.includes(240), 'a line through local (10, 0)');
+  assert.deepEqual([Math.min(...xs), Math.max(...xs)], [100, 300], 'from −25 to 25: the box grown by one step');
+  assert.deepEqual(g.axes.map((a) => a.from), [{ x: 200, y: 200 }, { x: 200, y: 200 }], 'the axes start at the local origin');
+  assert.deepEqual(g.labels.map((l) => l.text), ['x', 'y']);
+  const turned = localGridModel(box, [0, 4, -4, 0, 200, 200]); // rotate(90) about the origin
+  assert.ok(turned.lines.some((l) => Math.abs(l.from.y - 240) < 1e-9 && Math.abs(l.to.y - 240) < 1e-9), 'the grid turns with it: local x = 10 is host y = 240');
 });

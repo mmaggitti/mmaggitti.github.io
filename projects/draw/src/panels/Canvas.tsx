@@ -7,12 +7,13 @@
 // editor's view and the Select tool. The host is hidden from assistive tech: the code panel is the
 // accessible view of the document. A file (or SVG text) dropped on the canvas opens (iPad, desktop).
 //
-// Over the drawing: the Grid button at the top-left (a view option kept on this device, never in the
-// file); and when there is something to say, a file that isn't well-formed (it is shown only as
+// Over the drawing: the Grid and Snap buttons at the top-left (view options kept on this device,
+// never in the file; the Snap sheet also sets the grid step and the guides, which the file keeps as
+// Draw's own state); and when there is something to say, a file that isn't well-formed (it is shown only as
 // source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
 // under reduced motion, Play for a drawing that animates (it opens paused, top-right).
 
-import { useEffect, useRef, type DragEvent as ReactDragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import type { Editor } from '../editor.ts';
 import type { Unparsed } from '../workspace.ts';
 import { failureText } from '../files-view.ts';
@@ -22,6 +23,8 @@ import { Renderer } from '../canvas/renderer.ts';
 import { Overlay } from '../canvas/overlay/index.ts';
 import { Stage } from '../canvas/stage.ts';
 import type { Views } from './views.ts';
+import { Modal } from './Sheets.tsx';
+import type { SnapPrefs } from '../interact/snap.ts';
 
 interface Props {
   editor: Editor;
@@ -69,6 +72,7 @@ export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }
       <div ref={host} className="draw-host" aria-hidden="true" />
       <div ref={marks} className="draw-marks" />
       <GridButton editor={editor} />
+      <SnapButton editor={editor} />
       {error && <p className="draw-error ds-small">Can&rsquo;t show the drawing: {error}.</p>}
       <Over editor={editor} unparsed={unparsed} files={files} />
     </main>
@@ -93,6 +97,108 @@ function GridButton({ editor }: { editor: Editor }) {
     <button type="button" className="draw-chrome draw-grid-btn" aria-label="Grid" aria-pressed={on} onClick={toggle}>
       {GRID_ICON}
     </button>
+  );
+}
+
+const SNAP_ICON = (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 3v7a6 6 0 0012 0V3" />
+    <path d="M6 7h4M14 7h4" />
+    <path d="M12 20v1M4 17l-1 1M20 17l1 1" />
+  </svg>
+);
+
+const SNAP_NAMES: [keyof SnapPrefs, string][] = [['grid', 'Grid'], ['guides', 'Guides'], ['shapes', 'Shapes'], ['artboard', 'Artboard']];
+
+/** What snaps, from the device pref draw:snap (all on unless turned off there). */
+function readSnap(): SnapPrefs {
+  const off = new Set((readPref('snap') ?? '').split(' ').filter(Boolean));
+  return { grid: !off.has('grid'), guides: !off.has('guides'), shapes: !off.has('shapes'), artboard: !off.has('artboard') };
+}
+
+/** The Snap button and its sheet: the grid, its step, what snaps, and the guides. */
+function SnapButton({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => editor.snap.set(readSnap()), [editor]);
+  return (
+    <>
+      <button type="button" className="draw-chrome draw-snap-btn" aria-label="Snap" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        {SNAP_ICON}
+      </button>
+      {open && <SnapSheet editor={editor} close={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
+  const grid = useStore(editor.grid);
+  const snap = useStore(editor.snap);
+  useStore(editor.version);
+  const state = editor.drawState;
+  const [step, setStep] = useState(state.grid === null ? '' : String(state.grid));
+  const setGrid = (on: boolean) => {
+    writePref('grid', on ? 'on' : null);
+    editor.grid.set(on);
+  };
+  const toggle = (k: keyof SnapPrefs) => {
+    const next = { ...snap, [k]: !snap[k] };
+    writePref('snap', SNAP_NAMES.filter(([n]) => !next[n]).map(([n]) => n).join(' ') || null);
+    editor.snap.set(next);
+  };
+  const applyStep = (text: string) => {
+    setStep(text);
+    const v = Number(text);
+    if (text.trim() === '') editor.setGridStep(null);
+    else if (v > 0 && Number.isFinite(v)) editor.setGridStep(v);
+  };
+  return (
+    <Modal title="Snap" onClose={close} done mono={false}>
+      <div className="draw-snap">
+        <button type="button" className="ds-btn draw-snap-row" aria-pressed={grid} onClick={() => setGrid(!grid)}>
+          Grid shown
+        </button>
+        <label className="draw-snap-step">
+          <span>Grid step</span>
+          <input className="draw-field ds-mono" inputMode="decimal" enterKeyHint="done" autoComplete="off" placeholder="Auto" aria-label="Grid step (empty: automatic)" value={step} onChange={(e) => applyStep(e.target.value)} />
+        </label>
+        <p className="draw-subhead">Snap to</p>
+        <div className="draw-snap-toggles">
+          {SNAP_NAMES.map(([k, name]) => (
+            <button key={k} type="button" className="ds-btn draw-snap-row" aria-pressed={snap[k]} onClick={() => toggle(k)}>
+              {name}
+            </button>
+          ))}
+        </div>
+        <p className="draw-subhead">Guides</p>
+        <div className="draw-snap-toggles">
+          <button type="button" className="ds-btn draw-snap-row" onClick={() => editor.addGuide('v')}>
+            Add vertical guide
+          </button>
+          <button type="button" className="ds-btn draw-snap-row" onClick={() => editor.addGuide('h')}>
+            Add horizontal guide
+          </button>
+        </div>
+        {state.guides.length > 0 && (
+          <ul className="draw-guides">
+            {state.guides.map((g, i) => (
+              <li key={`${i}:${g.axis}:${g.at}`} className="draw-guide-row">
+                <span className="ds-mono">
+                  {g.axis === 'v' ? 'x' : 'y'} = {g.at}
+                </span>
+                <button type="button" className="ds-btn draw-snap-row" aria-label={`Remove the guide at ${g.axis === 'v' ? 'x' : 'y'} = ${g.at}`} onClick={() => editor.removeGuide(i)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.guides.length > 1 && (
+          <button type="button" className="ds-btn draw-snap-row" onClick={() => editor.removeGuide('all')}>
+            Remove all guides
+          </button>
+        )}
+      </div>
+    </Modal>
   );
 }
 

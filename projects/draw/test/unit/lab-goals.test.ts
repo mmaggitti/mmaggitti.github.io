@@ -137,3 +137,131 @@ test('lab goal "Write your own title" (access): the title\'s text, through the T
   editor.undo();
   assert.equal(editor.source(), r.file);
 });
+
+// ── P1-M1: the goals Draw's handles reach (lab/grid.svg, lab/shapes.svg, lab/transform.svg) ───────
+
+/** Host px of a point in the root's user units (the fakes' camera: the root's box, M). */
+function hostOf(r: Rig, x: number, y: number) {
+  const { box, viewport, M } = r.editor.rootBox;
+  const k = box!.width / viewport.width;
+  return { x: box!.left + k * (M[0] * x + M[4]), y: box!.top + k * (M[3] * y + M[5]) };
+}
+const handleAt = (r: Rig, id: string) => {
+  const h = r.editor.overlayModel().handles.find((x) => x.id === id);
+  assert.ok(h, `no ${id} handle: ${r.editor.overlayModel().handles.map((x) => x.id)}`);
+  return h.at;
+};
+/** One pointer gesture on the canvas: down at `from`, moved to `to` in 6 frames, up. */
+function gesture(r: Rig, from: { x: number; y: number }, to: { x: number; y: number }) {
+  r.editor.pointerDown(from, [], { add: false });
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: from.x + ((to.x - from.x) * i) / 6, y: from.y + ((to.y - from.y) * i) / 6 });
+  r.editor.pointerUp(to);
+}
+/** The goal reached by one gesture: one history entry, and one undo gives the file back. */
+function oneEntry(r: Rig, label: string) {
+  assert.equal(r.editor.history.get().undoLabel, label);
+  const now = r.editor.source();
+  r.editor.undo();
+  assert.equal(r.editor.source(), r.file, 'one undo gives the file back');
+  assert.equal(r.editor.history.get().canUndo, false, 'it was one entry');
+  r.editor.redo();
+  assert.equal(r.editor.source(), now);
+}
+/** A number token set through its Number sheet (the strip's value), one entry. */
+function setNumber(r: Rig, node: NodeId, after: string, value: string) {
+  const t = token(r, node, 'number', after);
+  r.editor.tapToken(t.block, t.token);
+  r.editor.openNumberSheet();
+  assert.equal(r.editor.sheet.get()?.kind, 'number');
+  assert.ok('text' in r.editor.sheetInput(value));
+  r.editor.closeSheet();
+}
+const near = (a: number, b: number, tol = 1) => Math.abs(a - b) <= tol;
+const num = (r: Rig, n: ElementNode, local: string) => Number(attrValue(doc(r), n, null, local));
+
+test('lab goals "Go to x 80, y 20" and "Go to x 10, y 90" (grid): the centre handle moves the circle there by whole units, one entry each', () => {
+  const r = open('lab/grid.svg');
+  const c = element(r, 'circle');
+  r.editor.select([c.id]);
+  for (const [x, y] of [[80, 20], [10, 90]]) {
+    const before = r.editor.source();
+    gesture(r, handleAt(r, 'center'), hostOf(r, x, y));
+    assert.ok(near(num(r, c, 'cx'), x) && near(num(r, c, 'cy'), y), `the circle is at (${num(r, c, 'cx')}, ${num(r, c, 'cy')})`);
+    assert.equal(r.editor.source(), before.replace(/cx="[^"]*" cy="[^"]*"/, `cx="${num(r, c, 'cx')}" cy="${num(r, c, 'cy')}"`), 'only cx and cy changed');
+    assert.equal(r.editor.history.get().undoLabel, 'Move');
+  }
+  assert.deepEqual([num(r, c, 'cx'), num(r, c, 'cy')], [10, 90], 'whole units, on the point');
+});
+
+test('lab goal "Set r to 20" (grid), and cx, cy, r and fill by their tokens (edit-center, edit-radius, edit-fill)', () => {
+  const r = open('lab/grid.svg');
+  const c = element(r, 'circle');
+  setNumber(r, c.id, 'r=', '20');
+  assert.equal(num(r, c, 'r'), 20, 'the goal: r === 20');
+  assert.equal(r.editor.source(), edited(r.file, 'r="5"', 'r="20"'));
+  oneEntry(r, r.editor.history.get().undoLabel!);
+  setNumber(r, c.id, 'cx=', '45');
+  setNumber(r, c.id, 'cy=', '55');
+  const fill = token(r, c.id, 'color');
+  r.editor.tapToken(fill.block, fill.token);
+  assert.ok('text' in r.editor.sheetInput('#2a9d8f'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), r.file.replace('cx="30" cy="60" r="5" fill="#e76f51"', 'cx="45" cy="55" r="20" fill="#2a9d8f"'));
+});
+
+test('lab goal "Make a square" (shapes): a corner handle, the opposite corner kept, one entry', () => {
+  const r = open('lab/shapes.svg');
+  const rect = element(r, 'rect');
+  r.editor.select([rect.id]);
+  gesture(r, handleAt(r, 'br'), hostOf(r, 80, 85));
+  assert.ok(near(num(r, rect, 'width'), num(r, rect, 'height'), 0.5), `${num(r, rect, 'width')} × ${num(r, rect, 'height')} is a square`);
+  assert.equal(r.editor.source(), edited(r.file, 'height="50"', 'height="60"'), 'the top-left corner kept: only the height');
+  oneEntry(r, 'Resize');
+});
+
+test('lab goals "Turn it upside down", "Double the size" and "Park it top right" (transform): the ring, the diamond and the centre handle on the house, each number in place', () => {
+  const r = open('lab/transform.svg');
+  const g = element(r, 'g');
+  r.editor.select([g.id]);
+  const list = () => attrValue(doc(r), g, null, 'transform')!;
+  // The ring: from above the pivot (the translate(50 50) point) to below it, 180°.
+  const pivot = hostOf(r, 50, 50);
+  const ring = handleAt(r, 'rot');
+  gesture(r, ring, { x: pivot.x, y: pivot.y + Math.hypot(ring.x - pivot.x, ring.y - pivot.y) });
+  assert.equal(r.editor.source(), edited(r.file, 'rotate(0)', 'rotate(180)'), 'upside down: rotate(180), and the list keeps its three lines');
+  oneEntry(r, 'Rotate');
+  // The diamond: twice as far from the scale pivot.
+  const d = handleAt(r, 'scale');
+  const sp = hostOf(r, 50, 50);
+  gesture(r, d, { x: sp.x + 2 * (d.x - sp.x), y: sp.y + 2 * (d.y - sp.y) });
+  assert.equal(r.editor.source(), edited(edited(r.file, 'rotate(0)', 'rotate(180)'), 'scale(1)', 'scale(2)'), 'double the size: scale(2)');
+  assert.equal(r.editor.history.get().undoLabel, 'Scale');
+  // The centre handle: to the top right.
+  const c = handleAt(r, 'center');
+  const { box, viewport, M } = r.editor.rootBox;
+  const k = (box!.width / viewport.width) * M[0];
+  gesture(r, c, { x: c.x + 30 * k, y: c.y - 30 * k });
+  const t = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(list())!;
+  assert.ok(Number(t[1]) >= 75 && Number(t[2]) <= 25, `parked at translate(${t[1]} ${t[2]})`);
+  assert.equal(r.editor.source(), edited(edited(edited(r.file, 'rotate(0)', 'rotate(180)'), 'scale(1)', 'scale(2)'), 'translate(50 50)', `translate(${t[1]} ${t[2]})`), 'only the translate numbers moved');
+  assert.equal(r.editor.history.get().undoLabel, 'Move');
+});
+
+test('the house\'s transform tokens scrub, and its three children\'s fills change by their colour tokens (transform-tokens, child-colors)', () => {
+  const r = open('lab/transform.svg');
+  const g = element(r, 'g');
+  const tx = token(r, g.id, 'number', 'translate(');
+  r.editor.scrubStart(tx.block, tx.token);
+  r.editor.scrub(5);
+  r.editor.scrubEnd(true);
+  assert.equal(r.editor.source(), edited(r.file, 'translate(50 50)', 'translate(55 50)'), 'the scrub changed only its number');
+  const kids = [...descendants(doc(r), g.id)].filter((n): n is ElementNode => n.kind === 'element' && n.id !== g.id);
+  assert.equal(kids.length, 3);
+  for (const [i, kid] of kids.entries()) {
+    const f = token(r, kid.id, 'color');
+    r.editor.tapToken(f.block, f.token);
+    assert.ok('text' in r.editor.sheetInput(['#111111', '#222222', '#333333'][i]));
+    r.editor.closeSheet();
+  }
+  assert.deepEqual(kids.map((k) => attrValue(doc(r), k, null, 'fill')), ['#111111', '#222222', '#333333']);
+});

@@ -191,6 +191,34 @@ export function coordGuides(centre: Point, paper: Rect, inRoot: Point, decimals:
   return { lines, labels };
 }
 
+// ── the local grid of a transformed element ─────────────────────────────────────────────────────
+
+/**
+ * A transformed element's own grid (SVG Lab LabMove's guides), through its CTM to host px: lines
+ * every step of its local units (the 1-2-5 rule at ≥ 12 px, measured through the CTM) over its box
+ * grown by one step, and its x and y axes from its local origin, labelled.
+ */
+export function localGridModel(box: Rect, toHost: Affine): { lines: Line[]; axes: Line[]; labels: Label[]; step: number } {
+  const px = Math.sqrt(Math.abs(toHost[0] * toHost[3] - toHost[1] * toHost[2]));
+  const step = gridStep(px);
+  const at = (x: number, y: number): Point => {
+    const [hx, hy] = apply(toHost, x, y);
+    return { x: hx, y: hy };
+  };
+  const x0 = Math.floor((box.x - step) / step) * step, x1 = Math.ceil((box.x + box.width + step) / step) * step;
+  const y0 = Math.floor((box.y - step) / step) * step, y1 = Math.ceil((box.y + box.height + step) / step) * step;
+  const lines: Line[] = [];
+  for (let i = 0, x = x0; x <= x1 + step * 1e-9 && i < 500; i++, x = x0 + i * step) lines.push({ from: at(x, y0), to: at(x, y1) });
+  for (let i = 0, y = y0; y <= y1 + step * 1e-9 && i < 500; i++, y = y0 + i * step) lines.push({ from: at(x0, y), to: at(x1, y) });
+  const ax = Math.max(x1, step), ay = Math.max(y1, step);
+  const axes: Line[] = [{ from: at(0, 0), to: at(ax, 0) }, { from: at(0, 0), to: at(0, ay) }];
+  const labels: Label[] = [
+    { text: 'x', at: at(ax + (12 / px), 0), anchor: 'middle' },
+    { text: 'y', at: at(0, ay + (12 / px)), anchor: 'middle' },
+  ];
+  return { lines, axes, labels, step };
+}
+
 /** A quad's four corners from a local box through a matrix to host px. */
 export function quadOf(box: Rect, toHost: Affine): Quad {
   const at = (x: number, y: number): Point => {

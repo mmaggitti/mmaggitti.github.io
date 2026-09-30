@@ -185,8 +185,35 @@
   color: var(--text);
   touch-action: manipulation;
 }
-.draw-grid-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-grid-btn svg, .draw-snap-btn svg { width: 1.5rem; height: 1.5rem; }
 .draw-grid-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* The Snap button, beside Grid. */
+.draw-snap-btn {
+  position: absolute;
+  top: var(--space-2);
+  left: calc(var(--space-2) + var(--tap-min) + var(--space-2));
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}
+/* The Snap sheet: rows of at least 44 pt. */
+.draw-snap { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-snap-row { flex: 1 1 auto; min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-snap-row[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-snap-row[aria-pressed="false"] { opacity: 0.85; }
+.draw-snap-toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.draw-snap-step { display: flex; align-items: center; gap: var(--space-3); }
+.draw-guides { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-guide-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.draw-guide-row .draw-snap-row { flex: 0 0 auto; }
 .draw-error {
   position: absolute;
   inset: auto var(--space-4) var(--space-4);

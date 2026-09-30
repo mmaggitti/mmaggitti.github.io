@@ -39,7 +39,7 @@ import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
 import { rootTransform, transformOrigin } from '../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../engine/geometry/bounds.ts';
 import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
-import { EMPTY, coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type Handle, type Line, type OverlayModel, type Quad } from './interact/overlay-model.ts';
+import { EMPTY, coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type Handle, type Line, type OverlayModel, type Quad } from './interact/overlay-model.ts';
 import { SNAP_ALL, SNAP_PX, boxTargets, snapAxis, snapStep, stepDecimals, toStep, type SnapPrefs, type SnapTargets } from './interact/snap.ts';
 import { applyPlan, movesBy, planMove, planResize, planRotate, planScale, rotationOf, scaleOf, ROOT_MOVE, type Corner, type Plan } from '../../../engine/geometry/write.ts';
 import { handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from './interact/handles.ts';
@@ -497,6 +497,14 @@ export class Editor {
     model.handles = hs.handles;
     model.rotGuide = hs.rotGuide;
     model.guides = this.#guideMarks();
+    // One transformed element: its own grid, through its CTM.
+    const one = ids.length === 1 ? measured.get(ids[0]) : undefined;
+    const own = one && attrValueOf(doc, ids[0], 'transform');
+    const list = own ? parseTransform(own) : null;
+    if (one && list && list.items.length && !isIdentity(list.matrix)) {
+      const lg = localGridModel(one.box, one.toHost);
+      model.localGrid = { lines: lg.lines, axes: lg.axes, labels: lg.labels };
+    }
     this.#gestureMarks(model, paper);
     return model;
   }
@@ -1692,6 +1700,7 @@ interface HandleDrag {
 }
 
 const linear = (m: Affine): Affine => [m[0], m[1], m[2], m[3], 0, 0];
+const isIdentity = (m: Affine): boolean => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
 const PILL_LONG = 44; // px: a guide's pill, 44 along its guide and 20 across, picked over 44 × 44
 /** The guide whose pill a press at `at` takes: within its 44 × 44 pick area, the nearest. */
 function pickPill(guides: OverlayModel['guides'], at: Point): number | null {

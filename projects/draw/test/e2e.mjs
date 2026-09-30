@@ -198,6 +198,10 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theGridToggleShowsTheGrid);
   await check(geometryMatchesTheBrowser);
   await check(percentLengthsKeepTheirSizeUnderZoom);
+  await check(theNearestHandleWithin26ptWins);
+  await check(rectCornerHandlesKeepTheOppositeCorner);
+  await check(rotateAndScaleHandlesEditTheLabHouse);
+  await check(movesSnapToGuidesShapesAndTheGrid);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -791,6 +795,17 @@ function screenPoint({ x, y }) {
 async function showCode(page) {
   if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
   await page.locator('.draw-code .cv-block').first().waitFor();
+}
+
+// The Snap sheet with every target off: a move is whole units alone (checks of tap-vs-drag and of
+// rounding; movesSnapToGuidesShapesAndTheGrid checks snapping).
+async function snapOff(page) {
+  await page.locator('.draw-snap-btn').tap();
+  for (const name of ['Grid', 'Guides', 'Shapes', 'Artboard']) {
+    const b = page.locator('.draw-snap-toggles .ds-btn', { hasText: new RegExp(`^${name}$`) });
+    if ((await b.getAttribute('aria-pressed')) === 'true') await b.tap();
+  }
+  await page.locator('.draw-modal-done').tap();
 }
 
 // The ContextBar's More sheet (Edit source, Select all), for what is selected now.
@@ -1438,7 +1453,9 @@ async function theOutlineStaysAboveTheDrawing(browser, origin) {
       await page.touchscreen.tap(c.x, c.y);
       const top = await page.evaluate(() => {
         const outline = document.querySelector('.draw-outline');
-        const [[x0, y0], [x1, y1]] = outline.getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+        // The left edge's middle: the rotation ring's guide (P1-M1) runs up through the top edge's.
+        const pts = outline.getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+        const [[x0, y0], [x1, y1]] = [pts[0], pts[3]];
         const o = document.querySelector('.draw-overlay').getBoundingClientRect();
         for (const el of [document.querySelector('.draw-marks'), document.querySelector('.draw-overlay')]) el.style.pointerEvents = 'auto';
         outline.style.pointerEvents = 'stroke';
@@ -2896,6 +2913,8 @@ async function aShortMoveOnTheCanvasIsATap(browser, origin) {
     const c = { x: Math.round(at.x), y: Math.round(at.y) }; // whole points: the 8pt stays 8pt
     const selected = () => page.locator('.draw-sel').textContent();
     const source = () => page.evaluate(() => window.drawTest.source());
+    await snapOff(page); // tap against drag, and whole units: nothing to snap to
+    must(await page.locator('.draw-sel').textContent() === 'nothing selected', 'a tap in the Snap sheet reached the drawing under it');
     const e = await page.evaluate(screenPoint, { x: 6, y: 6 }); // inside the viewBox, outside the frame: nothing drawn
     await oneFinger(browser, page, { x: Math.round(e.x), y: Math.round(e.y) }, 8);
     must(await selected() === 'nothing selected', 'a touch that moved 8pt on empty canvas selected something');
@@ -3234,6 +3253,7 @@ async function aDragMovesTheShapeByWholeUnits(browser, origin) {
     console.log(`     draw: the canvas's hit test is ${await page.evaluate(() => window.drawTest.hitPath())} (${browser.browserType().name()})`);
     const source = () => page.evaluate(() => window.drawTest.source());
     const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await snapOff(page); // whole units alone (snapping: movesSnapToGuidesShapesAndTheGrid)
     for (const way of chromium(browser) ? ['mouse', 'touch'] : ['mouse']) {
       const c = await circleCentre(page);
       await page.evaluate(watchPointer);
@@ -3665,6 +3685,325 @@ async function percentLengthsKeepTheirSizeUnderZoom(browser, origin) {
     judge(await read(), 'after a pinch');
     must(problems.length === 0, problems.join('\n'));
     must(await page.evaluate(() => window.drawTest.source()) === F, 'zooming changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M1 S3: handles and snapping ─────────────────────────────────────────────────────────────
+
+// Runs in the page: the overlay's handles, each with its id, kind, client centre and fill.
+function handlesNow() {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll('.draw-hd[data-handle]')].filter((h) => h.style.display !== 'none').map((h) => {
+    const b = h.getBoundingClientRect();
+    return { id: h.getAttribute('data-handle'), kind: h.getAttribute('class'), x: b.x + b.width / 2, y: b.y + b.height / 2, fill: getComputedStyle(h).fill, o: o.x };
+  });
+}
+// Runs in the page: a point in a drawn element's own units, on screen (its getScreenCTM).
+function elementPoint({ sel, x, y }) {
+  const el = document.querySelector('.draw-host').shadowRoot.querySelector(sel);
+  const p = new DOMPoint(x, y).matrixTransform(el.getScreenCTM());
+  return { x: p.x, y: p.y };
+}
+const SHAPES_SVG = () => readFileSync(join(CORPUS, 'lab/shapes.svg'), 'utf8');
+const openAndSelect = async (page, text, sel) => {
+  must((await page.evaluate((t) => window.drawTest.render(t), text)).ok, 'test setup: the file did not open');
+  await twoFrames(page);
+  const c = await page.evaluate(drawnCentre, sel);
+  await page.touchscreen.tap(c.x, c.y);
+  await page.waitForTimeout(50);
+};
+
+// On lab/shapes.svg's selected rect, a press takes the nearest handle within 26 pt: 20 pt from the
+// top-left corner (and further from every other) it drags that corner; 27 pt from every handle it
+// moves the rect instead; with two handles 10 and 20 pt away, the nearer wins. The dragged handle
+// is yellow while it moves and white after. A guide's pill is picked anywhere in 44 × 44.
+async function theNearestHandleWithin26ptWins(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const F = SHAPES_SVG();
+    await openAndSelect(page, F, 'rect');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const hs = await page.evaluate(handlesNow);
+    const tl = hs.find((h) => h.id === 'tl');
+    must(tl && hs.some((h) => h.id === 'center') && hs.some((h) => h.id === 'rot'), `test setup: the rect's handles are ${hs.map((h) => h.id)}`);
+    // 20 pt up and left of the top-left corner: that corner, dragged 30 pt further out.
+    const p = { x: tl.x - 14.14, y: tl.y - 14.14 };
+    let during = null;
+    await dragOnCanvas(page, 'mouse', p, { x: -30, y: -30 }, 6, async (i) => {
+      if (i === 6) during = (await page.evaluate(handlesNow)).find((h) => h.id === 'tl')?.fill;
+    });
+    const after = (await page.evaluate(handlesNow)).find((h) => h.id === 'tl')?.fill;
+    const moved = await source();
+    must(/<rect x="\d+" y="\d+" width="\d+" height="\d+"/.test(moved) && moved !== F && !moved.includes('x="20" y="25"'), `a press 20 pt from the top-left corner did not drag it:\n${moved}`);
+    const [x, y, w, h] = /x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/.exec(moved).slice(1).map(Number);
+    must(x + w === 80 && y + h === 75, `the corner drag moved the bottom-right corner (${x + w}, ${y + h})`);
+    must(during === 'rgb(255, 230, 0)', `the dragged handle is ${during} during the drag, not yellow`);
+    must(after === 'rgb(255, 255, 255)', `the handle is ${after} after the drag, not white`);
+    await undo.tap();
+    // 27 pt from every handle, on the rect: a move.
+    const now = await page.evaluate(handlesNow);
+    const q = { x: now.find((h) => h.id === 'tl').x + 40, y: now.find((h) => h.id === 'tl').y + 27 };
+    must(now.every((hd) => Math.hypot(hd.x - q.x, hd.y - q.y) >= 27), 'test setup: the point is within 27 pt of a handle');
+    await dragOnCanvas(page, 'mouse', q, { x: 21, y: 13 }, 6);
+    const m = await source();
+    must(/width="60" height="50"/.test(m) && !m.includes('x="20" y="25"'), `a press 27 pt from every handle did not move the rect:\n${m}`);
+    await undo.tap();
+    // Zoomed out, two handles 10 and 20 pt from one point: the top-left corner and the centre.
+    const c = await page.evaluate(drawnCentre, 'rect');
+    for (let i = 0; i < 2; i++) await ctrlWheel(page, Math.round(c.x), Math.round(c.y), 110);
+    const small = await page.evaluate(handlesNow);
+    const [a, b] = [small.find((h) => h.id === 'tl'), small.find((h) => h.id === 'center')];
+    must(a && b, `test setup: zoomed out the handles are ${small.map((h) => h.id)}`);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const r = { x: a.x + ((b.x - a.x) * 10) / len, y: a.y + ((b.y - a.y) * 10) / len };
+    must(len > 25 && len < 40, `test setup: the corner and the centre are ${len.toFixed(1)} pt apart`);
+    await dragOnCanvas(page, 'mouse', r, { x: -12, y: -12 }, 6);
+    const z = await source();
+    must(!z.includes('width="60" height="50"') && /x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/.test(z), `the nearer handle (the corner, 10 pt away) did not win over the centre (${(len - 10).toFixed(1)} pt):\n${z}`);
+    await undo.tap();
+    // A guide's pill, picked 21 pt off its centre both ways.
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Add vertical guide' }).tap();
+    await page.locator('.draw-modal-done').tap();
+    const pill = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0] ?? null);
+    must(pill, 'the guide has no pill');
+    const pc = { x: pill.x + pill.width / 2 + 21, y: pill.y + pill.height / 2 + 21 };
+    await dragOnCanvas(page, 'mouse', pc, { x: 40, y: 0 }, 6);
+    must(!(await source()).includes('guides="v 50"') && /guides="v \d+"/.test(await source()), 'a press 21 pt off the pill in both directions did not take it');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/shapes.svg's rect (x 20, y 25, 60 × 50): its top-left corner dragged to (30, 30) writes x 30,
+// y 30, width 50, height 45, the bottom-right staying at (80, 75); dragged past the bottom-right it
+// stops at 1 × 1; the bottom-right dragged to (90, 80) writes 70 × 55, the tooltip reading
+// "70 × 55"; each one history entry. A rect turned 30° resizes along its own sides (the corner
+// lands under the pointer). A group's corner doubles its width by a leading translate() scale()
+// pair (its top-left stays put, the tooltip reads its new size); a second drag rewrites that pair,
+// and a move then edits its translate.
+async function rectCornerHandlesKeepTheOppositeCorner(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const F = SHAPES_SVG();
+    await openAndSelect(page, F, 'rect');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const handle = async (id) => (await page.evaluate(handlesNow)).find((h) => h.id === id);
+    const to = (x, y) => page.evaluate(screenPoint, { x, y });
+    const dragTo = async (id, target) => {
+      const h = await handle(id);
+      must(h, `test setup: no ${id} handle`);
+      let tipText = null;
+      await dragOnCanvas(page, 'mouse', h, { x: target.x - h.x, y: target.y - h.y }, 8, async (i) => {
+        if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+      });
+      return tipText;
+    };
+    await dragTo('tl', await to(30, 30));
+    must(await source() === F.replace('x="20" y="25" width="60" height="50"', 'x="30" y="30" width="50" height="45"'), `the top-left corner to (30, 30):\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Resize', 'the resize is not one "Resize" entry');
+    await undo.tap();
+    must(await source() === F, 'one undo did not restore the rect');
+    await dragTo('tl', await to(95, 95));
+    must(await source() === F.replace('x="20" y="25" width="60" height="50"', 'x="79" y="74" width="1" height="1"'), `dragged past the bottom-right, not 1 × 1:\n${await source()}`);
+    await undo.tap();
+    const tipText = await dragTo('br', await to(90, 80));
+    must(await source() === F.replace('width="60" height="50"', 'width="70" height="55"'), `the bottom-right to (90, 80):\n${await source()}`);
+    must(tipText === '70 × 55', `the tooltip read ${JSON.stringify(tipText)}, not "70 × 55"`);
+    await undo.tap();
+    // Turned 30°: the corner lands under the pointer.
+    const R = F.replace('rx="0"', 'rx="0" transform="rotate(30 50 50)"');
+    await openAndSelect(page, R, 'rect');
+    const want = await page.evaluate(elementPoint, { sel: 'rect', x: 80, y: 70 }); // clear of every snap target
+    await dragTo('br', want);
+    must(await source() === R.replace('width="60" height="50"', 'width="60" height="45"'), `the turned rect's corner to its own (80, 70):\n${await source()}`);
+    const got = await page.evaluate(elementPoint, { sel: 'rect', x: 80, y: 70 });
+    must(Math.hypot(got.x - want.x, got.y - want.y) <= 1, `the turned rect's corner landed at ${JSON.stringify(got)}, not under the pointer ${JSON.stringify(want)}`);
+    must((await source()).includes('transform="rotate(30 50 50)"') && (await source()).includes('x="20" y="25"'), 'the turned rect moved its top-left or its transform');
+    // A group of two shapes: its corner scales it, by one leading pair.
+    const G = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <g id="g"><rect x="10" y="12" width="20" height="10" fill="#2a9d8f"/><circle cx="36" cy="24" r="4" fill="#e76f51"/></g>\n</svg>\n`;
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: the group did not open');
+    await showCode(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    await twoFrames(page);
+    const tl0 = await handle('tl');
+    const br0 = await handle('br');
+    const target = { x: tl0.x + 2 * (br0.x - tl0.x), y: tl0.y + 2 * (br0.y - tl0.y) };
+    const gTip = await dragTo('br', target);
+    const g1 = await source();
+    const pair = /<g id="g" transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)">/.exec(g1);
+    must(pair && Number(pair[3]) === 2, `doubling the group did not write a leading translate() scale(2) pair:\n${g1}`);
+    const tl1 = await handle('tl');
+    must(Math.hypot(tl1.x - tl0.x, tl1.y - tl0.y) <= 0.5, `the group's top-left moved from ${JSON.stringify(tl0)} to ${JSON.stringify(tl1)}`);
+    must(gTip === '60 × 32', `the group's tooltip read ${JSON.stringify(gTip)}, not "60 × 32"`);
+    const br1 = await handle('br');
+    await dragTo('br', { x: tl1.x + 1.5 * (br1.x - tl1.x), y: tl1.y + 1.5 * (br1.y - tl1.y) });
+    const g2 = await source();
+    must(/<g id="g" transform="translate\([-\d.]+ [-\d.]+\) scale\(3\)">/.test(g2), `a second corner drag did not rewrite the same pair:\n${g2}`);
+    const c = await handle('center');
+    await dragOnCanvas(page, 'mouse', { x: c.x - 3, y: c.y - 3 }, { x: 0, y: 17 }, 6);
+    const g3 = await source();
+    must(/<g id="g" transform="translate\([-\d.]+ [-\d.]+\) scale\(3\)">/.test(g3) && g3 !== g2, `a move did not edit the leading translate:\n${g3}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move', 'the move is not one entry');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/transform.svg with its <g> selected from the code: the ring dragged to 180° turns rotate(0)
+// into rotate(180) and changes no other byte (the list keeps its three lines); a drag ending at 47°
+// writes 45 (magnetic); the diamond doubles scale(1) to scale(2), and stops at 0.2 and 4; the centre
+// handle moves translate(50 50) by whole units, the tooltip reading "translate(X Y)"; and a line of
+// its local grid passes through the screen point of local (10, 0).
+async function rotateAndScaleHandlesEditTheLabHouse(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const T = readFileSync(join(CORPUS, 'lab/transform.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: lab/transform.svg did not open');
+    await showCode(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    await twoFrames(page);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const handle = async (id) => (await page.evaluate(handlesNow)).find((h) => h.id === id);
+    const pivot = await page.evaluate(screenPoint, { x: 50, y: 50 });
+    const turnTo = async (deg) => {
+      const ring = await handle('rot');
+      must(ring, 'test setup: no ring');
+      const d = Math.hypot(ring.x - pivot.x, ring.y - pivot.y);
+      const a = ((deg - 90) * Math.PI) / 180; // the ring starts straight above the pivot
+      await dragOnCanvas(page, 'mouse', ring, { x: pivot.x + d * Math.cos(a) - ring.x, y: pivot.y + d * Math.sin(a) - ring.y }, 8);
+    };
+    await turnTo(180);
+    must(await source() === T.replace('rotate(0)', 'rotate(180)'), `the ring at 180° did not write rotate(180) alone:\n${await source()}`);
+    await undo.tap();
+    await turnTo(47);
+    must(await source() === T.replace('rotate(0)', 'rotate(45)'), `a turn to 47° did not write 45:\n${await source()}`);
+    await undo.tap();
+    const scaleTo = async (k) => {
+      const d = await handle('scale');
+      must(d, 'test setup: no diamond');
+      await dragOnCanvas(page, 'mouse', d, { x: (k - 1) * (d.x - pivot.x), y: (k - 1) * (d.y - pivot.y) }, 8);
+    };
+    await scaleTo(2);
+    must(await source() === T.replace('scale(1)', 'scale(2)'), `the diamond at twice the distance did not write scale(2):\n${await source()}`);
+    await undo.tap();
+    await scaleTo(0.05);
+    must((await source()).includes('scale(0.2)'), 'the diamond went under 0.2');
+    await undo.tap();
+    await scaleTo(6);
+    must((await source()).includes('scale(4)'), 'the diamond went over 4');
+    await undo.tap();
+    const c = await handle('center');
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    let tipText = null;
+    await dragOnCanvas(page, 'mouse', c, { x: 12.3 * k, y: -7.8 * k }, 8, async (i) => {
+      if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    const m = /translate\((\d+) (\d+)\)/.exec(await source());
+    must(m && await source() === T.replace('translate(50 50)', `translate(${m[1]} ${m[2]})`) && m[1] !== '50', `the centre handle did not move translate(50 50) by whole units:\n${await source()}`);
+    must(tipText === `translate(${m[1]} ${m[2]})`, `the tooltip read ${JSON.stringify(tipText)}, not "translate(${m[1]} ${m[2]})"`);
+    await undo.tap();
+    const p = await page.evaluate(elementPoint, { sel: 'g', x: 10, y: 0 });
+    const lines = await page.evaluate(() => {
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      return [...document.querySelectorAll('.draw-local-grid')].filter((l) => l.style.display !== 'none').map((l) => ['x1', 'y1', 'x2', 'y2'].map((a, i) => Number(l.getAttribute(a)) + (i % 2 ? o.y : o.x)));
+    });
+    const through = lines.some(([x1, y1, x2, y2]) => Math.abs((x2 - x1) * (y1 - p.y) - (x1 - p.x) * (y2 - y1)) / Math.hypot(x2 - x1, y2 - y1) <= 1);
+    must(lines.length > 4 && through, `no local-grid line (of ${lines.length}) passes through local (10, 0) at ${JSON.stringify(p)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const SNAP_DOC = `<svg xmlns="${SVG_NS}" viewBox="0 0 80 60">
+  <rect id="a" x="8" y="6" width="10" height="10" fill="#2a9d8f"/>
+  <circle id="c" cx="62" cy="44" r="5" fill="#e76f51"/>
+</svg>
+`;
+
+// A vertical guide added at x 40 (the Snap sheet, at the artboard's centre) is kept as
+// <draw:state version="1" guides="v 40"/> in a Draw-made <metadata>. A rect dragged so its left
+// edge comes within 8 pt of the guide lands on 40, with a snap line; with Guides off it doesn't;
+// another shape's centre within 8 pt aligns the centres; with the grid shown at step 10, edges land
+// on multiples of 10; the artboard's edge snaps; beyond 8 pt of everything the move is in whole
+// units. The guide's pill drags it (tooltip "x = N"), and dragged off the canvas it is removed, and
+// with it <draw:state>, the Draw-made <metadata> and xmlns:draw: the file comes back byte for byte.
+async function movesSnapToGuidesShapesAndTheGrid(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), SNAP_DOC)).ok, 'test setup: the file did not open');
+    await twoFrames(page);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    // A drag on the shape itself (its edges and centre snap), never on the centre handle of a
+    // selection (only the centre snaps there): nothing is selected before each.
+    const drag = async (...args) => {
+      const x = page.locator('.draw-ctx-btn[aria-label="Deselect"]');
+      if (await x.count()) await x.tap();
+      return dragOnCanvas(page, ...args);
+    };
+    const sheet = async (...labels) => {
+      await page.locator('.draw-snap-btn').tap();
+      for (const l of labels) await page.locator('.draw-snap .ds-btn', { hasText: l }).first().tap();
+      await page.locator('.draw-modal-done').tap();
+    };
+    await sheet('Add vertical guide');
+    const withGuide = SNAP_DOC.replace('viewBox="0 0 80 60">\n', 'viewBox="0 0 80 60" xmlns:draw="https://mmaggitti.github.io/draw/ns">\n  <metadata draw:made="true"><draw:state version="1" guides="v 40"/></metadata>\n');
+    must(await source() === withGuide, `the guide is not kept as <draw:state version="1" guides="v 40"/> in a Draw-made <metadata>:\n${await source()}`);
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    const rectX = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('x')));
+    const rectY = () => page.evaluate(() => Number(document.querySelector('.draw-host').shadowRoot.querySelector('#a').getAttribute('y')));
+    // Left edge from 8 to 40 − 5 pt: within 8 pt of the guide.
+    const a = await page.evaluate(drawnCentre, '#a');
+    let lines = 0;
+    await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8, async (i) => {
+      if (i === 8) lines = await page.evaluate(() => [...document.querySelectorAll('.draw-snap')].filter((l) => l.style.display !== 'none').length);
+    });
+    must(await rectX() === 40, `the rect's left edge landed on ${await rectX()}, not the guide at 40`);
+    must(lines >= 1, 'no snap line while snapped');
+    await undo.tap();
+    await sheet('Guides', 'Artboard'); // the artboard's centre is at 40 too
+    await drag('mouse', a, { x: 32 * k - 5, y: 0.2 * k }, 8);
+    must(await rectX() === 39, `with Guides off the rect went to ${await rectX()}, not 39 (whole units)`);
+    await undo.tap();
+    await sheet('Guides', 'Artboard');
+    // The circle's centre is at y 44: the rect's centre (y 11) dragged to within 8 pt aligns.
+    await drag('mouse', a, { x: 5.4 * k, y: 33 * k - 6 }, 8);
+    must(await rectY() + 5 === 44, `the rect's centre went to y ${await rectY() + 5}, not the circle's 44`);
+    await undo.tap();
+    // The grid at step 10: edges on multiples of 10.
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Grid shown' }).tap();
+    await page.locator('.draw-snap-step input').fill('10');
+    await page.locator('.draw-modal-done').tap();
+    must((await source()).includes('grid="10"'), 'the grid step is not kept in <draw:state>');
+    await drag('mouse', a, { x: 13.3 * k, y: 7.4 * k }, 8);
+    must((await rectX()) % 10 === 0 || (await rectX() + 10) % 10 === 0, `on the grid, the rect's x is ${await rectX()}`);
+    await undo.tap();
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap .ds-btn', { hasText: 'Grid shown' }).tap();
+    await page.locator('.draw-snap-step input').fill('');
+    await page.locator('.draw-modal-done').tap();
+    // The artboard's top edge (y 0): the rect's top edge from 6 to within 8 pt of it.
+    await drag('mouse', a, { x: 11.3 * k, y: -6 * k + 4 }, 8);
+    must(await rectY() === 0, `the rect's top landed on ${await rectY()}, not the artboard's edge`);
+    await undo.tap();
+    // Beyond 8 pt of everything: whole units.
+    await drag('mouse', a, { x: 11.3 * k, y: 10.3 * k }, 8);
+    const [x, y] = [await rectX(), await rectY()];
+    must(x === 19 && y === 16, `beyond every target the rect went to (${x}, ${y}), not (19, 16)`);
+    await undo.tap();
+    // The pill drags the guide in whole units; off the canvas it is removed, and the file is back.
+    const pill = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0]);
+    const pc = { x: pill.x + pill.width / 2, y: pill.y + pill.height / 2 };
+    let tipText = null;
+    await dragOnCanvas(page, 'mouse', pc, { x: 5.4 * k, y: 30 }, 8, async (i) => {
+      if (i === 8) tipText = await page.evaluate(() => document.querySelector('.draw-tip:not([hidden])')?.textContent ?? null);
+    });
+    must((await source()).includes('guides="v 45"'), `the pill did not drag the guide to 45:\n${await source()}`);
+    must(tipText === 'x = 45', `the pill's tooltip read ${JSON.stringify(tipText)}`);
+    const host = await page.locator('.draw-host').boundingBox();
+    const p2 = await page.evaluate(() => [...document.querySelectorAll('.draw-pill')].filter((p) => p.style.display !== 'none').map((p) => p.getBoundingClientRect().toJSON())[0]);
+    await dragOnCanvas(page, 'mouse', { x: p2.x + p2.width / 2, y: p2.y + p2.height / 2 }, { x: host.x + host.width + 30 - (p2.x + p2.width / 2), y: 0 }, 8);
+    must(await source() === SNAP_DOC, `a guide dragged off the canvas did not give the file back:\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Remove guide', `the last entry is ${await undo.getAttribute('aria-label')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
