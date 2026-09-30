@@ -1768,6 +1768,21 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
     run: drawTests('editor.test.ts'), expect: /✖ an edit reaches the canvas, then the code/,
   },
+  {
+    id: 'B333', what: 'Bring forward moves one already last (it records an entry when nothing should move)',
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (past === null || moving.has(past)) continue;', to: '    if (moving.has(past!)) continue;',
+    run: drawTests('editor.test.ts'), expect: /✖ Bring forward and Send back swap each selected element/,
+  },
+  {
+    id: 'B334', what: 'a nudge (or Delete) acts while a field has focus',
+    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = '.draw-code';",
+    run: drawTests('keys.test.ts'), expect: /✖ no key acts in a field, in the code view, under a sheet/,
+  },
+  {
+    id: 'B335', what: 'every arrow repeat is its own history entry',
+    file: 'projects/draw/src/keys.ts', from: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n', to: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n      ed.nudgeEnd();\n',
+    run: drawTests('keys.test.ts'), expect: /✖ a held arrow with its repeats, and a second arrow while it is held, is one nudge/,
+  },
 ];
 
 const args = process.argv.slice(2);

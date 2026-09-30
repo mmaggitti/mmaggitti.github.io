@@ -16,6 +16,7 @@ import { writeClipboard } from '../platform/clipboard.ts';
 import { readPref, writePref } from '../platform/prefs.ts';
 import { Views } from './views.ts';
 import { hitPath } from '../canvas/stage.ts';
+import { installKeys } from '../keys.ts';
 import type { NodeId } from '../../../../engine/model/doc.ts';
 import { Canvas } from './Canvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
@@ -147,12 +148,15 @@ export function App() {
     // that opened this tab, so it opens only when Mark taps Open (the Open link sheet).
     const link = () => void workspace.offerLink(fragment(), clearFragment);
     window.addEventListener('keydown', keys);
+    // Delete, Escape, the arrows and ⌘A on the canvas selection (src/keys.ts).
+    const offKeys = installKeys(editor, window, () => document.querySelector('.draw-modal') !== null);
     window.addEventListener('paste', paste);
     window.addEventListener('pagehide', flush);
     window.addEventListener('hashchange', link);
     document.addEventListener('visibilitychange', hidden);
     return () => {
       window.removeEventListener('keydown', keys);
+      offKeys();
       window.removeEventListener('paste', paste);
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('hashchange', link);

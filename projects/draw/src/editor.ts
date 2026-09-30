@@ -42,7 +42,8 @@ import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
 import { EMPTY, coordGuides, gridModel, gridStep, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type OverlayModel, type Quad } from './interact/overlay-model.ts';
 import { snapStep, stepDecimals, toStep } from './interact/snap.ts';
 import { applyPlan, movesBy, planMove, ROOT_MOVE, type Plan } from '../../../engine/geometry/write.ts';
-import { isThin, thinHit } from '../../../engine/geometry/hit.ts';
+import { documentOrder, isThin, thinHit } from '../../../engine/geometry/hit.ts';
+import { remove, restack, ROOT_DELETE } from './interact/structure.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
 import { isLocked } from '../../../engine/model/draw-state.ts';
@@ -171,6 +172,7 @@ export class Editor {
   readonly grid: Store<boolean> = createStore(false);
   /** Select more: taps and marquees add to the selection (a ContextBar toggle). */
   readonly selectMore: Store<boolean> = createStore(false);
+  #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -302,6 +304,7 @@ export class Editor {
     session.subscribe(() => {
       const kept = [...this.selection.get()].filter((id) => attached(session.doc, id));
       if (kept.length !== this.selection.get().size) this.selection.set(new Set(kept));
+      if (!kept.length && this.selectMore.get()) this.selectMore.set(false);
       this.#show();
     });
     // A drag's frames change no store: a scrub renders nothing in React until it ends.
@@ -447,6 +450,7 @@ export class Editor {
       this.selection.set(next);
       this.#ports.code.select(next);
     }
+    if (!next.size && this.selectMore.get()) this.selectMore.set(false); // it stays on until the selection empties
     this.#show();
   }
 
@@ -522,7 +526,7 @@ export class Editor {
    */
   pointerDown(at: Point, hits: readonly NodeId[], mods: { add: boolean }): void {
     const doc = this.#doc;
-    if (!doc || this.#live || this.#gesture) return;
+    if (!doc || this.#live || this.#gesture || this.#nudge) return;
     const all = this.#withThin(at, hits);
     const target = all.map((id) => selectionTarget(doc, id)).find((t): t is NodeId => t !== null && !isLocked(doc, t)) ?? null;
     this.#gesture = { at0: at, at, target, add: mods.add || this.selectMore.get(), mode: 'pending', move: null };
@@ -559,15 +563,16 @@ export class Editor {
     this.#show();
   }
 
-  /** Is a pointer gesture or a scrub under way (Escape cancels one)? */
+  /** Is a pointer gesture, a scrub or a nudge under way (Escape cancels one)? */
   get busy(): boolean {
-    return !!this.#live || !!this.#gesture?.move;
+    return !!this.#live || !!this.#gesture?.move || !!this.#nudge;
   }
 
   /** Escape: cancel a live drag if one is running, else deselect. */
   escape(): void {
     if (this.#gesture) return this.pointerCancel();
     if (this.#live) return this.#endLive(false);
+    if (this.#nudge) return this.nudgeEnd(false);
     this.deselect();
   }
 
@@ -576,6 +581,50 @@ export class Editor {
     if (!this.#doc || this.#live || this.#gesture) return;
     this.focus.set(null);
     this.select(this.#leaves(null));
+  }
+
+  // ── structure: Bring forward, Send back, Delete ────────────────────────────────────────────
+
+  /** Bring forward: each selected element after its next element sibling, with its leading whitespace. One entry; nothing to do records nothing. */
+  forward(): void {
+    this.#restack('Bring forward', 1);
+  }
+
+  /** Send back: each selected element before its previous element sibling, with its leading whitespace. */
+  back(): void {
+    this.#restack('Send back', -1);
+  }
+
+  /** Delete the selected elements, each with its leading whitespace, in one entry. The root is refused. */
+  delete(): void {
+    const doc = this.#doc;
+    const sel = [...this.selection.get()];
+    if (!doc || !sel.length || this.#live || this.#gesture) return;
+    if (sel.includes(doc.root)) return void this.notice.set(ROOT_DELETE);
+    const ids = this.#acted(sel);
+    if (!ids?.length || !this.#dispatch('Delete', (apply) => remove(doc, ids, apply))) return;
+    this.focus.set(null);
+    this.select([]);
+  }
+
+  #restack(label: string, dir: 1 | -1): void {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (ids?.length) this.#dispatch(label, (apply) => restack(doc, ids, dir, apply));
+  }
+
+  // What a structure command acts on: the attached selected elements (never the root), none inside
+  // another that is acted on, in document order. A locked one refuses the command, and says so.
+  #acted(sel: readonly NodeId[]): NodeId[] | null {
+    const doc = this.#doc!;
+    const order = documentOrder(doc);
+    const ids = sel.filter((id) => id !== doc.root && order.has(id) && !sel.some((o) => o !== id && isInside(doc, id, o)));
+    if (ids.some((id) => isLocked(doc, id))) {
+      this.notice.set(LOCKED);
+      return null;
+    }
+    return ids.sort((a, b) => order.get(a)! - order.get(b)!);
   }
 
   // A tap: the target is selected (with Select more, or ⇧/⌘, toggled); empty canvas deselects
@@ -654,36 +703,37 @@ export class Editor {
   // → its units (from the canvas's own measurement, so a CSS transform on an ancestor still lands
   // under the finger), and one drag for the whole gesture.
   #startMove(g: Gesture, selection: NodeId[], label: string): void {
+    g.move = this.#openMove(selection, label);
+    g.mode = g.move ? 'move' : 'none';
+  }
+
+  // The move's state, or null (a read-only drawing, the root alone, a locked element: the notice
+  // says why).
+  #openMove(selection: NodeId[], label: string, step?: number): MoveState | null {
     const doc = this.#doc!;
+    if (!this.#writable()) return null;
     const ids = selection.filter((id) => id !== doc.root && attached(doc, id) && !selection.some((o) => o !== id && isInside(doc, id, o)));
     if (!ids.length || !this.#session) {
       if (selection.includes(doc.root)) this.notice.set(ROOT_MOVE);
-      g.mode = 'none';
-      return;
+      return null;
     }
     const locked = ids.find((id) => isLocked(doc, id));
     if (locked !== undefined) {
       this.notice.set(LOCKED);
-      g.mode = 'none';
-      return;
+      return null;
     }
     const parents = [...new Set(ids.map((id) => doc.nodes.get(id)!.parent!))];
     const measured = this.#ports.canvas.measure([doc.root, ...parents]);
     const root = measured.get(doc.root)?.toHost ?? (this.#box ? rootToHostMatrix(this.#box, this.#viewport, this.#M) : null);
     const rootInv = root && invert(linear(root));
-    if (!root || !rootInv) {
-      g.mode = 'none';
-      return;
-    }
+    if (!root || !rootInv) return null;
     const toParent = new Map<NodeId, Affine | null>();
     for (const p of parents) {
       const m = measured.get(p)?.toHost;
       toParent.set(p, m ? multiply(invert(linear(m)) ?? [0, 0, 0, 0, 0, 0], linear(root)) : null);
     }
     const px = Math.sqrt(Math.abs(root[0] * root[3] - root[1] * root[2]));
-    const step = snapStep(px);
-    g.mode = 'move';
-    g.move = { drag: this.#session.drag(label), ids, toParent, rootInv, step, delta: null, refused: null };
+    return { drag: this.#session.drag(label), ids, toParent, rootInv, step: step ?? snapStep(px), delta: null, refused: null };
   }
 
   // The delta from where the pointer went down (so the slop's first 5 px count), in root units,
@@ -719,10 +769,48 @@ export class Editor {
     const m = g.move;
     if (!m) return;
     g.move = null;
+    this.#finishMove(m, commit);
+  }
+
+  #finishMove(m: MoveState, commit: boolean): void {
     if (commit) m.drag.commit();
     else m.drag.cancel();
     this.#bump();
     this.#changed();
+  }
+
+  // ── the arrow keys: a nudge (src/keys.ts) ──────────────────────────────────────────────────
+
+  /**
+   * An arrow went down (or repeated): the selection moves (dx, dy) root user units further from
+   * where it was when the first arrow went down, re-planned from that document. The drag stays open
+   * until nudgeEnd (the last arrow up), so a press-and-hold is one history entry.
+   */
+  nudge(dx: number, dy: number): void {
+    if (!this.#doc || this.#live || this.#gesture) return;
+    if (!this.#nudge) {
+      const move = this.#openMove([...this.selection.get()], 'Nudge', 1);
+      if (!move) return;
+      this.#nudge = { move, d: { x: 0, y: 0 } };
+    }
+    const n = this.#nudge;
+    n.d = { x: n.d.x + dx, y: n.d.y + dy };
+    this.#applyMove(n.move, n.d);
+    this.#show();
+  }
+
+  /** The last arrow went up: the nudge is kept as one entry (or, `commit` false, undone). */
+  nudgeEnd(commit = true): void {
+    const n = this.#nudge;
+    if (!n) return;
+    this.#nudge = null;
+    this.#finishMove(n.move, commit);
+    this.#show();
+  }
+
+  /** Is a nudge open (an arrow held)? */
+  get nudging(): boolean {
+    return this.#nudge !== null;
   }
 
   #endMarquee(g: Gesture): void {
@@ -808,7 +896,7 @@ export class Editor {
 
   /** Run one named transaction; a refused edit becomes the notice and changes nothing. */
   #dispatch(label: string, build: Build): boolean {
-    if (!this.#session || this.#live || this.#gesture?.move || !this.#writable()) return false;
+    if (!this.#session || this.#live || this.#gesture?.move || this.#nudge || !this.#writable()) return false;
     try {
       this.#session.dispatch(label, build);
       return true;
@@ -918,7 +1006,7 @@ export class Editor {
   // value before the scrub, and the release commits one history entry.
   scrubStart(block: ViewBlock, token: ViewToken): void {
     const doc = this.#doc;
-    if (!doc || this.#live || !this.#session) return;
+    if (!doc || this.#live || this.#nudge || !this.#session) return;
     const hit = this.#resolve(block, token);
     const t = hit?.bt.token;
     if (!hit || t?.kind !== 'number' || !this.#writable()) return;
@@ -939,7 +1027,7 @@ export class Editor {
   }
 
   #openSheet(sheet: TokenSheet): void {
-    if (!this.#session || this.#live || !this.#writable()) return;
+    if (!this.#session || this.#live || this.#nudge || !this.#writable()) return;
     this.#live = { drag: this.#session.drag(labelFor('Set', sheet.token)), ref: sheet.ref, token: sheet.token, last: null };
     this.sheet.set(sheet);
     this.#bump();
@@ -1036,7 +1124,7 @@ export class Editor {
     }
     const index = el(doc, parent).children.indexOf(node);
     try {
-      if (!this.#session || this.#live) throw new Error('Finish the edit in progress first');
+      if (!this.#session || this.#live || this.#nudge) throw new Error('Finish the edit in progress first');
       this.#session.dispatch('Edit source', (apply) => {
         apply(opRemove(doc, node));
         made.forEach((id, i) => apply(opInsert(doc, id, parent, index + i)));

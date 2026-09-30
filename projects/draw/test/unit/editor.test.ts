@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { Editor, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -901,4 +901,115 @@ test('a cancelled move restores the file byte for byte and records nothing; a lo
   const k = hostAt(r, 15, 65);
   drag(r, k, { x: k.x + 30, y: k.y }, [idOf(r, 'k')]);
   assert.equal(r.editor.source(), SHAPES, 'selected from the code, it still refuses a move on the canvas');
+});
+
+// ── structure: Bring forward, Send back, Delete ────────────────────────────────────────────────
+
+/** The ids of the root's element children, in order. */
+const stack = (r: Rig) => (doc(r).nodes.get(doc(r).root) as ElementNode).children.map((c) => doc(r).nodes.get(c)!).filter((n): n is ElementNode => n.kind === 'element').map((n) => attr(n, 'id'));
+const spaceBefore = (r: Rig, id: NodeId): NodeId => {
+  const kids = (doc(r).nodes.get(doc(r).nodes.get(id)!.parent!) as ElementNode).children;
+  return kids[kids.indexOf(id) - 1];
+};
+
+test('Bring forward and Send back swap each selected element, with its leading whitespace, past its next or previous element sibling; one entry each, patching only what moved', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const a = idOf(r, 'a');
+  const ws = spaceBefore(r, a);
+  r.editor.select([a]);
+  r.log.length = 0;
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['b', 'a', 'g', 'k', 'l']);
+  assert.equal(r.editor.source(), SHAPES.replace('  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <rect id="b" x="40" y="10" width="10" height="10"/>', '  <rect id="b" x="40" y="10" width="10" height="10"/>\n  <rect id="a" x="10" y="10" width="10" height="10"/>'), 'its indentation moves with it');
+  assert.equal(r.editor.history.get().undoLabel, 'Bring forward');
+  assert.deepEqual(r.log.filter((l) => l.startsWith('canvas')), [`canvas subtree ${a}`, `canvas subtree ${ws}`], 'the canvas patches the element and its whitespace, last first');
+  assert.ok(!r.log.includes('code set') && r.log.includes(`code place ${a}:start`), 'the code places its blocks; the listing is not rebuilt');
+  assert.equal(text(r), r.editor.source(), 'the code shows exactly the document');
+  assert.deepEqual(sel(r), [a], 'it stays selected');
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(text(r), SHAPES);
+
+  // Several keep their order among themselves; one already last (first) stays.
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['g', 'a', 'b', 'k', 'l']);
+  r.editor.forward();
+  r.editor.forward();
+  assert.deepEqual(stack(r), ['g', 'k', 'l', 'a', 'b']);
+  const entries = () => r.editor.history.get().undoLabel;
+  const before = r.editor.source();
+  r.editor.undo();
+  r.editor.redo();
+  r.editor.forward();
+  assert.equal(r.editor.source(), before, 'already last: nothing moves');
+  r.editor.undo();
+  assert.deepEqual(stack(r), ['g', 'k', 'a', 'b', 'l'], 'and nothing was recorded (undo goes back one real move)');
+  r.editor.redo();
+  r.editor.back();
+  assert.deepEqual(stack(r), ['g', 'k', 'a', 'b', 'l']);
+  assert.equal(entries(), 'Send back');
+  assert.equal(text(r), r.editor.source());
+
+  // Back: before the previous element and its whitespace. At the front, nothing to do.
+  const r2 = rig();
+  r2.editor.open(SHAPES);
+  r2.editor.select([idOf(r2, 'b')]);
+  r2.editor.back();
+  assert.equal(r2.editor.source(), SHAPES.replace('  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <rect id="b" x="40" y="10" width="10" height="10"/>', '  <rect id="b" x="40" y="10" width="10" height="10"/>\n  <rect id="a" x="10" y="10" width="10" height="10"/>'));
+  r2.editor.back();
+  assert.deepEqual(stack(r2), ['b', 'a', 'g', 'k', 'l']);
+  r2.editor.undo();
+  assert.equal(r2.editor.source(), SHAPES, 'the second Back recorded nothing');
+  assert.equal(r2.editor.history.get().canUndo, false);
+  assert.equal(text(r2), SHAPES);
+
+  // Inside a group: past its siblings only. The root, and a locked element, are refused.
+  r2.editor.select([doc(r2).root]);
+  r2.editor.forward();
+  r2.editor.back();
+  assert.equal(r2.editor.source(), SHAPES, 'the root has no siblings to pass');
+  r2.editor.select([idOf(r2, 'k')]);
+  r2.editor.forward();
+  assert.equal(r2.editor.notice.get(), LOCKED);
+  assert.equal(r2.editor.source(), SHAPES);
+  assert.equal(r2.editor.history.get().canUndo, false);
+});
+
+test('Delete takes the selection away with its leading whitespace, in one entry; the root and locked elements are refused', () => {
+  const r = rig();
+  r.editor.open(SHAPES);
+  const [a, g, c] = ['a', 'g', 'c'].map((id) => idOf(r, id));
+  const ws = spaceBefore(r, a);
+  r.editor.select([a, c]);
+  r.log.length = 0;
+  r.editor.delete();
+  assert.equal(r.editor.source(), SHAPES.replace('\n  <rect id="a" x="10" y="10" width="10" height="10"/>', '').replace('<circle id="c" cx="70" cy="70" r="5"/>', ''));
+  assert.deepEqual(stack(r), ['b', 'g', 'k', 'l']);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+  assert.deepEqual(sel(r), [], 'nothing is selected');
+  assert.deepEqual(r.log.filter((l) => l.startsWith('canvas')).sort(), [`canvas subtree ${a}`, `canvas subtree ${c}`, `canvas subtree ${ws}`].sort(), 'the canvas takes away only what was deleted');
+  assert.ok(!r.log.includes('code set'), 'the listing is not rebuilt');
+  assert.equal(text(r), r.editor.source());
+  r.editor.undo();
+  assert.equal(r.editor.source(), SHAPES, 'one undo restores the file byte for byte');
+  assert.equal(text(r), SHAPES);
+
+  // A group and something inside it: the group goes, with everything in it.
+  r.editor.select([g, c]);
+  r.editor.delete();
+  assert.deepEqual(stack(r), ['a', 'b', 'k', 'l']);
+  r.editor.undo();
+
+  // The root, and a locked element, are refused and say why; nothing changes.
+  r.editor.select([doc(r).root]);
+  r.editor.delete();
+  assert.equal(r.editor.notice.get(), 'The root <svg> can’t be deleted.');
+  r.editor.select([idOf(r, 'b'), idOf(r, 'k')]);
+  r.editor.delete();
+  assert.equal(r.editor.notice.get(), LOCKED);
+  assert.equal(r.editor.source(), SHAPES);
+  assert.equal(r.editor.history.get().canUndo, false, 'the refusals recorded nothing');
+  assert.equal(r.editor.history.get().redoLabel, 'Delete', 'and left the undone Delete to redo');
 });
