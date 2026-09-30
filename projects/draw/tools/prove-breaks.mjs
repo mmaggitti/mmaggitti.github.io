@@ -2035,7 +2035,12 @@ const BREAKS = [
   },
   {
     id: 'B384', what: 'F1: any element marked draw:made counts as Draw’s own (a shape so marked leaves the As-is export)',
-    file: 'engine/model/draw-ns.ts', from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some(', to: '  return n.attrs.some(',
+    // P1-M2: re-anchored. The exports now also ask isHolderKind (a gradient Draw made stays), which
+    // alone kept a marked shape, so the fault is planted in both: any element marked draw:made is
+    // Draw's, and a holder unless it is a gradient.
+    file: 'engine/model/draw-ns.ts',
+    from: '  return n.ns === NS.svg && MADE_KINDS.has(n.local) && n.attrs.some((a) => a.ns === DRAW_NS && a.local === \'made\' && a.raw === \'true\');\n}\n\n/** Is this a kind Draw makes only to hold things (a <metadata> or <defs>, in the SVG namespace)? The exports ask before its draw:made goes. */\nexport function isHolderKind(n: ElementNode): boolean {\n  return n.ns === NS.svg && MADE_HOLDERS.has(n.local);\n',
+    to: '  return n.attrs.some((a) => a.ns === DRAW_NS && a.local === \'made\' && a.raw === \'true\');\n}\n\n/** Is this a kind Draw makes only to hold things (a <metadata> or <defs>, in the SVG namespace)? The exports ask before its draw:made goes. */\nexport function isHolderKind(n: ElementNode): boolean {\n  return n.local !== \'linearGradient\' && n.local !== \'radialGradient\';\n',
     run: engineTests('draw-state.test.ts'), expect: /✖ only Draw’s own empty <metadata> is taken away/,
   },
   {
