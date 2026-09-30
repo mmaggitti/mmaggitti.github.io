@@ -772,6 +772,12 @@ async function showCode(page) {
   await page.locator('.draw-code .cv-block').first().waitFor();
 }
 
+// The ContextBar's More sheet (Edit source, Select all), for what is selected now.
+async function openMore(page) {
+  await page.locator('.draw-ctx-btn[aria-label="More"]').tap();
+  await page.locator('.draw-more').waitFor();
+}
+
 // Two frames: the page has laid out and delivered its ResizeObserver callbacks (the canvas's view
 // follows its new size there), which a forced layout alone does not wait for.
 const twoFrames = (page) => page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
@@ -861,7 +867,9 @@ async function phoneRulesOnTheNewLayout(browser, origin, height) {
     await page.locator('.draw-modal-done').tap();
     const c2 = await circleCentre(page); // the canvas fitted again when the sheet opened
     await page.touchscreen.tap(c2.x, c2.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await rules('the More sheet');
+    await page.locator('.draw-more .draw-action').tap();
     await page.locator('.draw-source').waitFor();
     await rules('Edit source');
     await page.locator('.draw-modal .ds-btn', { hasText: 'Cancel' }).tap();
@@ -905,8 +913,9 @@ async function zoomKeepsThePointUnderIt(browser, origin) {
 // (b) The page never zooms: a two-finger pinch on the canvas (real touch in Chromium) zooms the
 // drawing, and the page's visual viewport stays at scale 1. Safari's own pinch events are
 // cancelled on the canvas too. So is a pinch anywhere else in the app: on the TopBar, the sheet's
-// handle and tabs, the code, the ContextBar and the ToolRail the page stays at scale 1 and Safari's
-// gesture events are cancelled (the pinch is real touch, so Chromium only; WebKit can't make it).
+// handle and tabs, the code, the ContextBar and its selection buttons, the ToolRail and the canvas's
+// Grid button the page stays at scale 1 and Safari's gesture events are cancelled (the pinch is
+// real touch, so Chromium only; WebKit can't make it).
 async function pageNeverZooms(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const gesturesCancelledOn = (sel) => page.evaluate((sel) => ['gesturestart', 'gesturechange'].map((type) => {
@@ -914,6 +923,8 @@ async function pageNeverZooms(browser, origin) {
       document.querySelector(sel).dispatchEvent(e);
       return e.defaultPrevented;
     }), sel);
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y); // a selection, so the ContextBar shows its buttons
     const before = await page.evaluate(() => window.drawTest.view().scale);
     await twoFingers(browser, page, { x: 180, y: 400 }, { x: 260, y: 400 }, { x: 60, y: 400 }, { x: 380, y: 400 }, 16);
     await page.waitForTimeout(300);
@@ -929,9 +940,10 @@ async function pageNeverZooms(browser, origin) {
     must(r.view > before * 2, `test setup: the pinch did not reach the canvas (view scale ${before} → ${r.view})`);
     must(r.prevented.every(Boolean), `Safari's gesture events are not cancelled on the canvas (${r.prevented})`);
     await showCode(page);
-    for (const sel of ['.draw-bar', '.draw-handle', '.draw-tabs', '.draw-code', '.draw-context', '.draw-rail']) {
+    must(await page.locator('.draw-ctx-btn').count() === 6, 'test setup: the ContextBar shows no selection buttons');
+    for (const sel of ['.draw-bar', '.draw-handle', '.draw-tabs', '.draw-code', '.draw-context', '.draw-rail', '.draw-ctx-btn', '.draw-grid-btn']) {
       if (chromium(browser)) {
-        const b = await page.locator(sel).boundingBox();
+        const b = await page.locator(sel).first().boundingBox();
         const m = { x: b.x + b.width / 2, y: b.y + Math.min(b.height / 2, 60) };
         await twoFingers(browser, page, { x: m.x - 20, y: m.y }, { x: m.x + 20, y: m.y }, { x: m.x - 120, y: m.y }, { x: m.x + 120, y: m.y }, 16);
         await page.waitForTimeout(300);
@@ -1123,10 +1135,14 @@ async function editSourceRoundTrip(browser, origin) {
     await root.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await root.tap();
     must(await page.locator('.draw-label').textContent() === '<svg>', "test setup: a tap on the root's code did not select it");
-    must(await page.locator('.draw-action').count() === 0, 'Edit source is offered for the root <svg>, which it cannot replace');
+    await openMore(page);
+    must(await page.locator('.draw-more .draw-action').count() === 0, 'Edit source is offered for the root <svg>, which it cannot replace');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-more').waitFor({ state: 'detached' });
     const c = await circleCentre(page);
     await page.touchscreen.tap(c.x, c.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await page.locator('.draw-more .draw-action').tap();
     const area = page.locator('.draw-source');
     const text = await area.inputValue();
     must(text === '<circle cx="212" cy="134" r="42" fill="#ffd166"/>', `Edit source shows ${JSON.stringify(text)}`);
@@ -1153,7 +1169,8 @@ async function editSourceRoundTrip(browser, origin) {
     // A name the DOM refuses to create (data-😀: the data-* pattern admits it) is kept in the file and
     // left off the canvas, which goes on drawing: it must never blank mid-edit (P1-M0 review, F4).
     await page.touchscreen.tap(c.x, c.y);
-    await page.locator('.draw-action').tap();
+    await openMore(page);
+    await page.locator('.draw-more .draw-action').tap();
     await area.fill('<circle cx="212" cy="134" r="42" fill="#ffd166" data-\u{1F600}="1"/>');
     await page.locator('.draw-modal .ds-btn', { hasText: 'Apply' }).tap();
     await page.locator('.draw-modal').waitFor({ state: 'detached' });
@@ -2848,16 +2865,29 @@ async function oneFinger(browser, page, at, dx) {
   await page.waitForTimeout(50);
 }
 
-// On the canvas, a touch that moves less than 5pt is a tap, which selects what is under it; one
-// that moves further is a drag, which (with P0's Select tool) selects nothing.
+// On the canvas, a touch that moves less than 5pt is a tap, which selects what is under it and
+// changes nothing. One that moves further is a drag (P1-M1): on a shape it selects the shape and
+// moves it by whole units (the snap step at fit: the drawn root's getScreenCTM().a px a unit); on
+// empty canvas it draws a marquee, here too thin to take anything.
 async function aShortMoveOnTheCanvasIsATap(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
-    const c = await circleCentre(page);
+    const at = await circleCentre(page);
+    const c = { x: Math.round(at.x), y: Math.round(at.y) }; // whole points: the 8pt stays 8pt
     const selected = () => page.locator('.draw-sel').textContent();
-    await oneFinger(browser, page, c, 8);
-    must(await selected() === 'nothing selected', 'a touch that moved 8pt selected the circle: it was taken for a tap');
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const e = await page.evaluate(screenPoint, { x: 6, y: 6 }); // inside the viewBox, outside the frame: nothing drawn
+    await oneFinger(browser, page, { x: Math.round(e.x), y: Math.round(e.y) }, 8);
+    must(await selected() === 'nothing selected', 'a touch that moved 8pt on empty canvas selected something');
+    must(await source() === SAMPLE, 'a touch that moved 8pt on empty canvas changed the file');
     await oneFinger(browser, page, c, 4);
     must(await selected() === '<circle>', 'a touch that moved 4pt did not select the circle: it was taken for a drag');
+    must(await source() === SAMPLE, 'a touch that moved 4pt changed the file');
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const k = await page.evaluate(() => document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().a);
+    const units = Math.round(8 / k);
+    await oneFinger(browser, page, c, 8);
+    must(await source() === SAMPLE.replace('cx="212"', `cx="${212 + units}"`), `a touch that moved 8pt did not move the circle by ${units} whole unit(s) (${k.toFixed(3)} px a unit): it was taken for a tap`);
+    must(await selected() === '<circle>', 'a touch that moved 8pt on the circle did not select it');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

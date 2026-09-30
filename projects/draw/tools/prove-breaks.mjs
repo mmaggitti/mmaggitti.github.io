@@ -518,7 +518,7 @@ const BREAKS = [
   },
   {
     id: 'B86', what: "the canvas's hit test finds nothing", slow: true,
-    file: 'projects/draw/src/canvas/stage.ts', from: 'ed.tapCanvas(this.#renderer.idFor(hit) ?? null);', to: 'ed.tapCanvas(null);',
+    file: 'projects/draw/src/canvas/stage.ts', from: '      const id = this.#renderer.idFor(el);', to: '      const id = this.#renderer.idFor(null);',
     run: SITE_E2E, expect: /tapping the circle (did not select it|drew no outline)/,
   },
   {
@@ -643,7 +643,7 @@ const BREAKS = [
     run: drawTests('editor.test.ts'), expect: /✖ Edit source is offered for one element, never the root/,
   },
   {
-    id: 'B111', what: 'the ContextBar offers Edit source whatever is selected', slow: true,
+    id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true,
     file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
     run: SITE_E2E, expect: /Edit source is offered for the root <svg>/,
   },
@@ -1207,7 +1207,7 @@ const BREAKS = [
     // (A wider SLOP itself is caught first, by viewport.test.ts in the build: B275.)
     id: 'B222', what: 'a touch that moves 8pt on the canvas is still a tap (the canvas reads a move at half its distance)', slow: true,
     file: 'projects/draw/src/canvas/stage.ts', from: 'x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp', to: 'x: (e.clientX - box.left) / 2, y: (e.clientY - box.top) / 2, t: e.timeStamp',
-    run: SITE_E2E, expect: /a touch that moved 8pt selected the circle/,
+    run: SITE_E2E, expect: /a touch that moved 8pt did not move the circle/,
   },
   {
     id: 'B223', what: "the code bar's buttons fall under the tap floor", slow: true,

@@ -421,6 +421,14 @@
 }
 .draw-strip-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-weight: 500; }
 .draw-done, .draw-action { font-size: var(--text-sm); }
+/* The selection's icon buttons: exactly 44 pt wide, so six and the label fit at 440 pt. */
+.draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }
+.draw-ctx-btn svg { width: 1.5rem; height: 1.5rem; }
+.draw-ctx-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.draw-ctx-btn:disabled { color: var(--text-muted); opacity: 0.5; }
+/* The More sheet: one full-width row per command, at least 44 pt tall. */
+.draw-more { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-more .ds-btn { flex: 0 0 auto; width: 100%; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; }
 .draw-toast {
   position: absolute;
   left: var(--space-3);
