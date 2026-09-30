@@ -46,7 +46,10 @@
 // the diamond on the lab's house) and snapping to guides, shapes, the artboard and the grid; then
 // Duplicate (fresh ids, its own references), Group and Ungroup keeping every shape in place, the
 // Layers tab (hide, lock, rename), Draw's own state kept out of As-is, Copy and Clean, and the phone
-// rules on the selection tools.
+// rules on the selection tools. The P1-M1 review adds: a drag of 2,000 selected shapes keeping up,
+// the Grid step field as one history entry, the Snap sheet reachable over the canvas on the phone,
+// Ungroup leaving a clip where it clips, the Snap toggles kept across a reload, and a file's own
+// !important CSS unable to move its drawing off the paper.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
