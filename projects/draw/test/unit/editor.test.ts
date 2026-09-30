@@ -1181,6 +1181,39 @@ test('Group refuses to nest a shape past the depth the parser opens, and every f
   assert.equal(groups, 255, 'the rect closes itself: 255 groups around it (the last at depth 256), then a refusal');
 });
 
+test('Ungroup gives the group’s transform only to the children drawn where they sit: a clip, defs and a gradient move out as they are (what uses them carries it); a group with a <title> or <desc> is refused', () => {
+  const CLIPPED = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g id="g" transform="translate(30 20)">
+    <clipPath id="c"><circle cx="20" cy="20" r="15"/></clipPath>
+    <defs><linearGradient id="lg"><stop offset="0" stop-color="#e76f51"/></linearGradient></defs>
+    <rect id="r" width="40" height="40" fill="url(#lg)" clip-path="url(#c)"/>
+    <circle id="d" cx="5" cy="5" r="2" transform="scale(2)"/>
+  </g>
+</svg>`;
+  const r = rig();
+  r.editor.open(CLIPPED);
+  r.editor.select([idOf(r, 'g')]);
+  r.editor.ungroup();
+  assert.equal(r.editor.history.get().undoLabel, 'Ungroup', `${r.editor.notice.get()}`);
+  assert.equal(r.editor.source(), CLIPPED
+    .replace('\n  <g id="g" transform="translate(30 20)">', '')
+    .replace('\n  </g>', '\n  ')
+    .replace('clip-path="url(#c)"/>', 'clip-path="url(#c)" transform="translate(30 20)"/>')
+    .replace('transform="scale(2)"', 'transform="translate(30 20) scale(2)"'), 'the shapes take the transform; the clip, defs and gradient keep their bytes');
+  r.editor.undo();
+  assert.equal(r.editor.source(), CLIPPED);
+  for (const [child, why] of [['<title>The sun</title>', 'Its title names the group; ungrouping would give it to the parent.'], ['<desc>A setting sun</desc>', 'Its desc describes the group; ungrouping would give it to the parent.']]) {
+    const named = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="g" transform="translate(1 2)">${child}<rect width="5" height="5"/></g></svg>`;
+    const n = rig();
+    n.editor.open(named);
+    n.editor.select([idOf(n, 'g')]);
+    n.editor.ungroup();
+    assert.equal(n.editor.notice.get(), why);
+    assert.equal(n.editor.source(), named, 'nothing was written');
+    assert.equal(n.editor.history.get().canUndo, false);
+  }
+});
+
 test('Layers: Hide writes display="none" and Show gives the bytes back; Lock writes draw:locked with the declaration and Unlock gives the bytes back; Rename rewrites every reference, and refuses a bad or taken id', () => {
   const F = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <circle id="c" cx="20" cy="20" r="5"/>\n  <use href="#c" x="10"/>\n  <rect id="r" x="1" y="1" width="5" height="5" fill="url(#c)"/>\n</svg>`;
   const r = rig();

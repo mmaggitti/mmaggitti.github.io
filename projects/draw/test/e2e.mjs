@@ -4178,6 +4178,20 @@ const TURNED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
   </g>
 </svg>
 `;
+// A group holding a clip and the rect it clips (the P1-M1 review, F16): the clip is used in the
+// rect's user space, so on Ungroup only the rect takes the group's transform.
+const CLIPPED_GROUP = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <g transform="translate(30 20)">
+    <clipPath id="clip"><circle cx="20" cy="20" r="15"/></clipPath>
+    <rect id="cr" x="0" y="0" width="40" height="40" fill="#e76f51" clip-path="url(#clip)"/>
+  </g>
+</svg>
+`;
+const CLIPPED_UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+    <clipPath id="clip"><circle cx="20" cy="20" r="15"/></clipPath>
+    <rect id="cr" x="0" y="0" width="40" height="40" fill="#e76f51" clip-path="url(#clip)" transform="translate(30 20)"/>
+  \n</svg>
+`;
 const UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
     <rect id="u1" x="20" y="10" width="30" height="20" fill="#2a9d8f" transform="translate(10 5) rotate(15)"/>
     <circle id="u2" cx="20" cy="30" r="6" fill="#e76f51" transform="translate(10 5) rotate(15) scale(2)"/>
@@ -4188,7 +4202,9 @@ const UNGROUPED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
 // screen box stays where it was (± 0.5 px); the group is selected; one entry. Select group climbs
 // from a shape to its group. Shapes with different parents refuse to group. Ungroup pushes a
 // translate(10 5) rotate(15) into each child (before a child's own transform) and every screen box
-// stays; one entry. A group with opacity refuses to ungroup, and says why.
+// stays; one entry. A group holding a clip and the rect it clips (the P1-M1 review, F16): only the
+// rect takes the transform, its screen box stays, and the clip still covers the clip's centre and
+// not the rect's corner. A group with opacity refuses to ungroup, and says why.
 async function groupAndUngroupKeepEveryShapeInPlace(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const undo = page.locator('.draw-tool', { hasText: 'Undo' });
@@ -4243,6 +4259,27 @@ async function groupAndUngroupKeepEveryShapeInPlace(browser, origin) {
     for (const id of ['u1', 'u2']) must(boxNear(flat[id], turned[id]), `ungrouping moved ${id}: ${rect(turned[id])} → ${flat[id] && rect(flat[id])}`);
     await undo.tap();
     must(await source(page) === TURNED && await undo.isDisabled(), 'one undo did not give the group back: Ungroup was more than one entry');
+    // A clip and its user: the drawing doesn't change.
+    await open(CLIPPED_GROUP);
+    const at = (x, y) => page.evaluate(([ux, uy]) => {
+      const p = new DOMPoint(ux, uy).matrixTransform(document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM());
+      return { x: p.x, y: p.y };
+    }, [x, y]);
+    const clipHits = async () => ({ centre: (await page.evaluate(hitIds, await at(50, 40))).includes('cr'), corner: (await page.evaluate(hitIds, await at(32, 22))).includes('cr') });
+    const clippedBox = (await page.evaluate(drawnBoxes, ['cr'])).cr;
+    const before = await clipHits();
+    must(before.centre && !before.corner, `test setup: the clip covers its centre ${before.centre}, the rect's corner ${before.corner}`);
+    await page.touchscreen.tap((await at(50, 40)).x, (await at(50, 40)).y);
+    await moreCommand(page, 'Select group');
+    must(await label(page) === '<g>', `test setup: Select group from the clipped rect selected ${await label(page)}`);
+    await moreCommand(page, 'Ungroup');
+    must(await source(page) === CLIPPED_UNGROUPED, `Ungroup gave the clip the group's transform, or changed more than the rect:\n${await source(page)}`);
+    await twoFrames(page);
+    must(boxNear((await page.evaluate(drawnBoxes, ['cr'])).cr, clippedBox), 'ungrouping moved the clipped rect');
+    const after = await clipHits();
+    must(after.centre && !after.corner, `after Ungroup the clip covers its centre ${after.centre}, the rect's corner ${after.corner}: the clip moved`);
+    await undo.tap();
+    must(await source(page) === CLIPPED_GROUP, 'one undo did not give the clipped group back');
     // A group with opacity: refused, with the reason.
     const FADED = TURNED.replace('<g transform', '<g opacity="0.5" transform');
     await open(FADED);

@@ -208,11 +208,24 @@ export function group(doc: Doc, ids: readonly NodeId[], apply: (op: Op) => void)
 
 const KEEPS = (a: { ns: string | null; local: string }) => (a.ns === null && (a.local === 'id' || a.local === 'transform')) || a.ns === DRAW_NS;
 
+// The children drawn where they sit, which take the group's transform when it goes. The rest (clipPath,
+// mask, pattern, the gradients, marker, symbol, defs, style, script, metadata…) are used in the user
+// space of whatever refers to them, which the pushed transform already carries, or aren't drawn at
+// all: they move out as they are, or a clip would be moved twice.
+const DRAWN_IN_PLACE = new Set(['circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'rect', 'text', 'use', 'image', 'foreignObject', 'g', 'a', 'switch', 'svg']);
+const drawnInPlace = (k: ElementNode) => k.ns === NS.svg && DRAWN_IN_PLACE.has(k.local);
+
 /** Why the group `id` can't be ungrouped without changing how it looks, or null. */
 export function ungroupRefusal(doc: Doc, id: NodeId): string | null {
   const n = doc.nodes.get(id);
   if (!n || n.kind !== 'element' || n.ns !== NS.svg || n.local !== 'g' || id === doc.root) return 'Select a group to ungroup.';
   if (isLocked(doc, id)) return 'It’s locked. Unlock it in Layers first.';
+  for (const c of n.children) {
+    const k = doc.nodes.get(c);
+    if (k?.kind !== 'element' || k.ns !== NS.svg) continue;
+    if (k.local === 'title') return 'Its title names the group; ungrouping would give it to the parent.';
+    if (k.local === 'desc') return 'Its desc describes the group; ungrouping would give it to the parent.';
+  }
   const other = n.attrs.find((a) => !KEEPS(a));
   if (other) return `It has ${other.qname}, which applies to the group as a whole; ungrouping would change how it looks.`;
   for (const prop of ['transform', 'transform-origin', 'transform-box']) {
@@ -222,7 +235,7 @@ export function ungroupRefusal(doc: Doc, id: NodeId): string | null {
   if (own !== null && buildRefIndex(doc).refs.get(own)?.length) return `Something refers to the group’s id (#${own}).`;
   for (const c of n.children) {
     const k = doc.nodes.get(c);
-    if (k?.kind !== 'element') continue;
+    if (k?.kind !== 'element' || !drawnInPlace(k)) continue;
     if (findAttr(k, null, 'transform-origin') || cssSets(doc, c, 'transform-origin') !== 'no' || cssSets(doc, c, 'transform') !== 'no') {
       return 'A child’s transform origin (or CSS transform) can’t take the group’s transform.';
     }
@@ -232,8 +245,9 @@ export function ungroupRefusal(doc: Doc, id: NodeId): string | null {
 
 /**
  * Ungroup `id` (ungroupRefusal is null): its children take its place, in order, keeping their bytes
- * and whitespace; each element child gets the group's transform pushed down (the group's raw text, a
- * space, then its own); the group and its leading whitespace go. Returns the former element children.
+ * and whitespace; each child drawn where it sits gets the group's transform pushed down (the group's
+ * raw text, a space, then its own), and the rest keep theirs; the group and its leading whitespace
+ * go. Returns the former element children.
  */
 export function ungroup(doc: Doc, id: NodeId, apply: (op: Op) => void): NodeId[] {
   const g = el(doc, id);
@@ -256,6 +270,7 @@ export function ungroup(doc: Doc, id: NodeId, apply: (op: Op) => void): NodeId[]
     if (k.kind !== 'element') continue;
     out.push(c);
     if (!t || gValue === null || !gValue.trim()) continue;
+    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced
     const own = findAttr(k, null, 'transform');
     if (own) apply(opSetAttrRaw(doc, c, null, 'transform', own.quote === t.quote ? `${t.raw} ${own.raw}` : `${gValue.replace(/[<&"']/g, (ch) => `&#${ch.charCodeAt(0)};`)} ${own.raw}`));
     else {

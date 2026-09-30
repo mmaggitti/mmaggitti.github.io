@@ -2019,11 +2019,26 @@ const BREAKS = [
     file: 'engine/code/edit.ts', from: "  if (bad) return `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;\n  return ID.test(text)", to: '  return ID.test(text)',
     run: drawTests('editor.test.ts'), expect: /✖ Rename refuses a name XML can’t hold as an id/,
   },
+  {
+    id: 'B381', what: 'F16: Ungroup pushes the group’s transform onto every element child again (a clip beside its user is moved twice)',
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup gives the group’s transform only to the children drawn where they sit/,
+  },
+  {
+    id: 'B383', what: 'F16: Ungroup takes a group with a <title> (its name goes to the parent)',
+    file: 'projects/draw/src/interact/structure.ts', from: "    if (k.local === 'title') return 'Its title names the group; ungrouping would give it to the parent.';\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Ungroup gives the group’s transform only to the children drawn where they sit/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],
     file: 'engine/geometry/css.ts', from: /(hit\.version === |version: )doc\.styleVersion/g, to: '$1doc.version',
     run: DRAW_E2E, expect: /aLargeSelectionDragsWithoutStalling: a drag frame over 2000 selected shapes took \d+ ms at best/,
+  },
+  {
+    id: 'B382', what: 'F16: Ungroup pushes the group’s transform onto the clip too (the drawing changes)', slow: true, checks: ['groupAndUngroupKeepEveryShapeInPlace'],
+    file: 'projects/draw/src/interact/structure.ts', from: '    if (!drawnInPlace(k)) continue; // a clip, a gradient, defs…: used where it is referenced\n', to: '',
+    run: DRAW_E2E, expect: /groupAndUngroupKeepEveryShapeInPlace: Ungroup gave the clip the group's transform/,
   },
 ];
 
