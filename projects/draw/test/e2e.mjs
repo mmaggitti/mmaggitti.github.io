@@ -37,6 +37,11 @@
 // pattern rows (data-*, aria-*) from P1-M0, and the corpus check allows them as the tables do. The
 // P1-M0 review adds: a data-* name the DOM refuses is dropped, never thrown on, in a file and in Edit
 // source; and six more parser probes (entity names, an entity declared twice, an unparsed entity).
+// P1-M1 adds selection and transform: a drag moves a shape by whole units (the tooltip and the
+// coordinate guides on it, two attribute mutations a frame), a marquee takes what it encloses,
+// Bring forward, Send back and Delete patch only what moved on the canvas and in the code, the
+// arrows nudge only the canvas selection, the grid, the engine's geometry against the browser's,
+// and % lengths keeping their size under zoom (the view is the root's own box, never its viewBox).
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -50,8 +55,11 @@ import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
 import { detentHeights } from '../src/detents.ts';
 import { encodeImport } from '../src/platform/files.ts';
-import { parseDoc } from '../../../engine/model/doc.ts';
+import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
+import { parsePath } from '../../../engine/path/parse.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
+import { rootBounds } from '../../../engine/geometry/bounds.ts';
+import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 
@@ -82,6 +90,10 @@ const EVIDENCE = join(HERE, '../../../.smoke/draw-e2e-evidence.jsonl');
 // These two assert in their own modules (renderer-patch.mjs, probe-shadow.mjs), which throw on
 // every failure, rather than through must().
 const DELEGATES = new Set(['rendererPatchCases', 'shadowRootProbe']);
+// DRAW_E2E_ONLY=checkA,checkB runs just those checks: tools/prove-breaks.mjs proves a slow break
+// against the check it names (a break's `checks`). Such a run never writes the evidence file's last
+// line, so ledger-check --e2e-evidence never takes it for a complete run.
+const ONLY = process.env.DRAW_E2E_ONLY ? new Set(process.env.DRAW_E2E_ONLY.split(',')) : null;
 
 // Every check runs even after one fails, and the run fails with all their messages: WebKit runs
 // only in CI, so one run should show everything it disagrees with.
@@ -93,6 +105,7 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   mkdirSync(dirname(EVIDENCE), { recursive: true });
   writeFileSync(EVIDENCE, '');
   const check = async (fn, ...args) => {
+    if (ONLY && !ONLY.has(fn.name)) return;
     calls++;
     const before = asserted;
     try {
@@ -177,8 +190,16 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   // P1-M0: the engine's parser against the browser's.
   await check(corpusTreesMatchTheBrowsersParser);
   await check(theEngineRefusesWhatTheBrowserRefuses);
+  // P1-M1: selection and transform.
+  await check(aDragMovesTheShapeByWholeUnits);
+  await check(aMarqueeSelectsWhatItEncloses);
+  await check(zOrderAndDeletePatchOnlyWhatMoved);
+  await check(arrowsNudgeOnlyTheCanvasSelection);
+  await check(theGridToggleShowsTheGrid);
+  await check(geometryMatchesTheBrowser);
+  await check(percentLengthsKeepTheirSizeUnderZoom);
   const proven = [...passed].filter((name) => !unproven.has(name));
-  const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), { complete: true, engine, calls }];
+  const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
   if (failures.length) throw new Error(`${failures.length} check(s) failed:\n${failures.join('\n')}`);
 }
@@ -3131,6 +3152,521 @@ async function renderEach({ files, tables }) {
     await new Promise((ok) => setTimeout(ok, 16));
   }
   return { checked, rendered, failed: failures.length, failures: failures.slice(0, 25) };
+}
+
+// ── P1-M1: selection and transform ─────────────────────────────────────────────────────────────
+
+// What makes a corpus file's frame depend on time (as corpusLooksAsItDoesAlone filters them).
+const ANIMATES = /<(animate|set|animateTransform|animateMotion|animateColor|script)\b|@keyframes|transition/;
+
+// Runs in the page: record the canvas's mutations (the drawing's shadow root) from now on.
+function watchCanvas() {
+  window.__mo?.disconnect();
+  window.__muts = [];
+  window.__mo = new MutationObserver((ms) => window.__muts.push(...ms));
+  window.__mo.observe(document.querySelector('.draw-host').shadowRoot, { subtree: true, attributes: true, childList: true, characterData: true });
+}
+// Runs in the page: the canvas's mutations since the last call, counted by type.
+function canvasMutations() {
+  const ms = window.__muts.splice(0).concat(window.__mo.takeRecords());
+  const n = (type) => ms.filter((m) => m.type === type).length;
+  return { childList: n('childList'), attributes: n('attributes'), characterData: n('characterData') };
+}
+// Runs in the page: record where the canvas's pointer events land from now on (the numbers the Stage
+// reads), so a check computes what the canvas saw even where an engine rounds a pointer's position.
+function watchPointer() {
+  window.__pts = [];
+  if (window.__ptsOn) return;
+  window.__ptsOn = true;
+  const area = document.querySelector('.draw-canvas');
+  for (const type of ['pointerdown', 'pointermove']) area.addEventListener(type, (e) => window.__pts.push([e.clientX, e.clientY]), true);
+}
+// Runs in the page: a drawn element's centre in client px.
+function drawnCentre(sel) {
+  const b = document.querySelector('.draw-host').shadowRoot.querySelector(sel).getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+}
+
+// One pointer on the canvas from `from` by `d` in `steps` moves: the mouse, or (Chromium) a CDP
+// touch. `each(i)` runs after each move, before the release.
+async function dragOnCanvas(page, way, from, d, steps, each = async () => {}) {
+  const at = (i) => ({ x: from.x + (d.x * i) / steps, y: from.y + (d.y * i) / steps });
+  if (way === 'touch') {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [at(i)] });
+      await each(i);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    return;
+  }
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(at(i).x, at(i).y);
+    await each(i);
+  }
+  await page.mouse.up();
+}
+
+// The whole user units the canvas moved by: the pointer's travel since it went down (watchPointer),
+// through the drawn root's scale, rounded (the snap step at fit is 1).
+async function wholeUnits(page) {
+  const { pts, a, d } = await page.evaluate(() => {
+    const m = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM();
+    return { pts: window.__pts, a: m.a, d: m.d };
+  });
+  const [p, q] = [pts[0], pts[pts.length - 1]];
+  return { x: Math.round((q[0] - p[0]) / a), y: Math.round((q[1] - p[1]) / d) };
+}
+
+// A drag moves the shape under it by whole user units (the snap step at fit), with the mouse and
+// (Chromium) a finger: only its cx and cy change in the file, it is selected, the move is one
+// history entry, and undo restores the bytes. While it moves, the tooltip reads where its centre is,
+// its bottom edge 42 px above the pointer; the two coordinate guides end at that centre; and each
+// frame is at most two attribute mutations on the canvas, never a node made or taken away. Then a
+// group selected from its code block moves by its leading translate() alone (the rest of its
+// multi-line transform keeps its bytes), and lab/grid.svg's circle moves by whole units.
+async function aDragMovesTheShapeByWholeUnits(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    console.log(`     draw: the canvas's hit test is ${await page.evaluate(() => window.drawTest.hitPath())} (${browser.browserType().name()})`);
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    for (const way of chromium(browser) ? ['mouse', 'touch'] : ['mouse']) {
+      const c = await circleCentre(page);
+      await page.evaluate(watchPointer);
+      await page.evaluate(watchCanvas);
+      const frames = [];
+      let during = null;
+      await dragOnCanvas(page, way, c, { x: 37.3, y: -21.6 }, 8, async (i) => {
+        frames.push(await page.evaluate(canvasMutations));
+        if (i < 8) return;
+        during = await page.evaluate(() => {
+          const tip = document.querySelector('.draw-tip');
+          const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+          const ends = [...document.querySelectorAll('.draw-coord')].filter((l) => l.style.display !== 'none').map((l) => ({ x: o.left + Number(l.getAttribute('x2')), y: o.top + Number(l.getAttribute('y2')) }));
+          const b = document.querySelector('.draw-host').shadowRoot.querySelector('circle').getBoundingClientRect();
+          const [x, y] = window.__pts[window.__pts.length - 1];
+          return { text: tip && !tip.hidden ? tip.textContent : null, bottom: tip ? tip.getBoundingClientRect().bottom : null, pointer: { x, y }, ends, centre: { x: b.x + b.width / 2, y: b.y + b.height / 2 } };
+        });
+      });
+      const u = await wholeUnits(page);
+      const [cx, cy] = [212 + u.x, 134 + u.y];
+      must(await source() === SAMPLE.replace('cx="212" cy="134"', `cx="${cx}" cy="${cy}"`), `${way}: the drag did not move the circle by (${u.x}, ${u.y}) whole units, and nothing else:\n${await source()}`);
+      must(await page.locator('.draw-sel').textContent() === '<circle>', `${way}: the dragged circle is not selected`);
+      must(await undo.getAttribute('aria-label') === 'Undo Move', `${way}: the history's last entry is "${await undo.getAttribute('aria-label')}", not "Undo Move"`);
+      must(during?.text === `x ${cx}, y ${cy}`, `${way}: during the drag the tooltip read ${JSON.stringify(during?.text)}, not "x ${cx}, y ${cy}"`);
+      must(Math.abs(during.pointer.y - during.bottom - 42) <= 2, `${way}: the tooltip's bottom edge is ${(during.pointer.y - during.bottom).toFixed(1)} px above the pointer, not 42`);
+      must(during.ends.length === 2 && during.ends.every((p) => Math.hypot(p.x - during.centre.x, p.y - during.centre.y) <= 1), `${way}: the coordinate guides end at ${JSON.stringify(during.ends)}, not at the circle's centre ${JSON.stringify(during.centre)}`);
+      must(frames.some((f) => f.attributes > 0), `${way}: test setup: no drag frame moved the circle`);
+      must(frames.every((f) => f.childList === 0 && f.characterData === 0 && f.attributes <= 2), `${way}: a drag frame did more than two attribute mutations on the canvas: ${JSON.stringify(frames)}`);
+      await undo.tap();
+      must(await source() === SAMPLE, `${way}: one undo did not restore the file byte for byte`);
+      must(await undo.isDisabled(), `${way}: the drag was more than one history entry`);
+      await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    }
+    // A group selected from its code block: a drag on a shape inside it moves the group, by its
+    // leading translate() only; the rest of its three-line transform keeps its bytes.
+    const T = readFileSync(join(CORPUS, 'lab/transform.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), T)).ok, 'test setup: lab/transform.svg did not open');
+    await showCode(page);
+    await twoFrames(page);
+    await page.locator('.cv-block', { hasText: '</g>' }).tap();
+    must(await page.locator('.draw-sel').textContent() === '<g>', "test setup: a tap on the group's end tag did not select it");
+    await page.evaluate(watchPointer);
+    await dragOnCanvas(page, 'mouse', await page.evaluate(drawnCentre, 'rect'), { x: 29.6, y: 17.2 }, 8);
+    const g = await wholeUnits(page);
+    must(g.x !== 0 && await source() === T.replace('translate(50 50)', `translate(${50 + g.x} ${50 + g.y})`), `the group's drag changed more than its translate(50 50) by (${g.x}, ${g.y}):\n${await source()}`);
+    // lab/grid.svg: its circle moves by whole units.
+    const G = readFileSync(join(CORPUS, 'lab/grid.svg'), 'utf8');
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: lab/grid.svg did not open');
+    await page.evaluate(watchPointer);
+    await dragOnCanvas(page, 'mouse', await page.evaluate(drawnCentre, 'circle'), { x: -23.7, y: 31.1 }, 8);
+    const q = await wholeUnits(page);
+    must(q.x !== 0 && await source() === G.replace('cx="30" cy="60"', `cx="${30 + q.x}" cy="${60 + q.y}"`), `lab/grid.svg's circle did not move by (${q.x}, ${q.y}) whole units:\n${await source()}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const THREE_RECTS = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <rect id="A" x="10" y="10" width="15" height="15" fill="#e76f51"/>
+  <rect id="B" x="40" y="10" width="15" height="15" fill="#2a9d8f"/>
+  <rect id="C" x="70" y="70" width="15" height="15" fill="#264653"/>
+</svg>
+`;
+
+// A drag from empty canvas draws a marquee in the overlay, from where the pointer went down to
+// where it is, and selects what it wholly encloses: A inside it, not B half inside nor C outside. A
+// hold-drag (down on B, a 500 ms wait, then a drag) draws a marquee instead of moving B and takes
+// what it encloses; with Select more on, a second marquee adds; one under 5 px takes nothing. (Each
+// starts clear of the Grid button at the canvas's top-left, which takes its own presses.)
+async function aMarqueeSelectsWhatItEncloses(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), THREE_RECTS)).ok, 'test setup: the three rects did not open');
+    await showCode(page);
+    await twoFrames(page); // the canvas has fitted its new size
+    const source = () => page.evaluate(() => window.drawTest.source());
+    // What the code view marks as selected, by id.
+    const chosen = () => page.evaluate(() => [...document.querySelectorAll('.cv-block.cv-selected')].map((b) => /id="(\w)"/.exec(b.textContent)?.[1]).filter(Boolean).sort().join(''));
+    const marquee = async (from, to, hold = false) => {
+      const [a, b] = await Promise.all([page.evaluate(screenPoint, from), page.evaluate(screenPoint, to)]);
+      let drawn = null;
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      if (hold) await page.waitForTimeout(500);
+      for (let i = 1; i <= 8; i++) {
+        await page.mouse.move(a.x + ((b.x - a.x) * i) / 8, a.y + ((b.y - a.y) * i) / 8);
+        if (i === 8) drawn = await page.evaluate(() => [...document.querySelectorAll('.draw-marquee')].find((m) => m.style.display !== 'none')?.getBoundingClientRect().toJSON() ?? null);
+      }
+      await page.mouse.up();
+      const want = { left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), right: Math.max(a.x, b.x), bottom: Math.max(a.y, b.y) };
+      return { drawn, want };
+    };
+    const m1 = await marquee({ x: 47, y: 32 }, { x: 5, y: 5 });
+    must(m1.drawn && ['left', 'top', 'right', 'bottom'].every((k) => Math.abs(m1.drawn[k] - m1.want[k]) <= 1.5), `the marquee is drawn at ${JSON.stringify(m1.drawn)}, not from where the pointer went down to where it is (${JSON.stringify(m1.want)})`);
+    must(await chosen() === 'A', `a marquee around A, with B half inside it, selected ${(await chosen()) || 'nothing'}`);
+    const m2 = await marquee({ x: 47.5, y: 17.5 }, { x: 90, y: 90 }, true);
+    must(m2.drawn !== null, 'a hold-drag from B drew no marquee');
+    must(await source() === THREE_RECTS, 'a hold-drag from B moved it');
+    must(await chosen() === 'C', `a hold-drag from B around C selected ${(await chosen()) || 'nothing'}`);
+    await page.locator('.draw-ctx-btn[aria-label="Select more"]').tap();
+    await marquee({ x: 32, y: 32 }, { x: 5, y: 5 });
+    must(await chosen() === 'AC', `with Select more on, a second marquee around A left ${(await chosen()) || 'nothing'} selected, not A and C`);
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const e = await page.evaluate(screenPoint, { x: 5, y: 40 });
+    await dragOnCanvas(page, 'mouse', e, { x: 60, y: 3 }, 8);
+    must(await chosen() === '' && await page.locator('.draw-sel').textContent() === 'nothing selected', `a marquee 3 px tall selected ${await chosen()}`);
+    must(await source() === THREE_RECTS, 'marquees changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Bring forward, Send back and Delete on a 2,000-node drawing (built like scrubFrameIsOneMutation)
+// patch only what moved: at most 4 childList records on the canvas (the element and its
+// whitespace, out and in) and no attribute record; every other drawn node, and every other block
+// of the code view, is the same DOM node as before; and the file changes only by that element and
+// its whitespace. Each undo likewise.
+async function zOrderAndDeletePatchOnlyWhatMoved(browser, origin) {
+  const rects = Array.from({ length: 1999 }, (_, i) => `<rect${i === 1000 ? ' id="m"' : ''} x="${(i % 50) * 40}" y="${Math.floor(i / 50) * 40}" width="30" height="30" fill="#2a9d8f"/>`);
+  const svg = (list) => `<svg xmlns="${SVG_NS}" viewBox="0 0 2000 1600">\n${list.join('\n')}\n</svg>\n`;
+  const swapped = (i) => svg(rects.map((r, j) => (j === i ? rects[i + 1] : j === i + 1 ? rects[i] : r)));
+  const BIG = svg(rects);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const stats = await page.evaluate((t) => window.drawTest.render(t), BIG);
+    must(stats.ok && stats.rendered === 2000, `test setup: the 2,000-node drawing rendered ${stats.rendered} elements`);
+    const m = await page.evaluate(drawnCentre, '#m');
+    await page.touchscreen.tap(m.x, m.y);
+    must(await page.locator('.draw-label').textContent() === '<rect#m>', 'test setup: a tap on the rect did not select it');
+    await showCode(page);
+    // Keep every drawn node and every code block now, then see what is new after one step.
+    const keep = () => page.evaluate(() => {
+      const nodes = (root) => {
+        const out = [];
+        const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) out.push(n);
+        return out;
+      };
+      window.__nodes = nodes;
+      window.__kept = new WeakSet([...nodes(document.querySelector('.draw-host').shadowRoot), ...document.querySelectorAll('.draw-code .cv-block')]);
+    });
+    const fresh = () => page.evaluate(() => {
+      const drawn = window.__nodes(document.querySelector('.draw-host').shadowRoot).filter((n) => !window.__kept.has(n));
+      const blocks = [...document.querySelectorAll('.draw-code .cv-block')].filter((b) => !window.__kept.has(b));
+      const name = (n) => (n.nodeType === 1 ? `<${n.localName}${n.id ? `#${n.id}` : ''}>` : JSON.stringify(n.data));
+      return { drawn: drawn.map(name).sort(), blocks: blocks.map((b) => (/^\s+$/.test(b.textContent) ? 'whitespace' : /id="m"/.test(b.textContent) ? '<rect#m>' : b.textContent.slice(0, 40))).sort() };
+    });
+    const MOVED = { drawn: ['"\\n"', '<rect#m>'], blocks: ['<rect#m>', 'whitespace'] };
+    const step = async (label, act, file, made) => {
+      await keep();
+      await page.evaluate(watchCanvas);
+      await act();
+      const ms = await page.evaluate(canvasMutations);
+      const now = await fresh();
+      must(ms.childList > 0 && ms.childList <= 4 && ms.attributes === 0 && ms.characterData === 0, `${label}: the canvas saw ${JSON.stringify(ms)}, not at most 4 childList records and nothing else`);
+      must(JSON.stringify(now.drawn) === JSON.stringify(made.drawn), `${label}: new drawn nodes ${JSON.stringify(now.drawn)}, not ${JSON.stringify(made.drawn)} (every other node must stay the same DOM node)`);
+      must(JSON.stringify(now.blocks) === JSON.stringify(made.blocks), `${label}: new code blocks ${JSON.stringify(now.blocks)}, not ${JSON.stringify(made.blocks)}`);
+      must(await page.evaluate(() => window.drawTest.source()) === file, `${label}: the file changed by more than the element and its whitespace`);
+    };
+    const tap = (name) => () => page.locator(`.draw-ctx-btn[aria-label="${name}"]`).tap();
+    const undo = () => page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    await step('Bring forward', tap('Bring forward'), swapped(1000), MOVED);
+    await step('its undo', undo, BIG, MOVED);
+    await step('Send back', tap('Send back'), swapped(999), MOVED);
+    await step('its undo', undo, BIG, MOVED);
+    await step('Delete', tap('Delete'), svg(rects.filter((_, i) => i !== 1000)), { drawn: [], blocks: [] });
+    await step('its undo', undo, BIG, MOVED);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The arrows nudge the canvas selection: → moves the circle's cx by 1, ⇧→ by 10, and → held with 5
+// auto-repeats is one history entry. With a code token focused the arrows are the token's: ↑ steps
+// a number (P0), → and ↓ on a colour do nothing, and neither nudges. In the Number sheet's field
+// they move the caret, and nothing else.
+async function arrowsNudgeOnlyTheCanvasSelection(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const source = () => page.evaluate(() => window.drawTest.source());
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const c = await circleCentre(page);
+    await page.touchscreen.tap(c.x, c.y);
+    must(await page.locator('.draw-sel').textContent() === '<circle>', 'test setup: tapping the circle did not select it');
+    const at = (cx, r = 42) => SAMPLE.replace('cx="212"', `cx="${cx}"`).replace('r="42"', `r="${r}"`);
+    await page.keyboard.press('ArrowRight');
+    must(await source() === at(213), '→ did not move the circle by 1');
+    await page.keyboard.press('Shift+ArrowRight');
+    must(await source() === at(223), '⇧→ did not move the circle by 10');
+    await page.keyboard.down('ArrowRight');
+    for (let i = 0; i < 5; i++) await page.keyboard.down('ArrowRight'); // auto-repeats
+    await page.keyboard.up('ArrowRight');
+    must(await source() === at(229), `a held → with 5 auto-repeats did not move the circle by 6:\n${await source()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Nudge', `the history's last entry is "${await undo.getAttribute('aria-label')}", not "Undo Nudge"`);
+    await undo.tap();
+    must(await source() === at(223), 'one undo did not take the whole held → back: it was more than one entry');
+    // A code token with the focus has the arrows.
+    await showCode(page);
+    const circle = page.locator('.cv-block', { hasText: '<circle' });
+    const r = circle.locator('.cv-number').nth(2);
+    await r.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await r.focus();
+    await page.keyboard.press('ArrowUp');
+    must(await source() === at(223, 43), `↑ on the focused r did not step it, or nudged the circle:\n${await source()}`);
+    await circle.locator('.cv-color').first().focus();
+    for (const k of ['ArrowRight', 'ArrowDown', 'ArrowLeft']) await page.keyboard.press(k);
+    must(await source() === at(223, 43), 'the arrows on a focused colour token nudged the circle');
+    // The Number sheet's field: the caret moves, nothing else.
+    await tapToken(r);
+    await page.locator('.draw-strip-value').tap();
+    const field = page.locator('.draw-modal input').first();
+    await field.focus();
+    await field.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length));
+    const end = await field.evaluate((el) => el.selectionStart);
+    await page.keyboard.press('ArrowLeft');
+    must(await field.evaluate((el) => el.selectionStart) === end - 1, 'ArrowLeft in the Number sheet did not move the caret');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowDown');
+    must(await source() === at(223, 43), 'the arrows in the Number sheet changed the file');
+    await page.locator('.draw-modal-done').tap();
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Runs in the page: the grid as drawn (client px), the paper's rectangle, and each line's place in
+// the root's user units (through the drawn root's getScreenCTM).
+function gridNow() {
+  const svg = document.querySelector('.draw-grid');
+  const o = svg.getBoundingClientRect();
+  const inv = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().inverse();
+  const paper = document.querySelector('.draw-paper').getBoundingClientRect().toJSON();
+  const lines = [...svg.querySelectorAll('line')].filter((l) => l.style.display !== 'none').map((l) => {
+    const [x1, y1, x2, y2] = ['x1', 'y1', 'x2', 'y2'].map((a) => Number(l.getAttribute(a)));
+    const v = x1 === x2;
+    const p = new DOMPoint(o.left + x1, o.top + y1).matrixTransform(inv);
+    return { v, at: v ? o.left + x1 : o.top + y1, from: v ? o.top + y1 : o.left + x1, to: v ? o.top + y2 : o.left + x2, unit: v ? p.x : p.y, major: l.classList.contains('major') };
+  });
+  return { step: Number(svg.dataset.step), paper, lines };
+}
+
+// The Grid button (44 pt at least) is off at first, and no line is drawn. On, the grid's lines are
+// drawn over the paper only, at least 12 px apart, at multiples of a 1, 2 or 5 × 10ⁿ step in the
+// root's user units (read back through its getScreenCTM), every fifth major; zoomed ×4 the step is
+// finer. The file never changes, and the choice survives a reload.
+async function theGridToggleShowsTheGrid(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const btn = page.locator('.draw-grid-btn');
+    const b = await btn.boundingBox();
+    must(b && b.width >= TAP_MIN && b.height >= TAP_MIN, `the Grid button is ${b ? `${b.width}×${b.height}` : 'missing'}, under ${TAP_MIN}pt`);
+    must(await btn.getAttribute('aria-pressed') === 'false', 'the grid is on at first');
+    must((await page.evaluate(gridNow)).lines.length === 0, 'grid lines are drawn while the grid is off');
+    await btn.tap();
+    must(await btn.getAttribute('aria-pressed') === 'true', 'the Grid button did not turn on');
+    const problems = [];
+    const judge = (g, when) => {
+      const e = 10 ** Math.floor(Math.log10(g.step));
+      if (!(g.step > 0) || ![1, 2, 5, 10].some((m) => Math.abs(g.step - m * e) < 1e-9 * g.step)) problems.push(`${when}: the step ${g.step} is not 1, 2 or 5 × 10ⁿ`);
+      if (g.lines.length < 4) problems.push(`${when}: only ${g.lines.length} grid line(s)`);
+      const p = g.paper;
+      for (const [v, name] of [[true, 'vertical'], [false, 'horizontal']]) {
+        const ls = g.lines.filter((l) => l.v === v).sort((a, b) => a.at - b.at);
+        const [lo, hi, from, to] = v ? [p.left, p.right, p.top, p.bottom] : [p.top, p.bottom, p.left, p.right];
+        for (const l of ls) {
+          const k = l.unit / g.step;
+          if (Math.abs(k - Math.round(k)) > 1e-3) problems.push(`${when}: a ${name} line at ${l.unit} user units is not a multiple of ${g.step}`);
+          else if (l.major !== (Math.round(k) % 5 === 0)) problems.push(`${when}: the ${name} line at ${l.unit} is ${l.major ? '' : 'not '}major`);
+          if (l.at < lo - 0.5 || l.at > hi + 0.5 || l.from < from - 0.5 || l.to > to + 0.5) problems.push(`${when}: a ${name} line at ${l.at.toFixed(1)} px runs past the paper (${JSON.stringify(p)})`);
+        }
+        for (let i = 1; i < ls.length; i++) if (ls[i].at - ls[i - 1].at < 12 - 0.01) problems.push(`${when}: ${name} lines ${(ls[i].at - ls[i - 1].at).toFixed(2)} px apart, under 12`);
+      }
+    };
+    const fit = await page.evaluate(gridNow);
+    judge(fit, 'at fit');
+    const c = await circleCentre(page);
+    for (let i = 0; i < 2; i++) await ctrlWheel(page, Math.round(c.x), Math.round(c.y), -100);
+    const zoomed = await page.evaluate(gridNow);
+    judge(zoomed, 'zoomed ×4');
+    must(zoomed.step < fit.step, `zoomed ×4 the step is ${zoomed.step}, not finer than ${fit.step} at fit`);
+    must(problems.length === 0, problems.slice(0, 12).join('\n'));
+    must(await page.evaluate(() => window.drawTest.source()) === SAMPLE, 'the grid changed the file');
+    await page.reload({ waitUntil: 'networkidle' });
+    await twoFrames(page);
+    must(await btn.getAttribute('aria-pressed') === 'true', 'the grid did not stay on across a reload');
+    must((await page.evaluate(gridNow)).lines.length > 0, 'after a reload the grid draws nothing');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Synthetic probes for geometryMatchesTheBrowser, beside the corpus: transform-origin with keywords
+// and percentages on the view box and the fill box, nested viewports with each preserveAspectRatio,
+// and em, ex, rem and % lengths.
+const GEOMETRY_PROBES = [
+  ['transform-origin on the view box', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100">
+  <rect x="10" y="10" width="40" height="20" transform="rotate(30)" transform-origin="left top"/>
+  <rect x="60" y="10" width="40" height="20" transform="rotate(30)" transform-origin="50% 50%"/>
+  <rect x="110" y="10" width="40" height="20" transform="scale(1.5)" transform-origin="right bottom"/>
+  <rect x="10" y="50" width="40" height="20" transform="rotate(-20)" style="transform-origin: 25% 75%"/>
+  <rect x="60" y="50" width="40" height="20" transform="skewX(20)" transform-origin="center"/>
+</svg>`],
+  ['transform-origin on the fill box', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100">
+  <rect x="10" y="10" width="40" height="20" transform="rotate(45)" style="transform-box: fill-box; transform-origin: center"/>
+  <rect x="60" y="10" width="40" height="20" transform="rotate(45)" style="transform-box: fill-box; transform-origin: 0 100%"/>
+  <rect x="110" y="10" width="40" height="20" transform="scale(0.5 2)" style="transform-box: fill-box; transform-origin: right top"/>
+  <circle cx="40" cy="70" r="12" transform="scale(1.5)" style="transform-box: fill-box; transform-origin: 25% 25%"/>
+  <g transform="rotate(10)" style="transform-box: fill-box; transform-origin: center"><rect x="120" y="50" width="30" height="30"/><rect x="160" y="60" width="20" height="10"/></g>
+</svg>`],
+  ['nested viewports, each preserveAspectRatio', `<svg xmlns="${SVG_NS}" viewBox="0 0 300 100" width="300" height="100">
+  ${['xMinYMin meet', 'xMidYMid meet', 'xMaxYMax meet', 'xMinYMin slice', 'xMidYMid slice', 'xMaxYMax slice', 'none'].map((par, i) => `<svg x="${(i % 4) * 70 + 5}" y="${Math.floor(i / 4) * 50 + 5}" width="60" height="30" viewBox="0 0 10 20" preserveAspectRatio="${par}"><rect x="1" y="2" width="8" height="16"/><circle cx="5" cy="5" r="3"/></svg>`).join('\n  ')}
+  <svg x="220" y="60" width="50%" height="30%" viewBox="-5 -5 20 20"><rect width="10" height="10"/></svg>
+</svg>`],
+  ['curves, arcs and polylines', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 120" width="200" height="120">
+  <path d="M10 60 C 20 0, 60 0, 70 60 S 120 120, 130 60"/>
+  <path d="M10 100 Q 40 60 70 100 T 130 100"/>
+  <path d="M150 20 A 30 15 30 0 1 190 60"/>
+  <path d="M150 70 A 30 15 -45 1 0 190 100 Z"/>
+  <path d="m20 20 h30 v10 l-10 10 z m40 0 c10 -10 20 10 30 0"/>
+  <polyline points="100,10 120,40 110,5 140,30"/>
+  <polygon points="160,110 180,80 195,115"/>
+  <line x1="5" y1="115" x2="60" y2="112"/>
+  <ellipse cx="100" cy="90" rx="15" ry="6" transform="rotate(35 100 90)"/>
+  <g transform="translate(5 3) rotate(-10) scale(1.2 0.8)"><path d="M60 20 C 70 10, 80 30, 90 20"/><rect x="60" y="25" width="10" height="5" transform="skewY(15)"/></g>
+</svg>`],
+  ['em, ex, rem and % lengths', `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100" width="200" height="100" style="font-size: 10px">
+  <rect x="1em" y="2em" width="3rem" height="10%" style="font-size: 20px"/>
+  <rect x="50%" y="5ex" width="2ex" height="1rem"/>
+  <circle cx="25%" cy="50%" r="5%"/>
+  <ellipse cx="3em" cy="70" rx="2rem" ry="1em" font-size="8"/>
+  <line x1="10%" y1="90%" x2="2em" y2="3rem" stroke="#000"/>
+  <svg x="120" y="10" width="4em" height="4em" viewBox="0 0 10 10"><rect width="100%" height="50%"/></svg>
+</svg>`],
+];
+
+// The engine's geometry against the browser's: the box of every drawn element, from the file in
+// node (engine/geometry's rootBounds, with the page's rem) and from the page (drawTest.measureAll:
+// each element's getBBox through root.getScreenCTM()⁻¹ · el.getScreenCTM(), in the root's user
+// units), within 0.5 user units wherever both give one. Over every static corpus file and the
+// synthetic probes above: at least 1,000 elements in 150 files (the static corpus holds about 1,250
+// boxes the browser measures, a fifth of them text, which the engine can't). Known, and left out: a
+// path with an error in its data, which the engine reads up to where every browser stops
+// (engine/path/parse.ts) while Blink and WebKit draw on past a comma before a command.
+async function geometryMatchesTheBrowser(browser, origin) {
+  const files = [...corpusFiles().filter((f) => !ANIMATES.test(f.text)), ...GEOMETRY_PROBES.map(([name, text]) => ({ name: `probe: ${name}`, text }))];
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const remPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+    const host = await page.evaluate(() => {
+      const b = document.querySelector('.draw-host').getBoundingClientRect();
+      return { width: b.width, height: b.height };
+    });
+    let compared = 0, inFiles = 0, known = 0;
+    const differ = [];
+    const box = (b) => `(${b.map((v) => Math.round(v * 100) / 100).join(', ')})`;
+    for (const f of files) {
+      const parsed = parseDoc(f.text);
+      if (!parsed.ok || !(await page.evaluate((t) => window.drawTest.render(t), f.text)).ok) continue;
+      const theirs = new Map((await page.evaluate(() => window.drawTest.measureAll())).map((m) => [m.index, m.box]));
+      const doc = parsed.doc;
+      const ctx = { viewport: rootViewport(doc, host), remPx };
+      const order = [];
+      const walk = (id, path) => {
+        const n = doc.nodes.get(id);
+        if (n?.kind !== 'element') return;
+        order.push({ id, path });
+        n.children.filter((k) => doc.nodes.get(k)?.kind === 'element').forEach((k, i) => walk(k, `${path} > ${doc.nodes.get(k).qname}:${i + 1}`));
+      };
+      walk(doc.root, 'svg');
+      let here = 0;
+      order.forEach(({ id, path }, index) => {
+        const b = theirs.get(index);
+        const r = b && rootBounds(doc, id, ctx);
+        if (!b || !r) return;
+        const n = doc.nodes.get(id);
+        if (n.local === 'path' && parsePath(attrValue(doc, n, null, 'd') ?? '').error) return void known++;
+        here++;
+        const mine = [r.x, r.y, r.x + r.width, r.y + r.height];
+        if (mine.some((v, i) => Math.abs(v - b[i]) > 0.5)) differ.push(`${f.name} ${path}: engine ${box(mine)}, browser ${box(b)}`);
+      });
+      compared += here;
+      if (here) inFiles++;
+    }
+    console.log(`     draw: the engine's geometry matched the browser's on ${compared - differ.length} of ${compared} element(s) in ${inFiles} file(s) (${known} known difference(s) left out)`);
+    must(compared >= 1000 && inFiles >= 150, `compared ${compared} elements in ${inFiles} files (at least 1,000 in 150 needed)`);
+    must(differ.length === 0, `${differ.length} element(s) whose box differs by more than 0.5 user units; the first ${Math.min(10, differ.length)}:\n${differ.slice(0, 10).join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// tools/drawio-flowchart-decision.svg's <rect width="100%" height="100%"> measures (0, 0, 161, 261)
+// in the root's user units at fit, after a ×8 ctrl-wheel zoom, a pan and a pinch, while its screen
+// size follows the zoom: the view is the root's own box, never its viewBox, which stays
+// "-0.5 -0.5 161 261". At ×8 the half-unit strip between the box's left edge and the rect (user x
+// −0.5 to 0), which only the root's own CSS background covers, is white where the checkerboard alone
+// would show #eeeeee squares. The file never changes.
+async function percentLengthsKeepTheirSizeUnderZoom(browser, origin) {
+  const F = readFileSync(join(CORPUS, 'tools/drawio-flowchart-decision.svg'), 'utf8');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the draw.io flowchart did not open');
+    const read = () => page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+      const rect = root.querySelector(':scope > rect');
+      const k = root.getScreenCTM().inverse().multiply(rect.getScreenCTM());
+      const b = rect.getBBox();
+      const [p, q] = [new DOMPoint(b.x, b.y).matrixTransform(k), new DOMPoint(b.x + b.width, b.y + b.height).matrixTransform(k)];
+      const s = rect.getBoundingClientRect();
+      return { box: [p.x, p.y, q.x - p.x, q.y - p.y], screen: [s.width, s.height], scale: root.getScreenCTM().a, viewBox: root.getAttribute('viewBox') };
+    });
+    const problems = [];
+    const judge = (r, when) => {
+      if (r.box.some((v, i) => Math.abs(v - [0, 0, 161, 261][i]) > 0.01)) problems.push(`${when}: the 100% rect measures (${r.box.map((v) => v.toFixed(3)).join(', ')}), not (0, 0, 161, 261)`);
+      if (Math.abs(r.screen[0] - 161 * r.scale) > 0.5 || Math.abs(r.screen[1] - 261 * r.scale) > 0.5) problems.push(`${when}: on screen it is ${r.screen.map((v) => v.toFixed(1)).join('×')}, not 161×261 at ${r.scale.toFixed(3)} px a unit`);
+      if (r.viewBox !== '-0.5 -0.5 161 261') problems.push(`${when}: the drawn root's viewBox is ${JSON.stringify(r.viewBox)}`);
+    };
+    const fit = await read();
+    judge(fit, 'at fit');
+    // ×8 about the drawing's left edge, halfway down.
+    const edge = await page.evaluate(screenPoint, { x: 0, y: 130 });
+    for (let i = 0; i < 3; i++) await ctrlWheel(page, Math.round(edge.x), Math.round(edge.y), -100);
+    const zoomed = await read();
+    judge(zoomed, 'zoomed ×8');
+    if (Math.abs(zoomed.scale / fit.scale - 8) > 1e-3) problems.push(`the ctrl-wheel zoomed ×${(zoomed.scale / fit.scale).toFixed(4)}, not ×8`);
+    // The strip from user x −0.5 to 0, inside (away from its anti-aliased edges), over 40 px of height.
+    const [a, b] = await Promise.all([page.evaluate(screenPoint, { x: -0.5, y: 130 }), page.evaluate(screenPoint, { x: 0, y: 130 })]);
+    const [x0, x1] = [Math.ceil(a.x) + 1, Math.floor(b.x) - 1];
+    if (x1 - x0 < 4) problems.push(`the half-unit strip is only ${x1 - x0} px wide at ×8`);
+    else {
+      const top = Math.round(a.y) - 20;
+      const shot = decodePng(await page.screenshot({ clip: { x: x0, y: top, width: x1 - x0, height: 40 } }));
+      let grey = 0;
+      for (let y = 0; y < shot.height; y++) for (let x = 0; x < shot.width; x++) if (shot.rgb(x, y).some((v) => v < 254)) grey++;
+      if (grey) problems.push(`${grey} of ${shot.width * shot.height} px of the strip between the root's box and the 100% rect are not white: the root's own background does not cover its box`);
+    }
+    // A pan (the wheel) and a pinch: the rect keeps its size in user units.
+    await page.evaluate(([x, y]) => document.querySelector('.draw-canvas').dispatchEvent(new WheelEvent('wheel', { clientX: x, clientY: y, deltaX: 40, deltaY: 60, bubbles: true, cancelable: true })), [200, 300]);
+    judge(await read(), 'after a pan');
+    await twoFingers(browser, page, { x: 180, y: 300 }, { x: 260, y: 300 }, { x: 150, y: 300 }, { x: 290, y: 300 }, 8);
+    judge(await read(), 'after a pinch');
+    must(problems.length === 0, problems.join('\n'));
+    must(await page.evaluate(() => window.drawTest.source()) === F, 'zooming changed the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
 }
 
 function corpusFiles() {

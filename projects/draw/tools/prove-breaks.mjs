@@ -16,7 +16,9 @@
 // isn't a check.
 //
 // A break edits with String.prototype.replace, so `from` may be a RegExp (an anchor that survives
-// the row or line around it changing) and `to` a replacer function.
+// the row or line around it changing) and `to` a replacer function. A site e2e break may name the
+// e2e checks that catch it (`checks`): only those run (DRAW_E2E_ONLY), which saves the rest of the
+// suite's minutes; such a run is never evidence (test/e2e.mjs).
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1783,6 +1785,52 @@ const BREAKS = [
     file: 'projects/draw/src/keys.ts', from: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n', to: '      ed.nudge(arrow[0] * n, arrow[1] * n);\n      ed.nudgeEnd();\n',
     run: drawTests('keys.test.ts'), expect: /✖ a held arrow with its repeats, and a second arrow while it is held, is one nudge/,
   },
+  // P1-M1 S2, slow: the new e2e checks (each run alone, `checks`).
+  {
+    id: 'B336', what: 'a move rounds its delta to 2 units', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
+    file: 'projects/draw/src/editor.ts', from: '    this.#applyMove(m, { x: toStep(rx, m.step), y: toStep(ry, m.step) });', to: '    this.#applyMove(m, { x: toStep(rx, 2), y: toStep(ry, 2) });',
+    run: SITE_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the drag did not move the circle by/,
+  },
+  {
+    id: 'B337', what: 'the tooltip is drawn under the finger', slow: true, checks: ['aDragMovesTheShapeByWholeUnits'],
+    file: 'projects/draw/src/interact/overlay-model.ts', from: 'top: t.below ? t.finger.y + TIP_BELOW : t.finger.y - TIP_ABOVE - height', to: 'top: t.finger.y',
+    run: SITE_E2E, expect: /aDragMovesTheShapeByWholeUnits: mouse: the tooltip's bottom edge is/,
+  },
+  {
+    id: 'B338', what: 'a marquee takes what it touches, not what it encloses', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
+    file: 'projects/draw/src/editor.ts', from: '      return b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.width <= r.x + r.width + 0.5 && b.y + b.height <= r.y + r.height + 0.5;', to: '      return b.x <= r.x + r.width && b.y <= r.y + r.height && b.x + b.width >= r.x && b.y + b.height >= r.y;',
+    run: SITE_E2E, expect: /aMarqueeSelectsWhatItEncloses: a marquee around A, with B half inside it, selected AB/,
+  },
+  {
+    id: 'B339', what: 'a hold-drag on a shape moves it', slow: true, checks: ['aMarqueeSelectsWhatItEncloses'],
+    file: 'projects/draw/src/editor.ts', from: '    if (held || g.target === null) {', to: '    if (g.target === null) {',
+    run: SITE_E2E, expect: /aMarqueeSelectsWhatItEncloses: a hold-drag from B (drew no marquee|moved it)/,
+  },
+  {
+    id: 'B340', what: 'the code view rebuilds every block on a structure change', slow: true, checks: ['zOrderAndDeletePatchOnlyWhatMoved'],
+    file: 'projects/draw/src/editor.ts', from: '      if ((r.code.moved.length || r.code.parents.length) && !this.#placeCode(r.code.moved, r.code.parents)) return this.#resetCode();', to: '      if (r.code.moved.length || r.code.parents.length) return this.#resetCode();',
+    run: SITE_E2E, expect: /zOrderAndDeletePatchOnlyWhatMoved: Bring forward: new code blocks/,
+  },
+  {
+    id: 'B341', what: 'the arrows nudge while a code token has focus', slow: true, checks: ['arrowsNudgeOnlyTheCanvasSelection'],
+    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = 'input, textarea, select';",
+    run: SITE_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
+  },
+  {
+    id: 'B342', what: 'the grid draws past the paper', slow: true, checks: ['theGridToggleShowsTheGrid'],
+    file: 'projects/draw/src/interact/overlay-model.ts', from: '  const over = intersect(paper, { x: 0, y: 0, width: host.width, height: host.height });', to: '  const over = { x: 0, y: 0, width: host.width, height: host.height };',
+    run: SITE_E2E, expect: /theGridToggleShowsTheGrid: .*runs past the paper/,
+  },
+  {
+    id: 'B343', what: "the engine's geometry ignores a nested svg's viewBox", slow: true, checks: ['geometryMatchesTheBrowser'],
+    file: 'engine/geometry/ctm.ts', from: '  const inner = vb ? viewportTransform(vb, parOf(doc, n), vp.width, vp.height) : IDENTITY;', to: '  const inner = IDENTITY;',
+    run: SITE_E2E, expect: /geometryMatchesTheBrowser: \d+ element\(s\) whose box differs/,
+  },
+  {
+    id: 'B344', what: "the renderer supplies the camera as the root's viewBox again", slow: true, checks: ['percentLengthsKeepTheirSizeUnderZoom'],
+    file: 'projects/draw/src/canvas/renderer.ts', from: '    if (!doc || !c || hasOwnViewBox(doc)) return null;', to: '    if (!doc || !c) return null;',
+    run: SITE_E2E, expect: /percentLengthsKeepTheirSizeUnderZoom: .*(viewBox is|the 100% rect measures)/,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -1855,7 +1903,8 @@ for (const b of chosen) {
     }
     const [cmd, cmdArgs, cwd] = b.run;
     try {
-      out = execFileSync(cmd, cmdArgs, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const env = b.checks ? { ...process.env, DRAW_E2E_ONLY: b.checks.join(',') } : process.env;
+      out = execFileSync(cmd, cmdArgs, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       out = `${e.stdout ?? ''}${e.stderr ?? ''}`;
       caught = b.expect.test(out);

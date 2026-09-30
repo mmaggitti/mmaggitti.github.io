@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1331 rows: 1067 planned, 3 partial, 260 done, 1 superseded.
+Current phase: **P1**. 1331 rows: 1051 planned, 3 partial, 276 done, 1 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -11,12 +11,12 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | element | 188 | 161 | 1 | 26 | 0 |
-| attribute | 386 | 266 | 0 | 120 | 0 |
+| attribute | 386 | 264 | 0 | 122 | 0 |
 | property | 48 | 34 | 0 | 14 | 0 |
-| value | 85 | 65 | 0 | 20 | 0 |
+| value | 85 | 64 | 0 | 21 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
-| namespace | 20 | 11 | 2 | 7 | 0 |
-| capability | 480 | 450 | 0 | 29 | 1 |
+| namespace | 20 | 10 | 2 | 8 | 0 |
+| capability | 480 | 438 | 0 | 41 | 1 |
 | feature | 101 | 80 | 0 | 21 | 0 |
 
 ## By phase
@@ -24,7 +24,7 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 318 | 304 | 0 | 14 | 0 |
+| P1 | 318 | 288 | 0 | 30 | 0 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
@@ -50,14 +50,14 @@ Each lesson's capabilities and the phases that deliver them.
 | Set | Lesson | Title | Phases | Capabilities | Done |
 |---|---|---|---|---|---|
 | 1 | Vector | Pixels vs vector | P1 | 11 | 2 |
-| 1 | Grid | The grid | P1 | 10 | 0 |
-| 1 | Shapes | Shapes | P1 | 13 | 0 |
+| 1 | Grid | The grid | P1 | 10 | 2 |
+| 1 | Shapes | Shapes | P1 | 13 | 1 |
 | 1 | Style | Fill and stroke | P1 | 12 | 1 |
 | 1 | Paths | Paths | P1 | 18 | 0 |
-| 1 | Transform | Groups and transforms | P1 | 11 | 0 |
+| 1 | Transform | Groups and transforms | P1 | 11 | 1 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P3, P4, P5 | 50 | 0 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 6 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 0 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |
