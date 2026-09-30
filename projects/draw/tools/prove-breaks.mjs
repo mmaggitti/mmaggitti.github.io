@@ -345,7 +345,8 @@ const BREAKS = [
     id: 'B51', what: 'an animation whose href the policy dropped (a URL to another file) animates its parent on the canvas, where the file alone animates nothing', slow: true, checks: ['moreEdges'],
     // P1-M2: re-planted. Its first fault (SMIL judged by the model's first href, not the one the sink
     // kept) can't happen since decision 5: the policy keeps at most one of href and xlink:href.
-    file: 'projects/draw/src/canvas/safe-sink.ts', from: "  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;\n", to: '',
+    // P1-M2 fix (F2): re-planted on the refusal's new call, the same fault.
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: '  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;\n', to: '',
     run: DRAW_E2E, expect: /an href to another file (beside a fragment xlink:href )?animates nothing: <animate> is on the canvas/,
   },
   {
@@ -2531,6 +2532,21 @@ const BREAKS = [
     id: 'B476', what: 'F9: the <style> scan is skipped, so Draw takes away a gradient a stylesheet rule still paints with (and the rule is no user)',
     file: 'engine/geometry/css.ts', from: '    for (const rule of textContent(doc, n.id).split(/[{}]/)) {', to: '    for (const rule of [] as string[]) {',
     run: engineTests('paint/gradients.test.ts'), expect: /✖ a gradient a <style> rule still paints with stays/,
+  },
+  {
+    id: 'B477', what: 'F2: only the attribute animations go with an href the canvas dropped (an animateMotion keeps moving its parent)',
+    file: 'engine/policy/render-policy.ts', from: '  if (!isAnimation(el) || kept !== null) return false;', to: '  if (!animatesAttribute(el) || kept !== null) return false;',
+    run: POLICY_TESTS, expect: /✖ SMIL: an animation whose href the canvas dropped goes with it/,
+  },
+  {
+    id: 'B478', what: 'F3: an empty href counts as one the canvas dropped (an animation of its parent vanishes)',
+    file: 'engine/policy/render-policy.ts', from: "  return href !== undefined && value(href) !== '';", to: '  return href !== undefined;',
+    run: POLICY_TESTS, expect: /✖ SMIL: an animation whose href the canvas dropped goes with it/,
+  },
+  {
+    id: 'B479', what: 'F2 and F3 on the canvas: the reviewed rule back (judged after the attribute animations’ early return, and any href counted): an animateMotion to another file moves its parent, and an animate or set with href="" vanishes', slow: true, checks: ['moreEdges'],
+    file: 'projects/draw/src/canvas/safe-sink.ts', from: "  if (!isAnimation(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (smilHrefLost(node, kept, (a) => decodeAttr(a.raw, doc.entities))) return false;\n  if (!animatesAttribute(node)) return true;\n", to: "  if (!animatesAttribute(node)) return true;\n  const kept = el.getAttributeNS(null, 'href') ?? el.getAttributeNS(NS.xlink, 'href');\n  if (kept === null && (findAttr(node, null, 'href') || findAttr(node, NS.xlink, 'href'))) return false;\n",
+    run: DRAW_E2E, expect: /(?=[\s\S]*an animateMotion with an href to another file moves nothing: <animateMotion> is on the canvas)(?=[\s\S]*an empty href animates the parent: <animate> is not on the canvas)(?=[\s\S]*a <set> with an empty href sets the parent: <set> is not on the canvas)/,
   },
 ];
 

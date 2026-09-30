@@ -10,7 +10,7 @@ import { RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMEN
 import { decodeAttr } from '../../xml/entities.ts';
 import { checkSvg, cssAllowed as profileCssAllowed } from '../../../scripts/lib/svg-profile.mjs';
 import {
-  attributeRenders, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue, smilTargetAllowed,
+  attributeRenders, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, renderValue, smilHrefLost, smilTargetAllowed,
   urlAllowed, URL_ATTRIBUTES,
 } from '../../policy/render-policy.ts';
 
@@ -393,6 +393,29 @@ test('SMIL: an animation renders only if what it animates renders on its target'
   assert.ok(smilTargetAllowed(animate, ' fill ', rect) && smilTargetAllowed(set, 'x', rect));
   assert.ok(smilTargetAllowed(animate, 'fill') && !smilTargetAllowed(animate, 'not-an-attribute'));
   assert.ok(smilTargetAllowed(find(doc, 'animateMotion'), '', rect), 'animateMotion has no attributeName');
+});
+
+test('SMIL: an animation whose href the canvas dropped goes with it (animate, set, animateTransform and animateMotion alike), unless the href is exactly "" (its parent, as both engines read it): " " or a URL to another file names nothing; href decides over xlink:href; a kept href, no href, or an element that isn’t an animation loses nothing', () => {
+  const lost = (el: string, kept: string | null = null): boolean => {
+    const doc = parse(svg(el));
+    const n = [...descendants(doc, doc.root)].find((x): x is ElementNode => x.kind === 'element' && x.id !== doc.root)!;
+    return smilHrefLost(n, kept, (a) => decodeAttr(a.raw, doc.entities));
+  };
+  for (const kind of ['animate', 'set', 'animateTransform', 'animateMotion', 'animateColor', 'discard']) {
+    assert.equal(lost(`<${kind} href="other.svg#t"/>`), true, `<${kind}>: an href to another file, dropped`);
+    assert.equal(lost(`<${kind} xlink:href="other.svg#t"/>`), true, `<${kind}>: xlink:href alike`);
+    assert.equal(lost(`<${kind} href=" "/>`), true, `<${kind}>: " " names nothing`);
+    assert.equal(lost(`<${kind} href="&#32;"/>`), true, `<${kind}>: nor does a space written as a reference`);
+    assert.equal(lost(`<${kind} href=""/>`), false, `<${kind}>: "" is its parent`);
+    assert.equal(lost(`<${kind} xlink:href=""/>`), false, `<${kind}>: xlink:href="" too`);
+    assert.equal(lost(`<${kind} href="" xlink:href="other.svg#t"/>`), false, `<${kind}>: href decides, and "" is its parent`);
+    assert.equal(lost(`<${kind} href="other.svg#t" xlink:href=""/>`), true, `<${kind}>: href decides over an empty xlink:href`);
+    assert.equal(lost(`<${kind} href="#t"/>`, '#t'), false, `<${kind}>: a kept href`);
+    assert.equal(lost(`<${kind}/>`), false, `<${kind}>: no href (its parent)`);
+  }
+  assert.equal(lost('<use href="other.svg#t"/>'), false, 'a <use> is no animation');
+  assert.equal(lost('<mpath href="other.svg#t"/>'), false, 'nor is <mpath>');
+  assert.equal(lost('<x:animate xmlns:x="urn:x" href="other.svg#t"/>'), false, 'nor an animate in another namespace');
 });
 
 test('SVG 2: href wins, so an element with href drops its xlink:href whatever either says (a relative href and a fragment xlink:href render with no template at all, as the file alone draws)', () => {

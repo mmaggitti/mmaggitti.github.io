@@ -468,9 +468,13 @@ const MORE_EDGES = [
   // SMIL is judged against what the browser animates: through the href the canvas keeps, every
   // element the fragment can name (drawn or not), never xml:id, and never "some element". An href
   // the canvas drops (a URL to another file) names nothing, in the file alone too, so the animation
-  // goes with it rather than falling to its parent; beside an href, xlink:href is ignored (SVG 2).
+  // goes with it rather than falling to its parent, animateMotion too; beside an href, xlink:href is
+  // ignored (SVG 2). An href of exactly "" is the parent in both engines, and animates it.
   { label: 'an href to another file beside a fragment xlink:href animates nothing', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" xlink:href="#t" attributeName="width" values="1;2" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animate', skipped: 1 },
   { label: 'an href to another file animates nothing', text: svgDoc('<rect width="10" height="10"><animate href="other.svg#t" attributeName="width" values="1;2" dur="1s"/></rect>'), absent: 'animate', skipped: 1 },
+  { label: 'an animateMotion with an href to another file moves nothing', text: svgDoc('<rect width="10" height="10"><animateMotion href="other.svg#t" path="M0,0 H 50" dur="1s"/></rect><circle id="t" r="5"/>'), absent: 'animateMotion', skipped: 1 },
+  { label: 'an empty href animates the parent', text: svgDoc('<rect width="10" height="10"><animate href="" attributeName="width" values="1;2" dur="1s"/></rect>'), present: 'animate', target: 'rect', skipped: 0 },
+  { label: 'a <set> with an empty href sets the parent', text: svgDoc('<rect width="10" height="10"><set href="" attributeName="width" to="2"/></rect>'), present: 'set', anim: 'set', target: 'rect', skipped: 0 },
   { label: 'an xml:id before the id', text: svgDoc(`<rect xml:id="t" width="10" height="10"/><circle id="t" r="5"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 1 },
   { label: 'the first id inside a refused element', text: svgDoc(`<x:g xmlns:x="urn:example:app-data"><rect id="t" width="10" height="10"/></x:g><circle id="t" r="5"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 2 },
   { label: 'a fragment that names nothing', text: svgDoc(`<rect width="10" height="10"/>${ANIMATE_WIDTH}`), absent: 'animate', skipped: 1 },
@@ -532,7 +536,8 @@ async function moreEdges(browser, origin) {
       }
       if (c.absent && q(c.absent)) out.push(`<${c.absent}> is on the canvas`);
       if (c.present && !q(c.present)) out.push(`<${c.present}> is not on the canvas`);
-      if (c.target && q('animate')?.targetElement?.localName !== c.target) out.push(`the animation drives <${q('animate')?.targetElement?.localName}>, not <${c.target}>`);
+      const anim = c.anim ?? 'animate';
+      if (c.target && q(anim)?.targetElement?.localName !== c.target) out.push(`the <${anim}> drives <${q(anim)?.targetElement?.localName}>, not <${c.target}>`);
       if (c.firstInSwitch && q('switch')?.firstElementChild?.localName !== c.firstInSwitch) out.push(`the <switch> starts with <${q('switch')?.firstElementChild?.localName}>`);
       for (const id of c.ids ?? []) if (!root.getElementById(id)) out.push(`id "${id}" was dropped`);
       if (c.draws && !(q(c.draws)?.getBBox().width > 0)) out.push(`<${c.draws}> draws nothing`);
