@@ -1675,6 +1675,47 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "      case 'text':\n        return this.#openSheet({ kind: 'text', ref, token: t });\n", to: "      case 'text':\n        return;\n",
     run: drawTests('lab-goals.test.ts'), expect: /✖ lab goal "Write your own title" \(access\)/,
   },
+  // P1-M1 S1: engine geometry, the write policy, rewriteNumbers, moved/coalesce and ids.
+  {
+    id: 'B317', what: 'rewriteNumbers re-serializes the whole value (its tokens joined by single spaces)',
+    file: 'engine/code/edit.ts', from: "  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');\n  return out;", to: "  if (!same) throw new TokenEditError('the new numbers would change how the rest of the value reads');\n  return after.map((t) => t.text).join(' ');",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path move leaves relative commands byte for byte/,
+  },
+  {
+    id: 'B318', what: 'a rotate plan collapses the list into one matrix()',
+    file: 'engine/geometry/write.ts', from: '  const raw = end > 0 ? `${attr.raw.slice(0, end)} ${item}${attr.raw.slice(end)}` : item + attr.raw;', to: "  const raw = `matrix(${parseTransform(attr.raw)!.matrix.join(' ')})`;",
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a transform list is never collapsed/,
+  },
+  {
+    id: 'B319', what: 'ownTransform ignores transform-origin',
+    file: 'engine/geometry/ctm.ts', from: '  return ox === 0 && oy === 0 ? t : multiply(multiply(translate(ox, oy), t), translate(-ox, -oy));', to: '  return t;',
+    run: engineTests('geometry/ctm.test.ts'), expect: /✖ transform-origin: keywords, lengths and % under view-box/,
+  },
+  {
+    id: 'B320', what: 'a path move moves relative commands too',
+    file: 'engine/geometry/write.ts', from: '    if (!abs) return null; // relative: its bytes stay\n', to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path move leaves relative commands byte for byte/,
+  },
+  {
+    id: 'B321', what: 'cssSets never reports a <style> rule',
+    file: 'engine/geometry/css.ts', from: "  if (sheet.rules.some((r) => r.decls.some((d) => names.includes(d)) && r.selectors.some((s) => mayMatch(s, doc, node)))) return 'sheet';\n", to: '',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ CSS-controlled geometry and transforms are refused with their reasons/,
+  },
+  {
+    id: 'B322', what: 'coalesce keeps a place op that ends where it started',
+    file: 'engine/commands/ops.ts', from: '    if (!samePlace(op.before, op.after)) return true;\n', to: '    return true;\n',
+    run: engineTests('commands/commands.test.ts'), expect: /✖ coalesce merges consecutive place ops of one node/,
+  },
+  {
+    id: 'B323', what: 'freshId returns the base even when it is taken',
+    file: 'engine/model/ids.ts', from: '  if (!used.has(base) && !taken.has(base)) return base;', to: '  return base;',
+    run: engineTests('ids.test.ts'), expect: /✖ freshId never reuses an id/,
+  },
+  {
+    id: 'B324', what: 'renameIdsIn skips url(#…) inside style=""',
+    file: 'engine/model/ids.ts', from: "  } else if (text.includes('url(')) {", to: "  } else if (text.includes('url(') && a.local !== 'style') {",
+    run: engineTests('ids.test.ts'), expect: /✖ renameIdsIn rewrites ids and references inside the subtree only/,
+  },
 ];
 
 const args = process.argv.slice(2);
