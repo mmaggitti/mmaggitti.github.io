@@ -2614,6 +2614,11 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '  renameIdsIn(doc, copy, fresh, apply);\n', to: '',
     run: engineTests('paint/gradients.test.ts'), expect: /✖ Make unique gives each id inside the copy a fresh one/,
   },
+  {
+    id: 'B493', what: 'F8: the batch puts its gradients into the file’s <defs> in reverse order (each shape still names its own, but the file differs from one shape at a time)',
+    file: 'engine/paint/gradients.ts', from: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)), apply);\n', to: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)).reverse(), apply).reverse();\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a selection write exactly what they write one shape at a time/,
+  },
 ];
 
 const args = process.argv.slice(2);
