@@ -197,6 +197,11 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
             Remove all guides
           </button>
         )}
+        {!!state.more && (
+          <p className="draw-subhead draw-snap-more">
+            {state.more} more guide{state.more === 1 ? '' : 's'} in the file {state.more === 1 ? 'isn’t' : 'aren’t'} shown.
+          </p>
+        )}
       </div>
     </Modal>
   );

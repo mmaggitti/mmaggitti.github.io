@@ -50,7 +50,7 @@ import { duplicate, group, groupRefusal, groupsOf, remove, restack, ungroup, ung
 import { alignDeltas, distributeDeltas, type AlignKind } from './interact/align.ts';
 import { displayNone } from '../../../engine/geometry/bounds.ts';
 import type { GeoContext } from '../../../engine/geometry/ctm.ts';
-import { DRAW_NS, NO_STATE, declare, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
+import { DRAW_NS, MAX_GUIDES, NO_STATE, declare, isLocked, moveGuide, readState, undeclareIfUnused, writeState, type DrawState } from '../../../engine/model/draw-state.ts';
 import { cssSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
 import { idError } from '../../../engine/code/edit.ts';
@@ -1286,6 +1286,7 @@ export class Editor {
     const b = this.#board ?? { x: 0, y: 0, width: 0, height: 0 };
     const at = Number(fmt(axis === 'v' ? b.x + b.width / 2 : b.y + b.height / 2, 4));
     const s = readState(doc);
+    if (s.guides.length >= MAX_GUIDES) return void this.notice.set(`Draw shows ${MAX_GUIDES} guides at most; remove one first.`);
     this.#dispatch('Add guide', (apply) => writeState(doc, { ...s, guides: [...s.guides, { axis, at }] }, apply));
   }
 
@@ -1309,17 +1310,19 @@ export class Editor {
     this.#show();
   }
 
-  // The guides, in host px, each with its pill at the canvas's top edge (vertical) or left edge.
+  // The guides in view, in host px, each with its pill at the canvas's top edge (vertical) or left
+  // edge, and its place in the file's list (what a pill drag moves).
   #guideMarks(): OverlayModel['guides'] {
     const doc = this.#doc;
     const box = this.#box;
     if (!doc || !box) return [];
     const toHost = rootToHostMatrix(box, this.#viewport, this.#M);
     const g = this.#gesture;
-    return readState(doc).guides.map((gd, i) => {
+    return readState(doc).guides.flatMap((gd, i) => {
       const [hx, hy] = applyM(toHost, gd.at, gd.at);
       const at = gd.axis === 'v' ? hx : hy;
-      return { axis: gd.axis, at, pill: gd.axis === 'v' ? { x: at, y: PILL_LONG / 2 } : { x: PILL_LONG / 2, y: at }, active: g?.guide === i && g.mode === 'guide' };
+      if (!(at >= 0 && at <= (gd.axis === 'v' ? this.#size.width : this.#size.height))) return []; // out of view: not drawn
+      return [{ index: i, axis: gd.axis, at, pill: gd.axis === 'v' ? { x: at, y: PILL_LONG / 2 } : { x: PILL_LONG / 2, y: at }, active: g?.guide === i && g.mode === 'guide' }];
     });
   }
 
@@ -1935,14 +1938,14 @@ function elementName(doc: Doc, id: NodeId): string {
 }
 const isIdentity = (m: Affine): boolean => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
 const PILL_LONG = 44; // px: a guide's pill, 44 along its guide and 20 across, picked over 44 × 44
-/** The guide whose pill a press at `at` takes: within its 44 × 44 pick area, the nearest. */
+/** The guide (its place in the file's list) whose pill a press at `at` takes: within its 44 × 44 pick area, the nearest. */
 function pickPill(guides: OverlayModel['guides'], at: Point): number | null {
   let best: number | null = null;
   let bestD = Infinity;
-  guides.forEach((g, i) => {
+  for (const g of guides) {
     const d = Math.max(Math.abs(at.x - g.pill.x), Math.abs(at.y - g.pill.y));
-    if (d <= PILL_LONG / 2 && d < bestD) [best, bestD] = [i, d];
-  });
+    if (d <= PILL_LONG / 2 && d < bestD) [best, bestD] = [g.index, d];
+  }
   return best;
 }
 // Elements a corner resizes (§5.3's table): geometry, nested svg, and g, use and text by a uniform scale.

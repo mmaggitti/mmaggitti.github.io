@@ -8,7 +8,9 @@
 // - Document state (guides and the grid step) is one empty element in the file's single
 //   <metadata>: <draw:state version="1" grid="10" guides="v 20 v 80 h 50"/>. `grid` is present only
 //   when a step was chosen; `guides` lists each guide as an axis letter and a position in root user
-//   units. The root's first SVG <metadata> is reused; with none, Draw adds <metadata draw:made="true">
+//   units. Draw reads the first MAX_GUIDES (100) guides only, so a file can't make it read, draw and
+//   list a million: the rest are counted, never shown, and kept byte for byte when Draw writes the
+//   ones it shows. A read is kept per document version. The root's first SVG <metadata> is reused; with none, Draw adds <metadata draw:made="true">
 //   before the root's first element, and takes it away again when its last state goes. A
 //   self-closing <metadata/> counts as none: stripped of Draw's state on export it would come back
 //   as <metadata></metadata>, not byte for byte.
@@ -36,9 +38,13 @@ export interface Guide {
 }
 export interface DrawState {
   grid: number | null; // the chosen grid step, or null (automatic)
-  guides: Guide[];
+  guides: Guide[]; // the first MAX_GUIDES the file lists
+  more?: number; // guides the file lists past those: never read or drawn, kept as they are
 }
 export const NO_STATE: DrawState = { grid: null, guides: [] };
+
+/** The guides Draw reads, draws and lists; a file's others are kept, unread. */
+export const MAX_GUIDES = 100;
 
 type Apply = (op: Op) => void;
 const isDraw = (n: { ns: string | null }) => n.ns === DRAW_NS;
@@ -75,22 +81,69 @@ export function stateElement(doc: Doc): ElementNode | null {
   return null;
 }
 
-/** The guides and the grid step the file keeps, or none. */
+const read = new WeakMap<Doc, { version: number; state: DrawState }>();
+
+/** The guides (the first MAX_GUIDES) and the grid step the file keeps, or none; read once per version. */
 export function readState(doc: Doc): DrawState {
+  const hit = read.get(doc);
+  if (hit && hit.version === doc.version) return hit.state;
   const s = stateElement(doc);
-  if (!s) return NO_STATE;
-  const g = attrValue(doc, s, null, 'grid');
-  const grid = g === null ? null : Number(g);
-  const guides: Guide[] = [];
-  const words = (attrValue(doc, s, null, 'guides') ?? '').trim().split(/[\s,]+/).filter(Boolean);
-  for (let i = 0; i + 1 < words.length; i += 2) {
-    const at = Number(words[i + 1]);
-    if ((words[i] === 'v' || words[i] === 'h') && Number.isFinite(at)) guides.push({ axis: words[i] as 'v' | 'h', at });
+  let state = NO_STATE;
+  if (s) {
+    const g = attrValue(doc, s, null, 'grid');
+    const grid = g === null ? null : Number(g);
+    const raw = findAttr(s, null, 'guides')?.raw ?? '';
+    const scan = scanGuides(raw);
+    const more = Math.floor(words(raw, scan.end) / 2);
+    state = { grid: grid !== null && Number.isFinite(grid) && grid > 0 ? grid : null, guides: scan.guides, ...(more ? { more } : {}) };
   }
-  return { grid: grid !== null && Number.isFinite(grid) && grid > 0 ? grid : null, guides };
+  read.set(doc, { version: doc.version, state });
+  return state;
 }
 
-const NUMBER = /[+-]?(?:\d*\.\d+|\d+)(?:[eE][+-]?\d+)?/g;
+const isSep = (c: number) => c === 32 || c === 9 || c === 10 || c === 13 || c === 44; // whitespace and ','
+
+/**
+ * The first MAX_GUIDES guides in a guides attribute as written (pairs of an axis letter and a number;
+ * a pair that isn't one is passed over), each number's place, and where the text after them begins.
+ */
+function scanGuides(raw: string): { guides: Guide[]; spans: [number, number][]; end: number } {
+  const guides: Guide[] = [];
+  const spans: [number, number][] = [];
+  let i = 0;
+  let end = 0;
+  const word = (): [number, number] => {
+    while (i < raw.length && isSep(raw.charCodeAt(i))) i++;
+    const from = i;
+    while (i < raw.length && !isSep(raw.charCodeAt(i))) i++;
+    return [from, i];
+  };
+  while (guides.length < MAX_GUIDES) {
+    const [a0, a1] = word();
+    const [n0, n1] = word();
+    if (n0 === n1) break;
+    const axis = raw.slice(a0, a1);
+    const at = Number(raw.slice(n0, n1));
+    if ((axis === 'v' || axis === 'h') && Number.isFinite(at)) {
+      guides.push({ axis, at });
+      spans.push([n0, n1]);
+    }
+    end = n1;
+  }
+  return { guides, spans, end };
+}
+
+/** How many words `raw` holds from `from` on (a character loop: a million guides take a few ms). */
+function words(raw: string, from: number): number {
+  let n = 0;
+  for (let i = from, inWord = false; i < raw.length; i++) {
+    const sep = isSep(raw.charCodeAt(i));
+    if (!sep && !inWord) n++;
+    inWord = !sep;
+  }
+  return n;
+}
+
 const guidesText = (guides: readonly Guide[]) => guides.map((g) => `${g.axis} ${fmt(g.at, 4)}`).join(' ');
 
 /** Does the document carry any Draw state: a draw: element or attribute (the declaration aside)? */
@@ -168,7 +221,11 @@ function removeWithSpace(doc: Doc, id: NodeId, apply: Apply): void {
  */
 export function writeState(doc: Doc, next: DrawState, apply: Apply): void {
   const cur = stateElement(doc);
-  if (!next.guides.length && next.grid === null) {
+  // The guides past the first MAX_GUIDES, as written: kept after the ones Draw shows.
+  const had = cur && findAttr(cur, null, 'guides');
+  const rest = had ? had.raw.slice(scanGuides(had.raw).end) : '';
+  const restLeft = /[^ \t\n\r,]/.test(rest);
+  if (!next.guides.length && next.grid === null && !restLeft) {
     if (!cur) return;
     const meta = el(doc, cur.parent!);
     removeWithSpace(doc, cur.id, apply);
@@ -178,13 +235,18 @@ export function writeState(doc: Doc, next: DrawState, apply: Apply): void {
   }
   const p = declare(doc, apply);
   const grid = next.grid === null ? null : fmt(next.grid, 4);
-  const guides = next.guides.length ? guidesText(next.guides) : null;
+  const shown = next.guides.length ? guidesText(next.guides) : null;
   if (cur) {
-    for (const [local, value] of [['grid', grid], ['guides', guides]] as const) {
-      if (attrValue(doc, cur, null, local) !== value) apply(opSetAttr(doc, cur.id, null, local, value));
-    }
+    if (attrValue(doc, cur, null, 'grid') !== grid) apply(opSetAttr(doc, cur.id, null, 'grid', grid));
+    // The shown guides, then the rest byte for byte (with no shown guide, from its first word on).
+    const raw = shown === null ? (restLeft ? rest.replace(/^[ \t\n\r,]+/, '') : null) : restLeft ? `${shown}${rest}` : shown;
+    if (raw === null) {
+      if (had) apply(opSetAttr(doc, cur.id, null, 'guides', null));
+    } else if (!had) apply(opSetAttr(doc, cur.id, null, 'guides', raw));
+    else if (had.raw !== raw) apply(opSetAttrRaw(doc, cur.id, null, 'guides', raw));
     return;
   }
+  const guides = shown;
   const attrs = `${p}:state version="1"${grid === null ? '' : ` grid="${grid}"`}${guides === null ? '' : ` guides="${guides}"`}`;
   const root = el(doc, doc.root);
   const meta = elementKids(doc, root).find((k) => k.ns === NS.svg && k.local === 'metadata' && !(k.selfClosing && !k.children.length));
@@ -211,14 +273,14 @@ export function writeState(doc: Doc, next: DrawState, apply: Apply): void {
   insertWithSpace(doc, made.nodes[0], root.id, at, blank(doc, ws) ? ws! : null, apply);
 }
 
-/** Move guide `index` to `at`, rewriting only its number (the rest of the attribute keeps its bytes). */
+/** Move guide `index` (of those readState lists) to `at`, rewriting only its number (the rest of the attribute keeps its bytes). */
 export function moveGuide(doc: Doc, index: number, at: number, decimals: number, apply: Apply): void {
   const s = stateElement(doc);
   const a = s && findAttr(s, null, 'guides');
   if (!s || !a) return;
-  const t = [...a.raw.matchAll(NUMBER)][index];
-  if (!t) return;
-  const [start, end] = [t.index, t.index + t[0].length];
+  const span = scanGuides(a.raw).spans[index];
+  if (!span) return;
+  const [start, end] = span;
   const text = fmt(at, decimals);
   if (a.raw.slice(start, end) === text) return;
   apply(opSetAttrRaw(doc, s.id, null, 'guides', rewriteNumbers(a.raw, [{ start, end, text }])));

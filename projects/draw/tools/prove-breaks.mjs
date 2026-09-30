@@ -2050,6 +2050,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    const targets = hd.targets;\n', to: '    const targets = this.#snapTargets([hd.id]);\n',
     run: drawTests('editor.test.ts'), expect: /✖ a corner drag gathers its snap targets once/,
   },
+  {
+    id: 'B388', what: 'F8: every guide a file lists is read (a million make each overlay frame seconds long)',
+    file: 'engine/model/draw-state.ts', from: '  while (guides.length < MAX_GUIDES) {', to: '  while (guides.length < Infinity) {',
+    run: engineTests('draw-state.test.ts'), expect: /✖ a state with 10⁶ guides reads its first 100 in under 50 ms/,
+  },
   // P1-M1 review fixes, slow.
   {
     id: 'B378', what: 'F5: the CSS sheet cache is keyed on doc.version again (a drag frame of 2,000 shapes)', slow: true, checks: ['aLargeSelectionDragsWithoutStalling'],

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDoc, serialize, type Doc } from '../model/doc.ts';
 import { DEFAULT_LIMITS } from '../xml/cst.ts';
 import { Session } from '../commands/session.ts';
-import { DRAW_NS, moveGuide, readState, stripDrawState, writeState, type DrawState } from '../model/draw-state.ts';
+import { DRAW_NS, MAX_GUIDES, moveGuide, readState, stripDrawState, writeState, type DrawState } from '../model/draw-state.ts';
 import { cleanExport } from '../export/clean.ts';
 
 const CORPUS = fileURLToPath(new URL('./fixtures/corpus/', import.meta.url));
@@ -152,4 +152,35 @@ test('only Draw’s own empty <metadata> is taken away: a shape marked draw:made
   assert.equal(stripDrawState(p.doc), prefixed);
   put(p, 'Remove guide', state([]));
   assert.equal(serialize(p.doc), prefixed);
+});
+
+test('a state with 10⁶ guides reads its first 100 in under 50 ms, once per version; Draw’s writes keep the rest byte for byte', () => {
+  const guide = (i: number) => `${i % 2 ? 'h' : 'v'} ${i % 997}`;
+  const many = Array.from({ length: 1e6 }, (_, i) => guide(i)).join(' ');
+  const text = PLAIN.replace('viewBox="0 0 100 100">\n', `viewBox="0 0 100 100" xmlns:draw="${DRAW_NS}">\n  <metadata draw:made="true"><draw:state version="1" guides="${many}"/></metadata>\n`);
+  const doc = load(text);
+  const t = performance.now();
+  const s = readState(doc);
+  const ms = performance.now() - t;
+  assert.ok(ms < 50, `reading the state took ${ms.toFixed(0)} ms`);
+  assert.equal(s.guides.length, MAX_GUIDES);
+  assert.deepEqual(s.guides.slice(0, 3), [{ axis: 'v', at: 0 }, { axis: 'h', at: 1 }, { axis: 'v', at: 2 }]);
+  assert.equal(s.more, 1e6 - MAX_GUIDES);
+  assert.equal(readState(doc), s, 'kept for the version: the next read costs nothing');
+  const guides = () => /guides="([^"]*)"/.exec(serialize(session.doc))![1];
+  const session = new Session(doc);
+  // Remove the first: the 101st shows in its place, and the rest is as it was.
+  put(session, 'Remove guide', { ...s, guides: s.guides.slice(1) });
+  assert.equal(guides(), many.slice(`${guide(0)} `.length));
+  assert.equal(readState(session.doc).guides.at(-1)!.at, 100);
+  // Move one: only its number changes.
+  session.dispatch('Move guide', (apply) => moveGuide(session.doc, 0, 42, 0, apply));
+  assert.equal(guides(), `h 42 ${many.slice(`${guide(0)} ${guide(1)} `.length)}`);
+  // Remove all those shown: the rest stays, from its first guide.
+  put(session, 'Remove all guides', { ...readState(session.doc), guides: [] });
+  assert.equal(guides(), many.split(' ').slice(2 * (MAX_GUIDES + 1)).join(' '));
+  session.undo();
+  session.undo();
+  session.undo();
+  assert.equal(serialize(session.doc), text, 'and each undoes to the file');
 });

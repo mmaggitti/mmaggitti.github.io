@@ -50,6 +50,7 @@ export interface Tip {
   below: boolean; // near the top of the canvas: under the finger
 }
 export interface Guide {
+  index: number; // its place in the file's list of guides (readState), which a pill drag moves
   axis: 'v' | 'h';
   at: number; // host px
   pill: Point; // the centre of its pill at the canvas's edge
