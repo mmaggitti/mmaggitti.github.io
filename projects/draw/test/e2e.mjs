@@ -6574,7 +6574,10 @@ async function booleansCombineWhatIsDrawn(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     must((await page.evaluate((t) => window.drawTest.render(t), BOOL_E2E)).ok, 'test setup: the file did not open');
     await toPeek(page);
-    const chunks = () => page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /^(booleans|paper-fallback)-.*\.js$/.test(n)));
+    // The boolean chunks fetched: the page's resource entries (since it loaded) and the requests seen since, by file name.
+    const requested = [];
+    page.on('request', (r) => requested.push(new URL(r.url()).pathname.split('/').pop()));
+    const chunks = async () => [...new Set([...requested, ...(await page.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname.split('/').pop())))])].filter((n) => /^(booleans|paper-fallback)-.*\.js$/.test(n));
     must((await chunks()).length === 0, `before any boolean, ${(await chunks()).join(', ')} loaded`);
     const undo = page.locator('.draw-tool', { hasText: 'Undo' });
     const marquee = async (from, to) => {
