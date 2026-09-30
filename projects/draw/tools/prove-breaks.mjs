@@ -2482,6 +2482,12 @@ const BREAKS = [
     file: 'engine/policy/render-policy.ts', from: "  if (attr.ns === NS.xlink && attr.local === 'href' && el.attrs.some((a) => a.ns === null && a.local === 'href')) return null;\n", to: '',
     run: POLICY_TESTS, expect: /✖ SVG 2: href wins/,
   },
+  // P1-M2 S3: the editor (quick).
+  {
+    id: 'B469', what: 'a stop’s offset field is one entry per keystroke, not per editing session',
+    file: 'projects/draw/src/editor.ts', from: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n', to: '      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));\n      this.fieldEnd();\n      this.fieldStart(f.field);\n',
+    run: drawTests('inspect.test.ts'), expect: /✖ the stop editor, one entry per editing session/,
+  },
 ];
 
 const args = process.argv.slice(2);

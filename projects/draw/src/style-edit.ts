@@ -59,8 +59,8 @@ export function checkStyle(prop: string, input: string): Checked {
   return { text };
 }
 
-/** A paint kind Inspect offers (S3 adds the gradients). */
-export type PaintKind = 'none' | 'color';
+/** A paint kind Inspect offers: none, a colour, or a new gradient (S3). */
+export type PaintKind = 'none' | 'color' | 'linear' | 'radial';
 
 /**
  * The paint kinds Inspect's Fill or Stroke row offers for the selected elements (their local
@@ -70,8 +70,8 @@ export type PaintKind = 'none' | 'color';
  */
 export function paintKinds(prop: 'fill' | 'stroke', locals: readonly string[]): PaintKind[] | null {
   const lines = locals.filter((l) => l === 'line').length;
-  if (prop === 'fill') return lines && lines === locals.length ? null : ['none', 'color'];
-  return lines ? ['color'] : ['none', 'color'];
+  if (prop === 'fill') return lines && lines === locals.length ? null : ['none', 'color', 'linear', 'radial'];
+  return lines ? ['color', 'linear', 'radial'] : ['none', 'color', 'linear', 'radial'];
 }
 
 /** The Dash presets on this artboard: none, then SVG Lab's three, each number × k. */

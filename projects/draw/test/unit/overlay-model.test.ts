@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
+import { coordGuides, gradientGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHost, tip, tipBox, unionBox, GRID_MIN_PX, type HandleKind } from '../../src/interact/overlay-model.ts';
 import { DIAMOND_PX, HANDLE_PICK_PX, RING_PX, handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from '../../src/interact/handles.ts';
 import { CENTRE_DOT_R, HANDLE } from '../../src/canvas/overlay/marks.ts';
 import { unionRect } from '../../src/editor.ts';
@@ -176,4 +176,23 @@ test('shape handles in the model: a radius (anchor) and an inner point (ctrl) ar
     const t = tip(text, { x: 200, y: 150 });
     assert.equal(tipBox(t, 60, 20, 400).top, 150 - 42 - 20, `${text}: 42 px above the finger`);
   }
+});
+
+// P1-M2 S3: Edit on canvas. The gradient's guides come from the engine (engine/paint/handles.ts) in
+// host px; the model labels the unit box's corners "0,0" (above and before it) and "1,1" (below
+// and after it), and they draw with SVG Lab's .gd (line, circle), .bb (box) and .arm (focus) looks.
+test('gradient guides in the model: the unit box with "0,0" and "1,1" beside its corners, a linear gradient’s line, a radial one’s circle and focus arm; drawn in SVG Lab’s .gd, .bb and .arm looks', () => {
+  const box = [{ x: 10, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 70 }, { x: 10, y: 70 }];
+  const g = gradientGuides({ box, labels: [{ text: '0,0', at: box[0] }, { text: '1,1', at: box[2] }], line: [{ x: 20, y: 45 }, { x: 50, y: 45 }], ring: null, arm: null });
+  assert.deepEqual(g.box, box);
+  assert.deepEqual(g.labels, [{ text: '0,0', at: { x: 6, y: 14 }, anchor: 'end' }, { text: '1,1', at: { x: 114, y: 84 }, anchor: 'start' }]);
+  assert.deepEqual(g.line, { from: { x: 20, y: 45 }, to: { x: 50, y: 45 } });
+  const ring = Array.from({ length: 64 }, (_, i) => ({ x: Math.cos(i), y: Math.sin(i) }));
+  const r = gradientGuides({ box: null, labels: [], line: null, ring, arm: [{ x: 0, y: 0 }, { x: 3, y: 4 }] });
+  assert.deepEqual([r.box, r.labels, r.line, r.ring?.length, r.arm], [null, [], null, 64, { from: { x: 0, y: 0 }, to: { x: 3, y: 4 } }]);
+  const css = readFileSync(new URL('../../src/app.css', import.meta.url), 'utf8');
+  const rule = (selector: string) => new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{ ([^}]*) \\}$`, 'm').exec(css)?.[1];
+  assert.equal(rule('.draw-grad-guide'), 'fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4;', 'the lab’s .gd');
+  assert.equal(rule('.draw-grad-box'), 'fill: none; stroke: #8d99ae; stroke-width: 1; stroke-dasharray: 2 3;', 'the lab’s .bb');
+  assert.equal(rule('.draw-grad-arm'), 'stroke: #e6007e; stroke-width: 1; opacity: 0.75;', 'the lab’s .arm');
 });

@@ -12,7 +12,10 @@ import { RULE_SETS } from '../../../../engine/style/write.ts';
 import { dashPresets, paintKinds } from '../../src/style-edit.ts';
 import { colorChoices, styleSlot } from '../../src/color-choices.ts';
 import { pickAlpha, pickHue, pickSV, pickerStart, pickerText } from '../../src/color-picker.ts';
-import { fakeEditor } from './fakes.ts';
+import { bind, fakeEditor, fakePorts } from './fakes.ts';
+import { Editor as EditorClass } from '../../src/editor.ts';
+import type { ViewBlock } from '../../src/codeview/code-view.ts';
+import { stripDrawState } from '../../../../engine/model/draw-state.ts';
 
 const svg = (body: string, viewBox = '0 0 100 100') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">\n  ${body}\n</svg>\n`;
 
@@ -159,10 +162,10 @@ test('the stroke sheet: a stroke given to a shape with none also gets the width-
 
 test('a line: Inspect offers it no Fill row and its stroke no None, as its stroke sheet offers no none chip (SVG Lab’s styleAttrs and L1885); a selection with a line and a rect keeps Fill, but its stroke still takes no None; the width and Cap write, one entry each', () => {
   assert.equal(paintKinds('fill', ['line']), null);
-  assert.deepEqual(paintKinds('stroke', ['line']), ['color']);
-  assert.deepEqual(paintKinds('fill', ['line', 'rect']), ['none', 'color'], 'the rect has a fill');
-  assert.deepEqual(paintKinds('stroke', ['line', 'rect']), ['color'], 'none would make the line vanish');
-  assert.deepEqual(paintKinds('stroke', ['polyline']), ['none', 'color'], 'only a line drops it');
+  assert.deepEqual(paintKinds('stroke', ['line']), ['color', 'linear', 'radial']);
+  assert.deepEqual(paintKinds('fill', ['line', 'rect']), ['none', 'color', 'linear', 'radial'], 'the rect has a fill');
+  assert.deepEqual(paintKinds('stroke', ['line', 'rect']), ['color', 'linear', 'radial'], 'none would make the line vanish');
+  assert.deepEqual(paintKinds('stroke', ['polyline']), ['none', 'color', 'linear', 'radial'], 'only a line drops it');
   const chips = (locals: string[]) => colorChoices(styleSlot('stroke', locals), 'red').chips.map((c) => c.value);
   assert.ok(!chips(['line']).includes('none') && !chips(['rect', 'line']).includes('none') && chips(['rect']).includes('none'));
   const F = svg('<line id="l" x1="10" y1="10" x2="90" y2="60" stroke="#e76f51" stroke-width="4"/>');
@@ -237,4 +240,195 @@ test('a style edit over a large selection takes linear time: Set fill, and a sli
     assert.ok(big < 6 * small, `${what}: ${small.toFixed(0)} ms over 1,000 shapes, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
     assert.ok(big < limit, `${what}: ${big.toFixed(0)} ms over 4,000 shapes (the limit is ${limit})`);
   }
+});
+
+// ── S3: gradients, the stop editor and gloss ─────────────────────────────────────────────────────
+
+const GRAD = svg(`<defs>
+    <linearGradient id="shared"><stop offset="0" stop-color="#e76f51"/><stop offset="1" stop-color="#264653"/></linearGradient>
+    <radialGradient id="rad" cx="0.5" cy="0.5" r="0.4" fx="0.4"><stop offset="0" style="stop-color:#ffffff;stop-opacity:1"/><stop offset="1" stop-color="#2a9d8f"/></radialGradient>
+  </defs>
+  <rect id="a" x="5" y="5" width="20" height="20" fill="#e9c46a"/>
+  <rect id="b" x="30" y="5" width="20" height="20" fill="url(#shared)"/>
+  <rect id="c" x="55" y="5" width="20" height="20" fill="url(#shared)"/>
+  <circle id="d" cx="20" cy="60" r="10" fill="url(#rad)"/>`);
+
+test('gradients through Inspect, one entry each: Linear writes SVG Lab’s gradient and Colour after it gives the bytes back; Radial, then None, likewise; a shared gradient says so and Make unique gives this shape its own; Spread, Add stop and Remove stop; Gloss on and off', () => {
+  const e = opened(GRAD);
+  const one = (label: string, was: string) => {
+    assert.equal(e.history.get().undoLabel, label);
+    const now = e.source();
+    e.undo();
+    assert.equal(e.source(), was, `${label}: one undo`);
+    e.redo();
+    assert.equal(e.source(), now);
+  };
+  select(e, 'a');
+  assert.equal(e.paintInfo('fill')?.kind, 'color');
+  e.setPaintKind('fill', 'linear');
+  assert.ok(e.source().includes('<linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#e9c46a"/><stop offset="1" stop-color="#e76f51"/></linearGradient>'), e.source());
+  assert.equal(e.paintInfo('fill')?.kind, 'linear');
+  one('Set fill', GRAD);
+  e.setPaintKind('fill', 'color');
+  assert.equal(e.source(), GRAD, 'Colour after Linear: the first stop’s colour back, the gradient gone, xmlns:draw gone');
+  e.setPaintKind('fill', 'radial');
+  assert.equal(e.paintInfo('fill')?.kind, 'radial');
+  e.setPaintKind('fill', 'none');
+  assert.equal(e.source(), GRAD.replace('fill="#e9c46a"', 'fill="none"'), 'None takes the Draw-made gradient away');
+  e.undo();
+  e.undo();
+  assert.equal(e.source(), GRAD);
+  // Shared: b's gradient is c's too; Make unique gives b its own.
+  select(e, 'b');
+  const info = e.paintInfo('fill')!;
+  assert.deepEqual([info.kind, info.shared, info.stops.map((x) => x.colour), info.spread, info.units], ['linear', 1, ['#e76f51', '#264653'], 'pad', 'Box']);
+  e.makeUnique('fill');
+  assert.ok(e.source().includes('fill="url(#linear-1)"') && e.source().includes('<rect id="c" x="55" y="5" width="20" height="20" fill="url(#shared)"/>'), e.source());
+  assert.equal(e.paintInfo('fill')?.shared, 0, 'unique now');
+  one('Make unique', GRAD);
+  e.undo();
+  // Spread, Add stop, Remove stop on the shared gradient (the file's own: it stays).
+  e.setSpread('fill', 'reflect');
+  assert.equal(e.source(), GRAD.replace('<linearGradient id="shared">', '<linearGradient id="shared" spreadMethod="reflect">'));
+  one('Set spreadMethod', GRAD);
+  e.undo();
+  e.addStop('fill', e.paintInfo('fill')!.stops[0].id);
+  assert.ok(e.source().includes('stop-color="#e76f51"/><stop offset="0.5" stop-color="#875b52"/><stop offset="1"'), e.source());
+  one('Add stop', GRAD);
+  e.undo();
+  e.removeStop('fill', e.paintInfo('fill')!.stops[1].id);
+  assert.equal(e.source(), GRAD.replace('<stop offset="1" stop-color="#264653"/>', ''));
+  one('Remove stop', GRAD);
+  e.undo();
+  // Gloss on a plain rect, then off: byte for byte.
+  select(e, 'a');
+  assert.equal(e.glossState(), 'off');
+  e.toggleGloss();
+  assert.ok(e.source().includes('<radialGradient id="gloss-1" cx="0.35" cy="0.3" r="0.8" draw:made="true">') && e.glossState() === 'on');
+  assert.equal(e.paintInfo('fill')?.gloss, true);
+  one('Gloss', GRAD);
+  e.toggleGloss();
+  assert.equal(e.source(), GRAD, 'Gloss off gives the file back');
+  assert.equal(e.history.get().undoLabel, 'Gloss off');
+});
+
+test('the stop editor, one entry per editing session: an offset typed then left, its − and + one each, a stop-opacity press, a stop’s Colour-sheet visit (no none chip), and a radial gradient’s fx field; one undo gives back the value from before each', () => {
+  const e = opened(GRAD);
+  select(e, 'd');
+  const stops = e.paintInfo('fill')!.stops;
+  // The offset field: typed "0.3", then "0.35", then left.
+  e.fieldStart({ kind: 'offset', stop: stops[1].id });
+  assert.equal(e.fieldInput('0.3'), null);
+  assert.equal(e.fieldInput('0.35'), null);
+  assert.match(e.fieldInput('1.5') ?? '', /not an offset/, 'out of 0–1: refused, the last good one stays');
+  e.fieldEnd();
+  assert.equal(e.source(), GRAD.replace('<stop offset="1" stop-color="#2a9d8f"/>', '<stop offset="0.35" stop-color="#2a9d8f"/>'));
+  assert.equal(e.history.get().undoLabel, 'Set offset');
+  e.undo();
+  assert.equal(e.source(), GRAD, 'typing was one entry');
+  e.stepStopOffset(stops[0].id, 1);
+  e.stepStopOffset(stops[0].id, 1);
+  assert.equal(e.source(), GRAD.replace('<stop offset="0" style=', '<stop offset="0.1" style='));
+  e.undo();
+  assert.equal(e.source(), GRAD.replace('<stop offset="0" style=', '<stop offset="0.05" style='), '− and + one entry each');
+  e.undo();
+  // stop-opacity: one press, in the stop's style="".
+  assert.ok(e.styleDrag('stop-opacity', [stops[0].id]));
+  for (const v of ['0.8', '0.5']) assert.equal(e.styleInput(v), null);
+  e.styleDragEnd();
+  assert.equal(e.source(), GRAD.replace('stop-opacity:1"', 'stop-opacity:0.5"'));
+  e.undo();
+  assert.equal(e.source(), GRAD, 'the press was one entry');
+  // The stop's colour: the Colour sheet over the stop, one visit, no none.
+  e.openStyleSheet('stop-color', [stops[1].id]);
+  assert.deepEqual(e.sheet.get(), { kind: 'style', prop: 'stop-color', ids: [stops[1].id], text: '#2a9d8f' });
+  assert.ok('text' in e.sheetInput('#e9c46a'));
+  assert.ok('text' in e.sheetInput('#264653'));
+  e.closeSheet();
+  assert.equal(e.source(), GRAD.replace('stop-color="#2a9d8f"', 'stop-color="#264653"'));
+  e.undo();
+  assert.equal(e.source(), GRAD, 'the visit was one entry');
+  // fx: one entry while typed.
+  e.fieldStart({ kind: 'gradient', prop: 'fill', name: 'fx' });
+  assert.equal(e.fieldInput('0.3'), null);
+  assert.equal(e.fieldInput('0.35'), null);
+  e.fieldEnd();
+  assert.equal(e.source(), GRAD.replace('fx="0.4"', 'fx="0.35"'));
+  e.undo();
+  assert.equal(e.source(), GRAD);
+  assert.equal(e.history.get().canUndo, false);
+});
+
+test('relative URLs keep their bytes: a relative gradient href, a relative xlink:href and a relative paint url() are never touched by Linear on another shape, a stop edit, Make unique of a gradient another shape shares, Colour back, or the As-is export; a Text-sheet edit of the href token rewrites only the URL’s characters, one entry one undo takes back', () => {
+  const F = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="rel" href="other.svg#a"/>
+    <radialGradient id="relx" xlink:href="lib/other.svg#b"/>
+  </defs>
+  <rect id="p" width="10" height="10" fill="url(#g)"/>
+  <rect id="q" x="20" width="10" height="10" fill="url(#g)"/>
+  <rect id="r" x="40" width="10" height="10" fill="url(other.svg#g) red"/>
+  <rect id="s" x="60" width="10" height="10" fill="#e9c46a"/>
+</svg>
+`;
+  const listing = new Map<string, ViewBlock>();
+  const ports = fakePorts();
+  ports.code = { ...ports.code, set: (bs) => { listing.clear(); for (const b of bs) listing.set(b.key, b); }, patch: (b) => void (listing.has(b.key) && listing.set(b.key, b)) };
+  const e = bind(ports, new EditorClass(ports));
+  assert.ok(e.open(F).ok);
+  const RELS = ['href="other.svg#a"', 'xlink:href="lib/other.svg#b"', 'fill="url(other.svg#g) red"'];
+  const kept = (what: string) => {
+    for (const r of RELS) assert.ok(e.source().includes(r), `${what}: ${r} kept byte for byte`);
+  };
+  select(e, 's');
+  e.setPaintKind('fill', 'linear');
+  kept('Linear on another shape');
+  select(e, 'p');
+  e.addStop('fill', null);
+  kept('a stop edit');
+  e.makeUnique('fill');
+  kept('Make unique of a shared gradient');
+  select(e, 's');
+  e.setPaintKind('fill', 'color');
+  kept('Colour back');
+  assert.ok(stripDrawState(e.doc!).includes(RELS.join('') === '' ? '' : RELS[0]) && RELS.every((r) => stripDrawState(e.doc!).includes(r)), 'the As-is export keeps them');
+  // The href token (text) through the Text sheet: only the URL's characters.
+  const before = e.source();
+  const rel = idOf(e, 'rel');
+  const block = listing.get(`${rel}:start`) ?? listing.get(`${rel}:leaf`);
+  assert.ok(block);
+  const token = block.tokens.find((t) => t.kind === 'text');
+  assert.ok(token, `the relative href is a text token: ${JSON.stringify(block.tokens)}`);
+  e.tapToken(block, token);
+  assert.equal(e.sheet.get()?.kind, 'text');
+  assert.ok('text' in e.sheetInput('#g'));
+  e.closeSheet();
+  assert.equal(e.source(), before.replace('href="other.svg#a"', 'href="#g"'), 'only the URL’s characters');
+  e.undo();
+  assert.equal(e.source(), before, 'one entry');
+});
+
+test('Edit on canvas: the gradient’s handles instead of the shape’s, with its box and line; a drag of the end is one "Gradient end" that writes x2 and y2 on the gradient the paint names; it ends when the selection changes', () => {
+  const e = opened(GRAD);
+  select(e, 'b');
+  assert.ok(e.overlayModel().handles.some((h) => h.id === 'tl'), 'test setup: a rect’s corners');
+  e.toggleEditGradient('fill');
+  assert.equal(e.editGradient.get(), 'fill');
+  const m = e.overlayModel();
+  assert.deepEqual(m.handles.map((h) => h.id), ['g-start', 'g-end'], 'only the gradient’s handles');
+  assert.ok(m.gradient?.box?.length === 4 && m.gradient.line && m.gradient.labels.map((l) => l.text).join() === '0,0,1,1');
+  const end = m.handles.find((h) => h.id === 'g-end')!.at;
+  const start = m.handles.find((h) => h.id === 'g-start')!.at;
+  assert.ok(Math.abs(end.y - start.y) < 1e-6 && end.x > start.x, 'the default: left to right across the box');
+  const to = { x: (start.x + end.x) / 2, y: end.y + (end.x - start.x) / 2 };
+  e.pointerDown(end, [], { add: false });
+  for (let i = 1; i <= 4; i++) e.pointerDrag({ x: end.x + ((to.x - end.x) * i) / 4, y: end.y + ((to.y - end.y) * i) / 4 });
+  e.pointerUp(to);
+  assert.equal(e.history.get().undoLabel, 'Gradient end');
+  assert.match(e.source(), /<linearGradient id="shared" x2="0\.5" y2="0\.5">/, e.source());
+  e.undo();
+  assert.equal(e.source(), GRAD, 'one entry');
+  select(e, 'a');
+  assert.equal(e.editGradient.get(), null, 'a new selection ends it');
 });

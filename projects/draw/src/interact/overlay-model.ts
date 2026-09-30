@@ -68,12 +68,33 @@ export interface OverlayModel {
   guides: Guide[]; // the user's guides (S3)
   snapLines: Line[];
   localGrid: { lines: Line[]; axes: Line[]; labels: Label[] } | null;
+  /** Edit on canvas (P1-M2): the gradient's guides, host px: its unit box with "0,0" and "1,1" (objectBoundingBox), a linear gradient's line, a radial one's circle and focus arm. */
+  gradient: GradientGuides | null;
   tip: Tip | null;
 }
 
+export interface GradientGuides {
+  box: Point[] | null;
+  labels: Label[];
+  line: Line | null;
+  ring: Point[] | null;
+  arm: Line | null;
+}
+
 export const EMPTY: OverlayModel = {
-  paper: null, grid: null, outlines: [], marquee: null, coords: null, handles: [], rotGuide: null, guides: [], snapLines: [], localGrid: null, tip: null,
+  paper: null, grid: null, outlines: [], marquee: null, coords: null, handles: [], rotGuide: null, guides: [], snapLines: [], localGrid: null, gradient: null, tip: null,
 };
+
+/** The gradient engine's marks (engine/paint/handles.ts) as the overlay draws them. */
+export function gradientGuides(m: { box: Point[] | null; labels: { text: string; at: Point }[]; line: [Point, Point] | null; ring: Point[] | null; arm: [Point, Point] | null }): GradientGuides {
+  return {
+    box: m.box,
+    labels: m.labels.map((l, i) => ({ text: l.text, at: { x: l.at.x + (i ? 4 : -4), y: l.at.y + (i ? 14 : -6) }, anchor: i ? 'start' : 'end' })),
+    line: m.line && { from: m.line[0], to: m.line[1] },
+    ring: m.ring,
+    arm: m.arm && { from: m.arm[0], to: m.arm[1] },
+  };
+}
 
 // ── the paper and the grid ────────────────────────────────────────────────────────────────────
 

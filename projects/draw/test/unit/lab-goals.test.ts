@@ -413,7 +413,7 @@ test('lab/shapes.svg: the rect’s fill by a palette swatch, by None and by a co
   const r = open('lab/shapes.svg');
   const rect = element(r, 'rect');
   r.editor.select([rect.id]);
-  assert.deepEqual(paintKinds('fill', ['rect']), ['none', 'color'], 'Fill offers None and Colour');
+  assert.deepEqual(paintKinds('fill', ['rect']), ['none', 'color', 'linear', 'radial'], 'Fill offers None and Colour (and the gradients)');
   sheetSets(r, 'fill', PALETTE[1]);
   assert.equal(r.editor.source(), edited(r.file, 'fill="#f4a261"', 'fill="#2a9d8f"'), 'a swatch');
   oneStyleEntry(r, 'Set fill', r.file);
@@ -432,7 +432,7 @@ test('lab/shapes.svg: a line placed with the Shapes tool (line-stroke): Inspect 
   const placed = r.editor.source();
   assert.deepEqual([...r.editor.selection.get()], [line.id]);
   assert.equal(paintKinds('fill', ['line']), null, 'no Fill row for a line (SVG Lab’s styleAttrs)');
-  assert.deepEqual(paintKinds('stroke', ['line']), ['color'], 'its stroke has no None');
+  assert.deepEqual(paintKinds('stroke', ['line']), ['color', 'linear', 'radial'], 'its stroke has no None');
   assert.ok(!colorChoices(styleSlot('stroke', ['line']), '#e76f51').chips.some((c) => c.value === 'none'), 'nor has its stroke sheet');
   sheetSets(r, 'stroke', PALETTE[0]);
   assert.equal(r.editor.source(), placed.replace('stroke="#e76f51"', 'stroke="#264653"'));
@@ -476,7 +476,7 @@ test('lab/style.svg: the polyline’s stroke and width (polyline-stroke) and its
   const r = open('lab/style.svg');
   const line = element(r, 'polyline');
   r.editor.select([line.id]);
-  assert.equal(paintKinds('fill', ['polyline'])?.length, 2, 'a polyline keeps its Fill row');
+  assert.equal(paintKinds('fill', ['polyline'])?.includes('none'), true, 'a polyline keeps its Fill row, None included');
   sheetSets(r, 'stroke', PALETTE[0]);
   assert.equal(r.editor.source(), edited(r.file, 'stroke="#e76f51"', 'stroke="#264653"'), 'stroke');
   oneStyleEntry(r, 'Set stroke', r.file);

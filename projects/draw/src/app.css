@@ -133,6 +133,11 @@
 /* SVG Lab's marks (its .selbox, .gd, .gt, .hd and .tip), in screen px. */
 .draw-marquee { fill: rgb(0 163 224 / 0.08); stroke: #00a3e0; stroke-width: 1; stroke-dasharray: 4 3; }
 .draw-coord, .draw-rot-guide { fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4; }
+/* Edit on canvas (P1-M2): a gradient's guides, SVG Lab's .gd (its line and circle), .bb (the unit
+   box of a bounding-box gradient) and .arm (centre to focus). */
+.draw-grad-guide { fill: none; stroke: #00a3e0; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.draw-grad-box { fill: none; stroke: #8d99ae; stroke-width: 1; stroke-dasharray: 2 3; }
+.draw-grad-arm { stroke: #e6007e; stroke-width: 1; opacity: 0.75; }
 .draw-mark-label {
   fill: #006f99;
   font: 700 var(--text-sm) / 1 var(--font-ui);
@@ -366,6 +371,9 @@
 }
 .draw-inspect-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .draw-inspect button:disabled, .draw-inspect input:disabled { opacity: 0.5; }
+/* A gradient paint's section (P1-M2 S3), set in under its paint row; each stop's rows together. */
+.draw-inspect-gradient { display: flex; flex-direction: column; gap: var(--space-2); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.draw-inspect-stop { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
 
 /* Over the code: the legend, Tidy and Copy, kept in view while the code scrolls. */
 .draw-code-bar {

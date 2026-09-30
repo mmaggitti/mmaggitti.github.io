@@ -6,6 +6,10 @@
 //   rule", whose control is disabled with the P2 notice). A swatch opens the Colour sheet over the
 //   selection; a segment, preset or switch is one entry; a slider one entry per press; a field one
 //   entry while it has focus.
+// - Gradients (S3), for one element whose fill or stroke is a gradient (engine/paint/): the paint
+//   kinds None, Colour, Linear and Radial (and the Gloss switch for a fill); then "Shared with N
+//   other shapes" and Make unique, the stops (offset, colour, opacity, Remove; Add stop), Spread,
+//   Units, a radial gradient's fx, fy and fr, and Edit on canvas.
 // - Generator (S1), for one generated shape (engine/generators/): its kind, a field per input with −
 //   and + (one entry each), and Detach.
 // A field is one history entry while it has focus: each keystroke that reads as a value is written
@@ -15,11 +19,11 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { decodeAttr } from '../../../../engine/xml/entities.ts';
-import type { ElementNode } from '../../../../engine/model/doc.ts';
+import type { ElementNode, NodeId } from '../../../../engine/model/doc.ts';
 import { parseColor } from '../../../../engine/values/color.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
 import { STYLE_PROPS } from '../../../../engine/style/props.ts';
-import type { Editor, Field, StyleRow } from '../editor.ts';
+import type { Editor, Field, PaintInfo, StyleRow } from '../editor.ts';
 import { INPUT_UI } from '../interact/shapes-tool.ts';
 import { dashPresets, paintKinds, widthRange, type PaintKind } from '../style-edit.ts';
 import { elementLabel } from './label.ts';
@@ -90,11 +94,14 @@ function StyleSections({ editor, locals }: { editor: Editor; locals: readonly st
     <>
       {fillKinds && (
         <Section title="Fill">
-          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} />
+          <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} info={editor.paintInfo('fill')} />
+          <GlossRow editor={editor} />
+          {locals.length === 1 && <GradientSection editor={editor} prop="fill" info={editor.paintInfo('fill')} />}
         </Section>
       )}
       <Section title="Stroke">
-        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds={paintKinds('stroke', locals)!} />
+        <PaintRow editor={editor} prop="stroke" label="Paint" row={row('stroke')} kinds={paintKinds('stroke', locals)!} info={editor.paintInfo('stroke')} />
+        {locals.length === 1 && <GradientSection editor={editor} prop="stroke" info={editor.paintInfo('stroke')} />}
         <NumberRow editor={editor} prop="stroke-width" label="Width" row={row('stroke-width')} slider={widthRange(ctx)} />
       </Section>
       <Section title="Opacity">
@@ -149,34 +156,162 @@ function Row({ label, row, children }: { label: string; row: StyleRow; children:
   );
 }
 
+const KIND_LABEL: Readonly<Record<PaintKind, string>> = { none: 'None', color: 'Colour', linear: 'Linear', radial: 'Radial' };
+
 /**
  * Fill, stroke and color: a swatch that opens the Colour sheet over the selection. Fill and stroke
  * add their paint kinds (paintKinds: a line's stroke has no None): None writes none; Colour opens
- * the sheet.
+ * the sheet (or gives a gradient's first stop colour back); Linear and Radial write a new gradient.
+ * With SVG Lab's gloss on, the fill's swatch is "Gloss" in the end stop's colour, and edits that stop.
  */
-function PaintRow({ editor, prop, label, row, kinds = [] }: { editor: Editor; prop: string; label: string; row: StyleRow; kinds?: readonly PaintKind[] }) {
+function PaintRow({ editor, prop, label, row, kinds = [], info = null }: { editor: Editor; prop: string; label: string; row: StyleRow; kinds?: readonly PaintKind[]; info?: PaintInfo | null }) {
   const v = row.value;
-  const colour = !row.mixed && parseColor(v)?.kind === 'color';
-  const text = row.mixed ? 'Mixed' : row.from === 'rule' ? 'a <style> rule’s' : v || '?';
+  const end = info?.gloss ? info.stops[info.stops.length - 1] : undefined;
+  const shown = end ? end.colour : v;
+  const colour = !row.mixed && parseColor(shown)?.kind === 'color';
+  const text = row.mixed ? 'Mixed' : end ? 'Gloss' : row.from === 'rule' ? 'a <style> rule’s' : v || '?';
+  const kind = row.mixed ? null : info?.kind;
+  const paint = prop === 'fill' || prop === 'stroke' ? prop : null;
   return (
     <Row label={label} row={row}>
-      <button type="button" className="draw-inspect-swatch" aria-label={`${prop}: ${text}`} disabled={!!row.disabled} onClick={() => editor.openStyleSheet(prop)}>
-        <span className="draw-inspect-chip" style={colour ? { background: v } : undefined} />
+      <button type="button" className="draw-inspect-swatch" aria-label={`${prop}: ${text}`} disabled={!!row.disabled} onClick={() => (end ? editor.openStyleSheet('stop-color', [end.id]) : editor.openStyleSheet(prop))}>
+        <span className="draw-inspect-chip" style={colour ? { background: shown } : undefined} />
         <span className="draw-inspect-text ds-mono">{text}</span>
       </button>
-      {kinds.length > 0 && (
-        <div className="ds-seg draw-inspect-seg" role="group" aria-label={`${prop} kind`}>
-          {kinds.includes('none') && (
-            <button type="button" aria-pressed={!row.mixed && v.toLowerCase() === 'none'} disabled={!!row.disabled} onClick={() => editor.setStyle(prop, 'none')}>
-              None
+      {kinds.length > 0 && paint && (
+        <div className="ds-seg draw-inspect-seg draw-inspect-seg--two" role="group" aria-label={`${prop} kind`}>
+          {kinds.map((k) => (
+            <button key={k} type="button" aria-pressed={kind === k} disabled={!!row.disabled} onClick={() => editor.setPaintKind(paint, k)}>
+              {KIND_LABEL[k]}
             </button>
-          )}
-          <button type="button" aria-pressed={!row.mixed && !!parseColor(v)} disabled={!!row.disabled} onClick={() => editor.openStyleSheet(prop)}>
-            Colour
-          </button>
+          ))}
         </div>
       )}
     </Row>
+  );
+}
+
+/** SVG Lab's gloss on a fill (Create, L1892): a switch, one entry each way. Not offered where nothing selected can take it. */
+function GlossRow({ editor }: { editor: Editor }) {
+  const state = editor.glossState();
+  if (state === null) return null;
+  return (
+    <div className="draw-inspect-row">
+      <span className="draw-inspect-name">Gloss</span>
+      <button type="button" role="switch" aria-checked={state === 'on'} aria-label="Gloss" className="draw-inspect-switch" onClick={() => editor.toggleGloss()}>
+        {state === 'on' ? 'On' : 'Off'}
+      </button>
+    </div>
+  );
+}
+
+const SPREADS: [string, string][] = [['pad', 'Pad'], ['reflect', 'Reflect'], ['repeat', 'Repeat']];
+
+/**
+ * A gradient paint's section (one element): whether an edit here changes other shapes too (Make
+ * unique gives this one its own copy), the stops it draws with, Spread, Units (never converted),
+ * a radial gradient's fx, fy and fr, and Edit on canvas.
+ */
+function GradientSection({ editor, prop, info }: { editor: Editor; prop: 'fill' | 'stroke'; info: PaintInfo | null }) {
+  const editing = useStore(editor.editGradient) === prop;
+  if (!info?.gradient) return null;
+  const name = prop === 'fill' ? 'Fill' : 'Stroke';
+  return (
+    <div className="draw-inspect-gradient" role="group" aria-label={`${name} gradient`}>
+      {info.shared > 0 && (
+        <div className="draw-inspect-row">
+          <p className="draw-inspect-note" role="status">
+            Shared with {info.shared} other shape{info.shared === 1 ? '' : 's'}
+          </p>
+          <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.makeUnique(prop)}>
+            Make unique
+          </button>
+        </div>
+      )}
+      {info.stops.map((stop, i) => (
+        <StopRow key={stop.id} editor={editor} prop={prop} stop={stop} n={i + 1} last={info.stops.length === 1} />
+      ))}
+      <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.addStop(prop, null)}>
+        Add stop
+      </button>
+      <div className="draw-inspect-row">
+        <span className="draw-inspect-name">Spread</span>
+        <div className="ds-seg draw-inspect-seg" role="group" aria-label={`${prop} spreadMethod`}>
+          {SPREADS.map(([v, t]) => (
+            <button key={v} type="button" aria-pressed={info.spread === v} onClick={() => editor.setSpread(prop, v as 'pad' | 'reflect' | 'repeat')}>
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="draw-inspect-row">
+        <span className="draw-inspect-name">Units</span>
+        <span className="draw-inspect-value ds-mono">{info.units}</span>
+      </div>
+      {info.kind === 'radial' &&
+        (['fx', 'fy', 'fr'] as const).map((n) => (
+          <GradientField key={n} editor={editor} prop={prop} name={n} text={info[n] ?? ''} />
+        ))}
+      <div className="draw-inspect-row">
+        <span className="draw-inspect-name">Edit on canvas</span>
+        <button type="button" className="ds-btn draw-inspect-btn" aria-label={`Edit the ${prop} gradient on canvas`} aria-pressed={editing} onClick={() => editor.toggleEditGradient(prop)}>
+          {editing ? 'On' : 'Off'}
+        </button>
+        {info.handles && <p className="draw-inspect-note">{info.handles}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** One stop: its offset (− and + by 0.05, or typed), its colour (the Colour sheet, no none), its opacity, and Remove. */
+function StopRow({ editor, prop, stop, n, last }: { editor: Editor; prop: 'fill' | 'stroke'; stop: PaintInfo['stops'][number]; n: number; last: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const row = editor.styleRow('stop-opacity', [stop.id]);
+  const colour = parseColor(stop.colour)?.kind === 'color';
+  return (
+    <div className="draw-inspect-stop" role="group" aria-label={`Stop ${n}`}>
+      <div className="draw-inspect-row">
+        <span className="draw-inspect-name">Stop {n}</span>
+        <div className="draw-stepper">
+          <button type="button" className="draw-key" aria-label={`Decrease stop ${n} offset`} onClick={() => editor.stepStopOffset(stop.id, -1)}>
+            −
+          </button>
+          <FocusField editor={editor} field={{ kind: 'offset', stop: stop.id }} label={`stop ${n} offset`} text={fmt(stop.offset, 4)} onError={setError} />
+          <button type="button" className="draw-key" aria-label={`Increase stop ${n} offset`} onClick={() => editor.stepStopOffset(stop.id, 1)}>
+            +
+          </button>
+        </div>
+        <Problem error={error} />
+      </div>
+      <div className="draw-inspect-row">
+        <button type="button" className="draw-inspect-swatch" aria-label={`stop ${n} colour: ${stop.colour}`} onClick={() => editor.openStyleSheet('stop-color', [stop.id])}>
+          <span className="draw-inspect-chip" style={colour ? { background: stop.colour } : undefined} />
+          <span className="draw-inspect-text ds-mono">{stop.colour}</span>
+        </button>
+        <button type="button" className="ds-btn draw-inspect-btn" aria-label={`Remove stop ${n}`} disabled={last} onClick={() => editor.removeStop(prop, stop.id)}>
+          Remove
+        </button>
+      </div>
+      {row && (
+        <div className="draw-inspect-row">
+          <span className="draw-inspect-name">Opacity</span>
+          <StyleSlider editor={editor} prop="stop-opacity" row={row} range={UNIT} only={[stop.id]} name={`stop ${n} opacity`} />
+          <span className="draw-inspect-value ds-mono">{row.value}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A radial gradient's fx, fy or fr: one entry while it has focus, written where it lives in the chain. */
+function GradientField({ editor, prop, name, text }: { editor: Editor; prop: 'fill' | 'stroke'; name: 'fx' | 'fy' | 'fr'; text: string }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="draw-inspect-row">
+      <span className="draw-inspect-name">{name}</span>
+      <FocusField editor={editor} field={{ kind: 'gradient', prop, name }} label={`${prop} gradient ${name}`} text={text} placeholder={text ? undefined : 'default'} onError={setError} />
+      <Problem error={error} />
+    </div>
   );
 }
 
@@ -223,7 +358,7 @@ function SliderRow({ editor, prop, label, row, range }: { editor: Editor; prop: 
 // A press holds the slider's one entry until the pointer lifts anywhere: a mouse let go off the
 // slider sends the slider nothing, so the release is heard on the window, and the slider going
 // away (the selection changed) ends it too.
-function StyleSlider({ editor, prop, row, range, name = prop }: { editor: Editor; prop: string; row: StyleRow; range: { min: number; max: number; step: number }; name?: string }) {
+function StyleSlider({ editor, prop, row, range, name = prop, only }: { editor: Editor; prop: string; row: StyleRow; range: { min: number; max: number; step: number }; name?: string; only?: NodeId[] }) {
   const held = useRef<(() => void) | null>(null); // while pressed: takes the release listeners off
   const read = parseFloat(row.value);
   const value = Number.isFinite(read) ? read : Number(STYLE_PROPS[prop]?.initial ?? 0);
@@ -247,7 +382,7 @@ function StyleSlider({ editor, prop, row, range, name = prop }: { editor: Editor
       value={Math.min(range.max, Math.max(range.min, value))}
       disabled={!!row.disabled}
       onPointerDown={() => {
-        if (held.current || !editor.styleDrag(prop)) return;
+        if (held.current || !editor.styleDrag(prop, only)) return;
         const up = () => end.current();
         window.addEventListener('pointerup', up, true);
         window.addEventListener('pointercancel', up, true);
@@ -259,7 +394,7 @@ function StyleSlider({ editor, prop, row, range, name = prop }: { editor: Editor
       onChange={(e) => {
         const t = fmt(Number(e.target.value), 10);
         if (held.current) editor.styleInput(t);
-        else editor.setStyle(prop, t);
+        else editor.setStyle(prop, t, only);
       }}
       onBlur={() => end.current()}
     />

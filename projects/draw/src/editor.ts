@@ -49,7 +49,7 @@ import type { Camera, Motion, RenderStats } from './canvas/renderer.ts';
 import { rootTransform, transformOrigin } from '../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../engine/geometry/bounds.ts';
 import { IDENTITY, type Affine } from '../../../engine/values/affine.ts';
-import { EMPTY, coordGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type Handle, type Line, type OverlayModel, type Quad } from './interact/overlay-model.ts';
+import { EMPTY, coordGuides, gradientGuides, gridModel, gridStep, localGridModel, paperRect, quadOf, rootToHostMatrix, tip, unionBox, type CameraBox, type Handle, type Line, type OverlayModel, type Quad } from './interact/overlay-model.ts';
 import { SNAP_ALL, SNAP_PX, boxTargets, snapAxis, snapStep, stepDecimals, toStep, type SnapPrefs, type SnapTargets } from './interact/snap.ts';
 import { applyPlan, movesBy, planMove, planResize, planRotate, planScale, rotationOf, scaleOf, ROOT_MOVE, type Corner, type Plan } from '../../../engine/geometry/write.ts';
 import { handlesFor, handlesForMany, magneticAngle, pickHandle, scaleStep } from './interact/handles.ts';
@@ -74,6 +74,12 @@ import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refO
 import { planStyle, ruleWhy, type StyleCtx } from '../../../engine/style/write.ts';
 import { shownValue, styleSource } from '../../../engine/style/where.ts';
 import { checkStyle } from './style-edit.ts';
+import { GRADIENT_LABELS, gradientHandles, planGradientHandle, type GradientGeo, type GradientHandleId } from '../../../engine/paint/handles.ts';
+import { LAB_A, gradientAttrOp, gradientUsers, makeUnique as makeUniqueCopy, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, valueOf, type PaintProp } from '../../../engine/paint/gradients.ts';
+import { addStop as addStopAfter, offsetOp, removeStop as removeStopOf, stopOffset } from '../../../engine/paint/stops.ts';
+import { glossOf, glossOff, glossOn, glossable } from '../../../engine/paint/gloss.ts';
+import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
+import { parsePaint } from '../../../engine/values/color.ts';
 import { elementLabel } from './panels/label.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
@@ -179,6 +185,22 @@ export interface StyleRow {
   disabled: string | null;
 }
 
+/** What Inspect shows about a paint of the first selected element (P1-M2 S3; editor.paintInfo). */
+export interface PaintInfo {
+  kind: 'none' | 'color' | 'linear' | 'radial' | 'other';
+  gradient: NodeId | null; // the gradient its own url(#…) names
+  gloss: boolean; // SVG Lab's gloss (a fill only)
+  shared: number; // the other shapes that draw with what an edit here writes
+  stops: { id: NodeId; offset: number; colour: string; opacity: string }[];
+  spread: string;
+  units: 'Box' | 'User space';
+  fx: string | null; // a radial gradient's, as written (null: not written)
+  fy: string | null;
+  fr: string | null;
+  handles: string | null; // why Edit on canvas can't show its handles, or null
+}
+export const NO_GLOSS = 'Gloss is for rectangles, circles, ellipses, polygons, polylines and paths.';
+
 const NO_STATS: RenderStats = { rendered: 0, skippedElements: 0, droppedAttributes: 0 };
 export const READ_ONLY = 'This drawing is open in another tab, so it is read-only here';
 const NO_HISTORY: HistoryState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
@@ -232,6 +254,8 @@ export class Editor {
   readonly tool: Store<Tool> = createStore<Tool>('select');
   /** The Shapes tool's kind, kept for the session (never in the file or storage). */
   readonly shapeKind: Store<ShapeKind> = createStore<ShapeKind>('rect');
+  /** Edit on canvas (P1-M2): the paint of the one selected element whose gradient handles the overlay shows instead of the shape's; off when the selection changes. */
+  readonly editGradient: Store<PaintProp | null> = createStore<PaintProp | null>(null);
   #shapes = 0; // shapes placed or drawn since the document opened: the colour cycle's n
   #detached: NodeId[] = []; // what the finish hook detached in the latest run (the notice, after a commit)
   #field: FieldSession | null = null; // an Inspect field being typed in: one entry while it has focus
@@ -264,6 +288,7 @@ export class Editor {
     // Select more lasts until it is tapped off, Deselect, Escape, or the selection empties.
     this.selection.subscribe(() => {
       if (!this.selection.get().size && this.selectMore.get()) this.selectMore.set(false);
+      if (this.editGradient.get() !== null) this.editGradient.set(null); // Edit on canvas ends with the selection
     });
   }
 
@@ -560,7 +585,9 @@ export class Editor {
       return m ? [{ id, quad: quadOf(m.box, m.toHost) }] : [];
     });
     const model: OverlayModel = { ...EMPTY, paper, grid: this.grid.get() ? gridModel(box, vp, this.#M, this.#size, paper, this.gridStep()) : null, outlines };
-    const hs = this.#handleSet(ids, measured, outlines.map((o) => o.quad));
+    const gv = this.#gradientView(ids, measured);
+    if (gv && !('refused' in gv.out)) model.gradient = gradientGuides(gv.out.marks);
+    const hs = this.#handleSet(ids, measured, outlines.map((o) => o.quad), gv);
     model.handles = hs.handles;
     model.rotGuide = hs.rotGuide;
     model.guides = this.#guideMarks();
@@ -1021,12 +1048,14 @@ export class Editor {
 
   // The selection's handles: one element's set (not the root, not locked), or a centre for
   // several; none during a marquee.
-  #handleSet(ids: readonly NodeId[], measured: Map<NodeId, Measured>, quads: readonly Quad[]): { handles: Handle[]; rotGuide: Line | null } {
+  #handleSet(ids: readonly NodeId[], measured: Map<NodeId, Measured>, quads: readonly Quad[], gv: GradientView | null = null): { handles: Handle[]; rotGuide: Line | null } {
     const doc = this.#doc!;
     const g = this.#gesture;
     const none = { handles: [], rotGuide: null };
     if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
     const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
+    // Edit on canvas: the gradient's handles instead of the shape's (none when they can't be placed).
+    if (gv) return 'refused' in gv.out ? none : { handles: gv.out.handles.map((h) => ({ id: h.id, kind: h.kind, at: h.at, active: h.id === active })), rotGuide: null };
     if (ids.length > 1) {
       const u = unionBox(quads);
       return u ? { handles: handlesForMany(u, active), rotGuide: null } : none;
@@ -1102,7 +1131,17 @@ export class Editor {
     // The offset from the finger to the handle at the press: the handle moves by the finger's
     // movement, never jumping to it (26 pt pick radius).
     const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, grab };
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, grab };
+    if (g.handle!.startsWith('g-')) {
+      // A gradient handle (Edit on canvas): raw, no snapping (as in the lab), so no targets.
+      const gv = this.#gradientView([id], measured);
+      if (!gv || 'refused' in gv.out) return;
+      hd.gradient = { prop: gv.prop, geo: gv.geo, handle: g.handle as GradientHandleId };
+      hd.drag = this.#drag(GRADIENT_LABELS[g.handle as GradientHandleId]);
+      g.hd = hd;
+      g.mode = 'handle';
+      return;
+    }
     if (kind === 'Shape') {
       const sh = shapeHandles(doc, id, this.geo)?.find((h) => h.id === g.handle);
       const toUnits = invert(m.toHost);
@@ -1156,7 +1195,15 @@ export class Editor {
     const opts = { ctx: this.geo, decimals: stepDecimals(hd.step) };
     let plan: () => Plan;
     const f = { x: g.at.x + hd.grab.x, y: g.at.y + hd.grab.y }; // where the handle goes (the grab kept)
-    if (hd.shape) {
+    if (hd.gradient) {
+      const gh = hd.gradient;
+      plan = () => {
+        const own = ownPaint(doc, hd.id, gh.prop);
+        const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
+        return r ? planGradientHandle(doc, r, gh.handle, f, gh.geo) : { refused: 'Its paint is no longer a gradient.' };
+      };
+      g.snapLines = [];
+    } else if (hd.shape) {
       const shape = hd.shape;
       let to: Point;
       if (shape.role === 'position') to = this.#cornerPoint(g, hd, f);
@@ -1187,6 +1234,12 @@ export class Editor {
     });
     if (hd.corner) hd.tip = this.#sizeTip(hd);
     if (hd.shape) hd.tip = shapeHandles(doc, hd.id, this.geo)?.find((h) => h.id === hd.shape!.id)?.tip ?? null;
+    if (hd.gradient) {
+      const own = ownPaint(doc, hd.id, hd.gradient.prop);
+      const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
+      const out = r && gradientHandles(r, hd.gradient.geo);
+      hd.tip = out && !('refused' in out) ? (out.handles.find((h) => h.id === hd.gradient!.handle)?.tip ?? null) : null;
+    }
     if (hd.refused && this.notice.get() !== hd.refused) this.notice.set(hd.refused);
     this.#show();
   }
@@ -1506,10 +1559,16 @@ export class Editor {
    */
   fieldStart(field: Field): void {
     if (!this.#session || this.#field || this.#stepDrag || this.#live || this.#gesture || this.#nudge) return;
-    const ids = field.kind === 'input' ? [this.generated()?.id].filter((id) => id !== undefined) : this.#styleIds();
+    const ids =
+      field.kind === 'input' ? [this.generated()?.id].filter((id) => id !== undefined)
+      : field.kind === 'style' ? (field.ids ?? this.#styleIds())
+      : field.kind === 'offset' ? [field.stop].filter((id) => this.#doc && attached(this.#doc, id))
+      : this.#styleIds().slice(0, 1);
     if (!ids.length || !this.#writable()) return;
-    if (field.kind === 'style' && this.styleRow(field.prop)?.disabled) return;
-    this.#field = { field, ids, drag: this.#drag(`Set ${field.kind === 'input' ? field.name : field.prop}`), refused: [] };
+    if (field.kind === 'style' && this.styleRow(field.prop, field.ids)?.disabled) return;
+    if (field.kind === 'gradient' && !this.paintInfo(field.prop)?.gradient) return;
+    const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.name;
+    this.#field = { field, ids, drag: this.#drag(`Set ${label}`), refused: [] };
   }
 
   /** Text typed in the focused field: written into its entry when it reads as a value; else why not (the last good value stays). */
@@ -1520,6 +1579,29 @@ export class Editor {
       const c = checkStyle(f.field.prop, text);
       if ('error' in c) return c.error;
       f.refused = this.#styleFrame(f.drag, f.ids, new Map([[f.field.prop, c.text]]));
+      return null;
+    }
+    if (f.field.kind === 'offset') {
+      const t = text.trim();
+      if (!/^(?:\d+|\d*\.\d+)$/.test(t) || Number(t) > 1) return `${JSON.stringify(text)} is not an offset from 0 to 1`;
+      const doc = this.#doc!;
+      f.drag.update((apply) => apply(offsetOp(doc, f.ids[0], Number(t))));
+      this.#show();
+      return null;
+    }
+    if (f.field.kind === 'gradient') {
+      const g = f.field;
+      const t = text.trim();
+      if (!/^-?(?:\d+|\d*\.\d+)%?$/.test(t)) return `${JSON.stringify(text)} is not a number or a percentage`;
+      if (g.name === 'fr' && t.startsWith('-')) return 'fr takes numbers from 0';
+      const doc = this.#doc!;
+      const id = f.ids[0];
+      f.drag.update((apply) => {
+        const own = ownPaint(doc, id, g.prop);
+        const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
+        if (r) apply(gradientAttrOp(doc, r, g.name, t));
+      });
+      this.#show();
       return null;
     }
     const name = f.field.name;
@@ -1561,9 +1643,9 @@ export class Editor {
    * from, whether the others differ (Mixed), and, when a <style> rule decides it for every one of
    * them, why nothing can be written. Null with nothing selected.
    */
-  styleRow(prop: string): StyleRow | null {
+  styleRow(prop: string, only?: readonly NodeId[]): StyleRow | null {
     const doc = this.#doc;
-    const ids = this.#styleIds();
+    const ids = only ? [...only] : this.#styleIds();
     if (!doc || !ids.length) return null;
     const first = shownValue(doc, ids[0], prop);
     const key = (v: string | null) => (v === null ? null : v.toLowerCase());
@@ -1581,9 +1663,9 @@ export class Editor {
   }
 
   /** A segment, preset or switch in Inspect: `prop` = `value` over the selection, one entry ("Set fill"); the elements a rule decides keep theirs, and one notice names them. */
-  setStyle(prop: string, value: string): void {
+  setStyle(prop: string, value: string, only?: readonly NodeId[]): void {
     const doc = this.#doc;
-    const ids = this.#styleIds();
+    const ids = only ? [...only] : this.#styleIds();
     if (!doc || !ids.length) return;
     const c = checkStyle(prop, value);
     if ('error' in c) return void this.notice.set(c.error);
@@ -1598,10 +1680,10 @@ export class Editor {
   }
 
   /** A slider pressed (opacity, stroke-width): one entry per press ("Set opacity"), each move written live by styleInput from the file as it was before the press, kept by styleDragEnd. */
-  styleDrag(prop: string): boolean {
-    const ids = this.#styleIds();
+  styleDrag(prop: string, only?: readonly NodeId[]): boolean {
+    const ids = only ? [...only] : this.#styleIds();
     if (!this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return false;
-    if (this.styleRow(prop)?.disabled) return false;
+    if (this.styleRow(prop, only)?.disabled) return false;
     this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
     return true;
   }
@@ -1620,11 +1702,11 @@ export class Editor {
   }
 
   /** Inspect's swatch, or the More sheet's Fill… and Stroke…: the Colour sheet for `prop` over the selection, one entry per visit. */
-  openStyleSheet(prop: string): void {
+  openStyleSheet(prop: string, only?: readonly NodeId[]): void {
     const doc = this.#doc;
-    const ids = this.#styleIds();
+    const ids = only ? [...only] : this.#styleIds();
     if (!doc || !this.#session || this.#live || this.#field || this.#stepDrag || this.#gesture || this.#nudge || !ids.length || !this.#writable()) return;
-    const row = this.styleRow(prop)!;
+    const row = this.styleRow(prop, ids)!;
     if (row.disabled) return void this.notice.set(row.disabled);
     this.focus.set(null);
     this.#live = { kind: 'style', drag: this.#drag(`Set ${prop}`), prop, ids, last: new Map(), refused: [] };
@@ -1667,6 +1749,157 @@ export class Editor {
     const doc = this.#doc!;
     const names = refused.slice(0, 3).map((r) => elementLabel(doc, r.id)).join(', ') + (refused.length > 3 ? ', …' : '');
     this.notice.set(`${refused.length} of ${ids.length} kept their ${prop} (${names}): ${refused[0].why}`);
+  }
+
+  // ── gradients, the stop editor and gloss (P1-M2 S3, engine/paint/) ─────────────────────────
+
+  /**
+   * What Inspect shows about the first selected element's own fill or stroke: its kind, the
+   * gradient it names (resolved through its templates), whether it is SVG Lab's gloss, how many
+   * other shapes draw with what an edit here would write, the stops, spread, units and a radial
+   * gradient's fx, fy and fr as written, and why Edit on canvas can't show its handles.
+   */
+  paintInfo(prop: PaintProp): PaintInfo | null {
+    const doc = this.#doc;
+    const id = this.#styleIds()[0];
+    if (!doc || id === undefined) return null;
+    const own = ownPaint(doc, id, prop);
+    const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
+    const shown = shownValue(doc, id, prop).value;
+    const p = shown === null ? null : parsePaint(shown);
+    const kind: PaintInfo['kind'] = r ? (r.kind === 'linearGradient' ? 'linear' : 'radial') : p?.kind === 'none' ? 'none' : p?.kind === 'color' ? 'color' : 'other';
+    const out: PaintInfo = { kind, gradient: r?.id ?? null, gloss: prop === 'fill' && glossOf(doc, id) !== null, shared: 0, stops: [], spread: 'pad', units: 'Box', fx: null, fy: null, fr: null, handles: null };
+    if (!r) return out;
+    out.shared = sharedWith(gradientUsers(doc), [...r.chain], { el: id, prop }).length;
+    out.stops = r.stops.map((s) => ({ id: s, offset: stopOffset(doc, s), colour: stopColour(doc, s), opacity: styleSource(doc, s, 'stop-opacity').value ?? '1' }));
+    out.spread = valueOf(r, 'spreadMethod');
+    out.units = valueOf(r, 'gradientUnits') === 'userSpaceOnUse' ? 'User space' : 'Box';
+    if (r.kind === 'radialGradient') for (const n of ['fx', 'fy', 'fr'] as const) out[n] = r.attrs.get(n)?.value ?? null;
+    const gv = this.#gradientView([id], this.#ports.canvas.measure([id]), prop);
+    out.handles = !gv ? 'The canvas doesn’t draw it now.' : 'refused' in gv.out ? gv.out.refused : null;
+    return out;
+  }
+
+  // The gradient Edit on canvas shows for one selected element (`prop`, else the store's), where
+  // the canvas measured it: null when it is off, several are selected, or the paint isn't a gradient.
+  #gradientView(ids: readonly NodeId[], measured: ReadonlyMap<NodeId, Measured>, prop: PaintProp | null = this.editGradient.get()): GradientView | null {
+    const doc = this.#doc;
+    if (!doc || prop === null || ids.length !== 1) return null;
+    const m = measured.get(ids[0]);
+    const own = ownPaint(doc, ids[0], prop);
+    const r = own.gradient === null ? null : resolveGradient(doc, own.gradient);
+    const inv = m && invert(m.toHost);
+    if (!m || !r || !inv) return null;
+    const step = snapStep(1 / Math.sqrt(Math.abs(inv[0] * inv[3] - inv[1] * inv[2])));
+    const geo: GradientGeo = { box: m.box, toHost: m.toHost, viewport: viewportSize(doc, nearestViewport(doc, ids[0]), this.geo), step };
+    return { prop, geo, out: gradientHandles(r, geo) };
+  }
+
+  /** Edit on canvas for `prop`: on (the gradient's handles instead of the shape's), or off again. */
+  toggleEditGradient(prop: PaintProp): void {
+    this.editGradient.set(this.editGradient.get() === prop ? null : prop);
+    this.#show();
+  }
+
+  /**
+   * Inspect's paint kinds over the selection, one entry each ("Set fill"): None; Colour (a
+   * gradient gives back its first stop's colour, else the Colour sheet opens); Linear and Radial (a
+   * new gradient each, SVG Lab's, in defs). A gradient Draw made that nothing uses any more goes.
+   */
+  setPaintKind(prop: PaintProp, kind: 'none' | 'color' | 'linear' | 'radial'): void {
+    const doc = this.#doc;
+    const ids = this.#styleIds();
+    if (!doc || !ids.length) return;
+    const ctx = this.styleCtx;
+    let refused: { id: NodeId; why: string }[] = [];
+    let done: boolean;
+    if (kind === 'color') {
+      const graded = ids.filter((id) => ownPaint(doc, id, prop).gradient !== null);
+      if (!graded.length) return this.openStyleSheet(prop);
+      const first = (id: NodeId) => {
+        const r = resolveGradient(doc, ownPaint(doc, id, prop).gradient!)!;
+        return r.stops.length ? stopColour(doc, r.stops[0]) : LAB_A;
+      };
+      done = this.#dispatch(`Set ${prop}`, (apply) => (refused = setPlainPaint(doc, graded, prop, first, ctx, apply)));
+      if (done) this.#kept(prop, graded, refused);
+      return;
+    }
+    done = this.#dispatch(`Set ${prop}`, (apply) => {
+      refused = kind === 'none' ? setPlainPaint(doc, ids, prop, () => 'none', ctx, apply) : setGradientPaint(doc, ids, prop, kind === 'linear' ? 'linearGradient' : 'radialGradient', ctx, apply);
+    });
+    if (done) this.#kept(prop, ids, refused);
+  }
+
+  /** Make unique: the first selected element's `prop` draws with a standalone copy of its gradient ("Make unique"). */
+  makeUnique(prop: PaintProp): void {
+    const doc = this.#doc;
+    const id = this.#styleIds()[0];
+    if (!doc || id === undefined) return;
+    this.#dispatch('Make unique', (apply) => {
+      const r = makeUniqueCopy(doc, id, prop, apply);
+      if (typeof r !== 'number') throw new TokenEditError(r.refused);
+    });
+  }
+
+  /** Gloss (More, Inspect): on for each selected shape that can take one, or off when every one has it ("Gloss", "Gloss off"), one entry. */
+  toggleGloss(): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const order = documentOrder(doc);
+    const ids = this.#styleIds().filter((id) => glossable(doc, id)).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    if (!ids.length) return void this.notice.set(NO_GLOSS);
+    const on = ids.every((id) => glossOf(doc, id) !== null);
+    const ctx = this.styleCtx;
+    let refused: { id: NodeId; why: string }[] = [];
+    const done = this.#dispatch(on ? 'Gloss off' : 'Gloss', (apply) => {
+      refused = on ? glossOff(doc, ids, ctx, apply) : glossOn(doc, ids.filter((id) => glossOf(doc, id) === null), ctx, apply);
+    });
+    if (done) this.#kept('fill', ids, refused);
+  }
+
+  /** Whether the selection's gloss is on (every shape that can take one has it), off, or not offered (none can). */
+  glossState(): 'on' | 'off' | null {
+    const doc = this.#doc;
+    if (!doc) return null;
+    const ids = this.#styleIds().filter((id) => glossable(doc, id));
+    return !ids.length ? null : ids.every((id) => glossOf(doc, id) !== null) ? 'on' : 'off';
+  }
+
+  // The first selected element's gradient for `prop`, resolved now.
+  #gradientOf(prop: PaintProp): { doc: Doc; gradient: NodeId } | null {
+    const doc = this.#doc;
+    const id = this.#styleIds()[0];
+    const g = doc && id !== undefined ? ownPaint(doc, id, prop).gradient : null;
+    return doc && g !== null ? { doc, gradient: g } : null;
+  }
+
+  /** Spread (Pad, Reflect, Repeat), written where it lives in the chain, one entry. */
+  setSpread(prop: PaintProp, value: 'pad' | 'reflect' | 'repeat'): void {
+    const at = this.#gradientOf(prop);
+    if (!at) return;
+    const r = resolveGradient(at.doc, at.gradient)!;
+    if (valueOf(r, 'spreadMethod') === value) return;
+    this.#dispatch('Set spreadMethod', (apply) => apply(gradientAttrOp(at.doc, r, 'spreadMethod', value)));
+  }
+
+  /** A stop's offset − or + (SVG Lab's 0.05), one entry each; kept within 0–1. */
+  stepStopOffset(stop: NodeId, dir: 1 | -1): void {
+    const doc = this.#doc;
+    if (!doc || !attached(doc, stop)) return;
+    const v = Math.min(1, Math.max(0, Number(fmt(stopOffset(doc, stop) + dir * 0.05, 4))));
+    if (v !== stopOffset(doc, stop)) this.#dispatch('Set offset', (apply) => apply(offsetOp(doc, stop, v)));
+  }
+
+  /** Add stop: after `after` (else the last), at the midpoint, coloured as the gradient is there ("Add stop"). */
+  addStop(prop: PaintProp, after: NodeId | null): void {
+    const at = this.#gradientOf(prop);
+    if (at) this.#dispatch('Add stop', (apply) => void addStopAfter(at.doc, resolveGradient(at.doc, at.gradient)!, after, apply));
+  }
+
+  /** Remove a stop with its whitespace ("Remove stop"); never the last one. */
+  removeStop(prop: PaintProp, stop: NodeId): void {
+    const at = this.#gradientOf(prop);
+    if (at) this.#dispatch('Remove stop', (apply) => removeStopOf(at.doc, resolveGradient(at.doc, at.gradient)!, stop, apply));
   }
 
   // ── rem (decision 13) ────────────────────────────────────────────────────────────────────────
@@ -2399,7 +2632,13 @@ export const DETACHED = 'It’s a plain shape now: its generator inputs were dro
 // A style sheet opened on a value a rule may decide for the first element starts from the initial one.
 const STYLE_INITIAL: Readonly<Record<string, string>> = { fill: 'black', stroke: 'none', color: 'black', 'stop-color': 'black' };
 /** An Inspect field that is one history entry while it is typed in: a generator input (S1), or a style property over the selection (S2). */
-export type Field = { kind: 'input'; name: string } | { kind: 'style'; prop: string };
+export type Field =
+  | { kind: 'input'; name: string }
+  | { kind: 'style'; prop: string; ids?: NodeId[] }
+  /** A stop's offset (S3): typed as 0–1, written in its own unit. */
+  | { kind: 'offset'; stop: NodeId }
+  /** A radial gradient's fx, fy or fr (S3), where it lives in the chain. */
+  | { kind: 'gradient'; prop: PaintProp; name: 'fx' | 'fy' | 'fr' };
 interface FieldSession {
   field: Field;
   ids: NodeId[]; // the generated shape, or the selection
@@ -2459,7 +2698,15 @@ interface HandleDrag {
   refused: string | null;
   targets: SnapTargets | null; // a corner's or a position handle's snap targets, gathered once when the drag starts
   shape: { id: string; role: 'position' | 'length' } | null; // a shape handle (engine/geometry/shape-handles.ts)
+  gradient: { prop: PaintProp; geo: GradientGeo; handle: GradientHandleId } | null; // a gradient handle (engine/paint/handles.ts), Edit on canvas
   grab: Point; // the handle's offset from the finger at the press, host px: kept for the whole drag
+}
+// Edit on canvas: the painted element's gradient, where the canvas measured it, and its handles
+// and guides (or why they can't be placed).
+interface GradientView {
+  prop: PaintProp;
+  geo: GradientGeo;
+  out: ReturnType<typeof gradientHandles>;
 }
 // The Shapes tool's gesture: a tap places, a drag draws.
 interface DrawGesture {
