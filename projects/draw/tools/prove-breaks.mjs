@@ -11,6 +11,11 @@
 //                                         check that each chosen break (default: every one) still
 //                                         applies, without running any: a stale anchor otherwise
 //                                         shows only when someone runs that break. Writes nothing.
+//                                         STALE: the anchor is gone; NOOP: replacing it changes
+//                                         nothing; AMBIG: a string anchor, or a RegExp without the
+//                                         g flag, matches more than once, so the break plants only
+//                                         the first match (a g RegExp replaces every match on
+//                                         purpose). Any of them fails the run.
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
@@ -544,7 +549,7 @@ const BREAKS = [
   },
   {
     id: 'B89', what: 'the Number sheet refuses a value without saying why', slow: true,
-    file: 'projects/draw/src/panels/Sheets.tsx', from: "setProblem('error' in r ? r.error : null);", to: 'setProblem(null);',
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "    const r = editor.sheetInput(t);\n    setProblem('error' in r ? r.error : null);", to: '    const r = editor.sheetInput(t);\n    setProblem(null);',
     run: SITE_E2E, expect: /the Number sheet took "4o" without a word/,
   },
   {
@@ -671,7 +676,7 @@ const BREAKS = [
   },
   {
     id: 'B114', what: 'a document lifted above the selection outline paints over it (no z-index on the marks)', slow: true,
-    file: 'projects/draw/src/app.css', from: ' z-index: 2147483647;', to: '',
+    file: 'projects/draw/src/app.css', from: '.draw-marks { position: absolute; inset: 0; z-index: 2147483647;', to: '.draw-marks { position: absolute; inset: 0;',
     run: SITE_E2E, expect: /paints over the selection outline/,
   },
   // The correctness review: breaks that every test used to pass.
@@ -773,7 +778,7 @@ const BREAKS = [
   },
   {
     id: 'B134', what: 'an #import fragment stays in the URL (a reload imports it again)',
-    file: 'projects/draw/src/workspace.ts', from: '    clearFragment();\n', to: '',
+    file: 'projects/draw/src/workspace.ts', from: '    clearFragment();\n    let text: string | null = null;\n', to: '    let text: string | null = null;\n',
     run: drawTests('workspace.test.ts'), expect: /✖ an #import link opens with its report/,
   },
   {
@@ -2245,7 +2250,7 @@ const BREAKS = [
   },
   {
     id: 'B421', what: 'the colour cycle restarts for every shape',
-    file: 'projects/draw/src/editor.ts', from: '    this.#shapes++;\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '  #placed(id: NodeId): void {\n    this.#shapes++;\n', to: '  #placed(id: NodeId): void {\n',
     run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
   },
   {
@@ -2743,6 +2748,13 @@ const BREAKS = [
     file: 'projects/draw/src/panels/ContextBar.tsx', from: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} onClick={() => editor.toggleRelative()}>", to: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} style={{ width: '1.5rem', minWidth: 0, height: '1.5rem', minHeight: 0 }} onClick={() => editor.toggleRelative()}>",
     run: DRAW_E2E, expect: /phoneRulesOnThePenAndNodeTools \(956\): 440×956:[\s\S]*the Node tool: Relative is \d+×\d+/,
   },
+  // P1-M3 S1 close-out: the dry run's AMBIG rule (an anchor that matches twice plants only the first).
+  {
+    // As B325 proves STALE: a comment holding a second copy of B275's anchor keeps valid TypeScript.
+    id: 'B518', what: "the dry run misses an ambiguous anchor (a second copy of B275's anchor, SLOP, appended in a comment: B275 would plant only the first)",
+    file: 'projects/draw/src/canvas/gestures.ts', append: '// a second copy of the anchor: export const SLOP = 5;\n',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +AMBIG +projects\/draw\/src\/canvas\/gestures\.ts: the anchor matches 2 times/,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -2754,6 +2766,22 @@ const chosen = BREAKS.filter((b) => (only.length ? only.includes(b.id) : !(quick
 /** The broken file's text: the original with the break applied (the real run and the dry run share this). */
 function applyBreak(b, original) {
   return b.append != null ? original + b.append : original.replace(b.from, b.to);
+}
+
+/**
+ * How many places a break's anchor matches, for the dry run's AMBIG rule: a string counts every
+ * occurrence (overlapping ones too), a RegExp without g every match. An append, or a g RegExp
+ * (which replaces every match on purpose), counts as one.
+ */
+function anchorMatches(b, original) {
+  if (b.append != null || b.from == null) return 1;
+  if (b.from instanceof RegExp) {
+    if (b.from.global) return 1;
+    return [...original.matchAll(new RegExp(b.from.source, b.from.flags.replace('y', '') + 'g'))].length;
+  }
+  let n = 0;
+  for (let i = original.indexOf(b.from); i !== -1; i = original.indexOf(b.from, i + 1)) n++;
+  return n;
 }
 
 // ── the dry run: does every chosen break still apply? ─────────────────────────────────────────
@@ -2782,14 +2810,18 @@ if (dry) {
       continue;
     }
     const original = readFileSync(path, 'utf8');
-    if (applyBreak(b, original) !== original) continue;
+    if (applyBreak(b, original) !== original) {
+      const n = anchorMatches(b, original);
+      if (n > 1) say('AMBIG', `${b.file}: the anchor matches ${n} times; the break plants only the first`);
+      continue;
+    }
     const found = b.from instanceof RegExp ? new RegExp(b.from.source, b.from.flags.replace(/[gy]/g, '')).test(original) : original.includes(b.from);
     if (found) say('NOOP', `${b.file}: the anchor is there but replacing it changes nothing`);
     else say('STALE', `${b.file}: the anchor is not in the file`);
   }
   for (const p of problems) console.log(p);
   const bad = new Set(problems.map((p) => p.split(' ')[0])).size;
-  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
+  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply as written.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
   process.exit(bad ? 1 : 0);
 }
 
