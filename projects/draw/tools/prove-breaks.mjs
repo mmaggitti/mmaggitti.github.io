@@ -122,7 +122,7 @@ const BREAKS = [
     id: 'B300', what: 'an entity expansion costs only what it writes again (a bomb of entities that expand to nothing runs free)',
     file: 'engine/xml/entities.ts', from: "    budget.left -= 1 + (rep.includes('&') ? rep.length : 0);\n", to: '',
     run: ['node', ['--test', '--test-reporter=spec', '../../engine/test/xml.test.ts', '../../engine/test/fragment.test.ts'], DRAW],
-    expect: /^(?=[\s\S]*✖ an entity bomb that expands to nothing fails within the entity budget[\s\S]*an expansion to nothing is charged\b)(?=[\s\S]*✖ Edit source refuses an entity bomb that expands to nothing, within the budget[\s\S]*an expansion to nothing is charged to the document)/,
+    expect: /^(?=[\s\S]*✖ an entity bomb that expands to nothing fails within the entity budget[\s\S]*an expansion to nothing is charged to the budget)(?=[\s\S]*✖ Edit source refuses an entity bomb that expands to nothing, within the budget[\s\S]*an expansion to nothing is charged to the document)/,
   },
   {
     id: 'B16', what: 'the number formatter falls back to exponent notation',
@@ -1245,6 +1245,12 @@ const BREAKS = [
     id: 'B235', what: 'an internal parameter entity is read as a general one (and expanded)',
     file: 'engine/xml/entities.ts', from: '    if (m[1]) table.parameter.add(name);\n    else if (m[3])', to: '    if (m[1] && m[3]) table.parameter.add(name);\n    else if (m[3])',
     run: XML_TESTS, expect: /✖ parameter entities are recorded and never expanded/,
+  },
+  {
+    // P1-M0 review (F2): an unterminated declaration's scan stops at the next '<'.
+    id: 'B301', what: "an external entity's declaration is scanned to the next '>' again (quadratic over unterminated declarations)",
+    file: 'engine/xml/entities.ts', from: `(SYSTEM|PUBLIC)\\b(?:[^<>"']|"[^"]*"|'[^']*')*`, to: '(SYSTEM|PUBLIC)\\b[^>]*',
+    run: XML_TESTS, expect: /✖ a DOCTYPE full of unterminated entity declarations is read in linear time[\s\S]*250 KB of unterminated declarations took \d+ ms/,
   },
   {
     id: 'B236', what: "an edit rewrites a path's unparsed tail",

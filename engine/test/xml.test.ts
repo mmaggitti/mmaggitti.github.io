@@ -394,6 +394,19 @@ test('text content decodes entities and CDATA', () => {
   assert.equal(attrValue(r.doc, el(r.doc, r.doc.root), null, 'x'), null);
 });
 
+// Declarations that never close used to send the entity-declaration scan on to the end of the
+// subset from every one: quadratic (1 MB took about 100 s). Refused or not, it is linear now.
+test('a DOCTYPE full of unterminated entity declarations is read in linear time', () => {
+  const unit = '<!ENTITY a SYSTEM ';
+  for (const kb of [250, 1000]) {
+    const src = `<!DOCTYPE svg [${unit.repeat(Math.ceil((kb * 1000) / unit.length))}]><svg xmlns="http://www.w3.org/2000/svg"/>`;
+    const t0 = performance.now();
+    parseDoc(src);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 2000, `${kb} KB of unterminated declarations took ${ms.toFixed(0)} ms`);
+  }
+});
+
 test('lexing is linear: a 5 MB file parses in well under a second', () => {
   const body = '<path d="M1 2L3 4"/>'.repeat(250_000);
   const src = `<svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`;

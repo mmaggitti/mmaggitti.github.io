@@ -87,7 +87,9 @@ export function readEntityTable(subset: string | null, publicId: string | null =
   if (!subset) return table;
   const { declarations, hasPERefs } = readSubset(subset);
   table.hasPERefs = hasPERefs;
-  const re = /<!ENTITY\s+(%\s+)?([A-Za-z_:][\w.:-]*)\s+(?:(SYSTEM|PUBLIC)\b[^>]*|"([^"]*)"|'([^']*)')\s*>/g;
+  // An external identifier runs to the declaration's '>' through its literals, never past a '<': an
+  // unterminated declaration can't send the scan on to the end of the subset from every one (F2).
+  const re = /<!ENTITY\s+(%\s+)?([A-Za-z_:][\w.:-]*)\s+(?:(SYSTEM|PUBLIC)\b(?:[^<>"']|"[^"]*"|'[^']*')*|"([^"]*)"|'([^']*)')\s*>/g;
   for (const m of declarations.matchAll(re)) {
     const name = m[2];
     if (m[1]) table.parameter.add(name);
