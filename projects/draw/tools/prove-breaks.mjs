@@ -549,9 +549,10 @@ const BREAKS = [
     run: SITE_E2E, expect: /the scrubbed token doesn't flash/,
   },
   {
-    id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true,
-    file: 'projects/draw/test/e2e.mjs', from: 'must(bytes <= 250_000,', to: 'must(bytes <= 50_000,',
-    run: SITE_E2E, expect: /over the 250 KB budget/,
+    // P1-M1 fix: the budget is 1 MB (Mark, 2026-09-30); the same plant, on the new line, run alone.
+    id: 'B91', what: 'the initial JS is over its budget (here, a budget the bundle cannot meet)', slow: true, checks: ['initialJsBudget'],
+    file: 'projects/draw/test/e2e.mjs', from: 'must(bytes <= 1_000_000,', to: 'must(bytes <= 50_000,',
+    run: DRAW_E2E, expect: /over the 1 MB budget/,
   },
   // P0-M3 review fixes.
   {

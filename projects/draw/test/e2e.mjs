@@ -1479,13 +1479,14 @@ async function theOutlineStaysAboveTheDrawing(browser, origin) {
   }
 }
 
-// (i) The initial JS (the entry module and what it preloads) is at most 250 KB gzipped.
+// (i) The initial JS (the entry module and what it preloads) is at most 1 MB gzipped (Mark, 2026-09-30,
+// raised from 250 KB).
 async function initialJsBudget() {
   const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
   const urls = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
   must(urls.length >= 1, 'test setup: no script in the built index.html');
   const bytes = urls.reduce((n, u) => n + gzipSync(readFileSync(join(SITE_DRAW, u.replace(/^\/draw\//, '')))).length, 0);
-  must(bytes <= 250_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 250 KB budget`);
+  must(bytes <= 1_000_000, `the initial JS is ${(bytes / 1000).toFixed(1)} KB gzipped, over the 1 MB budget`);
   console.log(`     draw: initial JS ${(bytes / 1000).toFixed(1)} KB gzipped (${urls.length} file${urls.length === 1 ? '' : 's'})`);
 }
 
