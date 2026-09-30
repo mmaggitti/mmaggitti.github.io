@@ -67,7 +67,9 @@
 // labelled, a tap switching to one; the direction arrows, Inspect's Fill rule and Reverse cutting the
 // holes of SVG Lab's keyhole two ways (the paper shows through); and SVG Lab's donut, Edit as donut
 // on its own file, a boundary dragged round the ring redrawing the slices from the data comment, and
-// a hand edit of a slice turning it plain, the comment's tokens going with it.
+// a hand edit of a slice turning it plain, the comment's tokens going with it. Then booleans: Union,
+// Subtract, Intersect and Exclude from the More sheet, drawn where they cover, path-bool loading only
+// then, in a chunk of its own.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -265,6 +267,7 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(ghostArcsSwitchTheFlags);
   await check(holesCutTwoWays);
   await check(theDonutRegeneratesFromItsData);
+  await check(booleansCombineWhatIsDrawn);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -6547,6 +6550,100 @@ async function theDonutRegeneratesFromItsData(browser, origin) {
     await page.waitForTimeout(50);
     must(await source(page) === dragged, `one undo did not bring the donut back:\n${await source(page)}`);
     must(JSON.stringify(await tokens()) === '["64","1","20","15"]', `after the undo the comment's tokens are ${JSON.stringify(await tokens())}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M3 S3: booleans ──────────────────────────────────────────────────────────────────────────
+
+const BOOL_RECT_E2E = '<rect id="a" x="10" y="10" width="50" height="50" fill="#e76f51"/>';
+const BOOL_CIRCLE_E2E = '<circle cx="0" cy="0" r="25" fill="#2a9d8f" transform="translate(60 60)"/>';
+const BOOL_E2E = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${BOOL_RECT_E2E}\n  ${BOOL_CIRCLE_E2E}\n  <text x="70" y="96" font-size="6">Hi</text>\n</svg>`;
+
+// A rect and a circle placed by its transform, both taken by a marquee. Before any boolean, no
+// booleans- or paper-fallback- script has loaded, and the built index.html names neither. More →
+// Union: a booleans- script loads (and no paper-fallback-); the rect's element becomes <path id="a"
+// fill="#e76f51" d="…"/> in its place, the circle and its leading whitespace gone, one "Union" entry;
+// on a 20 × 20 grid over the two shapes' box (pixels within 2 px of either outline skipped) each
+// pixel is #e76f51 where the union covers and the paper's elsewhere; undo gives the file back byte
+// for byte. Subtract, Intersect and Exclude the same way, each after an undo. A selection with a
+// <text> in it refuses with the notice and writes nothing.
+async function booleansCombineWhatIsDrawn(browser, origin) {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  must(!/booleans-|paper-fallback-/.test(html), 'the built index.html names a boolean chunk');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), BOOL_E2E)).ok, 'test setup: the file did not open');
+    await toPeek(page);
+    const chunks = () => page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /^(booleans|paper-fallback)-.*\.js$/.test(n)));
+    must((await chunks()).length === 0, `before any boolean, ${(await chunks()).join(', ')} loaded`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const marquee = async (from, to) => {
+      const [a, b] = await page.evaluate(rootToScreen, [from, to]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      for (let i = 1; i <= 8; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / 8, a.y + ((b.y - a.y) * i) / 8);
+      await page.mouse.up();
+    };
+    const LABEL = { union: 'Union', difference: 'Subtract', intersection: 'Intersect', exclusion: 'Exclude' };
+    const COVERS = { union: (r, c) => r || c, difference: (r, c) => r && !c, intersection: (r, c) => r && c, exclusion: (r, c) => r !== c };
+    // The grid over the two shapes' box (10 to 85 both ways), in root units, with how far each point is from either outline.
+    const grid = [];
+    for (let j = 0; j < 20; j++) {
+      for (let i = 0; i < 20; i++) {
+        const [x, y] = [10 + (75 * (i + 0.5)) / 20, 10 + (75 * (j + 0.5)) / 20];
+        const inRect = x > 10 && x < 60 && y > 10 && y < 60;
+        const toRect = inRect ? Math.min(x - 10, 60 - x, y - 10, 60 - y) : Math.hypot(Math.max(10 - x, 0, x - 60), Math.max(10 - y, 0, y - 60));
+        const r = Math.hypot(x - 60, y - 60);
+        grid.push({ x, y, inRect, inCircle: r < 25, edge: Math.min(toRect, Math.abs(r - 25)) });
+      }
+    }
+    const INK = hex('#e76f51');
+    for (const op of ['union', 'difference', 'intersection', 'exclusion']) {
+      await marquee([88, 88], [4, 4]);
+      must(await label(page) === '2 selected', `${LABEL[op]}: the marquee selected ${await label(page)}`);
+      await openMore(page);
+      await page.locator('.draw-more-row', { hasText: new RegExp(`^${LABEL[op]}$`) }).tap();
+      await until(`${LABEL[op]} writes`, async () => (await source(page)) !== BOOL_E2E, 5000);
+      const src = await source(page);
+      const d = /<path id="a" fill="#e76f51" d="([^"]+)"\/>/.exec(src)?.[1];
+      must(d && src === BOOL_E2E.replace(BOOL_RECT_E2E, `<path id="a" fill="#e76f51" d="${d}"/>`).replace(`\n  ${BOOL_CIRCLE_E2E}`, ''), `${LABEL[op]} wrote:\n${src}`);
+      must(await undo.getAttribute('aria-label') === `Undo ${LABEL[op]}`, `${LABEL[op]} is ${await undo.getAttribute('aria-label')}`);
+      if (op === 'union') {
+        const loaded = await chunks();
+        must(loaded.some((n) => n.startsWith('booleans-')) && !loaded.some((n) => n.startsWith('paper-fallback-')), `the first Union loaded ${loaded.join(', ') || 'no boolean chunk'}`);
+      }
+      // Where it draws: one screenshot of the box, the overlay's marks hidden.
+      await toPeek(page);
+      const [o, k] = await page.evaluate(rootToScreen, [[0, 0], [1, 0]]);
+      const perUnit = Math.hypot(k.x - o.x, k.y - o.y);
+      const pts = await page.evaluate(rootToScreen, grid.map((g) => [g.x, g.y]));
+      const [tl, br] = await page.evaluate(rootToScreen, [[10, 10], [85, 85]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x) + 1, height: Math.ceil(br.y - tl.y) + 1 };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const wrong = [];
+      grid.forEach((g, n) => {
+        if (g.edge * perUnit < 2) return;
+        const px = shot.rgb(Math.round(pts[n].x - clip.x), Math.round(pts[n].y - clip.y));
+        const covered = COVERS[op](g.inRect, g.inCircle);
+        if (covered ? !near3(px, INK, 6) : !PAPER(px)) wrong.push(`(${g.x.toFixed(1)}, ${g.y.toFixed(1)}) ${covered ? 'covered' : 'uncovered'}: ${px}`);
+      });
+      must(wrong.length === 0, `${LABEL[op]}: ${wrong.length} pixel(s) drawn wrong: ${wrong.slice(0, 6).join('; ')}`);
+      await undo.tap();
+      must(await source(page) === BOOL_E2E, `undo after ${LABEL[op]} did not give the file back:\n${await source(page)}`);
+    }
+    // A selection with a <text> in it refuses, and writes nothing.
+    await marquee([99, 99], [1, 1]);
+    must(await label(page) === '3 selected', `the marquee over everything selected ${await label(page)}`);
+    await openMore(page);
+    await page.locator('.draw-more-row', { hasText: /^Union$/ }).tap();
+    await page.locator('.draw-toast').waitFor();
+    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first (P1-M4).', `with the text: ${await page.locator('.draw-toast').textContent()}`);
+    must(await source(page) === BOOL_E2E, 'the refused Union wrote something');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

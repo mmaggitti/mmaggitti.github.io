@@ -160,3 +160,11 @@ test('the results’ loops are oriented by nesting depth: nonzero and evenodd fi
     }
   }
 });
+
+test('a polyline combines as SVG fills it, closed back to its start', async () => {
+  const inputs = inputsOf({ name: 'an open triangle and a square', a: '<polyline points="10,10 90,10 50,80"/>', b: '<rect x="40" y="0" width="20" height="20"/>' });
+  const out = await runPipeline(inputs, 'union', LIBS);
+  assert.ok('loops' in out, `refused: ${'refused' in out ? out.refused : ''}`);
+  assert.ok(worst(scoreOf(inputs, 'union', out.loops)) <= CORPUS.limit);
+  assert.notEqual(windingOf(polygons(loopsToAbs(out.loops)), 50, 40), 0, 'the inside the closing edge encloses is filled');
+});

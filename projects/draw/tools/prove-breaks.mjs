@@ -2844,6 +2844,65 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '      r = route(session.doc, cs);\n', to: "      r = route(session.doc, cs);\n      if (!r.code.reset) r.code.blocks = r.code.blocks.filter((id) => session.doc.nodes.get(id)?.kind !== 'comment' || cs.texts.has(id));\n",
     run: DRAW_E2E, expect: /theDonutRegeneratesFromItsData: the comment's block holds the number tokens \[\]/,
   },
+  // P1-M3 S3: booleans (quick).
+  {
+    id: 'B536', what: 'check-bundle misses new Function (its pattern wants "Functionn")',
+    file: 'projects/draw/tools/check-bundle.mjs', from: "['new-function', /\\bnew\\s+Function\\s", to: "['new-function', /\\bnew\\s+Functionn\\s",
+    run: drawTests('check-bundle.test.ts'), expect: /✖ check-bundle: each pattern planted in a chunk fails the build/,
+  },
+  {
+    id: 'B537', what: 'the notices test walks only Draw’s own dependencies (scheduler, react-dom’s, and gl-matrix, path-bool’s, are never asked for)',
+    file: 'projects/draw/test/unit/notices.test.ts', from: '    for (const d of Object.keys(e.dependencies ?? {})) visit(d, key, false);\n    for (const d of Object.keys(e.optionalDependencies ?? {})) visit(d, key, true);\n', to: '',
+    run: drawTests('notices.test.ts'), expect: /the walk found no scheduler/,
+  },
+  {
+    id: 'B538', what: 'a rect’s outline ignores rx and ry (square corners)',
+    file: 'engine/path/from-shape.ts', from: '      const rx = Math.min(r[0], w / 2);\n', to: '      const rx = Math.min(0, w / 2);\n',
+    run: engineTests('path/from-shape.test.ts'), expect: /✖ a rect: its four sides clockwise/,
+  },
+  {
+    id: 'B539', what: 'arcs and quadratics reach the libraries unconverted (toLoops keeps them as they are)',
+    file: 'engine/path/loops.ts', from: "    else if (s.type === 'Q') {\n", to: "    else if (s.type === 'Q' || s.type === 'A') segs.push({ type: s.type, to: [s.x, s.y] } as unknown as LoopSeg);\n    else if (s.type === ('never' as string)) {\n",
+    run: drawTests('booleans.test.ts'), expect: /✖ the libraries get lines and cubics only/,
+  },
+  {
+    id: 'B540', what: 'a library’s result is written as it comes (its loops not oriented by nesting depth)',
+    file: 'projects/draw/src/paths/pipeline.ts', from: '  return orientLoops(toLoops(toAbsolute(parsePath(d))));\n', to: '  return toLoops(toAbsolute(parsePath(d)));\n',
+    run: drawTests('booleans.test.ts'), expect: /nonzero and evenodd disagree on the ring/,
+  },
+  {
+    id: 'B541', what: 'the fallback never runs (only path-bool is tried)',
+    file: 'projects/draw/src/paths/pipeline.ts', from: "[['path-bool', libs.primary], ['paper', libs.fallback]] as const", to: "[['path-bool', libs.primary]] as const",
+    run: drawTests('booleans.test.ts'), expect: /✖ a path-bool that throws hands the operation to paper-core/,
+  },
+  {
+    id: 'B542', what: 'Subtract takes the top operand from the rest (path-bool gets the operands top first, so paper-core writes every subtract)',
+    file: 'projects/draw/src/paths/booleans.ts', from: '  new PathBoolean(inputs.map(', to: "  new PathBoolean((op === 'difference' ? [...inputs].reverse() : inputs).map(",
+    run: drawTests('booleans.test.ts'), expect: /each case written as pinned/,
+  },
+  {
+    id: 'B543', what: 'the result drops the bottom’s id (the new <path> takes its attributes less its id)',
+    file: 'projects/draw/src/paths/write.ts', from: '(a.ns === null && GEOMETRY_ATTRS.has(a.local))', to: "(a.ns === null && (GEOMETRY_ATTRS.has(a.local) || a.local === 'id'))",
+    run: drawTests('editor.test.ts'), expect: /union wrote:/,
+  },
+  {
+    id: 'B544', what: 'the other operands are removed without their leading whitespace',
+    file: 'projects/draw/src/paths/write.ts', from: /import \{ remove \} from '\.\.\/interact\/structure\.ts';([\s\S]*)  remove\(doc, others, apply\);/, to: "import { remove } from '../interact/structure.ts';\nimport { opRemove } from '../../../../engine/commands/ops.ts';$1  for (const id of others) apply(opRemove(doc, id));",
+    run: drawTests('editor.test.ts'), expect: /union: the rest of the file as it was/,
+  },
+  {
+    // A Vite build, but no site build: quick, though it takes a minute or two. The minifier writes
+    // paper-full's new Function("str", f) as Function("str", f), so check-bundle names it function-string.
+    id: 'B545', what: 'paper-fallback.ts imports bare paper, which is paper-full (its PaperScript compiles with new Function)',
+    file: 'projects/draw/src/paths/paper-fallback.ts', from: "import paperModule from 'paper/dist/paper-core.js';", to: "import paperModule from 'paper';",
+    run: ['sh', ['-c', 'BASE_PATH=/draw/ npx vite build >/dev/null && node tools/check-bundle.mjs'], DRAW], expect: /paper-fallback-[\w-]+\.js:\d+  (new-function|function-string)/,
+  },
+  // P1-M3 S3 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B546', what: 'the editor imports booleans.ts statically, so path-bool rides in the first chunk', slow: true, checks: ['booleansCombineWhatIsDrawn'],
+    file: 'projects/draw/src/editor.ts', from: "import { LAZY_LIBRARIES } from './paths/load.ts';\n", to: "import { LAZY_LIBRARIES } from './paths/load.ts';\nimport { combine as eagerBooleans } from './paths/booleans.ts';\nvoid eagerBooleans;\n",
+    run: DRAW_E2E, expect: /booleansCombineWhatIsDrawn: the first Union loaded no boolean chunk/,
+  },
 ];
 
 const args = process.argv.slice(2);
