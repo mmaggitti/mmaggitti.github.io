@@ -87,7 +87,7 @@ const BREAKS = [
   },
   {
     id: 'B6', what: 'the ledger and the served profile disagree on the version',
-    file: 'engine/ledger/ledger.json', from: '"profileVersion": 4', to: '"profileVersion": 5',
+    file: 'engine/ledger/ledger.json', from: '"profileVersion": 5', to: '"profileVersion": 6',
     run: ['node', ['tools/ledger-check.mjs'], DRAW], expect: /profileVersion/,
   },
   {

@@ -2,7 +2,7 @@
 "meta": {
   "schema": 1,
   "currentPhase": 1,
-  "profileVersion": 4,
+  "profileVersion": 5,
   "note": "Draw support ledger. Rows are never deleted: a superseded row keeps its entry with a note."
 },
 "lessons": [

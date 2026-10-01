@@ -19,7 +19,9 @@ import { ACTIVE_ATTRIBUTES, ELEMENTS, METADATA_NS, XHTML_ELEMENTS, SMIL_ELEMENTS
 //    value) must pass the CSS rule too.
 // 4: a url() is read from its start (one never closed is still a url()), CSS is read with its
 //    comments both kept and removed, and XHTML srcset and background are refused.
-export const PROFILE_VERSION = 4;
+// 5: a url() is judged from at most 512 characters after "url(", and one whose start is still
+//    undecided there is refused.
+export const PROFILE_VERSION = 5;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
