@@ -12,6 +12,12 @@
 // move written in the notation the value was written in), a before and now preview, and the text
 // field, which always shows the text that will be written. Its body scrolls under a head that
 // keeps Done. The stroke's style sheet adds the stroke-width slider, written in the same visit.
+//
+// P1-M4: the Text sheet's lines (a textarea: Return adds a line, each keystroke rewrites the text's
+// lines into the visit's one entry, Done, the dim or Escape closes it); the Font sheet (Draw's fonts,
+// each name drawn in its own 400 face, yours with Remove, the generics, and Add a font…; its groups
+// come from a list, so P2's library fonts join it); and the Weight sheet (each weight by name and
+// number, drawn in its own). A pick is one entry and closes the sheet.
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Editor, Sheet, SourceError } from '../editor.ts';
@@ -22,6 +28,9 @@ import { parseColor } from '../../../../engine/values/color.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
 import { keyboardInset } from '../detents.ts';
 import { negated, sliderRange, sliderText, steppedFrom } from '../token-edit.ts';
+import { CATALOGUE, type Generic } from '../platform/font-catalogue.ts';
+import type { MyFont } from '../platform/fonts.ts';
+import { WEIGHT_NAMES, offeredWeights } from '../style-edit.ts';
 import { Repeat } from '../repeat.ts';
 import { useStore } from './store.ts';
 
@@ -30,12 +39,26 @@ const GHOST_CLICK_MS = 350; // the tap that opened a sheet must not close it thr
 export function Sheets({ editor }: { editor: Editor }) {
   const sheet = useStore(editor.sheet);
   if (!sheet) return null;
-  const key = sheet.kind === 'source' ? `source:${sheet.node}` : sheet.kind === 'style' ? `style:${sheet.prop}:${sheet.ids.join(',')}` : `${sheet.kind}:${sheet.ref.node}:${sheet.ref.index}`;
+  const key =
+    sheet.kind === 'source' ? `source:${sheet.node}`
+    : sheet.kind === 'style' ? `style:${sheet.prop}:${sheet.ids.join(',')}`
+    : sheet.kind === 'lines' ? `lines:${sheet.id}`
+    : sheet.kind === 'font' ? `font:${sheet.ids.join(',')}`
+    : sheet.kind === 'weight' ? `weight:${sheet.family}`
+    : `${sheet.kind}:${sheet.ref.node}:${sheet.ref.index}`;
   const close = () => (sheet.kind === 'source' ? editor.closeSource() : editor.closeSheet());
   // A path's number is named for what it is ("point 2 x", "control 1 y": P1-M3), else its property.
-  const title = sheet.kind === 'source' ? 'Edit source' : sheet.kind === 'style' ? sheet.prop : sheet.kind === 'number' ? (sheet.token.label ?? sheet.token.prop) : sheet.token.prop;
+  const title =
+    sheet.kind === 'source' ? 'Edit source'
+    : sheet.kind === 'style' ? sheet.prop
+    : sheet.kind === 'lines' ? 'Text'
+    : sheet.kind === 'font' ? 'Font'
+    : sheet.kind === 'weight' ? `${sheet.family} weight`
+    : sheet.kind === 'number' ? (sheet.token.label ?? sheet.token.prop)
+    : sheet.token.prop;
+  const mono = sheet.kind !== 'lines' && sheet.kind !== 'font' && sheet.kind !== 'weight';
   return (
-    <Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>
+    <Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>
       <Body editor={editor} sheet={sheet} close={close} />
     </Modal>
   );
@@ -55,6 +78,12 @@ function Body({ editor, sheet, close }: { editor: Editor; sheet: Sheet; close: (
       return <TextBody editor={editor} sheet={sheet} close={close} />;
     case 'source':
       return <SourceBody editor={editor} sheet={sheet} close={close} />;
+    case 'lines':
+      return <LinesBody editor={editor} sheet={sheet} />;
+    case 'font':
+      return <FontBody editor={editor} />;
+    case 'weight':
+      return <WeightBody editor={editor} sheet={sheet} />;
   }
 }
 
@@ -407,5 +436,148 @@ function SourceBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'sourc
         </button>
       </div>
     </>
+  );
+}
+
+/** The Text sheet's lines (P1-M4): one line per line of the text; Return adds one. */
+function LinesBody({ editor, sheet }: { editor: Editor; sheet: Of<'lines'> }) {
+  const [text, setText] = useState(sheet.text);
+  const [problem, setProblem] = useState<string | null>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const a = area.current;
+    if (!a) return;
+    try {
+      a.focus({ preventScroll: true });
+      if (sheet.select) a.select(); // the Text tool's "Hello", ready to type over (SVG Lab's Sheet.text)
+      else a.setSelectionRange(a.value.length, a.value.length);
+    } catch {
+      // a field that can't take the focus: typing starts with a tap
+    }
+  }, [sheet.select]);
+  return (
+    <>
+      <textarea
+        ref={area}
+        className="draw-field draw-lines"
+        aria-label="Text"
+        rows={Math.max(2, text.split('\n').length)}
+        autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setProblem(editor.linesInput(e.target.value));
+        }}
+      />
+      <Problem message={problem} />
+    </>
+  );
+}
+
+/** A row of the Font sheet: a family drawn in its own face (its fallback until the face arrives). */
+interface FontRow {
+  key: string;
+  family: string; // what a pick writes (a generic alone)
+  label: string;
+  css: string; // the row's own font-family
+  mine?: MyFont;
+}
+interface FontGroup {
+  title: string;
+  rows: FontRow[];
+}
+const GENERIC_ROWS: [string, string][] = [['sans-serif', 'Sans-serif'], ['serif', 'Serif'], ['monospace', 'Monospace']];
+const quoted = (family: string) => `"${family.replace(/["\\]/g, '\\$&')}"`;
+
+/** The Font sheet's groups (P1-M4): Draw's fonts (font-catalogue.ts alone), yours, the generics. P2's library fonts join this list. */
+export function fontGroups(mine: readonly MyFont[]): FontGroup[] {
+  const generic = (g: Generic) => g;
+  return [
+    { title: 'Draw’s fonts', rows: CATALOGUE.map((f) => ({ key: `draw:${f.family}`, family: f.family, label: f.family, css: `${quoted(f.family)}, ${generic(f.generic)}` })) },
+    { title: 'Your fonts', rows: mine.map((m) => ({ key: `mine:${m.id}`, family: m.family, label: `${m.family}${m.weight !== 400 || m.style !== 'normal' ? ` ${m.weight}${m.style === 'italic' ? ' italic' : ''}` : ''}`, css: `${quoted(m.family)}, sans-serif`, mine: m })) },
+    { title: 'Generic', rows: GENERIC_ROWS.map(([g, label]) => ({ key: `generic:${g}`, family: g, label, css: g })) },
+  ];
+}
+
+function FontBody({ editor }: { editor: Editor }) {
+  useStore(editor.version);
+  const input = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<string | null>(null); // a font of yours whose Remove was tapped once
+  const now = editor.textFamily();
+  const current = now && !now.mixed ? now.family.trim().toLowerCase() : null;
+  const pick = (el: HTMLInputElement) => {
+    const file = el.files?.[0];
+    el.value = ''; // the same file can be picked again
+    if (file) void editor.addFont(file, file.name).then(setProblem);
+  };
+  return (
+    <div className="draw-fonts">
+      {fontGroups(editor.myFonts()).map((g) => (
+        <section key={g.title} className="draw-font-group" aria-label={g.title}>
+          <h3 className="draw-subhead">{g.title}</h3>
+          {!g.rows.length && <p className="ds-small ds-muted draw-hint-text">None yet: Add a font… keeps one on this device.</p>}
+          {g.rows.map((r) => (
+            <div key={r.key} className="draw-font-line">
+              <button type="button" className="ds-btn draw-font-row" style={{ fontFamily: r.css }} aria-pressed={current === r.family.toLowerCase()} onClick={() => editor.setFont(r.family)}>
+                {r.label}
+              </button>
+              {r.mine && (
+                <button
+                  type="button"
+                  className="ds-btn draw-font-remove"
+                  aria-label={confirm === r.mine.id ? `Remove ${r.mine.family} from this device?` : `Remove ${r.label}`}
+                  onClick={() => {
+                    if (confirm !== r.mine!.id) return setConfirm(r.mine!.id);
+                    setConfirm(null);
+                    void editor.removeFont(r.mine!.id);
+                  }}
+                >
+                  {confirm === r.mine.id ? `Remove ${r.mine.family} from this device?` : 'Remove'}
+                </button>
+              )}
+            </div>
+          ))}
+        </section>
+      ))}
+      <button type="button" className="ds-btn draw-font-add" onClick={() => input.current?.click()}>
+        Add a font…
+      </button>
+      {/* iOS offers only the types listed here: the extensions must be named, not just the types. */}
+      <input ref={input} type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/x-font-ttf,application/x-font-otf,application/vnd.ms-opentype" hidden onChange={(e) => pick(e.currentTarget)} />
+      <Problem message={problem} />
+    </div>
+  );
+}
+
+function WeightBody({ editor, sheet }: { editor: Editor; sheet: Of<'weight'> }) {
+  useStore(editor.version);
+  const row = editor.styleRow('font-weight', sheet.ids);
+  const styleRow = editor.styleRow('font-style', sheet.ids);
+  const italic = !!styleRow && !styleRow.mixed && /^(italic|oblique)/i.test(styleRow.value);
+  const faces = editor.familyFaces(sheet.family);
+  const list = offeredWeights(faces, italic ? 'italic' : 'normal');
+  const now = row && !row.mixed ? (row.value === 'normal' ? 400 : row.value === 'bold' ? 700 : Number(row.value)) : null;
+  return (
+    <div className="draw-fonts">
+      {list.map((w) => (
+        <button
+          key={w}
+          type="button"
+          className="ds-btn draw-font-row"
+          style={{ fontFamily: `${quoted(sheet.family)}, sans-serif`, fontWeight: w, fontStyle: italic && faces?.italics.includes(w) ? 'italic' : 'normal' }}
+          aria-pressed={now === w}
+          onClick={() => {
+            editor.setStyle('font-weight', String(w), sheet.ids);
+            editor.closeSheet();
+          }}
+        >
+          {WEIGHT_NAMES[w] ?? 'Weight'} {w}
+        </button>
+      ))}
+    </div>
   );
 }

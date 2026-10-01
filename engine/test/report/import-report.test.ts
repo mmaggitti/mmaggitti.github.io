@@ -179,3 +179,22 @@ test('rem lengths in attributes and style="" are counted with a note (the canvas
   assert.equal(ruled.rem.convertible, false);
   assert.match(ruled.rem.why!, /^The root’s font size is set by a <style> rule/);
 });
+
+test('the font notes (P1-M4): a file’s own data: faces are counted as drawn on the canvas, a face named like Draw’s interface fonts isn’t loaded, and a face over the limits is named', () => {
+  const face = (family: string, b64: string) => `@font-face{font-family:${family};src:url(data:font/woff2;base64,${b64})}`;
+  const parse = (src: string) => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    return r.doc;
+  };
+  const doc = parse(`<svg xmlns="http://www.w3.org/2000/svg"><style>${face('Own', 'd09GMg==')}${face("'Own Bold'", 'd09GMg==')}${face('Arial', 'd09GMg==')}${face('"Segoe UI"', 'd09GMg==')}${face('Huge', 'A'.repeat(6_800_000))}</style><text font-family="Own">a</text></svg>`);
+  const notes = importReport(doc).notes;
+  assert.deepEqual(notes.filter((n) => /font/i.test(n)), [
+    'This file’s own fonts: 2 drawn on the canvas.',
+    'Not loaded: Arial, which shares a name with Draw’s own interface fonts.',
+    'Not loaded: Segoe UI, which shares a name with Draw’s own interface fonts.',
+    'Not loaded: Huge, over the limits for a file’s own fonts (5 MB a face, 20 MB in all).',
+  ]);
+  const none = parse('<svg xmlns="http://www.w3.org/2000/svg"><text>a</text></svg>');
+  assert.deepEqual(importReport(none).notes.filter((n) => /font/i.test(n)), []);
+});

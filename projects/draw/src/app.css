@@ -555,6 +555,26 @@
 /* The Pen's bar (P1-M3): its hint, then Undo point, Close and Done, 44 pt each. */
 .draw-pen-hint { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .draw-pen-keys { display: flex; gap: var(--space-2); flex: 0 0 auto; }
+/* The Text tool's bar (P1-M4): its hint, the font for new text (two 44 pt segments, each label in
+   its own face), and Cancel. */
+.draw-text-hint { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draw-text-fonts { flex: 0 0 auto; }
+.draw-text-fonts > button { flex: 0 0 auto; min-width: var(--tap-min); padding: 0 var(--space-3); font-size: var(--text-md); touch-action: manipulation; }
+/* The Text sheet's lines (P1-M4): the field's text never under 16 px, or iOS zooms the page into it. */
+.draw-lines { display: block; width: 100%; padding: var(--space-3); resize: none; line-height: 1.4; }
+.draw-lines { font-size: max(16px, var(--text-md)); } /* px-ok: iOS focus-zoom floor, as SVG Lab's text field */
+/* The Font and Weight sheets (P1-M4): rows of at least 44 pt, each name in its own face; the body
+   scrolls under a head that keeps Done (the Colour sheet's pattern). */
+.draw-modal:has(> .draw-fonts) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-fonts { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.draw-font-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-font-group > .draw-subhead { margin: var(--space-2) 0 0; }
+.draw-font-line { display: flex; gap: var(--space-2); }
+.draw-font-row { flex: 1 1 auto; min-width: 0; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; font-size: var(--text-lg); font-weight: 400; touch-action: manipulation; }
+.draw-font-row[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }
+.draw-font-remove { flex: 0 1 auto; min-width: var(--tap-min); min-height: max(var(--tap-min), var(--control-h-sm)); font-size: var(--text-sm); touch-action: manipulation; }
+.draw-font-add { flex: 0 0 auto; min-height: max(var(--tap-min), var(--control-h-sm)); touch-action: manipulation; }
+.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); }
 /* The More sheet: one full-width row per command, at least 44 pt tall. */
 .draw-more { display: flex; flex-direction: column; gap: var(--space-2); }
 .draw-more .ds-btn { flex: 0 0 auto; width: 100%; min-height: max(var(--tap-min), var(--control-h-sm)); text-align: left; }

@@ -31,6 +31,12 @@
 //   arcs (a tap sets its flags), Reverse and a path's direction arrows, and the donut (engine/
 //   generators/donut.ts): Edit as donut, its values in Inspect, and its boundary handles, whose drag
 //   rewrites two numbers of its data comment while the finish hook draws the slices again.
+// - Text and fonts (P1-M4): the Text tool places SVG Lab's "Hello" (interact/text-tool.ts) in the
+//   Text tool's font and opens the lines sheet on it (engine/text/lines.ts: one "Edit text" entry per
+//   visit); Edit text, Inspect's Text section, the Font and Weight sheets; and the fonts port
+//   (platform/fonts.ts): after open and after any change that may need a face, the faces the text asks
+//   for are registered, a file's own data: faces too (page-wide, under the name guard), and a face
+//   arriving measures the overlay again.
 
 import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
@@ -100,6 +106,12 @@ import { parsePath } from '../../../engine/path/parse.ts';
 import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
 import { cssWhy } from '../../../engine/geometry/write.ts';
 import { appendSegment, closingText, penColour, penPathMarkup, segmentInto, type PenAnchor } from './interact/pen.ts';
+import { readLines, planLines } from '../../../engine/text/lines.ts';
+import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest } from '../../../engine/text/font-faces.ts';
+import { appFonts, couldNotLoad, SHEET_FACES, type FontEvent, type Fonts } from './platform/fonts.ts';
+import { TEXT_DEFAULTS, catalogueFamily } from './platform/font-catalogue.ts';
+import { readPref, writePref, type Pref } from './platform/prefs.ts';
+import { TEXT_LABEL, TEXT_NOTICE, fontValue, textMarkup } from './interact/text-tool.ts';
 import { NO_PATH_MARKS, arcGhosts, directionArrows, donutLabels, ghostAt, pathMarks, penArms, type ArcParams, type PathMarks } from './interact/path-marks.ts';
 
 // ── ports: what the editor drives ──────────────────────────────────────────────────────────────
@@ -159,6 +171,10 @@ export interface EditorPorts {
   sinkReady(): boolean;
   /** The boolean libraries (P1-M3): paths/load.ts's lazy chunks unless a test hands its own. */
   booleans?: Libraries;
+  /** The fonts (P1-M4): platform/fonts.ts's (FontFace, document.fonts, your fonts) unless a test hands its own. */
+  fonts?: Fonts;
+  /** The viewer's device preferences (P1-M4: the Text tool's font): platform/prefs.ts unless a test hands its own. */
+  prefs?: { read(name: Pref): string | null; write(name: Pref, value: string | null): void };
 }
 
 // ── state React reads ──────────────────────────────────────────────────────────────────────────
@@ -190,7 +206,13 @@ export type Sheet =
   | { kind: 'text'; ref: TokenRef; token: TextToken }
   | { kind: 'source'; node: NodeId; text: string }
   /** The Colour sheet over the selection for a style property (Inspect's swatches, More's Fill… and Stroke…). */
-  | { kind: 'style'; prop: string; ids: NodeId[]; text: string };
+  | { kind: 'style'; prop: string; ids: NodeId[]; text: string }
+  /** The Text sheet's lines (P1-M4): one text's lines, one entry per visit; `select`: its text selected in the field (the Text tool's). */
+  | { kind: 'lines'; id: NodeId; text: string; select: boolean }
+  /** The Font sheet over the selected texts (P1-M4): a pick is one "Set font" entry. */
+  | { kind: 'font'; ids: NodeId[] }
+  /** The Weight sheet (P1-M4): a family's weights by name and number, for one with more than three. */
+  | { kind: 'weight'; ids: NodeId[]; family: string };
 type TokenSheet = Extract<Sheet, { ref: TokenRef }>;
 
 /** What Inspect shows for a style property over the selection (engine/style/where.ts shownValue). */
@@ -255,7 +277,14 @@ interface StyleLive {
   last: Map<string, string>; // each property's last good value in this drag (the stroke sheet's width joins its stroke)
   refused: { id: NodeId; why: string }[]; // the last frame's
 }
-type Live = TokenLive | StyleLive;
+// A lines visit (P1-M4): the text's lines written by every keystroke into one drag.
+interface LinesLive {
+  kind: 'lines';
+  drag: Drag;
+  id: NodeId;
+  last: string[] | null; // the last lines written, kept when later ones are refused
+}
+type Live = TokenLive | StyleLive | LinesLive;
 
 // A document's code view: its blocks, and how the view shows each.
 interface CodeBlocks {
@@ -293,12 +322,17 @@ export class Editor {
   readonly pen: Store<PenView | null> = createStore<PenView | null>(null);
   /** The Node tool's chosen node (P1-M3): an anchor's handle id on the one selected path, until another is tapped, the selection or the tool changes. */
   readonly chosenNode: Store<string | null> = createStore<string | null>(null);
+  /** The Text tool's font for new text (P1-M4: Archivo or Inter, platform/font-catalogue.ts TEXT_DEFAULTS): a device preference, never in the file. */
+  readonly textFont: Store<string> = createStore<string>(TEXT_DEFAULTS[0]);
   #shapes = 0; // shapes placed or drawn since the document opened: the colour cycle's n
   #detached: NodeId[] = []; // what the finish hook detached in the latest run (the notice, after a commit)
   #field: FieldSession | null = null; // an Inspect field being typed in: one entry while it has focus
   #nudge: { move: MoveState; d: Point } | null = null; // arrows held (keys.ts)
   #stepDrag: { drag: Drag; from: DrawState } | null = null; // the Snap sheet's Grid step field, while it is being typed in
   #pen: PenState | null = null; // the Pen's state (never in the file): its path, anchors and entries
+  #fontsDirty = false; // a change since the last font request may need another face (P1-M4)
+  #faceDoc: Doc | null = null; // the document whose own faces are registered, and its <style> text's version then
+  #faceVersion = -1;
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -320,6 +354,9 @@ export class Editor {
 
   constructor(ports: EditorPorts) {
     this.#ports = ports;
+    const font = this.#prefs().read('text-font');
+    if (font !== null && TEXT_DEFAULTS.includes(font)) this.textFont.set(font);
+    this.#fonts().subscribe((e) => this.#fontEvent(e));
     this.focus.subscribe(() => this.#markFocus());
     this.readOnly.subscribe(() => this.#ports.code.readOnly(this.readOnly.get()));
     this.grid.subscribe(() => this.#show());
@@ -357,6 +394,10 @@ export class Editor {
   }
 
   #changed(): void {
+    if (this.#fontsDirty) {
+      this.#fontsDirty = false;
+      this.#useFonts();
+    }
     for (const fn of [...this.#listeners]) fn();
   }
 
@@ -383,6 +424,7 @@ export class Editor {
     } catch (e) {
       return { ok: false, error: String(e), ...NO_STATS };
     }
+    this.#endLines(); // a lines visit keeps what was typed (P1-M4)
     this.#endLive(false);
     this.#stepDrag = null; // the field's entry belonged to the document that is closing
     this.#field = null;
@@ -415,6 +457,8 @@ export class Editor {
     } catch (e) {
       return { ok: false, error: String(e), ...canvas.stats() };
     }
+    this.#fontsDirty = false;
+    this.#useFonts();
     const root = el(doc, doc.root);
     if (!canvas.nodeFor(root.id)) {
       const svg = root.ns === NS.svg && root.local === 'svg';
@@ -454,6 +498,10 @@ export class Editor {
     // A drag's frames change no store: a scrub renders nothing in React until it ends.
     session.subscribe((_cs, why) => {
       if (why.kind !== 'drag') this.#bump();
+    });
+    // A change that may need another face (P1-M4): asked for when it is kept (#changed).
+    session.subscribe((cs) => {
+      if (this.#fontish(session.doc, cs)) this.#fontsDirty = true;
     });
     // Last, the change listeners (the draft autosave). A drag tells them when it ends (#endLive).
     session.subscribe((_cs, why) => {
@@ -702,13 +750,19 @@ export class Editor {
     if (this.tool.get() === 'pen') {
       if (!this.#writable() || !this.#pen) return;
       const took = pickHandle(this.#penHandles(true), at);
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: took?.id ?? null, handleAt: took?.at ?? null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: { take: (took?.id ?? null) as PenGesture['take'], p: null, f: null, drag: null, label: null } };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: took?.id ?? null, handleAt: took?.at ?? null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: { take: (took?.id ?? null) as PenGesture['take'], p: null, f: null, drag: null, label: null }, text: false };
+      return;
+    }
+    // The Text tool (P1-M4): a tap places SVG Lab's "Hello"; a drag places nothing.
+    if (this.tool.get() === 'text') {
+      if (!this.#writable()) return;
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: null, text: true };
       return;
     }
     // The Shapes tool: every one-finger gesture places or draws, never selects or moves.
     if (this.tool.get() === 'shapes') {
       if (!this.#writable()) return;
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null }, pen: null };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null }, pen: null, text: false };
       return;
     }
     const all = this.#withThin(at, hits);
@@ -719,7 +773,7 @@ export class Editor {
     const pill = pickPill(model.guides, at);
     const picked = pill === null ? pickHandle(model.handles, at) : null;
     const onLocked = targets.length > 0 && isLocked(doc, targets[0]);
-    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null, pen: null };
+    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null, pen: null, text: false };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -727,6 +781,14 @@ export class Editor {
     const g = this.#gesture;
     if (!g || !this.#doc) return;
     g.at = at;
+    if (g.text) {
+      // A drag with the Text tool places nothing (wrapping text boxes are P4's): it says so again.
+      if (g.mode === 'pending') {
+        g.mode = 'none';
+        this.notice.set(TEXT_NOTICE);
+      }
+      return;
+    }
     if (g.pen) return this.#penFrame(g);
     if (g.draw) return this.#drawFrame(g);
     if (g.mode === 'pending') this.#startDrag(g, held);
@@ -742,7 +804,9 @@ export class Editor {
     if (!g) return;
     g.at = at;
     this.#gesture = null;
-    if (g.pen) this.#penUp(g);
+    if (g.text) {
+      if (g.mode === 'pending') this.#placeText(g.at0);
+    } else if (g.pen) this.#penUp(g);
     else if (g.draw) this.#endDraw(g, true);
     else if (g.mode === 'pending') {
       // A tap on a node handle (P1-M3): a bend curves its segment, an anchor becomes the chosen node.
@@ -780,7 +844,7 @@ export class Editor {
     if (this.#live) return this.#endLive(false);
     if (this.#nudge) return this.nudgeEnd(false);
     if (this.tool.get() === 'pen') return this.penDone();
-    if (this.tool.get() === 'shapes' || this.tool.get() === 'node') return this.pickTool('select');
+    if (this.tool.get() === 'shapes' || this.tool.get() === 'node' || this.tool.get() === 'text') return this.pickTool('select');
     this.deselect();
   }
 
@@ -1255,7 +1319,7 @@ export class Editor {
     const g = this.#gesture;
     const none = { handles: [], rotGuide: null };
     if (this.tool.get() === 'pen') return { handles: this.#penHandles(), rotGuide: null }; // only the Pen's own
-    if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => isLocked(doc, id))) return none;
+    if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || this.tool.get() === 'text' || !ids.length || ids.some((id) => isLocked(doc, id))) return none;
     const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
     // The root has no handles of its own; a root that holds a donut (SVG Lab's own file) shows its
     // donut's boundary handles, and only those.
@@ -1664,6 +1728,7 @@ export class Editor {
     if (tool !== 'select' && (!this.#doc || this.readOnly.get())) return;
     if (this.#gesture) this.pointerCancel();
     if (this.tool.get() === tool) return;
+    this.#endLines(); // a tool change ends a lines visit first (P1-M4)
     if (this.tool.get() === 'pen') this.#endPen(false);
     this.chosenNode.set(null);
     this.tool.set(tool);
@@ -1677,6 +1742,11 @@ export class Editor {
       this.notice.set(PEN_NOTICE);
     }
     if (tool === 'node') this.#noteHidden();
+    if (tool === 'text') {
+      this.focus.set(null);
+      this.notice.set(TEXT_NOTICE);
+      this.#fonts().use(TEXT_DEFAULTS.map((family): FaceRequest => ({ family, weight: 400, style: 'normal' }))); // the toggle's labels, each in its own face
+    }
     this.#bump();
     this.#show();
   }
@@ -1684,6 +1754,249 @@ export class Editor {
   /** The kind the Shapes tool places. */
   pickShape(kind: ShapeKind): void {
     this.shapeKind.set(kind);
+  }
+
+  // ── text and fonts (P1-M4) ─────────────────────────────────────────────────────────────────
+
+  #fonts(): Fonts {
+    return this.#ports.fonts ?? appFonts();
+  }
+
+  #prefs(): NonNullable<EditorPorts['prefs']> {
+    return this.#ports.prefs ?? { read: readPref, write: writePref };
+  }
+
+  // A face arrived (the drawn boxes change: measure again), failed (say so), or your fonts changed (ask again).
+  #fontEvent(e: FontEvent): void {
+    if (e.kind === 'failed') return void this.notice.set(couldNotLoad(e.family));
+    if (e.kind === 'mine') {
+      this.#useFonts();
+      this.version.set(this.version.get() + 1);
+    }
+    this.#show();
+  }
+
+  // The faces the drawing needs: its own data: faces (again only when its <style> text changed), and
+  // the faces its text asks for that Draw holds (yours, the catalogue's).
+  #useFonts(): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const fonts = this.#fonts();
+    if (this.#faceDoc !== doc || this.#faceVersion !== doc.styleVersion) {
+      this.#faceDoc = doc;
+      this.#faceVersion = doc.styleVersion;
+      fonts.documentFaces(fontFaces(doc).faces);
+    }
+    fonts.use(usedFaces(doc, (f) => fonts.holds(f)));
+  }
+
+  // May this change need another face: nodes in or out, text changed, a <style> changed, or an element
+  // with a font-* attribute or a style="" edited?
+  #fontish(doc: Doc, cs: ChangeSet): boolean {
+    if (cs.moved.size || cs.texts.size || doc.styleVersion !== this.#faceVersion) return true;
+    for (const id of cs.attrs) {
+      const n = doc.nodes.get(id);
+      if (n?.kind === 'element' && n.attrs.some((a) => a.ns === null && (a.local.startsWith('font') || a.local === 'style'))) return true;
+    }
+    return false;
+  }
+
+  /** The Text tool's font for new text: one of TEXT_DEFAULTS, kept on this device (draw:text-font). A tap on it makes no history entry. */
+  setTextFont(family: string): void {
+    if (!TEXT_DEFAULTS.includes(family)) return;
+    this.textFont.set(family);
+    this.#prefs().write('text-font', family === TEXT_DEFAULTS[0] ? null : family);
+  }
+
+  // A tap with the Text tool: SVG Lab's "Hello" in one entry, its middle at the (snapped) tap; then
+  // Select, the text selected, and the lines sheet open on it with its text selected.
+  #placeText(at: Point): void {
+    const doc = this.#doc!;
+    const step = this.#rootStep();
+    const p = this.#snapRoot(at, this.#snapTargets([]), step).p;
+    const family = this.textFont.get();
+    const value = fontValue(family, catalogueFamily(family)?.generic ?? 'sans-serif');
+    let id: NodeId | null = null;
+    const ok = this.#dispatch(TEXT_LABEL, (apply) => (id = insertMarkup(doc, { last: doc.root }, textMarkup(p, { k: boardScale(this.#board), step, svg: el(doc, doc.root).prefix, family: value }), apply)));
+    if (!ok) return;
+    this.tool.set('select');
+    this.focus.set(null);
+    this.select([id!]);
+    this.#openLines(id!, true);
+  }
+
+  // The selected <text>, <tspan> and <textPath> elements (Inspect's Text section edits them).
+  #textIds(): NodeId[] {
+    const doc = this.#doc;
+    return doc ? this.#styleIds().filter((id) => isTextPart(doc, id)) : [];
+  }
+
+  /** Is everything selected a text, tspan or textPath (Inspect shows its Text section)? */
+  textSelected(): boolean {
+    const ids = this.#styleIds();
+    return ids.length > 0 && this.#textIds().length === ids.length;
+  }
+
+  /** Is Edit text offered: one selected <text> Draw edits as lines (engine/text/lines.ts)? */
+  canEditText(): boolean {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    return !!doc && ids.length === 1 && ids[0] !== doc.root && readLines(doc, ids[0]) !== null && !isLocked(doc, ids[0]);
+  }
+
+  /** Edit text (the ContextBar's, Inspect's): the lines sheet on the one selected text. */
+  editText(): void {
+    if (this.canEditText()) this.#openLines([...this.selection.get()][0], false);
+  }
+
+  #openLines(id: NodeId, select: boolean): void {
+    const doc = this.#doc;
+    const lines = doc && readLines(doc, id);
+    if (!doc || !lines || !this.#session || this.#live || this.#nudge || this.#field || this.#stepDrag || !this.#writable()) return;
+    this.focus.set(null);
+    this.#live = { kind: 'lines', drag: this.#drag('Edit text'), id, last: null };
+    this.sheet.set({ kind: 'lines', id, text: lines.join('\n'), select });
+    this.#bump();
+  }
+
+  /** The lines sheet's text, as typed: its lines written into the visit's one entry; else why not (the last good lines stay). */
+  linesInput(text: string): string | null {
+    const live = this.#live;
+    const doc = this.#doc;
+    if (live?.kind !== 'lines' || !doc) return 'No text is being edited';
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    let why: string | null = null;
+    live.drag.update((apply) => {
+      try {
+        planLines(doc, live.id, lines, apply);
+        live.last = lines;
+      } catch (e) {
+        if (!(e instanceof TokenEditError)) throw e;
+        why = e.message;
+        if (live.last) planLines(doc, live.id, live.last, apply);
+      }
+    });
+    this.#show();
+    return why;
+  }
+
+  // Anything else ends a lines visit first (M3's rule for the Pen): what was typed is kept.
+  #endLines(): void {
+    if (this.#live?.kind !== 'lines') return;
+    this.#endLive(true);
+    this.sheet.set(null);
+  }
+
+  /**
+   * The faces a family has that Draw holds (the drawing's own, yours, the catalogue's), weights by
+   * style; null for a generic or a family Draw holds none of (Inspect offers SVG Lab's three).
+   */
+  familyFaces(family: string): { weights: number[]; italics: number[] } | null {
+    const doc = this.#doc;
+    const held = this.#fonts().faces(family);
+    const ws = new Set<number>(held?.weights ?? []);
+    const is = new Set<number>(held?.italics ?? []);
+    let own = false;
+    if (doc) {
+      for (const f of fontFaces(doc).faces) {
+        if (f.family.toLowerCase() !== family.trim().toLowerCase()) continue;
+        own = true;
+        for (const w of faceWeights(f.weight)) (/^(italic|oblique)/i.test(f.style.trim()) ? is : ws).add(w);
+      }
+    }
+    if (!held && !own) return null;
+    return { weights: [...ws].sort((a, b) => a - b), italics: [...is].sort((a, b) => a - b) };
+  }
+
+  /** The first family of the first selected element's font-family (as written where it comes from), and whether the selection differs. */
+  textFamily(): { family: string; mixed: boolean } | null {
+    const row = this.styleRow('font-family', this.#textIds());
+    if (!row) return null;
+    return { family: familyList(row.value)[0] ?? row.value, mixed: row.mixed };
+  }
+
+  /** The Font sheet over the selected texts: Draw's ten fonts (each drawn in its own 400 face, asked for now), yours, and the generics. */
+  openFontSheet(): void {
+    const ids = this.#textIds();
+    if (!this.#doc || !ids.length || this.#live || this.#field || this.#gesture || !this.#writable()) return;
+    const row = this.styleRow('font-family', ids);
+    if (row?.disabled) return void this.notice.set(row.disabled);
+    this.focus.set(null);
+    const fonts = this.#fonts();
+    fonts.use([...SHEET_FACES, ...fonts.mine().map((m): FaceRequest => ({ family: m.family, weight: m.weight, style: m.style }))]);
+    this.sheet.set({ kind: 'font', ids });
+  }
+
+  /**
+   * A pick in the Font sheet: font-family over the selected texts in one entry, "Set font": the family
+   * with its generic (`Archivo, sans-serif`; yours with sans-serif), or a generic alone; where the
+   * family has no face at a text's weight or style, the same entry writes the nearest real one, so
+   * the canvas never draws a synthetic bold or italic (text to path couldn't copy it). The sheet closes.
+   */
+  setFont(family: string): void {
+    const doc = this.#doc;
+    const ids = this.#textIds();
+    if (!doc || !ids.length) return;
+    const generic = GENERICS.has(family.toLowerCase());
+    const value = generic ? family : fontValue(family, catalogueFamily(family)?.generic ?? 'sans-serif');
+    const faces = generic ? null : this.familyFaces(family);
+    const ctx = this.styleCtx;
+    let refused: { id: NodeId; why: string }[] = [];
+    const done = this.#dispatch('Set font', (apply) => {
+      const plan = planStyle(doc, ids, 'font-family', value, ctx);
+      refused = plan.refused;
+      applyPlan(doc, plan, apply);
+      if (!faces) return;
+      for (const id of ids) {
+        const w = computedWeight(doc, id);
+        const st = computedStyle(doc, id);
+        if (w === null || st === null) continue;
+        let style = st;
+        if (style === 'italic' && !faces.italics.length) {
+          style = 'normal';
+          applyPlan(doc, planStyle(doc, [id], 'font-style', 'normal', ctx), apply);
+        }
+        const list = style === 'italic' ? faces.italics : faces.weights.length ? faces.weights : faces.italics;
+        if (list.length && !list.includes(w)) applyPlan(doc, planStyle(doc, [id], 'font-weight', String(nearest(list, w)), ctx), apply);
+      }
+    });
+    if (done) this.#kept('font-family', ids, refused);
+    this.sheet.set(null);
+  }
+
+  /** The Weight sheet (a family with more than three weights): each weight by name and number, drawn in its own (asked for now). */
+  openWeightSheet(family: string): void {
+    const ids = this.#textIds();
+    if (!this.#doc || !ids.length || this.#live || this.#field || this.#gesture || !this.#writable()) return;
+    const faces = this.familyFaces(family);
+    const st = computedStyle(this.#doc, ids[0]) ?? 'normal';
+    const list = faces ? (st === 'italic' && faces.italics.length ? faces.italics : faces.weights) : [];
+    this.#fonts().use(list.map((weight): FaceRequest => ({ family, weight, style: st === 'italic' && faces?.italics.length ? 'italic' : 'normal' })));
+    this.focus.set(null);
+    this.sheet.set({ kind: 'weight', ids, family });
+  }
+
+  /** Your fonts (Add a font…), on this device. */
+  myFonts(): ReturnType<Fonts['mine']> {
+    return this.#fonts().mine();
+  }
+
+  /** Add a font… (a file the Font sheet's input took, read in platform/): kept on this device, then applied to the selected texts. Why not, or null. */
+  async addFont(file: Blob, name: string): Promise<string | null> {
+    try {
+      const f = await this.#fonts().add(file, name);
+      this.version.set(this.version.get() + 1);
+      if (this.sheet.get()?.kind === 'font') this.setFont(f.family);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /** Remove one of your fonts from this device. */
+  async removeFont(id: string): Promise<void> {
+    await this.#fonts().remove(id);
+    this.version.set(this.version.get() + 1);
   }
 
   // ── the Pen (P1-M3, src/interact/pen.ts) ───────────────────────────────────────────────────
@@ -3177,6 +3490,7 @@ export class Editor {
    * is selected too, so the canvas shows what is being edited.
    */
   tapToken(block: ViewBlock, token: ViewToken): void {
+    this.#endLines(); // a code token edit ends a lines visit first (P1-M4)
     const doc = this.#doc;
     if (!doc || this.#live) return;
     const hit = this.#resolve(block, token);
@@ -3303,6 +3617,7 @@ export class Editor {
     const sheet = this.sheet.get();
     if (!live || !sheet || sheet.kind === 'source') return { error: 'No value is open' };
     if (live.kind === 'style') return this.#styleInput(live, prop ?? live.prop, input);
+    if (live.kind === 'lines') return { error: 'The lines sheet takes its text through linesInput' };
     const t = live.token;
     const c = t.kind === 'number' ? checkNumber(t, input) : t.kind === 'color' ? checkColor(t, input) : t.kind === 'text' ? checkText(t, input) : { error: 'This value has no sheet' };
     if ('error' in c) return c;
@@ -3345,7 +3660,7 @@ export class Editor {
     if (commit && live.kind === 'style') this.#kept(live.prop, live.ids, live.refused);
     this.#bump();
     this.#changed();
-    if (live.kind === 'style') this.#show();
+    if (live.kind === 'style' || live.kind === 'lines') this.#show();
   }
 
   // ── Edit source ────────────────────────────────────────────────────────────────────────────
@@ -3359,6 +3674,7 @@ export class Editor {
   /** Open the selected element's source (one element, not the root). */
   openSource(): void {
     if (this.tool.get() === 'pen') this.#endPen(true);
+    this.#endLines(); // Edit source ends a lines visit first (P1-M4)
     const doc = this.#doc;
     const ids = [...this.selection.get()];
     if (!doc || this.#live || ids.length !== 1 || !this.#writable()) return;
@@ -3427,7 +3743,10 @@ export class Editor {
    * opens), and nothing here can be edited until another drawing opens.
    */
   showSource(text: string, at: number): void {
+    this.#endLines();
     this.#endLive(false);
+    this.#faceDoc = null;
+    this.#fonts().documentFaces([]); // the drawing that closes takes its own faces with it
     this.#stepDrag = null;
     this.#field = null;
     this.tool.set('select');
@@ -3549,8 +3868,8 @@ export class Editor {
 
 /** Screen px within which a tap takes a thin shape (plus half its stroke): SVG Lab's hitThin. */
 export const THIN_PX = 22;
-/** The tools the ToolRail offers now. */
-export type Tool = 'select' | 'shapes' | 'pen' | 'node';
+/** The tools the ToolRail offers now (P1-M4: Text). */
+export type Tool = 'select' | 'shapes' | 'pen' | 'node' | 'text';
 /** What the Pen's bar shows (P1-M3). */
 export interface PenView {
   anchors: number;
@@ -3636,6 +3955,7 @@ interface Gesture {
   handleAt: Point | null; // where that handle was, host px (the grab offset)
   draw: DrawGesture | null; // the Shapes tool's gesture
   pen: PenGesture | null; // the Pen's gesture (P1-M3)
+  text: boolean; // the Text tool's gesture (P1-M4): a tap places, a drag places nothing
   hd: HandleDrag | null; // a resize, rotate or scale drag
   guide: number | null; // the guide whose pill the press took, by index
   gd: { drag: Drag; step: number; tip: string | null } | null; // a guide's drag
@@ -3740,6 +4060,30 @@ function outermost(doc: Doc, sel: readonly NodeId[]): NodeId[] {
 function attrValueOf(doc: Doc, id: NodeId, local: string): string | null {
   const n = doc.nodes.get(id);
   return n?.kind === 'element' ? attrValue(doc, n, null, local) : null;
+}
+
+/** Is it an SVG text, tspan or textPath (P1-M4: Inspect's Text section)? */
+function isTextPart(doc: Doc, id: NodeId): boolean {
+  const n = doc.nodes.get(id);
+  return n?.kind === 'element' && n.ns === NS.svg && (n.local === 'text' || TEXT_PARTS.has(n.local));
+}
+/** SVG Lab's three generics: the Font sheet writes one alone. */
+const GENERICS: ReadonlySet<string> = new Set(['sans-serif', 'serif', 'monospace']);
+/** The weights a @font-face weight descriptor covers: a number, normal, bold, or a range (100 900: each hundred in it). */
+function faceWeights(descriptor: string): number[] {
+  const parts = descriptor.trim().toLowerCase().split(/\s+/).map((p) => (p === 'normal' ? 400 : p === 'bold' ? 700 : Number(p)));
+  if (!parts.every((p) => Number.isFinite(p) && p >= 1 && p <= 1000)) return [400];
+  if (parts.length === 1) return [parts[0]];
+  const [a, b] = [Math.min(parts[0], parts[1]), Math.max(parts[0], parts[1])];
+  const out: number[] = [];
+  for (let w = Math.ceil(a / 100) * 100; w <= b; w += 100) out.push(w);
+  return out.length ? out : [a];
+}
+/** The weight in a list nearest to `w` (a tie goes to the heavier, as a bold that can't be had is nearer bold). */
+function nearest(list: readonly number[], w: number): number {
+  let best = list[0];
+  for (const x of list) if (Math.abs(x - w) < Math.abs(best - w) || (Math.abs(x - w) === Math.abs(best - w) && x > best)) best = x;
+  return best;
 }
 
 const sameTarget = (a: TokenTarget, b: TokenTarget): boolean =>

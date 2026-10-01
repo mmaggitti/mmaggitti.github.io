@@ -2293,7 +2293,7 @@ const BREAKS = [
   },
   {
     id: 'B429', what: 'M1’s resize corners still show on a circle (and every shape-handle kind)',
-    file: 'projects/draw/src/editor.ts', from: 'corners: sh === null && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
+    file: 'projects/draw/src/editor.ts', from: 'corners: !takesShapeHandles(doc, n.id) && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
     run: drawTests('editor.test.ts'), expect: /✖ the overlay gives circles, ellipses, lines, polygons, polylines and generated shapes their own handles and no corners/,
   },
   // P1-M2 S1 (slow: one per new e2e check, each naming it).
@@ -2409,8 +2409,8 @@ const BREAKS = [
   {
     id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
     file: 'projects/draw/src/panels/Sheets.tsx',
-    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
-    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
     run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
   },
   // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).

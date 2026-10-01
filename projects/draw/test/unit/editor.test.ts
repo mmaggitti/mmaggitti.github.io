@@ -9,7 +9,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
+import { catalogueFamily } from '../../src/platform/font-catalogue.ts';
+import type { Fonts } from '../../src/platform/fonts.ts';
+import type { FaceRequest, OwnFace } from '../../../../engine/text/font-faces.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -50,7 +54,7 @@ interface Rig {
   focused: (FocusMark | null)[];
 }
 
-function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries): Rig {
+function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries, extra: Partial<EditorPorts> = {}): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
@@ -124,6 +128,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries):
       hostSize: () => size,
       sinkReady: () => true,
       booleans,
+      ...extra,
     }),
   };
   r.editor.version.subscribe(() => log.push('stores'));
@@ -2779,4 +2784,195 @@ test('a boolean whose bottom shape would become a <path> a <style> rule may pain
   await q.editor.strokeToPath();
   assert.equal(q.editor.notice.get(), STYLE_PAINT);
   assert.equal(q.editor.source(), G);
+});
+
+// ── P1-M4 S1: text and fonts ─────────────────────────────────────────────────────────────────────
+
+/** A fonts port that records what the editor asks for, holding the catalogue's families. */
+function fakeFonts(): Fonts & { used: FaceRequest[][]; documents: OwnFace[][] } {
+  const used: FaceRequest[][] = [];
+  const documents: OwnFace[][] = [];
+  return {
+    used,
+    documents,
+    use: (faces) => void used.push([...faces]),
+    documentFaces: (faces) => void documents.push([...faces]),
+    bytes: async () => null,
+    holds: (f) => !!catalogueFamily(f),
+    faces: (f) => {
+      const c = catalogueFamily(f);
+      return c ? { weights: [...c.weights], italics: [...c.italics] } : null;
+    },
+    mine: () => [],
+    add: async () => {
+      throw new Error('not here');
+    },
+    remove: async () => {},
+    subscribe: () => () => {},
+  };
+}
+/** Device preferences in a map, shared by two editors as a reload shares storage. */
+const fakePrefs = (m = new Map<string, string>()) => ({ m, read: (k: string) => m.get(k) ?? null, write: (k: string, v: string | null) => void (v === null ? m.delete(k) : m.set(k, v)) });
+const BOARD = (body = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n${body}</svg>`;
+// The engine doesn't measure text (the browser's getBBox does): a stand-in box around (x, y).
+const textBoxes = (r: () => Rig): Partial<CanvasPort> => ({
+  measure: (ids) => {
+    const m = measureWith(r().editor, ids, true);
+    const { box, viewport, M } = r().editor.rootBox;
+    for (const id of ids) {
+      const n = doc(r()).nodes.get(id);
+      if (!m.has(id) && n?.kind === 'element' && n.local === 'text') m.set(id, { box: { x: 30, y: 45, width: 40, height: 30 }, toHost: rootToHostMatrix(box!, viewport, M) });
+      // A root holding text: its box too, as the browser measures it.
+      if (!m.has(id) && id === doc(r()).root) m.set(id, { box: { x: 0, y: 0, width: 100, height: 100 }, toHost: rootToHostMatrix(box!, viewport, M) });
+    }
+    return m;
+  },
+});
+
+test('the Text tool (P1-M4): a tap places SVG Lab’s "Hello" in the Text tool’s font in one "Add text" entry, then Select, the text selected and the lines sheet open on it with its text selected; a drag places nothing and says so', () => {
+  const fonts = fakeFonts();
+  const r = rig(HOST, {}, undefined, { fonts, prefs: fakePrefs() });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  r.editor.pickTool('text');
+  assert.equal(r.editor.tool.get(), 'text');
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE);
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Archivo', weight: 400, style: 'normal' }, { family: 'Inter', weight: 400, style: 'normal' }], 'the toggle’s two labels, each in its own face');
+  drag(r, hostAt(r, 20, 20), hostAt(r, 60, 60), []);
+  assert.equal(r.editor.source(), BOARD(), 'a drag places nothing');
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.notice.set(null);
+  drag(r, hostAt(r, 20, 20), hostAt(r, 60, 60), []);
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE, 'and says so again');
+  tap(r, hostAt(r, 50, 50), []);
+  const hello = '<text x="50" y="55" font-size="14" font-family="Archivo, sans-serif" font-weight="700" text-anchor="middle" fill="#264653">Hello</text>';
+  assert.equal(r.editor.source(), BOARD(`  ${hello}\n`));
+  assert.equal(r.editor.history.get().undoLabel, 'Add text');
+  assert.equal(r.editor.tool.get(), 'select');
+  const t = element(doc(r), (n) => n.local === 'text').id;
+  assert.deepEqual(sel(r), [t]);
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'lines' && sheet.id === t && sheet.text === 'Hello' && sheet.select, JSON.stringify(sheet));
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Archivo', weight: 700, style: 'normal' }], 'the new text’s face, asked for once it is kept');
+  r.editor.closeSheet();
+  assert.equal(r.editor.history.get().undoLabel, 'Add text', 'a visit that typed nothing adds no entry');
+  r.editor.undo();
+  assert.equal(r.editor.source(), BOARD());
+});
+
+test('the Text tool’s font (Mark, 2026-10-01): Archivo by default; Inter once toggled, for the next text; a device preference that survives a reload through the storage, and no history entry', () => {
+  const prefs = fakePrefs();
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  assert.equal(r.editor.textFont.get(), 'Archivo');
+  r.editor.setTextFont('Inter');
+  assert.equal(r.editor.history.get().canUndo, false, 'a tap on the toggle makes no entry');
+  assert.equal(prefs.m.get('text-font'), 'Inter');
+  r.editor.setTextFont('Comic Sans');
+  assert.equal(r.editor.textFont.get(), 'Inter', 'only the toggle’s two');
+  r.editor.pickTool('text');
+  tap(r, hostAt(r, 50, 50), []);
+  assert.match(r.editor.source(), /font-family="Inter, sans-serif"/);
+  const again = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs });
+  assert.equal(again.editor.textFont.get(), 'Inter', 'after a reload');
+  again.editor.setTextFont('Archivo');
+  assert.equal(prefs.m.has('text-font'), false, 'the default is no preference at all');
+});
+
+test('a lines visit is one "Edit text" entry: each keystroke rewrites the lines into it (Draw’s tspans for two or more), a refused character keeps the last good lines, and one undo gives the file back; Edit text is offered only for one text Draw edits as lines', () => {
+  const src = BOARD('<text id="t" x="50" y="55" text-anchor="middle">Hello</text><text id="lab" x="50" y="20"><tspan x="50" dy="0em" fill="red">A</tspan></text><rect id="r" width="5" height="5"/>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select([idOf(r, 't')]);
+  assert.equal(r.editor.canEditText(), true);
+  r.editor.editText();
+  assert.ok(r.editor.sheet.get()?.kind === 'lines');
+  assert.equal(r.editor.linesInput('Big'), null);
+  assert.equal(r.editor.linesInput('Big\nIdea'), null);
+  const two = src.replace('>Hello<', '><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan><');
+  assert.equal(r.editor.source(), two);
+  assert.equal(r.editor.linesInput('Big\nIdea\uFFFE'), "XML can't hold the character U+FFFE");
+  assert.equal(r.editor.source(), two, 'the last good lines stay');
+  r.editor.closeSheet();
+  assert.equal(r.editor.history.get().undoLabel, 'Edit text');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+  for (const [ids, want] of [[['lab'], false], [['r'], false], [['t', 'r'], false], [['t'], true]] as const) {
+    r.editor.select(ids.map((i) => idOf(r, i)));
+    assert.equal(r.editor.canEditText(), want, ids.join());
+  }
+  r.editor.select([idOf(r, 't')]);
+  r.editor.editText();
+  r.editor.linesInput('Hi');
+  r.editor.pickTool('shapes');
+  assert.equal(r.editor.sheet.get(), null, 'a tool change ends the visit');
+  assert.equal(r.editor.history.get().undoLabel, 'Edit text', 'keeping what was typed');
+  assert.match(r.editor.source(), />Hi</);
+});
+
+test('a pick in the Font sheet is one "Set font" entry over the selected texts: the family with its generic, and the nearest real weight and style written with it (Bebas Neue has no bold and no italic); a generic alone; the sheet closes', () => {
+  const src = BOARD('<text id="a" font-weight="700" font-style="italic">A</text><g font-weight="900"><text id="b">B</text></g><text id="c">C</text>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select(['a', 'b', 'c'].map((i) => idOf(r, i)));
+  assert.equal(r.editor.textSelected(), true);
+  r.editor.openFontSheet();
+  assert.equal(r.editor.sheet.get()?.kind, 'font');
+  r.editor.setFont('Bebas Neue');
+  assert.equal(r.editor.sheet.get(), null);
+  assert.equal(r.editor.history.get().undoLabel, 'Set font');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="400" font-style="normal" font-family="Bebas Neue, sans-serif">A</text><g font-weight="900"><text id="b" font-family="Bebas Neue, sans-serif" font-weight="400">B</text></g><text id="c" font-family="Bebas Neue, sans-serif">C</text>\n'));
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+  r.editor.setFont('Fraunces');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="700" font-style="italic" font-family="Fraunces, serif">A</text><g font-weight="900"><text id="b" font-family="Fraunces, serif">B</text></g><text id="c" font-family="Fraunces, serif">C</text>\n'), 'Fraunces has 700 italic and 900: nothing else written');
+  r.editor.undo();
+  r.editor.setFont('IBM Plex Mono');
+  assert.match(r.editor.source(), /<text id="b" font-family="IBM Plex Mono, monospace" font-weight="700">/, 'IBM Plex Mono’s heaviest is 700: the nearest to 900');
+  r.editor.undo();
+  r.editor.setFont('serif');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="700" font-style="italic" font-family="serif">A</text><g font-weight="900"><text id="b" font-family="serif">B</text></g><text id="c" font-family="serif">C</text>\n'), 'a generic alone');
+  r.editor.select([idOf(r, 'a'), doc(r).root]);
+  assert.equal(r.editor.textSelected(), false, 'the root selected too: no Text section');
+});
+
+test('the fonts port: after open, the file’s own faces (documentFaces) and the faces its text asks for that Draw holds (use); again after a font edit and a <style> edit; [] when the drawing closes', () => {
+  const fonts = fakeFonts();
+  const face = '@font-face{font-family:Own;src:url(data:font/woff2;base64,d09GMg==)}';
+  const r = rig(HOST, {}, undefined, { fonts, prefs: fakePrefs() });
+  r.editor.open(BOARD(`<style>${face}</style><text id="t" font-family="Inter, sans-serif" font-weight="bold">A</text><text font-family="Own">B</text>\n`));
+  assert.deepEqual(fonts.documents.at(-1)!.map((f) => f.family), ['Own']);
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Inter', weight: 700, style: 'normal' }, { family: 'Own', weight: 400, style: 'normal' }]);
+  const documents = fonts.documents.length;
+  r.editor.select([idOf(r, 't')]);
+  r.editor.setStyle('font-weight', '900');
+  assert.deepEqual(fonts.used.at(-1)![0], { family: 'Inter', weight: 900, style: 'normal' }, 'a font edit asks again');
+  assert.equal(fonts.documents.length, documents, 'its own faces are registered again only when its <style> changes');
+  const style = element(doc(r), (n) => n.local === 'style');
+  r.editor.select([style.id]);
+  r.editor.openSource();
+  assert.equal(r.editor.applySource(style.id, '<style>@font-face{font-family:Next;src:url(data:font/woff2;base64,d09GMg==)}</style>'), null);
+  assert.deepEqual(fonts.documents.at(-1)!.map((f) => f.family), ['Next'], 'a <style> edit registers the faces again');
+  r.editor.showSource('<svg', 4);
+  assert.deepEqual(fonts.documents.at(-1), [], 'the drawing closes: its faces go');
+});
+
+test('a text’s pos handle (P1-M4) sits at its (x, y) beside its corners; its drag is one "Move text" entry moving its tspans’ x with it', () => {
+  const src = BOARD('<text id="t" x="50" y="55" font-size="14"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>\n');
+  let r!: Rig;
+  r = rig(HOST, textBoxes(() => r), undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.snap.set(NO_SNAP);
+  r.editor.select([idOf(r, 't')]);
+  const ids = handleIds(r);
+  assert.ok(ids.includes('pos') && ['tl', 'tr', 'br', 'bl', 'center'].every((h) => ids.includes(h)), ids.join());
+  const pos = r.editor.overlayModel().handles.find((h) => h.id === 'pos')!.at;
+  const want = hostAt(r, 50, 55);
+  assert.ok(Math.hypot(pos.x - want.x, pos.y - want.y) < 0.01, JSON.stringify([pos, want]));
+  drag(r, want, hostAt(r, 60, 50), [idOf(r, 't')]);
+  assert.equal(r.editor.source(), src.replace('x="50" y="55"', 'x="60" y="50"').replaceAll('<tspan x="50"', '<tspan x="60"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Move text');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
 });

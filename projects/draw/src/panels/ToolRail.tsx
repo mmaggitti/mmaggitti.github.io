@@ -1,6 +1,6 @@
 // The ToolRail (52pt, the bottom of the screen): the tools, then Undo and Redo, which follow the
-// session's history. Select, Node and Pen (P1-M3) and Shapes (P1-M2) work; Text and Insert arrive
-// later in P1 and are shown, disabled, so the rail doesn't reshuffle when they do. A tool is pressed
+// session's history. Select, Node and Pen (P1-M3), Shapes (P1-M2) and Text (P1-M4) work; Insert
+// arrives later in P1 and is shown, disabled, so the rail doesn't reshuffle when it does. A tool is pressed
 // while it is on, and a tap turns it on or off (Select turns it off too); each is disabled with no
 // drawing, or a read-only one. While the Pen is on, Undo is its Undo point and Redo is off.
 
@@ -18,10 +18,8 @@ const SELECT = icon(<path d="M5 3l14 8-6 1.5L10 19z" />);
 const SHAPES = icon(<><rect x="3" y="11" width="9" height="9" /><circle cx="16" cy="8" r="5" /></>);
 const NODE = icon(<><path d="M4 18C8 6 16 6 20 18" /><rect x="2.5" y="16.5" width="3" height="3" /><rect x="18.5" y="16.5" width="3" height="3" /><circle cx="12" cy="9" r="1.5" /></>);
 const PEN = icon(<><path d="M4 20l3-1 11-11-2-2L5 17z" /><path d="M14 6l4 4" /></>);
-const AFTER: [string, ReactNode][] = [
-  ['Text', icon(<><path d="M5 6V4h14v2" /><path d="M12 4v16" /><path d="M9 20h6" /></>)],
-  ['Insert', icon(<><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M12 8v8M8 12h8" /></>)],
-];
+const TEXT = icon(<><path d="M5 6V4h14v2" /><path d="M12 4v16" /><path d="M9 20h6" /></>);
+const AFTER: [string, ReactNode][] = [['Insert', icon(<><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M12 8v8M8 12h8" /></>)]];
 const later = ([name, svg]: [string, ReactNode]) => (
   <button key={name} type="button" className="draw-tool" disabled aria-label={`${name} (coming in P1)`}>
     {svg}
@@ -53,6 +51,10 @@ export function ToolRail({ editor }: { editor: Editor }) {
       <button type="button" className="draw-tool draw-shapes-tool" aria-pressed={tool === 'shapes'} disabled={!editor.doc || readOnly} onClick={() => editor.pickTool(tool === 'shapes' ? 'select' : 'shapes')}>
         {SHAPES}
         <span>Shapes</span>
+      </button>
+      <button type="button" className="draw-tool draw-text-tool" aria-pressed={tool === 'text'} disabled={!editor.doc || readOnly} onClick={() => editor.pickTool(tool === 'text' ? 'select' : 'text')}>
+        {TEXT}
+        <span>Text</span>
       </button>
       {AFTER.map(later)}
       <button type="button" className="draw-tool" disabled={!h.canUndo} aria-label={h.undoLabel ? `Undo ${h.undoLabel}` : 'Undo'} onClick={() => editor.undo()}>

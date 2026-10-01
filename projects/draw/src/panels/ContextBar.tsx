@@ -15,6 +15,11 @@
 // (Rectangle, Circle, Ellipse, Line, Polygon, Star, Spiral), the chosen one pressed, then Cancel,
 // which returns to Select.
 //
+// While the Text tool is on (P1-M4), the bar is its own: its hint, the font for new text (Archivo or
+// Inter, each label drawn in its own 400 face; a device preference, never in the file, and no history
+// entry), and Cancel. For one selected text Draw edits as lines, the selection's bar gains Edit text
+// (seven 44 pt buttons and the label still fit 440 pt).
+//
 // While the Pen is on (P1-M3), the bar is its own: Undo point, Close (from 3 anchors) and Done. In
 // the Node tool, for one selected path, the selection's bar gives way to the path's: Deselect, Smooth
 // (for the chosen node, when Make smooth or Make corner applies), Close or Open, Relative or
@@ -24,6 +29,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BOOLEAN_LABELS, BOOLEAN_OPS, type Editor } from '../editor.ts';
 import { SHAPE_KINDS, SHAPE_NAMES, type ShapeKind } from '../interact/shapes-tool.ts';
+import { TEXT_DEFAULTS } from '../platform/font-catalogue.ts';
 import type { Unparsed } from '../workspace.ts';
 import { elementLabel } from './label.ts';
 import { Modal } from './Sheets.tsx';
@@ -50,6 +56,7 @@ const SMOOTH = icon(<><path d="M3 18C6 9 18 9 21 18" /><path d="M4 11h16" /><cir
 const RELATIVE = icon(<><circle cx="6" cy="18" r="1.75" /><path d="M7.5 16.5L18 6M12 6h6v6" /></>);
 const ABSOLUTE = icon(<><path d="M4 3v17h17" /><circle cx="14" cy="10" r="1.75" /><path d="M14 10H4M14 10v10" strokeDasharray="2 2" /></>);
 const REVERSE = icon(<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4" />);
+const EDIT_TEXT = icon(<><path d="M4 7V5h10v2M9 5v12M7 17h4" /><path d="M14 19l1-3 5-5 2 2-5 5z" /></>);
 const KIND_ICONS: Record<ShapeKind, ReactNode> = {
   rect: icon(<rect x="4" y="6" width="16" height="12" />),
   circle: icon(<circle cx="12" cy="12" r="8" />),
@@ -68,6 +75,7 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
   const tool = useStore(editor.tool);
   const kind = useStore(editor.shapeKind);
   const pen = useStore(editor.pen);
+  const textFont = useStore(editor.textFont);
   useStore(editor.chosenNode);
   const [more, setMore] = useState(false);
   useStore(editor.version);
@@ -130,6 +138,22 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
         </button>
       </>
     );
+  } else if (tool === 'text') {
+    body = (
+      <>
+        <span className="draw-hint draw-text-hint">Tap to place text</span>
+        <div className="ds-seg draw-text-fonts" role="group" aria-label="Font for new text">
+          {TEXT_DEFAULTS.map((f) => (
+            <button key={f} type="button" className="draw-text-font" aria-pressed={f === textFont} style={{ fontFamily: `"${f}", var(--font-ui)` }} onClick={() => editor.setTextFont(f)}>
+              {f}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="draw-key draw-ctx-btn draw-text-cancel" aria-label="Cancel" onClick={() => editor.pickTool('select')}>
+          {DESELECT}
+        </button>
+      </>
+    );
   } else if (tool === 'pen' && pen) {
     body = (
       <>
@@ -186,6 +210,11 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
         <button type="button" className="draw-key draw-ctx-btn" aria-label="Select more" aria-pressed={selectMore} onClick={() => editor.selectMore.set(!selectMore)}>
           {SELECT_MORE}
         </button>
+        {editor.canEditText() && (
+          <button type="button" className="draw-key draw-ctx-btn draw-edit-text" aria-label="Edit text" onClick={() => editor.editText()}>
+            {EDIT_TEXT}
+          </button>
+        )}
         <button type="button" className="draw-key draw-ctx-btn" aria-label="Bring forward" disabled={rootOnly} onClick={() => editor.forward()}>
           {FORWARD}
         </button>

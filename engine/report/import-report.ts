@@ -6,7 +6,9 @@
 // - unclassified: no ledger row names it; only a fallback row caught it (kept, never rendered).
 //
 // Plus notes on things that change what the file looks like in Draw or in another browser, and on
-// the external entities a DOCTYPE declares (never fetched).
+// the external entities a DOCTYPE declares (never fetched). P1-M4: the file's own fonts (its data:
+// @font-face faces, which Draw registers so both engines draw them), and the ones it doesn't load: a
+// face named like Draw's own interface fonts (it would restyle Draw itself), and faces over the limits.
 
 import { descendants, NS, type Doc, type ElementNode } from '../model/doc.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
@@ -16,6 +18,7 @@ import type { LedgerClass } from '../policy/tables.ts';
 import { cssSets } from '../geometry/css.ts';
 import { rootFontSize } from '../geometry/lengths.ts';
 import { fmt } from '../values/number-format.ts';
+import { FACE_MAX, FACES_MAX, appFontName, fontFaces } from '../text/font-faces.ts';
 
 export type Bucket = 'editable' | 'kept' | 'preview' | 'unclassified';
 
@@ -113,6 +116,7 @@ export function importReport(doc: Doc): ImportReport {
     notes.push(`${rems.attributes} rem length${rems.attributes > 1 ? 's' : ''}: the canvas measures rem against the app’s 12 px root, not this file’s own ${fmt(rootFontSize(doc), 2)} px, so ${rems.attributes > 1 ? 'they draw' : 'it draws'} smaller here. Convert ${rems.attributes > 1 ? 'them' : 'it'} to user units to fix it.${convertible ? '' : ` ${REM_UNCONVERTIBLE}`}`);
   }
   if (rems.styleText) notes.push(`${rems.styleText} rem length${rems.styleText > 1 ? 's' : ''} inside <style> text ${rems.styleText > 1 ? 'are' : 'is'} left as written.`);
+  notes.push(...fontNotes(doc));
   return { totals, items, notes, rem: { count: rems.attributes, convertible, why: convertible ? null : REM_UNCONVERTIBLE } };
 }
 
@@ -120,4 +124,15 @@ function displayName(ns: string | null, qname: string, local: string): string {
   if (ns === NS.svg) return local;
   if (ns === NS.xhtml) return `xhtml:${local}`;
   return qname;
+}
+
+/** The import report's notes on a file's own fonts (P1-M4). */
+export function fontNotes(doc: Doc): string[] {
+  const own = fontFaces(doc);
+  const drawn = own.faces.filter((f) => !appFontName(f.family));
+  const notes: string[] = [];
+  if (drawn.length) notes.push(`This file’s own fonts: ${drawn.length} drawn on the canvas.`);
+  for (const family of [...new Set(own.faces.filter((f) => appFontName(f.family)).map((f) => f.family))]) notes.push(`Not loaded: ${family}, which shares a name with Draw’s own interface fonts.`);
+  for (const family of [...new Set(own.over)]) notes.push(`Not loaded: ${family}, over the limits for a file’s own fonts (${FACE_MAX / 1e6} MB a face, ${FACES_MAX / 1e6} MB in all).`);
+  return notes;
 }
