@@ -2915,6 +2915,11 @@ const BREAKS = [
     file: 'engine/path/segments.ts', from: '  const out = reverseSubpaths(t, sub);\n', to: '  let out: string | null = null;\n  if (sub !== null) out = reverseSubpaths(t, sub);\n  else for (let s = 0; s < subpathCount(t.abs); s++) out = reverseSubpaths(readPathText(out ?? raw), s) ?? out;\n',
     run: engineTests('path/costs.test.ts'), expect: /✖ Reverse with no chosen node takes linear time/,
   },
+  {
+    id: 'B549', what: 'R5: every comment under a donut holder asks whether the holder is a donut (each ask walks the holder’s children: quadratic)',
+    file: 'engine/code/tokens.ts', from: '  if (dataCommentOf(doc, leaf.parent) !== leaf.id) return [];\n', to: '',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ the tokens of many comments under a donut holder take linear time/,
+  },
 ];
 
 const args = process.argv.slice(2);

@@ -20,7 +20,7 @@
 import type { ChangeSet } from '../../../engine/commands/ops.ts';
 import type { Doc, NodeId } from '../../../engine/model/doc.ts';
 import { NS } from '../../../engine/model/doc.ts';
-import { readData } from '../../../engine/generators/donut.ts';
+import { dataCommentOf } from '../../../engine/generators/donut.ts';
 
 export interface Route {
   /** Elements whose start tag changed and that are not inside a subtree being re-rendered. */
@@ -71,18 +71,6 @@ function orderOf(doc: Doc): Map<NodeId, number> {
   walk(doc.root);
   for (const id of doc.epilog) walk(id);
   return order;
-}
-
-/** The element's data comment (a donut holder's first child, whitespace aside, reading as data), or null. */
-export function dataCommentOf(doc: Doc, id: NodeId | null | undefined): NodeId | null {
-  const n = id === null || id === undefined ? undefined : doc.nodes.get(id);
-  if (n?.kind !== 'element') return null;
-  for (const c of n.children) {
-    const k = doc.nodes.get(c);
-    if (k?.kind === 'text' && /^[ \t\r\n]*$/.test(k.raw)) continue;
-    return k?.kind === 'comment' && readData(k.raw) ? c : null;
-  }
-  return null;
 }
 
 export function route(doc: Doc, cs: ChangeSet): Route {

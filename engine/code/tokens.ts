@@ -17,7 +17,7 @@ import { NAME_PATTERN } from '../xml/lex.ts';
 import { parseColor, parsePaint, type Color } from '../values/color.ts';
 import { decodeFragment } from '../values/url.ts';
 import { argSpans, isFlag, parsePath } from '../path/parse.ts';
-import { VALUE_MAX, VALUE_MIN, donutOf, readData } from '../generators/donut.ts';
+import { VALUE_MAX, VALUE_MIN, dataCommentOf, donutOf, readData } from '../generators/donut.ts';
 
 export type TokenKind = 'number' | 'color' | 'enum' | 'text' | 'ref';
 
@@ -817,8 +817,11 @@ export function tokenizeLeafRaw(doc: Doc, leaf: LeafNode, raw: string): Token[] 
   return inOrder(out);
 }
 
-// A donut's data comment (P1-M3, code/comment-tokens): its values as number tokens, spans in the raw text.
+// A donut's data comment (P1-M3, code/comment-tokens): its values as number tokens, spans in the raw
+// text. Only its holder's data comment asks whether the holder is a donut: any other comment under it
+// stays plain at once (asking for each would walk the holder's children once per comment).
 function dataTokens(doc: Doc, leaf: LeafNode, raw: string): Token[] {
+  if (dataCommentOf(doc, leaf.parent) !== leaf.id) return [];
   const d = leaf.parent === null ? null : donutOf(doc, leaf.parent);
   const read = d && d.comment === leaf.id ? readData(raw) : null;
   if (!read) return [];

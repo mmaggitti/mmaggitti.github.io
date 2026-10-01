@@ -64,6 +64,22 @@ export function readData(raw: string): DataRead | null {
 /** A data comment's raw text for these values. */
 export const dataRaw = (values: readonly number[]): string => `${HEAD}${values.join(', ')}${TAIL}`;
 
+/**
+ * The element's data comment: its first child (whitespace-only text aside) when that is a comment
+ * reading as data, else null. Only it can be a donut's data comment, so only it asks whether its
+ * holder is a donut (each ask walks the holder's children).
+ */
+export function dataCommentOf(doc: Doc, id: NodeId | null | undefined): NodeId | null {
+  const n = id === null || id === undefined ? undefined : doc.nodes.get(id);
+  if (n?.kind !== 'element') return null;
+  for (const c of n.children) {
+    const k = doc.nodes.get(c);
+    if (k?.kind === 'text' && /^[ \t\r\n]*$/.test(k.raw)) continue;
+    return k?.kind === 'comment' && readData(k.raw) ? c : null;
+  }
+  return null;
+}
+
 const lab1 = (v: number): number => Math.round(v * 10) / 10; // SVG Lab's rnd(v, 1)
 
 /** Each slice's d for these values, centre and radius (the header's rule, SVG Lab's arithmetic). */

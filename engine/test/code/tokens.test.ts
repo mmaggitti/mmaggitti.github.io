@@ -8,6 +8,7 @@ import { ENUMS, decimalsOf, tokenizeAttr, tokenizeText, type AttrRef, type Numbe
 import { codeBlocks } from '../../code/blocks.ts';
 import { readFileSync } from 'node:fs';
 import { applyTokenEdit } from '../../code/edit.ts';
+import { linear } from '../timing.ts';
 
 const SVG = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
 
@@ -436,4 +437,24 @@ test('a donut’s data comment (draw:gen="donut") has one number token per value
   assert.deepEqual(commentTokens(read('arcs--holes.svg')), []);
   assert.deepEqual(commentTokens(adopted.replace('66.5 72.7" fill="none" stroke="#e76f51"', '66.5 72.8" fill="none" stroke="#e76f51"')), [], 'a slice that differs: not a donut, so a plain comment');
   assert.deepEqual(commentTokens(adopted.replace('<!-- data: 40, 25, 20, 15 -->', '<!-- data: 40, 25, 20, 15 -->\n  <!-- data: 1, 2 -->')), [], 'two comments: not a donut');
+});
+
+// R5 (the P1-M3 review): every comment under an element carrying draw:gen="donut" asked whether that
+// element is a donut, which walks its children, so opening 8,000 of them took 10.8 s. Only the holder's
+// data comment (its first child, whitespace aside) asks now. A pass over a thousand comments takes under
+// a ms, so a run is twenty passes. Measured in node: about 11 and 48 ms over 1,000 and 4,000 comments;
+// the quadratic code took 2.6 s and 44 s (engine/test/timing.ts).
+test('the tokens of many comments under a donut holder take linear time: over 4,000 comments they cost under 6× what they cost over 1,000 (only the holder’s data comment asks whether it is a donut)', () => {
+  const file = (n: number) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28" viewBox="0 0 100 100">\n<!-- data: 40, 60 -->\n${'<path d="M 1 1"/>\n'.repeat(n)}${'<!-- a note -->\n'.repeat(n)}</svg>\n`;
+  const pass = (n: number) => {
+    const r = parseDoc(file(n));
+    assert.ok(r.ok);
+    const comments = [...descendants(r.doc, r.doc.root)].filter((c) => c.kind === 'comment').map((c) => c.id);
+    assert.equal(comments.length, n + 1);
+    assert.deepEqual(comments.flatMap((id) => tokenizeText(r.doc, id)), [], 'test setup: n slices for 2 values, then comments: not a donut, so every comment is plain');
+    return () => {
+      for (const id of comments) tokenizeText(r.doc, id);
+    };
+  };
+  linear('the comments’ tokens (tokenizeText)', pass(1000), pass(4000), { limit: 1000, reps: 20 });
 });
