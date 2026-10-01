@@ -853,6 +853,9 @@
 .draw-export-row:first-child { border-top: 0; padding-top: 0; }
 .draw-export-go { display: block; width: 100%; }
 .draw-export-say { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+/* P1-M4 S2: Clean's Text choice, and what it says about the text. */
+.draw-export-text { margin: var(--space-1) 0 var(--space-3); }
+.draw-export-note { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
 
 /* ── The Support tab: the ledger in the app ─────────────────────────────────── */
 

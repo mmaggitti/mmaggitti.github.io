@@ -113,7 +113,8 @@ import { textPathMarkup, writeTextToPath } from '../../../engine/text/to-path.ts
 import { outlineTexts, type TextDeps } from './text/pipeline.ts';
 import { loadTextLib, type TextLib } from './text/load.ts';
 import { appFonts, couldNotLoad, SHEET_FACES, type FontEvent, type Fonts } from './platform/fonts.ts';
-import { LATIN_RANGE, TEXT_DEFAULTS, catalogueFamily } from './platform/font-catalogue.ts';
+import { LATIN_RANGE, TEXT_DEFAULTS, catalogueFamily, hasFace } from './platform/font-catalogue.ts';
+import type { ExportDeps } from './export/svg.ts';
 import { readPref, writePref, type Pref } from './platform/prefs.ts';
 import { TEXT_LABEL, TEXT_NOTICE, fontValue, textMarkup } from './interact/text-tool.ts';
 import { NO_PATH_MARKS, arcGhosts, directionArrows, donutLabels, ghostAt, pathMarks, penArms, type ArcParams, type PathMarks } from './interact/path-marks.ts';
@@ -1060,6 +1061,21 @@ export class Editor {
     let made: NodeId[] = [];
     const items = texts.map((id, i) => ({ id, markup: textPathMarkup(doc, id, ds[i], reads[i].label) }));
     if (this.#dispatch('Text to path', (apply) => void (made = writeTextToPath(doc, items, apply)))) this.select(made);
+  }
+
+  /** What Export's text choices need (P1-M4 S2, export/svg.ts prepareExport): the text tools, and the faces Draw holds. */
+  exportDeps(): ExportDeps {
+    const fonts = this.#fonts();
+    return {
+      textDeps: (own) => this.textDeps(own),
+      faces: (family) => fonts.faces(family),
+      held: (f) => {
+        const m = fonts.mine().find((x) => x.family.toLowerCase() === f.family.toLowerCase() && x.weight === f.weight && x.style === f.style);
+        if (m) return { family: m.family, reserved: m.reserved, copyright: m.copyright, licence: m.licence || null, format: m.format };
+        const c = catalogueFamily(f.family);
+        return c && hasFace(c, f.weight, f.style) ? { family: c.family, reserved: c.reserved, copyright: c.copyright, licence: null, format: 'woff2' } : null;
+      },
+    };
   }
 
   /** What Text to path and Export's text choices outline with: the text library, and each face's file and range (`own`: the open file's own faces). */

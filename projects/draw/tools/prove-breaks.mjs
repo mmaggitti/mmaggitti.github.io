@@ -917,7 +917,7 @@ const BREAKS = [
   },
   {
     id: 'B161', what: 'export re-derives the encoding from the text (UTF-16 without a declaration becomes UTF-8)',
-    file: 'projects/draw/src/workspace.ts', from: "current?.encoding ?? undefined", to: 'undefined',
+    file: 'projects/draw/src/workspace.ts', from: "kind, current?.encoding ?? undefined)", to: 'kind, undefined)',
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {
