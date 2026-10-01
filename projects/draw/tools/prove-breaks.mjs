@@ -2996,6 +2996,16 @@ const BREAKS = [
     file: 'projects/draw/src/interact/path-marks.ts', from: "    const shift = s.type === 'L' && 'LHV'.includes(s.cmd.toUpperCase()) && len / 2 - past >= ANCHOR_REACH + ARROW_REACH ? past : 0;", to: '    const shift = 0;',
     run: drawTests('editor.test.ts'), expect: /✖ the direction arrows clear the handles/,
   },
+  {
+    id: 'B565', what: 'N1: the boolean compares the editor’s version again (a tool pick refuses it; a drag’s frames don’t, so a Union resolving mid-drag is dropped without a word)',
+    file: 'projects/draw/src/editor.ts', from: /    const version = doc\.version;\n([\s\S]*?)doc\.version !== version \|\| this\.#live \|\| this\.#gesture \|\| this\.#field \|\| this\.#stepDrag \|\| this\.#nudge\) return/, to: '    const version = this.version.get();\n$1this.version.get() !== version) return',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose chunk resolves during a live move drag/,
+  },
+  {
+    id: 'B566', what: 'N1: the boolean doesn’t refuse while an edit is live (a press held): it writes into the gesture',
+    file: 'projects/draw/src/editor.ts', from: ' || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);', to: ') return void this.notice.set(DRAWING_CHANGED);',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose chunk resolves during a live move drag/,
+  },
 ];
 
 const args = process.argv.slice(2);

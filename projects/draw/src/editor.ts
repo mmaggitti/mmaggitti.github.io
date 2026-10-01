@@ -839,9 +839,11 @@ export class Editor {
     if (ids.length < 2) return void this.notice.set('Select two shapes or more to combine them.');
     const read = this.#booleanInputs(doc, ids);
     if ('refused' in read) return void this.notice.set(read.refused);
-    const version = this.version.get();
+    const version = doc.version;
     const out = await runPipeline(read.inputs, op, this.#ports.booleans ?? LAZY_LIBRARIES);
-    if (this.#doc !== doc || this.version.get() !== version) return void this.notice.set(DRAWING_CHANGED);
+    // The document changed meanwhile (every applied op moves its own version, a drag's frames too), or
+    // an edit is live now (a gesture, a scrub, a field), which writing would go over: refused, saying so.
+    if (this.#doc !== doc || doc.version !== version || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);
     if ('refused' in out) return void this.notice.set(out.refused);
     const d = loopsD(out.loops);
     let result: NodeId | null = null;

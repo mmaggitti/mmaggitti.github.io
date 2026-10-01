@@ -2564,3 +2564,46 @@ test('a boolean the drawing changes under while its chunk loads refuses, and wri
   assert.equal(r.editor.source(), after, 'nothing written over the change');
   assert.equal(r.editor.history.get().undoLabel, 'Delete');
 });
+
+// N1 (the P1-M3 review): the check read the editor's own version, which a tool pick moves and a drag's
+// frames don't: a Union resolving mid-drag was dropped with no notice, and a tool picked and put back
+// while it loaded refused for nothing. It reads the document's version now, and refuses while an edit
+// is live.
+test('a boolean whose chunk resolves during a live move drag, or while a press is held, refuses with the notice and writes nothing; one whose load saw only a tool picked and put back is written', async () => {
+  const pendingUnion = () => {
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+    r.editor.open(BOOL_FILE);
+    r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+    return { r, pending: r.editor.combine('union'), release };
+  };
+  // A move drag of the text, live when the chunk resolves.
+  const d = pendingUnion();
+  const at = hostAt(d.r, 12, 93);
+  d.r.editor.pointerDown(at, [idOf(d.r, 't')], { add: false });
+  d.r.editor.pointerDrag({ x: at.x + 20, y: at.y });
+  d.r.editor.pointerDrag({ x: at.x + 30, y: at.y });
+  d.release();
+  await d.pending;
+  assert.equal(d.r.editor.notice.get(), DRAWING_CHANGED, 'mid-drag: refused, saying so');
+  d.r.editor.pointerUp({ x: at.x + 30, y: at.y });
+  assert.equal(d.r.editor.history.get().undoLabel, 'Move', 'the drag is one entry of its own');
+  assert.ok(!d.r.editor.source().includes('<path'), 'and nothing was combined');
+  // A press held (nothing changed yet): an edit is live, so nothing is written into it.
+  const h = pendingUnion();
+  h.r.editor.pointerDown(hostAt(h.r, 12, 93), [idOf(h.r, 't')], { add: false });
+  h.release();
+  await h.pending;
+  assert.equal(h.r.editor.notice.get(), DRAWING_CHANGED, 'a press held: refused, saying so');
+  h.r.editor.pointerUp(hostAt(h.r, 12, 93));
+  assert.equal(h.r.editor.history.get().canUndo, false, 'nothing written');
+  // A tool picked and put back while it loads: the document never changed, so the Union is written.
+  const p = pendingUnion();
+  p.r.editor.pickTool('node');
+  p.r.editor.pickTool('select');
+  p.release();
+  await p.pending;
+  assert.equal(p.r.editor.notice.get(), null);
+  assert.equal(p.r.editor.history.get().undoLabel, 'Union');
+});
