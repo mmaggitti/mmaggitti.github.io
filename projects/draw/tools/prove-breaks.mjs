@@ -3447,6 +3447,11 @@ const BREAKS = [
     file: 'engine/access/model.ts', from: "  const bad = value.trim().split(/\\s+/).find((t) => t !== '' && !ARIA_ROLES.has(t.toLowerCase()));", to: "  const bad = value.trim().split(/\\s+/).find((t) => t === 'never-a-token');",
     run: engineTests('access/access.test.ts'), expect: /✖ Role takes only ARIA role tokens/,
   },
+  {
+    id: 'B652', what: 'a file’s own faces have no count cap (1,000 tiny faces would be 1,000 FontFaces on each open)',
+    file: 'engine/text/font-faces.ts', from: ' || read.faces.length >= count) {', to: ') {',
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ the count limit, 64 faces in all/,
+  },
 ];
 
 const args = process.argv.slice(2);

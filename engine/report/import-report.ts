@@ -20,7 +20,7 @@ import type { LedgerClass } from '../policy/tables.ts';
 import { cssSets, unmatchableRules } from '../geometry/css.ts';
 import { rootFontSize } from '../geometry/lengths.ts';
 import { fmt } from '../values/number-format.ts';
-import { FACE_MAX, FACES_MAX, appFontName, fontFaces } from '../text/font-faces.ts';
+import { FACE_MAX, FACES_COUNT_MAX, FACES_MAX, appFontName, fontFaces } from '../text/font-faces.ts';
 import { metaOf } from '../access/metadata.ts';
 
 export type Bucket = 'editable' | 'kept' | 'preview' | 'unclassified';
@@ -140,6 +140,7 @@ export function fontNotes(doc: Doc): string[] {
   const notes: string[] = [];
   if (drawn.length) notes.push(`This file’s own fonts: ${drawn.length} drawn on the canvas.`);
   for (const family of [...new Set(own.faces.filter((f) => appFontName(f.family)).map((f) => f.family))]) notes.push(`Not loaded: ${family}, which shares a name with Draw’s own interface fonts.`);
-  for (const family of [...new Set(own.over)]) notes.push(`Not loaded: ${family}, over the limits for a file’s own fonts (${FACE_MAX / 1e6} MB a face, ${FACES_MAX / 1e6} MB in all).`);
+  const over = [...new Set(own.over)];
+  if (over.length) notes.push(`Not loaded: ${over.slice(0, 5).join(', ')}${over.length > 5 ? ` and ${over.length - 5} more` : ''}, over the limits for a file’s own fonts (${FACE_MAX / 1e6} MB a face, ${FACES_MAX / 1e6} MB and ${FACES_COUNT_MAX} faces in all).`);
   return notes;
 }

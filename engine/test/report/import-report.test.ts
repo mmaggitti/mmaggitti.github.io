@@ -197,7 +197,7 @@ test('the font notes (P1-M4): a file’s own data: faces are counted as drawn on
     'This file’s own fonts: 2 drawn on the canvas.',
     'Not loaded: Arial, which shares a name with Draw’s own interface fonts.',
     'Not loaded: Segoe UI, which shares a name with Draw’s own interface fonts.',
-    'Not loaded: Huge, over the limits for a file’s own fonts (5 MB a face, 20 MB in all).',
+    'Not loaded: Huge, over the limits for a file’s own fonts (5 MB a face, 20 MB and 64 faces in all).',
   ]);
   const none = parse('<svg xmlns="http://www.w3.org/2000/svg"><text>a</text></svg>');
   assert.deepEqual(importReport(none).notes.filter((n) => /font/i.test(n)), []);

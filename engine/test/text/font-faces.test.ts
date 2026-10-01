@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { el, parseDoc, type Doc } from '../../model/doc.ts';
 import { Session } from '../../commands/session.ts';
 import { opSetLeafRaw } from '../../commands/ops.ts';
-import { FACE_MAX, FACES_MAX, UI_STACKS, appFontName, familyList, fontFaces, usedFaces } from '../../text/font-faces.ts';
+import { FACE_MAX, FACES_COUNT_MAX, FACES_MAX, UI_STACKS, appFontName, familyList, fontFaces, usedFaces } from '../../text/font-faces.ts';
+import { importReport } from '../../report/import-report.ts';
 
 const load = (src: string): Doc => {
   const r = parseDoc(src);
@@ -65,6 +66,19 @@ test('the size limits, 5 MB a face and 20 MB in all (here a test’s smaller one
   assert.deepEqual(read.faces.map((f) => [f.family, f.bytes.length]), [['S1', 300], ['S2', 300]]);
   assert.deepEqual(read.over, ['Big', 'S3']);
   assert.equal(fontFaces(doc).faces.length, 4, 'the usual limits take them all');
+});
+
+test('the count limit, 64 faces in all: a file’s faces past the 64th are counted by family and not read', () => {
+  assert.equal(FACES_COUNT_MAX, 64);
+  const tiny = `url(data:font/woff2;base64,${b64('wOF2')})`;
+  const doc = load(svg(`<style>${Array.from({ length: 66 }, (_, i) => face(`F${i}`, tiny)).join('')}</style>`));
+  const read = fontFaces(doc);
+  assert.equal(read.faces.length, 64);
+  assert.deepEqual(read.over, ['F64', 'F65']);
+  assert.deepEqual(fontFaces(doc, { face: FACE_MAX, total: FACES_MAX, count: 2 }).faces.map((f) => f.family), ['F0', 'F1'], 'a test’s own count');
+  assert.ok(importReport(doc).notes.includes('Not loaded: F64, F65, over the limits for a file’s own fonts (5 MB a face, 20 MB and 64 faces in all).'), importReport(doc).notes.join(' | '));
+  const many = load(svg(`<style>${Array.from({ length: 1000 }, (_, i) => face(`F${i}`, tiny)).join('')}</style>`));
+  assert.deepEqual(importReport(many).notes.filter((n) => n.startsWith('Not loaded')), ['Not loaded: F64, F65, F66, F67, F68 and 931 more, over the limits for a file’s own fonts (5 MB a face, 20 MB and 64 faces in all).'], 'one note, the first five named');
 });
 
 test('the name guard refuses ds.css’s --font-ui and --font-mono names, the CSS generic families and the CSS-wide keywords, case and quotes aside; the stacks are ds.css’s own', () => {

@@ -4,8 +4,8 @@
 //   whose text passes the canvas's CSS guards: cssAllowed and cssUrlsLocal), at the top level or in
 //   a grouping rule, each from its FIRST src that is a url(data:font/…;base64,…) whose format() is
 //   woff2, woff, truetype or opentype, or absent (local() and anything else skipped). The base64 is
-//   decoded with whitespace ignored. At most 5 MB a face and 20 MB in all; what is over is counted by
-//   family. Read again only when the document's <style> text changes (doc.styleVersion), and each
+//   decoded with whitespace ignored. At most 5 MB a face, and 20 MB and 64 faces in all; what is over
+//   is counted by family. Read again only when the document's <style> text changes (doc.styleVersion), and each
 //   <style>'s guard verdict is kept by its text, so an edit to one judges only that one again.
 // - The name guard (appFontName): a family the page must never register from a file, because the
 //   app's own UI draws with it (ds.css's --font-ui and --font-mono), or because it is a CSS generic
@@ -52,6 +52,8 @@ export interface FaceRequest {
 
 export const FACE_MAX = 5_000_000;
 export const FACES_MAX = 20_000_000;
+/** The most faces of a file's own Draw reads (each one is a FontFace on the page). */
+export const FACES_COUNT_MAX = 64;
 
 /** The CSS generic families. */
 export const GENERIC_FAMILIES: ReadonlySet<string> = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'math', 'emoji', 'fangsong']);
@@ -174,8 +176,9 @@ function drawn(doc: Doc, id: NodeId, css: string): boolean {
 }
 
 /** The document's own faces (see the header), cached by its <style> text. `limits`: a test's own (not cached). */
-export function fontFaces(doc: Doc, limits: { face: number; total: number } = { face: FACE_MAX, total: FACES_MAX }): OwnFaces {
-  const usual = limits.face === FACE_MAX && limits.total === FACES_MAX;
+export function fontFaces(doc: Doc, limits: { face: number; total: number; count?: number } = { face: FACE_MAX, total: FACES_MAX }): OwnFaces {
+  const count = limits.count ?? FACES_COUNT_MAX;
+  const usual = limits.face === FACE_MAX && limits.total === FACES_MAX && count === FACES_COUNT_MAX;
   const hit = usual ? cache.get(doc) : undefined;
   if (hit && hit.version === doc.styleVersion) return hit.read;
   const read: OwnFaces = { faces: [], over: [] };
@@ -192,7 +195,7 @@ export function fontFaces(doc: Doc, limits: { face: number; total: number } = { 
       const src = srcItems(desc.get('src') ?? '').map(dataSource).find((s) => s !== null);
       if (!src) continue;
       const size = Math.floor((src.base64.replace(/[\s=]/g, '').length * 3) / 4);
-      if (size > limits.face || total + size > limits.total) {
+      if (size > limits.face || total + size > limits.total || read.faces.length >= count) {
         read.over.push(family);
         continue;
       }
