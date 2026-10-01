@@ -3442,6 +3442,11 @@ const BREAKS = [
     file: 'projects/draw/src/platform/fonts.ts', from: "      if (/[\"“'‘]$/.test(t.slice(0, m.index)) && /^[\"”'’]/.test(t.slice(m.index + m[0].length))) continue;\n", to: '',
     run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
   },
+  {
+    id: 'B651', what: 'the Role field takes any text (“picture” written as a role)',
+    file: 'engine/access/model.ts', from: "  const bad = value.trim().split(/\\s+/).find((t) => t !== '' && !ARIA_ROLES.has(t.toLowerCase()));", to: "  const bad = value.trim().split(/\\s+/).find((t) => t === 'never-a-token');",
+    run: engineTests('access/access.test.ts'), expect: /✖ Role takes only ARIA role tokens/,
+  },
 ];
 
 const args = process.argv.slice(2);

@@ -3218,6 +3218,21 @@ test('the Access tab’s switches (P1-M4 S3) are one entry each: Title and Descr
   assert.equal(a().selected, 1);
 });
 
+test('the Role field takes only ARIA role tokens: “picture” is refused, naming it, and the last good role stays; a fallback list is taken', () => {
+  const r = rig();
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"/></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  r.editor.fieldStart({ kind: 'access', name: 'role', id: c });
+  assert.equal(r.editor.fieldInput('img'), null);
+  assert.equal(r.editor.fieldInput('picture'), '“picture” isn’t an ARIA role.');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" role="img"/></svg>', 'the last good role');
+  assert.equal(r.editor.fieldInput('switch checkbox'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" role="switch checkbox"/></svg>');
+  assert.equal(r.editor.history.get().undoLabel, 'Set role');
+});
+
 test('an Access field is one entry while it has focus (P1-M4 S3): the drawing’s Title typed on lab/create.svg makes SVG Lab’s title in that entry; Language refuses what isn’t a tag and keeps the last good value; a shape’s Title, Label and Role; a metadata item; one undo each', () => {
   const create = LAB_FILE('create.svg');
   const r = rig();

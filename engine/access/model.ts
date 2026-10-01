@@ -23,7 +23,8 @@
 //     has none: <rect …/> becomes <rect …><title>…</title></rect>, SVG Lab's bar titles), or taken
 //     away.
 //   - planAria(doc, id, name, value | null) and planRole(doc, id, value | null): an attribute
-//     written or taken away.
+//     written or taken away; a role only as ARIA role tokens (WAI-ARIA 1.2's and the graphics roles,
+//     a space-separated fallback list allowed).
 // A text is written escaped as P0's Text sheet escapes it (&, <, and > in ]]>); a character XML
 // can't hold is refused (TokenEditError).
 
@@ -237,10 +238,33 @@ export function planAria(doc: Doc, id: NodeId, name: string, value: string | nul
   if (id === doc.root && name === 'aria-label' && value === null) dropImgRole(doc, apply);
 }
 
-/** A role written, or taken away (null or ''). */
+/** WAI-ARIA 1.2's roles (its abstract roles aside), and the WAI-ARIA Graphics Module's three. */
+export const ARIA_ROLES: ReadonlySet<string> = new Set([
+  'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader',
+  'combobox', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form',
+  'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math',
+  'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation',
+  'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider',
+  'spinbutton', 'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer',
+  'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem',
+  'graphics-document', 'graphics-object', 'graphics-symbol',
+]);
+export const notARole = (token: string) => `“${token}” isn’t an ARIA role.`;
+
+/** Why a Role value isn't one: each of its space-separated tokens (a role and its fallbacks) must be an ARIA role, in any case. */
+export function roleError(value: string): string | null {
+  const bad = value.trim().split(/\s+/).find((t) => t !== '' && !ARIA_ROLES.has(t.toLowerCase()));
+  return bad === undefined ? null : notARole(bad);
+}
+
+/** A role written (only ARIA role tokens: roleError), or taken away (null or ''). */
 export function planRole(doc: Doc, id: NodeId, value: string | null, apply: Apply): void {
   const v = value?.trim() || null;
-  if (v !== null) escaped(v);
+  if (v !== null) {
+    const why = roleError(v);
+    if (why) throw new TokenEditError(why);
+    escaped(v);
+  }
   if (attrValue(doc, el(doc, id), null, 'role') !== v) apply(opSetAttr(doc, id, null, 'role', v));
 }
 

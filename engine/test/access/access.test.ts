@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { descendants, parseDoc, serialize, type Doc, type ElementNode, type NodeId } from '../../model/doc.ts';
 import { Session } from '../../commands/session.ts';
 import { TokenEditError } from '../../code/edit.ts';
-import { DEFAULT_TITLE, NOT_A_TAG, accessOf, elementAccess, planAria, planDrawingDesc, planDrawingTitle, planElementTitle, planLang, planRole } from '../../access/model.ts';
+import { ARIA_ROLES, DEFAULT_TITLE, NOT_A_TAG, accessOf, elementAccess, notARole, planAria, planDrawingDesc, planDrawingTitle, planElementTitle, planLang, planRole, roleError } from '../../access/model.ts';
 
 const corpus = (rel: string) => readFileSync(new URL(`../fixtures/corpus/${rel}`, import.meta.url), 'utf8');
 const load = (src: string): Doc => {
@@ -106,4 +106,19 @@ test('Label, Role, Hidden and other ARIA: each attribute written and taken away;
   const doc = load(labelled.replace('/>', ' role="img" aria-hidden="true"/>'));
   assert.deepEqual(elementAccess(doc, circle(doc)), { title: null, label: 'Sun', role: 'img', hidden: true, aria: [{ name: 'aria-describedby', value: 'd' }], tabindex: '0' });
   assert.throws(() => planAria(load(src), 1, 'onclick', 'x', () => {}), TokenEditError);
+});
+
+test('Role takes only ARIA role tokens: WAI-ARIA 1.2’s and the graphics roles, in any case, with space-separated fallbacks; anything else is refused, naming the token', () => {
+  const src = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>';
+  const circle = (doc: Doc) => all(doc, 'circle')[0].id;
+  for (const role of ['img', 'graphics-symbol', 'Button', 'switch checkbox', ' none ']) {
+    assert.equal(roleError(role), null, role);
+    assert.equal(once(src, (doc, apply) => planRole(doc, circle(doc), role, apply)), src.replace('/>', ` role="${role.trim()}"/>`), role);
+  }
+  for (const [role, token] of [['picture', 'picture'], ['img sparkly', 'sparkly'], ['roletype', 'roletype'], ['"><x', '"><x'], ['aria-hidden', 'aria-hidden']]) {
+    assert.equal(roleError(role), notARole(token), role);
+    assert.throws(() => planRole(load(src), circle(load(src)), role, () => {}), new TokenEditError(notARole(token)), role);
+  }
+  assert.equal(notARole('picture'), '“picture” isn’t an ARIA role.');
+  assert.equal(ARIA_ROLES.size, 85, 'WAI-ARIA 1.2’s 82, and three graphics roles');
 });

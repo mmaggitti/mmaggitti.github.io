@@ -82,7 +82,7 @@ import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColou
 import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
 import { idError, xmlCharError } from '../../../engine/code/edit.ts';
-import { DEFAULT_TITLE, LANG_TAG, NOT_A_TAG, accessOf, elementAccess, planAria, planDrawingDesc, planDrawingTitle, planElementTitle, planLang, planRole, type DrawingAccess, type ElementAccess } from '../../../engine/access/model.ts';
+import { DEFAULT_TITLE, LANG_TAG, NOT_A_TAG, accessOf, elementAccess, planAria, planDrawingDesc, planDrawingTitle, planElementTitle, planLang, planRole, roleError, type DrawingAccess, type ElementAccess } from '../../../engine/access/model.ts';
 import { metaOf, planMetaText, planMetadata, type Meta } from '../../../engine/access/metadata.ts';
 import { speak } from '../../../engine/access/speak.ts';
 import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
@@ -2877,11 +2877,11 @@ export class Editor {
       return null;
     }
     if (f.field.kind === 'access') {
-      // Checked before the frame, so a frame never throws: a language must read as a tag, and text
-      // must hold only characters XML can.
+      // Checked before the frame, so a frame never throws: a language must read as a tag, a role as
+      // ARIA role tokens, and text must hold only characters XML can.
       const a = f.field;
       const t = text.trim();
-      const why = a.name === 'lang' ? (t && !LANG_TAG.test(t) ? NOT_A_TAG : null) : xmlCharError(text);
+      const why = a.name === 'lang' ? (t && !LANG_TAG.test(t) ? NOT_A_TAG : null) : a.name === 'role' ? (xmlCharError(text) ?? roleError(text)) : xmlCharError(text);
       if (why) return why;
       const doc = this.#doc!;
       const id = f.ids[0];
