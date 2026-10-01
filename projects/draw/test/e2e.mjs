@@ -678,6 +678,9 @@ const LOOKS_DIFFERENT = new Map([
   ['lab/texture--tiles.svg', 'its tile is a data: SVG on feImage, which the canvas does not load'],
   ['tools/affinity-designer-serif.svg', "its text asks for Inter 600, which the canvas draws in Draw's own Inter (P1-M4); an <img> can't use the page's fonts, so the file alone falls back"],
 ]);
+// How far a difference named above may still go (of the pixels), where it can be bounded: the
+// Affinity file's text in Inter against the fallback measured 2.9%.
+const LOOKS_DIFFERENT_UP_TO = new Map([['tools/affinity-designer-serif.svg', 0.05]]);
 // Differences one engine shows because its <img> reference differs from the file opened on its own;
 // the canvas is right in each. By browser, then file; `scheme` limits one to light or dark.
 const LOOKS_DIFFERENT_IN = {
@@ -729,7 +732,7 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
       }
       const share = n / Math.max(1, (x1 - x0) * (y1 - y0));
       if (!decoded) differ.push(`${f.name}: test setup: the file did not load as an <img>`);
-      else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
+      else if (share > MAX_DIFFERENT && !(LOOKS_DIFFERENT.has(f.name) && share <= (LOOKS_DIFFERENT_UP_TO.get(f.name) ?? 1)) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
     }
     must(differ.length === 0, `${colorScheme}: ${differ.length} corpus file(s) look different on the canvas than on their own:\n${differ.join('\n')}`);
   }, { colorScheme, viewport: { width: 456, height: 320 } });
