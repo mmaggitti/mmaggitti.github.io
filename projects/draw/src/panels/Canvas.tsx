@@ -253,7 +253,7 @@ function Over({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed 
   }
   if (tool !== 'pen' && editor.isEmpty()) {
     return (
-      <p className="draw-over draw-empty" role="status">
+      <p className="draw-over draw-chrome draw-empty" role="status">
         {wide ? EMPTY_HINT.left : EMPTY_HINT.below}
       </p>
     );

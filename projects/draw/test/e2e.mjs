@@ -810,6 +810,10 @@ async function showBoth(text) {
   img.style.cssText = `position:absolute;display:block;left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px`;
   img.src = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
   alone.replaceChildren(...parts, img);
+  // The canvas's own chrome that comes with a file (P1-M5: an empty drawing's hint) is the app's, not
+  // the drawing's: hidden, as the setup hides the canvas's buttons, once React has drawn it.
+  await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+  for (const el of document.querySelectorAll('.draw-canvas .draw-chrome')) el.style.display = 'none';
   await document.fonts.ready;
   try {
     await img.decode();
