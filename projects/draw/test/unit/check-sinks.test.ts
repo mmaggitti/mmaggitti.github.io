@@ -102,3 +102,13 @@ test('check-sinks allows DOM writes in the overlay folder only: a file beside it
   assert.equal(r.code, 1, r.out);
   assert.deepEqual(r.findings, ['projects/draw/src/canvas/overlayish.ts:1 dom-write', 'projects/draw/src/interact/overlay-model.ts:1 dom-write']);
 });
+
+test('check-sinks keeps registering a font face to src/platform/ (P1-M4): new FontFace and document.fonts anywhere else are flagged; in platform/ they pass', () => {
+  const r = sinks({
+    'projects/draw/src/panels/Fonts.tsx': "export const a = (b: ArrayBuffer) => new FontFace('X', b);\nexport const c = () => document.fonts.ready;\n",
+    'projects/draw/src/editor-fonts.ts': 'export const d = () => document.fonts.size;\n',
+    'projects/draw/src/platform/fonts.ts': "export const e = (b: ArrayBuffer) => document.fonts.add(new FontFace('X', b));\n",
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, ['projects/draw/src/editor-fonts.ts:1 font-face', 'projects/draw/src/panels/Fonts.tsx:1 font-face', 'projects/draw/src/panels/Fonts.tsx:2 font-face']);
+});
