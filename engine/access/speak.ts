@@ -13,8 +13,12 @@
 // - Then, when an element other than the root has its own <title>: " Titles on shapes show as tooltips
 //   on hover, but role="img" hides them from screen readers." under a root role of img, else " Titles
 //   on shapes show as tooltips on hover." (SVG Lab's bar titles' sentence, for any shape).
+// - Neither the stray labels nor the titles note reads what a reader never reaches: an element with
+//   aria-hidden="true" and everything in it (the Access tab's Hidden from screen readers writes it), and
+//   the contents of <defs>, <symbol>, <clipPath>, <mask>, <marker> and <pattern> (drawn nowhere by
+//   themselves).
 
-import { NS, attrValue, descendants, el, textContent, type Doc, type NodeId } from '../model/doc.ts';
+import { NS, attrValue, descendants, el, textContent, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { renderedText } from '../text/space.ts';
 import { accessOf, namedIds } from './model.ts';
 
@@ -22,6 +26,11 @@ export const HIDDEN = 'hidden from screen readers.';
 export const MAX_LABELS = 20;
 
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+// Containers whose contents are drawn nowhere by themselves.
+const UNDRAWN: ReadonlySet<string> = new Set(['defs', 'symbol', 'clipPath', 'mask', 'marker', 'pattern']);
+/** Is this element out of a reader's reach, with everything in it (aria-hidden="true", or an undrawn container's)? */
+const unread = (doc: Doc, n: ElementNode): boolean => (n.ns === NS.svg && UNDRAWN.has(n.local)) || (attrValue(doc, n, null, 'aria-hidden') ?? '').trim() === 'true';
 
 // Every element with an id, the first one for each id (as the browser resolves a reference).
 function byId(doc: Doc): Map<string, NodeId> {
@@ -40,8 +49,8 @@ export function strayLabels(doc: Doc): string[] {
   const walk = (id: NodeId): void => {
     for (const c of el(doc, id).children) {
       const n = doc.nodes.get(c)!;
-      if (n.kind !== 'element' || n.ns !== NS.svg) continue;
-      if (n.local === 'defs' || n.local === 'title' || n.local === 'desc' || n.local === 'metadata') continue; // drawn nowhere
+      if (n.kind !== 'element' || n.ns !== NS.svg || unread(doc, n)) continue;
+      if (n.local === 'title' || n.local === 'desc' || n.local === 'metadata') continue; // drawn nowhere
       if (n.local === 'text') {
         const t = squash(renderedText(doc, c));
         if (t) out.push(t);
@@ -78,14 +87,19 @@ export function speak(doc: Doc): string {
   return said;
 }
 
-/** Does an element other than the root have its own <title> child? */
+/** Does an element other than the root, within a reader's reach, have its own <title> child? */
 function shapeTitles(doc: Doc): boolean {
-  for (const n of descendants(doc, doc.root)) {
-    if (n.kind !== 'element' || n.id === doc.root || n.ns !== NS.svg || n.local === 'title') continue;
-    if (n.children.some((c) => {
-      const k = doc.nodes.get(c);
-      return k?.kind === 'element' && k.ns === NS.svg && k.local === 'title';
-    })) return true;
-  }
-  return false;
+  const walk = (id: NodeId): boolean => {
+    for (const c of el(doc, id).children) {
+      const n = doc.nodes.get(c)!;
+      if (n.kind !== 'element' || unread(doc, n)) continue;
+      if (n.ns === NS.svg && n.local !== 'title' && n.children.some((k) => {
+        const t = doc.nodes.get(k);
+        return t?.kind === 'element' && t.ns === NS.svg && t.local === 'title';
+      })) return true;
+      if (walk(c)) return true;
+    }
+    return false;
+  };
+  return walk(doc.root);
 }

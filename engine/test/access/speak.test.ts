@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { descendants, parseDoc, serialize, type Doc, type ElementNode } from '../../model/doc.ts';
 import { Session } from '../../commands/session.ts';
 import { HIDDEN, speak, strayLabels } from '../../access/speak.ts';
-import { planDrawingDesc, planDrawingTitle, planElementTitle } from '../../access/model.ts';
+import { planAria, planDrawingDesc, planDrawingTitle, planElementTitle } from '../../access/model.ts';
+import { attrValue } from '../../model/doc.ts';
 
 const load = (src: string): Doc => {
   const r = parseDoc(src);
@@ -55,4 +56,18 @@ test('the titles note: a shape’s own <title> shows as a tooltip, which role="i
 test('a hidden root says only that it is hidden', () => {
   assert.equal(speak(load(svg(' aria-hidden="true" role="img"', '<title>Logo</title>'))), HIDDEN);
   assert.equal(HIDDEN, 'hidden from screen readers.');
+});
+
+test('the preview never reads what a reader never reaches: a text the Access tab hid (aria-hidden="true"), a group hidden so, and the contents of <defs>, <symbol>, <clipPath>, <mask>, <marker> and <pattern>, neither as stray labels nor for the titles note', () => {
+  const doc = load(svg(' viewBox="0 0 100 40"', '<defs><symbol id="s"><text x="1" y="9">InSymbol</text></symbol><clipPath id="c"><text x="1" y="9">InClip</text></clipPath></defs><mask id="m"><text x="1" y="9">InMask</text></mask><marker id="k"><text x="1" y="9">InMarker</text></marker><pattern id="p"><text x="1" y="9">InPattern</text></pattern><text id="a" x="1" y="20">Visible</text><text id="b" x="1" y="30">Decoration</text><g aria-hidden="true"><text x="1" y="39">HiddenGroup</text></g>'));
+  assert.deepEqual(strayLabels(doc), ['Visible', 'Decoration']);
+  const b = [...descendants(doc, doc.root)].find((n): n is ElementNode => n.kind === 'element' && attrValue(doc, n, null, 'id') === 'b')!;
+  new Session(doc).dispatch('Hidden from screen readers', (apply) => planAria(doc, b.id, 'aria-hidden', 'true', apply));
+  assert.match(serialize(doc), /<text id="b" x="1" y="30" aria-hidden="true">Decoration<\/text>/, 'the Access tab’s own switch');
+  assert.equal(speak(doc), 'no name, so it may skip the drawing or read stray labels: “Visible”');
+  const titled = (body: string) => speak(load(svg('', `<text>Hi</text>${body}`)));
+  for (const body of ['<mask id="m"><rect><title>t</title></rect></mask>', '<g aria-hidden="true"><rect><title>t</title></rect></g>', '<rect aria-hidden="true"><title>t</title></rect>', '<defs><rect id="r"><title>t</title></rect></defs>', '<pattern id="p"><rect><title>t</title></rect></pattern>']) {
+    assert.equal(titled(body), 'no name, so it may skip the drawing or read stray labels: “Hi”', body);
+  }
+  assert.equal(titled('<rect><title>t</title></rect>'), 'no name, so it may skip the drawing or read stray labels: “Hi” Titles on shapes show as tooltips on hover.');
 });

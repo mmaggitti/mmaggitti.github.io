@@ -3372,6 +3372,16 @@ const BREAKS = [
     file: 'projects/draw/src/platform/fonts.ts', from: ' : bare ? bare[0].split(/\\s+(?:and|&)\\s+/i) : [family];', to: ' : [];',
     run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
   },
+  {
+    id: 'B637', what: 'the screen-reader preview reads a text hidden from screen readers (aria-hidden="true", which the Access tab itself writes)',
+    file: 'engine/access/speak.ts', from: " || (attrValue(doc, n, null, 'aria-hidden') ?? '').trim() === 'true';", to: ';',
+    run: engineTests('access/speak.test.ts'), expect: /✖ the preview never reads what a reader never reaches/,
+  },
+  {
+    id: 'B638', what: 'the screen-reader preview reads the texts in a <mask>, <marker> or <pattern> (drawn nowhere by themselves)',
+    file: 'engine/access/speak.ts', from: "new Set(['defs', 'symbol', 'clipPath', 'mask', 'marker', 'pattern'])", to: "new Set(['defs', 'symbol', 'clipPath'])",
+    run: engineTests('access/speak.test.ts'), expect: /✖ the preview never reads what a reader never reaches/,
+  },
 ];
 
 const args = process.argv.slice(2);
