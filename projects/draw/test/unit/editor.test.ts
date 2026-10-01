@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -2456,7 +2456,7 @@ test('a bottom with its own transform: the union is written in its units, so, it
   assert.deepEqual(wrong, [], 'root points the result fills differently from the rect and the circle');
 });
 
-test('booleans refuse, saying why and writing nothing: one shape, a line, text, a group, a <use>, CSS geometry, a d with an error, a fill-rule a <style> rule may set, a bottom with a <title>, a shape the canvas can’t measure, nothing left, and a chunk that can’t load', async () => {
+test('booleans refuse, saying why and writing nothing: one shape, a line, text, a group, a <use>, CSS geometry, a d with an error, a fill-rule a <style> rule may set, a bottom shape a <style> rule may paint (a <path> bottom combines), a bottom with a <title>, a shape the canvas can’t measure, nothing left, and a chunk that can’t load', async () => {
   const W = (body: string, first = '<rect id="a" x="10" y="10" width="50" height="50"/>') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${first}\n  ${body}\n</svg>`;
   const cases: [file: string, op: BoolOp, notice: string, libs?: Libraries, over?: (r: () => Rig) => Partial<CanvasPort>][] = [
     [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Select two shapes or more to combine them.'],
@@ -2467,6 +2467,8 @@ test('booleans refuse, saying why and writing nothing: one shape, a line, text, 
     [W('<circle id="b" cx="50" cy="50" r="10" style="r: 20px"/>'), 'union', 'Its r is set by CSS (its style attribute), which wins over the attribute.'],
     [W('<path id="b" d="M 0 0 L 10 Q"/>'), 'union', 'Its path data has an error at character 12.'],
     [W('<style>circle { fill-rule: evenodd }</style>\n  <circle id="b" cx="50" cy="50" r="10"/>'), 'union', 'A <style> rule may set its fill-rule, which Draw can’t read yet (P2).'],
+    // R7 (the P1-M3 review): the rect would become a <path>, which `rect { … }` no longer paints (it turned black).
+    [W('<circle id="b" cx="60" cy="60" r="25"/>', '<style>rect { fill: #e76f51 } circle { fill: #2a9d8f }</style>\n  <rect id="a" x="10" y="10" width="50" height="50"/>'), 'union', STYLE_PAINT],
     [W('<rect id="b" x="40" y="40" width="40" height="40"/>', '<rect id="a" x="10" y="10" width="50" height="50"><title>A</title></rect>'), 'union', 'Its <title> would be lost.'],
     [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Draw can’t tell where it is.', LIBS, (r) => ({
       measure: (ids) => {
@@ -2489,6 +2491,12 @@ test('booleans refuse, saying why and writing nothing: one shape, a line, text, 
     assert.equal(r.editor.source(), file, `${notice}: nothing written`);
     assert.equal(r.editor.history.get().canUndo, false, `${notice}: nothing recorded`);
   }
+  // A <path> bottom keeps its element, so a rule that paints it still does: it combines.
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(W('<circle id="b" cx="60" cy="60" r="25"/>', '<style>path { fill: #e76f51 }</style>\n  <path id="a" d="M 10 10 H 60 V 60 H 10 Z"/>'));
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.history.get().undoLabel, 'Union', `a <path> bottom a rule paints: ${r.editor.notice.get()}`);
 });
 
 test('a boolean the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {

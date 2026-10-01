@@ -69,7 +69,7 @@ import { donutCandidateFor, donutFor, donutParts, VALUE_MAX, VALUE_MIN, type Don
 import { planShapeHandle, shapeHandleLabel, shapeHandles } from '../../../engine/geometry/shape-handles.ts';
 import { insertMarkup } from '../../../engine/model/space.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
-import { cssSets, styleNamesId } from '../../../engine/geometry/css.ts';
+import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
 import { idError } from '../../../engine/code/edit.ts';
 import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
@@ -78,6 +78,7 @@ import { fmt } from '../../../engine/values/number-format.ts';
 import { checkColor, checkNumber, checkText, labelFor, negated, nextOption, refOf, stepped, tokenAt, tokenOp, type Checked, type TokenRef } from './token-edit.ts';
 import { planStyle, ruleWhy, type StyleCtx } from '../../../engine/style/write.ts';
 import { shownValue, styleSource } from '../../../engine/style/where.ts';
+import { STYLE_PROPS } from '../../../engine/style/props.ts';
 import { checkStyle } from './style-edit.ts';
 import { GRADIENT_LABELS, gradientHandles, planGradientHandle, type GradientGeo, type GradientHandleId } from '../../../engine/paint/handles.ts';
 import { LAB_A, gradientAttrOp, gradientUsers, makeUnique as makeUniqueCopy, ownPaint, resolveGradient, setGradientPaint, setPlainPaint, sharedWith, stopColour, stopSpelling, valueOf, type PaintProp } from '../../../engine/paint/gradients.ts';
@@ -860,6 +861,9 @@ export class Editor {
     const bottom = el(doc, ids[0]);
     const child = bottom.local === 'path' ? undefined : bottom.children.map((c) => doc.nodes.get(c)!).find((c) => c.kind === 'element');
     if (child) return { refused: `Its <${(child as ElementNode).qname}> would be lost.` };
+    // A bottom shape becomes a <path>: a <style> rule that styles it (by its type, say) may then miss it,
+    // and Draw can't read selectors yet. A <path> bottom keeps its element.
+    if (bottom.local !== 'path' && Object.keys(STYLE_PROPS).some((p) => sheetSets(doc, bottom.id, p) !== 'no')) return { refused: STYLE_PAINT };
     const measured = this.#ports.canvas.measure(ids);
     const base = measured.get(ids[0]);
     const toBottom = base && invert(base.toHost);
@@ -3540,6 +3544,8 @@ const TEXT_PARTS = new Set(['tspan', 'textPath']);
 export const BOOLEAN_OPS: readonly BoolOp[] = ['union', 'difference', 'intersection', 'exclusion'];
 export const BOOLEAN_LABELS: Readonly<Record<BoolOp, string>> = { union: 'Union', difference: 'Subtract', intersection: 'Intersect', exclusion: 'Exclude' };
 export const DRAWING_CHANGED = 'The drawing changed; try again.';
+/** A boolean's refusal when a <style> rule may style its bottom shape (M2's P2 wording). */
+export const STYLE_PAINT = 'A <style> rule may paint it, which Draw can’t read yet (P2).';
 const COMBINES = new Set(['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline']);
 
 interface MoveState {

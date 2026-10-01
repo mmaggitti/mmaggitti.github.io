@@ -2986,6 +2986,11 @@ const BREAKS = [
     file: 'engine/path/winding.ts', from: '  const flat = flatFor(inputs.map((i) => i.abs));', to: '  const flat = FLAT;',
     run: drawTests('booleans.test.ts'), expect: /✖ a boolean’s cost follows what is drawn, not its units/,
   },
+  {
+    id: 'B563', what: 'R7: a bottom shape a <style> rule may paint is combined anyway (the <path> that replaces it loses the rule’s paint: black)',
+    file: 'projects/draw/src/editor.ts', from: "    if (bottom.local !== 'path' && Object.keys(STYLE_PROPS).some((p) => sheetSets(doc, bottom.id, p) !== 'no')) return { refused: STYLE_PAINT };\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ booleans refuse, saying why and writing nothing/,
+  },
 ];
 
 const args = process.argv.slice(2);
