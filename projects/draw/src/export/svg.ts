@@ -18,8 +18,9 @@
 //     whole file as a data: URL (Draw can't make subsets: fontkit's subsetter writes no cmap), each
 //     after a comment naming its copyright and licence. Never a face whose font has a Reserved Font
 //     Name (OFL 1.1: the catalogue's "Plex" and "Source", or one your font's copyright or licence
-//     gives), nor one whose OS/2 fsType forbids embedding in an editable file: its texts are written
-//     as paths instead, and the notes say why. A text in a family Draw holds no file for stays text;
+//     gives), nor one whose OS/2 fsType forbids embedding in an editable file, nor one whose file
+//     would make the export larger than Draw opens (20 MB): its texts are written as paths instead,
+//     and the notes say why. A text in a family Draw holds no file for stays text;
 //     the file's own @font-face rules stay as they are. A text whose font a <style> rule may set is
 //     left as it is (Draw can't read selectors yet: P2), and a note names it.
 
@@ -35,6 +36,7 @@ import { textPathMarkup, writeTextToPath } from '../../../../engine/text/to-path
 import { OFFLINE, faceUnloaded, outlineTexts, type TextDeps } from '../text/pipeline.ts';
 import type { TextLib } from '../text/load.ts';
 import { encodeSvg } from '../platform/files.ts';
+import { DEFAULT_LIMITS } from '../../../../engine/xml/cst.ts';
 
 export type ExportKind = 'as-is' | 'clean' | 'working';
 
@@ -105,6 +107,7 @@ export const OFL = 'SIL Open Font License 1.1, https://openfontlicense.org';
 export const reservesName = (family: string, name: string) => `${family} reserves the name “${name}”, so its text is written as paths.`;
 export const noEmbedding = (family: string) => `${family}’s font doesn’t allow embedding in an editable file, so its text is written as paths.`;
 export const notDraws = (family: string) => `${family} isn’t one of Draw’s fonts, so its text stays as it is.`;
+export const overOpenLimit = (family: string) => `${family}’s file would make the export larger than Draw opens (${DEFAULT_LIMITS.maxBytes / 1e6} MB), so its text is written as paths.`;
 export const keptAsText = (n: number, reasons: readonly string[]) => `Kept as text: ${n}. ${reasons.join(' ')}`;
 /** With fonts' note on the texts whose font a <style> rule may set (named by their first characters, at most three). */
 export function ruledFonts(names: readonly string[]): string {
@@ -182,7 +185,8 @@ export async function prepareExport(doc: Doc, name: string, choice: 'paths' | 'f
 }
 
 async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: ExportDeps, read?: string): Promise<Prepared | { refused: string }> {
-  const parsed = parseDoc(serialize(doc));
+  const source = serialize(doc);
+  const parsed = parseDoc(source);
   if (!parsed.ok) return { refused: parsed.error.message };
   const copy = parsed.doc;
   const ownFaces = fontFaces(copy).faces;
@@ -202,6 +206,7 @@ async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: 
     }
     const own = new Set(ownFaces.filter((f) => !appFontName(f.family)).map((f) => f.family.toLowerCase()));
     const verdict = new Map<string, string | null>(); // by face: why it isn't embedded, or null
+    let room = DEFAULT_LIMITS.maxBytes - source.length; // what Draw opens, less the file as it is
     const foreign = new Set<string>();
     const ruled: string[] = []; // the texts whose font a <style> rule may set, by their characters
     toPaths = [];
@@ -226,9 +231,15 @@ async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: 
           } catch {
             return { refused: `Draw can’t read ${face.family}’s file.` };
           }
-          const no = held.reserved.length ? reservesName(held.family, held.reserved[0]) : !embeddable(fsType) ? noEmbedding(held.family) : null;
+          // Its whole file as base64, with its rule and comment: a face that would take the export past
+          // what Draw opens goes as paths.
+          const cost = Math.ceil(bytes.length / 3) * 4 + 300 + held.copyright.length + (held.licence ?? OFL).length;
+          const no = held.reserved.length ? reservesName(held.family, held.reserved[0]) : !embeddable(fsType) ? noEmbedding(held.family) : cost > room ? overOpenLimit(held.family) : null;
           verdict.set(k, no);
-          if (!no) embed.push({ face, held, bytes });
+          if (!no) {
+            embed.push({ face, held, bytes });
+            room -= cost;
+          }
         }
         why ??= verdict.get(k) ?? null;
       }

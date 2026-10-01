@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseDoc, serialize, type Doc } from '../../../../engine/model/doc.ts';
-import { cssString, exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, ruledFonts, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
+import { cssString, exportFile, embeddable, keptAsText, notDraws, overOpenLimit, prepareExport, reservesName, ruledFonts, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { LATIN_RANGE, catalogueFamily, faceFile, hasFace } from '../../src/platform/font-catalogue.ts';
 import { reservedNames } from '../../src/platform/fonts.ts';
@@ -160,6 +160,25 @@ test('As paths outlines at most 20,000 characters: a text that would take it pas
   assert.match(t, /<text id="b" /, 'past the budget: kept as text');
   assert.deepEqual((out as Prepared).notes, [keptAsText(1, [TOO_MUCH_TEXT])]);
   assert.equal(keptAsText(1, [TOO_MUCH_TEXT]), 'Kept as text: 1. Draw outlines up to 20,000 characters at once.');
+});
+
+test('With fonts writes a face as paths, saying so, when embedding its file would make the export larger than Draw opens (20 MB)', async () => {
+  // One of yours, 15.1 MB (its base64 over 20 MB), drawn by a library that draws each character as a box.
+  const big = new Uint8Array(15_100_000);
+  const boxes = async () => ({ openFont: () => ({ family: 'Huge', subfamily: 'Regular', weight: 400, italic: false, fsType: 0, copyright: 'Copyright 2026 Someone', licence: 'SIL Open Font License 1.1' }), shape: (_b: Uint8Array, runs: readonly string[]) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo' as const, args: [0, 0] }, { command: 'lineTo' as const, args: [500, 700] }, { command: 'closePath' as const, args: [] }], xAdvance: 500, xOffset: 0, yOffset: 0 })), missing: [] })) }) });
+  const huge: ExportDeps = {
+    textDeps: (own) => ({ ...deps.textDeps(own), lib: boxes, bytes: async (f) => (f.family === 'Huge' ? big : deps.textDeps(own).bytes(f)), range: () => null }),
+    faces: (family) => (family === 'Huge' ? { weights: [400], italics: [] } : deps.faces(family)),
+    held: (f) => (f.family === 'Huge' ? { family: 'Huge', reserved: [], copyright: 'Copyright 2026 Someone', licence: 'SIL Open Font License 1.1', format: 'truetype' } : deps.held(f)),
+  };
+  const out = await prepareExport(load('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text id="h" x="5" y="30" font-family="Huge, sans-serif" font-size="20">Big</text></svg>'), 'huge', 'fonts', huge);
+  assert.ok(!('refused' in out), 'refused' in out ? out.refused : '');
+  const t = text(out as Prepared);
+  assert.match(t, /<path id="h" d="M [^"]+" aria-label="Big"\/>/);
+  assert.doesNotMatch(t, /@font-face/);
+  assert.ok(t.length < 1e5);
+  assert.deepEqual((out as Prepared).notes, [overOpenLimit('Huge')]);
+  assert.equal(overOpenLimit('Huge'), 'Huge’s file would make the export larger than Draw opens (20 MB), so its text is written as paths.');
 });
 
 test('a text library that won’t load refuses (the sheet falls back to As text)', async () => {

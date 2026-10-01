@@ -3487,6 +3487,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "    if (this.notice.get() === TEXT_NOTICE) this.notice.set(null); // placed: the tool's toast closes, not over the lines sheet\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ the Text tool’s "Tap to place text\." toast closes/,
   },
+  {
+    id: 'B660', what: 'With fonts embeds a face whatever its size (a 15 MB font makes an export larger than Draw opens)',
+    file: 'projects/draw/src/export/svg.ts', from: ' : cost > room ? overOpenLimit(held.family) : null;', to: ' : null;',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts writes a face as paths, saying so, when embedding its file would make the export larger/,
+  },
 ];
 
 const args = process.argv.slice(2);
