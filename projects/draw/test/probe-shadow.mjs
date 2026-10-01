@@ -163,7 +163,8 @@ export default async function probe({ browser, origin }) {
     const rows = CASES.map((c, i) => ({ ...c, shadow: judge(c, i, 'shadow'), control: judge(c, i, 'control') }));
 
     const cell = (r) => `${r.ok ? 'ok' : 'FAIL'} (${r.detail})`;
-    const cols = (...c) => `  ${c[0].padEnd(name.length + 2)}${c[1].padEnd(46)}${c[2].padEnd(32)}${c[3]}`;
+    const wide = Math.max(32, ...rows.map((r) => cell(r.shadow).length + 2)); // a failing font row says more
+    const cols = (...c) => `  ${c[0].padEnd(name.length + 2)}${c[1].padEnd(46)}${c[2].padEnd(wide)}${c[3]}`;
     console.log(`\nprobe-shadow: ${name}, ${CASES.length} features, ${Math.round(performance.now() - started)} ms`);
     console.log(cols('browser', 'feature', 'shadow root', 'light-DOM control'));
     for (const r of rows) console.log(cols(name, r.feature, cell(r.shadow), cell(r.control)));
@@ -221,9 +222,21 @@ async function render({ shadow, control, pageStyle }) {
     svg.pauseAnimations();
     svg.setCurrentTime(2);
   }
-  // Let any face the documents declare load before text is measured.
-  for (const t of [...root.querySelectorAll('text'), ...light.querySelectorAll('text')]) t.getComputedTextLength();
+  // Let any face the documents declare load before text is measured. document.fonts.ready can
+  // settle before a data: face's load has begun, so each family the texts name first is loaded by
+  // name too (in the shadow root and the control), each on its own.
+  const texts = [...root.querySelectorAll('text'), ...light.querySelectorAll('text')];
+  for (const t of texts) t.getComputedTextLength();
   await document.fonts.ready;
+  const generic = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui']);
+  for (const family of new Set(texts.map((t) => (t.getAttribute('font-family') ?? '').split(',')[0].trim()))) {
+    if (!family || generic.has(family)) continue;
+    try {
+      await document.fonts.load(`10px "${family}"`);
+    } catch {
+      // measured anyway: a row that fails names its faces' status
+    }
+  }
 
   const corner = (svg) => {
     const b = svg.getBoundingClientRect();
@@ -241,7 +254,10 @@ async function render({ shadow, control, pageStyle }) {
   };
   const font = (svg) => {
     const [own, fallback] = svg.querySelectorAll('text');
-    return own && fallback ? { own: own.getComputedTextLength(), fallback: fallback.getComputedTextLength() } : null;
+    if (!own || !fallback) return null;
+    const family = (own.getAttribute('font-family') ?? '').split(',')[0].trim();
+    const faces = [...document.fonts].filter((f) => f.family.replace(/^["']|["']$/g, '') === family).map((f) => f.status);
+    return { own: own.getComputedTextLength(), fallback: fallback.getComputedTextLength(), faces };
   };
   return {
     boxes: { shadow: [...root.children].map(corner), control: [...light.children].map(corner) },
@@ -259,11 +275,13 @@ function alongPath(m) {
   return { ok, detail: `glyphs at ${r(m.x0)},${r(m.y0)} → ${r(m.x2)},${r(m.y2)}` };
 }
 
-// The document's monospace face draws 'iiii' far wider than the serif fallback does.
+// The document's monospace face draws 'iiii' far wider than the serif fallback does. A row that
+// fails also names the status of its family's faces on document.fonts (none: never connected).
 function ownFace(m) {
   if (!m) return { ok: false, detail: 'no text' };
   const r = (v) => Math.round(v * 10) / 10;
-  return { ok: m.own > m.fallback * 1.5, detail: `${r(m.own)} vs serif ${r(m.fallback)}` };
+  const ok = m.own > m.fallback * 1.5;
+  return { ok, detail: `${r(m.own)} vs serif ${r(m.fallback)}${ok ? '' : `; document.fonts: ${m.faces.join(', ') || 'no face'}`}` };
 }
 
 const near = (rgb, want) => rgb.every((v, k) => Math.abs(v - want[k]) <= TOLERANCE);
