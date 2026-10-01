@@ -153,7 +153,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Text and fonts (P1-M4).** Fonts are registered only by `src/platform/fonts.ts` (check-sinks'
   `font-face` rule): Draw's ten from `@fontsource` when a drawing uses one, yours from IndexedDB, and
   a file's own `data:` faces page-wide, never under a name Draw's interface uses. The text library
-  loads from a lazy chunk in `src/text/`.
+  loads from a lazy chunk in `src/text/`. Text to path and Export's text choices load the same chunk;
+  a font with a Reserved Font Name is never embedded: its text is exported as paths.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

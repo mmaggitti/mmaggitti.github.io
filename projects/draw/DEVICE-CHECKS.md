@@ -69,5 +69,7 @@ To take the house's group: tap the roof, then More → Select group.
 | 47 | The Font sheet | Select a text, Inspect → Font: each name is drawn in its own face (they may take a moment to arrive), and a tap on one changes the text on the canvas at once | ☐ |
 | 48 | Your own font | In the Font sheet, Add a font… and pick a .ttf or .otf from Files: it is listed under Your fonts by its own name and the text draws in it; reload Draw: it is still listed and still draws (Safari may clear it after seven days without a visit, as it does drafts) | ☐ |
 | 49 | The text's position handle | Select a text: grab its position handle (on the first line's baseline, at the text's x and y) with your thumb, first try, at the fit and zoomed in to about 4×; the whole text moves, every line with it, and Undo puts it back | ☐ |
+| 50 | Text to path | Type a short word in one of Draw's fonts (Inter, say) and make it large, then More → Text to path: zoomed in to about 4×, it looks the same before and after, now a path | ☐ |
+| 51 | Export with fonts | A drawing with an Inter text and an IBM Plex Sans text: Export, Text → With fonts, Clean SVG, save to Files, then open it in Safari: the Inter text draws in Inter, and the IBM Plex text draws too, as paths (the sheet said its font reserves "Plex") | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

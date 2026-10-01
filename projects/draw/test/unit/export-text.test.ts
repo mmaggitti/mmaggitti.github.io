@@ -20,13 +20,14 @@ import { cssAllowed } from '../../../../scripts/lib/svg-profile.mjs';
 const file = (slug: string, name: string) => new Uint8Array(readFileSync(new URL(`../../node_modules/@fontsource/${slug}/files/${name}`, import.meta.url)));
 // The editor's deps (editor.ts exportDeps), over the catalogue's files.
 const deps: ExportDeps = {
-  textDeps: () => ({
+  textDeps: (own) => ({
     lib: async () => ({ openFont, shape }),
     bytes: async (f) => {
+      if (f.own !== null) return own[f.own]?.bytes ?? null;
       const c = catalogueFamily(f.family);
       return c ? file(c.slug, faceFile(c.slug, f.weight, f.style)) : null;
     },
-    range: () => LATIN_RANGE,
+    range: (f) => (f.own !== null ? (own[f.own]?.unicodeRange ?? null) : LATIN_RANGE),
   }),
   faces: (family) => catalogueFamily(family) ?? null,
   held: (f) => {
@@ -106,5 +107,20 @@ test('a text library that won’t load refuses (the sheet falls back to As text)
   for (const choice of ['paths', 'fonts'] as const) {
     const out = await prepareExport(load(SRC), 'fonts', choice, off);
     assert.deepEqual(out, { refused: 'Draw couldn’t load the text tools. Try again when you’re online.' }, choice);
+  }
+});
+
+test('the file’s own @font-face rules are kept as written in As paths and With fonts; its own face’s text is outlined from the file’s own bytes in As paths', async () => {
+  const face = Buffer.from(file('space-grotesk', 'space-grotesk-latin-400-normal.woff2')).toString('base64');
+  const style = `<style>@font-face{font-family:Own;src:url(data:font/woff2;base64,${face}) format("woff2")}</style>`;
+  const src = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${style}\n  <text id="o" x="10" y="50" font-family="Own, serif" font-size="12">Own</text>\n</svg>\n`;
+  for (const choice of ['paths', 'fonts'] as const) {
+    const out = await prepareExport(load(src), 'own', choice, deps);
+    assert.ok(!('refused' in out), 'refused' in out ? out.refused : '');
+    const t = text(out as Prepared);
+    assert.ok(t.includes(`\n  ${style}\n`), `${choice}: the file’s own rule kept as written`);
+    assert.equal((t.match(/@font-face/g) ?? []).length, 1, `${choice}: nothing added for the file’s own face`);
+    if (choice === 'paths') assert.match(t, /<path id="o" d="M [^"]+" aria-label="Own"\/>/);
+    else assert.match(t, /<text id="o" /, 'With fonts: its text stays text, drawn by its own face');
   }
 });
