@@ -152,6 +152,42 @@ test('Undo point and ⌘Z walk back through the anchors to nothing, the file the
   assert.equal(d(e), 'M 20 80 L 50 20 Q 70 90 80 80 Q 90 70 30 60', 'the dragged anchor keeps its out-handle after an Undo point');
 });
 
+// R1 (the P1-M3 review): an entry the Pen doesn't own (an Inspect edit, a Layers Hide) stayed under the
+// Pen's: Undo point then undid it while dropping an anchor still in the file, and a later one left the
+// path in the file, forgotten. Any other entry ends the Pen first now (§5.2: anything else ends it).
+test('an entry the Pen doesn’t own ends the Pen first: an Inspect edit, a Layers Hide and an Inspect slider each leave every point drawn in the file and the path in the Node tool; Undo point then undoes nothing, and ⌘Z undoes that entry, then the Pen’s', () => {
+  const drawn = withPath('M 20 80 L 50 20 L 80 80');
+  const CASES: [string, (e: Editor) => void, string, string][] = [
+    ['an Inspect edit', (e) => e.setStyle('stroke-width', '5'), 'Set stroke-width', drawn.replace('stroke-width="3"', 'stroke-width="5"')],
+    ['a Layers Hide', (e) => e.setHidden(paths(e)[0].id, true), 'Hide', drawn.replace('stroke-linejoin="round"/>', 'stroke-linejoin="round" display="none"/>')],
+    ['an Inspect slider', (e) => {
+      assert.ok(e.styleDrag('stroke-width'), 'test setup: the slider pressed');
+      e.styleInput('7');
+      e.styleDragEnd();
+    }, 'Set stroke-width', drawn.replace('stroke-width="3"', 'stroke-width="7"')],
+  ];
+  for (const [what, act, label, after] of CASES) {
+    const e = open(CREATE);
+    e.pickTool('pen');
+    tap(e, 20, 80);
+    tap(e, 50, 20);
+    tap(e, 80, 80);
+    assert.equal(e.source(), drawn, `${what}: test setup`);
+    act(e);
+    assert.equal(e.source(), after, `${what}: written`);
+    assert.equal(e.history.get().undoLabel, label);
+    assert.equal(e.pen.get(), null, `${what}: the Pen is off`);
+    assert.equal(e.tool.get(), 'node', `${what}: the path is in the Node tool`);
+    assert.deepEqual([...e.selection.get()], [paths(e)[0].id]);
+    e.undoPoint();
+    assert.equal(e.source(), after, `${what}: Undo point undoes nothing the Pen doesn’t own`);
+    e.undo();
+    assert.equal(e.source(), drawn, `${what}: ⌘Z undoes the entry`);
+    e.undo();
+    assert.equal(e.source(), withPath('M 20 80 L 50 20'), `${what}: then the Pen’s, as ordinary entries`);
+  }
+});
+
 test('Done, Enter and Escape with one anchor leave the file unchanged and return to Select; with a path, Done shows it in the Node tool', () => {
   for (const end of ['done', 'enter', 'escape'] as const) {
     const e = open(CREATE);

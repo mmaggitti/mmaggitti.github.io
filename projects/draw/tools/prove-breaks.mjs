@@ -2970,6 +2970,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    const toBottom = base && invert(base.toHost);', to: '    const toBottom = base && invert(this.#unitsToHost(doc.root)!);',
     run: drawTests('editor.test.ts'), expect: /✖ a bottom with its own transform/,
   },
+  {
+    id: 'B560', what: 'R1: an entry the Pen doesn’t own (an Inspect edit, a Layers Hide, a slider) no longer ends the Pen, so Undo point undoes it',
+    file: 'projects/draw/src/editor.ts', from: '    if (this.#pen && !PEN_LABELS.has(label)) this.#endPen(true);\n', to: '',
+    run: drawTests('pen.test.ts'), expect: /✖ an entry the Pen doesn’t own ends the Pen first/,
+  },
 ];
 
 const args = process.argv.slice(2);

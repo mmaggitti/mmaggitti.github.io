@@ -1884,6 +1884,13 @@ export class Editor {
     this.#endPen(true);
   }
 
+  // The Pen owns its entries ("Draw path", "Add point", "Close path"): any other entry (an Inspect or
+  // Layers edit, a field or a slider) ends it first, as anything else does, so Undo point only ever
+  // undoes the Pen's own.
+  #penOwns(label: string): void {
+    if (this.#pen && !PEN_LABELS.has(label)) this.#endPen(true);
+  }
+
   // The Pen ends (its entries stay in the history as ordinary ones). `switchTool`: the Node tool with
   // the path selected, or Select with none (a tool change picks its own).
   #endPen(switchTool: boolean): void {
@@ -2153,6 +2160,7 @@ export class Editor {
   // A drag on the Session whose commit shows the notice when the finish hook made a generated shape
   // plain in its last frame, and whose cancel forgets that.
   #drag(label: string): Drag {
+    this.#penOwns(label);
     const d = this.#session!.drag(label);
     return {
       update: (build) => d.update(build),
@@ -3073,6 +3081,7 @@ export class Editor {
    */
   #dispatch(label: string, build: Build): boolean {
     if (!this.#session || this.#live || this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge || this.#stepDrag || this.#field || !this.#writable()) return false;
+    this.#penOwns(label);
     try {
       this.#session.dispatch(label, build);
       this.#noteDetached();
@@ -3500,6 +3509,8 @@ interface PenGesture {
   label: string | null;
 }
 export const PEN_NOTICE = 'Tap to add points, or drag to curve.';
+/** The Pen's own history entries: any other ends the Pen first. */
+const PEN_LABELS: ReadonlySet<string> = new Set(['Draw path', 'Add point', 'Close path']);
 /** The notice when an edit makes a generated shape plain. */
 export const DETACHED = 'It’s a plain shape now: its generator inputs were dropped.';
 // A style sheet opened on a value a rule may decide for the first element starts from the initial one.
