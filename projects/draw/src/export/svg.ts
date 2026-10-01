@@ -20,14 +20,15 @@
 //     Name (OFL 1.1: the catalogue's "Plex" and "Source", or one your font's copyright or licence
 //     gives), nor one whose OS/2 fsType forbids embedding in an editable file: its texts are written
 //     as paths instead, and the notes say why. A text in a family Draw holds no file for stays text;
-//     the file's own @font-face rules stay as they are.
+//     the file's own @font-face rules stay as they are. A text whose font a <style> rule may set is
+//     left as it is (Draw can't read selectors yet: P2), and a note names it.
 
 import { NS, descendants, el, parseDoc, serialize, type Doc, type NodeId } from '../../../../engine/model/doc.ts';
 import { cleanExport } from '../../../../engine/export/clean.ts';
 import { stripDrawState } from '../../../../engine/model/draw-state.ts';
 import { insertMarkup } from '../../../../engine/model/space.ts';
 import { escape } from '../../../../engine/xml/entities.ts';
-import { textRuns } from '../../../../engine/text/space.ts';
+import { renderedText, textRuns } from '../../../../engine/text/space.ts';
 import { GENERIC_FAMILIES, appFontName, computedFamilies, computedStyle, computedWeight, fontFaces, type FaceRequest, type FontFormat, type OwnFace } from '../../../../engine/text/font-faces.ts';
 import { outlineText, type OutlineCtx, type OutlineText } from '../../../../engine/text/outline.ts';
 import { textPathMarkup, writeTextToPath } from '../../../../engine/text/to-path.ts';
@@ -105,6 +106,13 @@ export const reservesName = (family: string, name: string) => `${family} reserve
 export const noEmbedding = (family: string) => `${family}’s font doesn’t allow embedding in an editable file, so its text is written as paths.`;
 export const notDraws = (family: string) => `${family} isn’t one of Draw’s fonts, so its text stays as it is.`;
 export const keptAsText = (n: number, reasons: readonly string[]) => `Kept as text: ${n}. ${reasons.join(' ')}`;
+/** With fonts' note on the texts whose font a <style> rule may set (named by their first characters, at most three). */
+export function ruledFonts(names: readonly string[]): string {
+  const q = names.slice(0, 3).map((n) => `“${[...n].length > 40 ? `${[...n].slice(0, 40).join('')}…` : n}”`);
+  const more = names.length - q.length;
+  const list = more ? `${q.join(', ')} and ${more} more` : q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0];
+  return `A <style> rule sets the font of ${list}, which Draw can’t read yet (P2): ${names.length === 1 ? 'its font isn’t' : 'their fonts aren’t'} embedded.`;
+}
 
 /**
  * May a face with these OS/2 fsType bits be embedded in an editable file? Its bitmapOnly bit (9) clear,
@@ -132,16 +140,21 @@ function base64(bytes: Uint8Array): string {
 const keyOf = (f: FaceRequest) => `${f.family.toLowerCase()}|${f.weight}|${f.style}`;
 
 // The faces of Draw's a text uses (as usedFaces finds them: each run's first family that is generic,
-// the file's own, or one Draw holds), and the first families it names that Draw holds no file for.
-function facesOf(doc: Doc, id: NodeId, own: ReadonlySet<string>, deps: ExportDeps): { faces: FaceRequest[]; foreign: string[] } {
+// the file's own, or one Draw holds), the first families it names that Draw holds no file for, and
+// whether a <style> rule may set the font of one of its runs (Draw can't read that yet: P2).
+function facesOf(doc: Doc, id: NodeId, own: ReadonlySet<string>, deps: ExportDeps): { faces: FaceRequest[]; foreign: string[]; ruled: boolean } {
   const faces = new Map<string, FaceRequest>();
   const foreign = new Set<string>();
+  let ruled = false;
   for (const run of textRuns(doc, id)) {
     if (!run.text) continue;
     const families = computedFamilies(doc, run.owner);
     const weight = computedWeight(doc, run.owner);
     const style = computedStyle(doc, run.owner);
-    if (!families || weight === null || style === null) continue;
+    if (!families || weight === null || style === null) {
+      ruled = true;
+      continue;
+    }
     const known = (f: string) => GENERIC_FAMILIES.has(f.toLowerCase()) || own.has(f.toLowerCase()) || deps.faces(f) !== null;
     if (families[0] && !known(families[0])) foreign.add(families[0]); // the browser draws it where it is installed
     const family = families.find(known);
@@ -149,7 +162,7 @@ function facesOf(doc: Doc, id: NodeId, own: ReadonlySet<string>, deps: ExportDep
     const face = { family, weight, style };
     faces.set(keyOf(face), face);
   }
-  return { faces: [...faces.values()], foreign: [...foreign] };
+  return { faces: [...faces.values()], foreign: [...foreign], ruled };
 }
 
 /** Why Clean's text couldn't be prepared when something failed outright (the text library misbehaving). */
@@ -190,10 +203,12 @@ async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: 
     const own = new Set(ownFaces.filter((f) => !appFontName(f.family)).map((f) => f.family.toLowerCase()));
     const verdict = new Map<string, string | null>(); // by face: why it isn't embedded, or null
     const foreign = new Set<string>();
+    const ruled: string[] = []; // the texts whose font a <style> rule may set, by their characters
     toPaths = [];
     for (const id of texts) {
       const used = facesOf(copy, id, own, deps);
       for (const f of used.foreign) foreign.add(f);
+      if (used.ruled) ruled.push(renderedText(copy, id).replace(/\s+/g, ' ').trim());
       let why: string | null = null;
       for (const face of used.faces) {
         const k = keyOf(face);
@@ -223,6 +238,7 @@ async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: 
       }
     }
     for (const f of foreign) notes.push(notDraws(f));
+    if (ruled.length) notes.push(ruledFonts(ruled));
   }
   // The texts to write as paths: each one Draw can outline (the rest stay text, and say why).
   const reads: { id: NodeId; read: OutlineText }[] = [];

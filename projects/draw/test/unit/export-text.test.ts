@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseDoc, serialize, type Doc } from '../../../../engine/model/doc.ts';
-import { exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
+import { exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, ruledFonts, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { LATIN_RANGE, catalogueFamily, faceFile, hasFace } from '../../src/platform/font-catalogue.ts';
 import { reservedNames } from '../../src/platform/fonts.ts';
@@ -83,6 +83,18 @@ test('With fonts: one <style> right after the <title> embeds Inter 700 whole (it
   assert.deepEqual(p.notes, [reservesName('IBM Plex Sans', 'Plex'), reservesName('DM Serif Display', 'Source'), notDraws('Georgia')]);
   assert.equal(reservesName('IBM Plex Sans', 'Plex'), 'IBM Plex Sans reserves the name “Plex”, so its text is written as paths.');
   assert.ok(cssAllowed(style[1]), 'the served profile’s CSS guard takes it');
+});
+
+test('With fonts names the texts whose font a <style> rule sets (Draw can’t read it yet), saying their fonts weren’t embedded; a rule that sets no font changes nothing', async () => {
+  const ruled = await prepareExport(load('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>text { font-family: Inter, sans-serif }</style><text x="10" y="40" font-size="20">Ruled</text></svg>'), 'ruled', 'fonts', deps);
+  assert.ok(!('refused' in ruled), 'refused' in ruled ? ruled.refused : '');
+  assert.deepEqual((ruled as Prepared).notes, ['A <style> rule sets the font of “Ruled”, which Draw can’t read yet (P2): its font isn’t embedded.']);
+  assert.equal((text(ruled as Prepared).match(/@font-face/g) ?? []).length, 0);
+  const plain = await prepareExport(load('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>rect { fill: teal }</style><text x="10" y="40" font-family="Inter, sans-serif" font-size="20">Own</text></svg>'), 'plain', 'fonts', deps);
+  assert.deepEqual((plain as Prepared).notes, []);
+  assert.equal((text(plain as Prepared).match(/@font-face/g) ?? []).length, 1, 'its Inter 400 is embedded');
+  assert.equal(ruledFonts(['A', 'B']), 'A <style> rule sets the font of “A” and “B”, which Draw can’t read yet (P2): their fonts aren’t embedded.');
+  assert.equal(ruledFonts(['A', 'B', 'C', 'D', 'E']), 'A <style> rule sets the font of “A”, “B”, “C” and 2 more, which Draw can’t read yet (P2): their fonts aren’t embedded.');
 });
 
 test('As-is and Save to Files are unchanged by the text choices; Clean as text is the clean file', async () => {

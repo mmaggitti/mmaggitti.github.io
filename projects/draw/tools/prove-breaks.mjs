@@ -3417,6 +3417,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    const texts = [...new Set(ids.map((id) => textOf(doc, id)))].filter((id) => {', to: '    const texts = [...new Set(ids)].filter((id) => {',
     run: drawTests('editor.test.ts'), expect: /✖ a tap on a line of Draw’s multi-line text selects the <text>/,
   },
+  {
+    id: 'B646', what: 'With fonts says nothing about a text whose font a <style> rule sets (its font silently not embedded)',
+    file: 'projects/draw/src/export/svg.ts', from: '    if (ruled.length) notes.push(ruledFonts(ruled));\n', to: '',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts names the texts whose font a <style> rule sets/,
+  },
 ];
 
 const args = process.argv.slice(2);
