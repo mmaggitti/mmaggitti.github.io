@@ -229,6 +229,7 @@ input[type=range]{flex:1;min-width:0;accent-color:var(--ink);height:max(var(--ta
 .legend{flex:1 1 10.625rem;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;font-size:var(--text-sm);color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:.25rem}
 .legend .tk{cursor:default;font-size:var(--text-sm)}
+a.cbtn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:inherit}
 .cbtn{height:max(var(--tap-min),2.125rem);min-width:var(--tap-min);padding:0 .8125rem;border-radius:.5rem;border:1px solid var(--panel-line);background:transparent;font-weight:600;font-size:var(--text-sm)}
 /* Code rows keep ~24px pitch and ~20px tokens at the 0.75 scale: tokens are the main drag/tap
    targets, under 44pt by necessity (the Sheet they open has full-size controls). */
@@ -357,6 +358,7 @@ body[data-lab="links"] .ctx:not(:empty){display:flex;width:min(100%,35rem);margi
         <div class="legend"><span><b class="tk num">12</b>drag</span><span><b class="tk en">round</b><b class="tk col"><i style="--c:#e76f51"></i>fill</b>tap</span></div>
         <button class="cbtn" id="btnEdit" hidden>Edit</button>
         <button class="cbtn" id="btnCopy">Copy</button>
+        <a class="cbtn" id="btnDraw" target="_blank" rel="noopener" hidden>Open in Draw</a>
         <button class="cbtn" id="btnDl" hidden>Download</button>
       </div>
       <pre class="src" id="code"></pre>
@@ -905,6 +907,7 @@ const App = {
         Stage.drawHandles(this.handles, this.hid);
       }
       Code.show(nodes, { sel: lab.sel, xmlns: !!lab.xmlns, root: lab.root });
+      this.drawLink();
       this.checkGoals(false);
       if (lab.after) lab.after();
     } catch (err) {
@@ -998,6 +1001,30 @@ const App = {
     if (!opt.initial) window.scrollTo(0, 0);
   },
   exportText() { return codeText(this.lab.nodes(), true, this.lab.root); },
+  // Open in Draw: the lesson's export as a link to Draw, ../draw/#import= then the file deflated raw and
+  // base64url-encoded, exactly as Draw's encodeImport writes it (projects/draw/src/platform/files.ts;
+  // Draw's e2e opens the link, so the two agree). Made again whenever the export changes: the href
+  // goes at once (an <a> with none does nothing) and comes back only if no newer export started
+  // meanwhile (ltok, as makeBitmap's btok). Without CompressionStream (Safari before 16.4) it stays hidden.
+  ltext: null, ltok: 0,
+  drawLink() {
+    const a = $('#btnDraw');
+    if (!a || typeof CompressionStream === 'undefined') return;
+    const text = this.exportText();
+    if (text === this.ltext) return;
+    this.ltext = text;
+    const tok = ++this.ltok;
+    a.removeAttribute('href');
+    const raw = new Blob([new TextEncoder().encode(text)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    new Response(raw).arrayBuffer().then((buf) => {
+      if (tok !== this.ltok) return;
+      const b = new Uint8Array(buf);
+      let s = '';
+      for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+      a.href = '../draw/#import=' + btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      a.hidden = false;
+    }).catch(() => {});
+  },
   async download() {
     if (!this.dl) return;
     const name = (this.lab === LabCreate ? 'my-drawing' : 'svg-lab-' + this.lab.id) + '.svg';

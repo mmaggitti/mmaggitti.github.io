@@ -6,6 +6,8 @@
 // Every origin-wide rule matters more here than elsewhere: all projects share one origin, so
 // script from a pasted file would reach every project's storage.
 
+import { inflateRawSync } from 'node:zlib';
+
 const PHONE = { viewport: { width: 440, height: 956 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const TAP_MIN = 44;
 const SETS = [
@@ -26,6 +28,7 @@ export default async function run({ browser, origin }) {
   await exportIsClean(browser, origin);
   await lessonMarkupSurvives(browser, origin);
   await reducedMotion(browser, origin);
+  await openInDrawCarriesTheLesson(browser, origin);
 }
 
 // 1. Load: fonts from this origin, the site scale, no third-party requests. Then every lab screen:
@@ -318,6 +321,52 @@ async function reducedMotion(browser, origin) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+// 8. Open in Draw: on Vector, on Create before and after its Rect, and on a lesson of set 2, the code
+// head's link is ../draw/#import= and the lesson's export, deflated raw and base64url-encoded (Draw's
+// encoding): inflated here, it is exactly what Copy copies (App.exportText(), which the page keeps to
+// itself). Draw's e2e opens it (svgLabOpensInDraw).
+async function openInDrawCarriesTheLesson(browser, origin) {
+  await withPage(browser, origin, {}, async (page, errors) => {
+    const HEAD = '../draw/#import=';
+    // Copy hands App.exportText() to the clipboard: kept here instead.
+    await page.evaluate(() => {
+      window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void (window.__copied = t) } });
+    });
+    const exported = async () => {
+      await page.evaluate(() => void (window.__copied = null));
+      await page.locator('#btnCopy').tap();
+      await waitFor(() => page.evaluate(() => window.__copied !== null), 'Copy copied nothing');
+      return page.evaluate(() => window.__copied);
+    };
+    // The link once it carries the export (it is made again on every change, a moment later).
+    const link = async (what) => {
+      const text = await exported();
+      let got = null;
+      await waitFor(async () => {
+        got = await page.evaluate(() => {
+          const a = document.getElementById('btnDraw');
+          return { href: a.getAttribute('href'), hidden: a.hidden, tag: a.tagName, target: a.target, rel: a.rel };
+        });
+        if (!got.href || got.hidden || !got.href.startsWith(HEAD)) return false;
+        return inflateRawSync(Buffer.from(got.href.slice(HEAD.length), 'base64url')).toString('utf8') === text;
+      }, () => `${what}: the Open in Draw link ${got?.href ? `carries something other than the export (${got.href.slice(0, 60)}…)` : 'is missing'}`, 4000);
+      must(got.tag === 'A' && got.target === '_blank' && got.rel === 'noopener', `${what}: the link is ${got.tag} target=${got.target} rel=${got.rel}`);
+      return got.href;
+    };
+    await openLab(page, 0, 'Vector');
+    await link('Vector');
+    await openLab(page, 0, 'Create');
+    const before = await link('Create');
+    await page.locator('#ctx [data-a="add:rect"]').tap();
+    const after = await link('Create with a rect');
+    must(after !== before, 'Create: the link didn’t change with the drawing');
+    await openLab(page, 1, 'Arcs');
+    await link('Arcs (set 2)');
+    must(errors.length === 0, `errors on the page:\n${errors.join('\n')}`);
+  });
+}
 
 async function withPage(browser, origin, opts, fn) {
   const context = await browser.newContext({ ...PHONE, reducedMotion: opts.reducedMotion ?? 'no-preference' });
