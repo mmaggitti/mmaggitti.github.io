@@ -1,5 +1,5 @@
-// engine/text/lines.ts: the lines model. What readLines accepts and refuses, exactly as the brief
-// lists them; planLines writing one line and three in SVG Lab's spelling with nothing between the
+// engine/text/lines.ts: the lines model. What readLines accepts and refuses, exactly as the module's
+// header lists them; planLines writing one line and three in SVG Lab's spelling with nothing between the
 // tspans; escaping; a character XML can't hold refused; one undo giving the bytes back.
 
 import { test } from 'node:test';
