@@ -6825,7 +6825,9 @@ const pageFaces = () => [...document.fonts].map((f) => f.family.replace(/^["']|[
 // lab/create.svg, with a second text whose x is a list (the check's own: the lab's file has none).
 // The Text button is at least 44 × 44 and pressed once picked, the bar's font toggle has Archivo and
 // Inter, each at least 44 × 44 (Archivo pressed). A tap at the screen point of (50, 50) inserts
-// exactly lab-goals' "Hello" (one "Add text") and the lines sheet opens with "Hello" selected; typing
+// exactly lab-goals' "Hello" (one "Add text") and the lines sheet opens with "Hello" selected in its
+// focused field, which a ghost click at the tap point in the sheet's first 350 ms (a phone's late
+// mouse events) leaves so, the sheet open; typing
 // Big, Return, Idea and Done writes Draw's two line tspans (one "Edit text"). On the canvas each
 // line's middle is at x 50 and its baseline at y 55, then 18.2 units below (getStartPositionOfChar and
 // getEndPositionOfChar through getScreenCTM, ± 1 px). The pos handle sits at the screen point of
@@ -6852,12 +6854,24 @@ async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
     for (const t of toggle) must(t.width >= TAP_MIN - 0.5 && t.height >= TAP_MIN - 0.5 && t.right <= 440.5, `the toggle's ${t.name} is ${Math.round(t.width)}×${Math.round(t.height)} at ${Math.round(t.left)}–${Math.round(t.right)}`);
     const [at] = await page.evaluate(rootToScreen, [[50, 50]]);
     await page.touchscreen.tap(at.x, at.y);
+    const tapped = Date.now();
     await page.locator('.draw-lines').waitFor();
     const placed = F.replace(LIST, `${LIST}\n  ${HELLO}`);
     must(await source(page) === placed, `the tap wrote:\n${await source(page)}`);
     must(await undo.getAttribute('aria-label') === 'Undo Add text', `the tap is ${await undo.getAttribute('aria-label')}`);
     const field = await page.locator('.draw-lines').evaluate((t) => [t.value, t.selectionStart, t.selectionEnd, document.activeElement === t]);
     must(JSON.stringify(field) === JSON.stringify(['Hello', 0, 5, true]), `the lines sheet opened on ${JSON.stringify(field)}, not "Hello" selected in a focused field`);
+    // A ghost click: the mouse events a phone's browser sends after a tap can arrive once the sheet
+    // is open, at the tap point, on the dim. Within the sheet's first 350 ms it takes neither the
+    // field's focus nor the sheet; nor does a press inside the sheet that no pointer began.
+    await page.mouse.click(at.x, at.y);
+    const ghost = await page.evaluate(() => {
+      const t = document.querySelector('.draw-lines');
+      const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      document.querySelector('.draw-modal-title')?.dispatchEvent(press);
+      return t && [t.value, t.selectionStart, t.selectionEnd, document.activeElement === t, press.defaultPrevented];
+    });
+    must(JSON.stringify(ghost) === JSON.stringify(['Hello', 0, 5, true, true]), `a ghost click ${Date.now() - tapped} ms after the tap left the lines sheet on ${JSON.stringify(ghost)}, not "Hello" selected in a focused field with a press in the sheet held off`);
     await page.keyboard.type('Big');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Idea');

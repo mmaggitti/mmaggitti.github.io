@@ -108,11 +108,14 @@ export function Modal({ title, onClose, done, mono = true, children }: { title: 
   }, [onClose]);
   return (
     <>
-      <div className="draw-scrim" aria-hidden="true" onClick={() => performance.now() - opened.current > GHOST_CLICK_MS && onClose()} />
+      {/* A press on the dim never takes the sheet's focus (a phone's late mouse events land here after
+          the tap that opened it, and the field would lose its keyboard); a tap still closes it by its click. */}
+      <div className="draw-scrim" aria-hidden="true" onMouseDown={(e) => e.preventDefault()} onClick={() => performance.now() - opened.current > GHOST_CLICK_MS && onClose()} />
       {/* Above the keyboard, and no taller than the room left there, so Done never goes off the top. */}
       {/* The click that ends the tap which opened the sheet lands on whatever is under the finger
           now: a swatch, ±. A click in the first moments whose press didn't start in the sheet is
-          that one, and does nothing (a key's click, detail 0, has no press and always counts). */}
+          that one, and does nothing (a key's click, detail 0, has no press and always counts); its
+          mousedown, by the same rule, takes no focus. */}
       <section
         className="draw-modal"
         role="dialog"
@@ -120,6 +123,9 @@ export function Modal({ title, onClose, done, mono = true, children }: { title: 
         aria-label={title}
         style={inset ? { bottom: inset, maxHeight: `calc(85svh - ${inset}px)` } : undefined}
         onPointerDownCapture={() => (pressed.current = true)}
+        onMouseDownCapture={(e) => {
+          if (!pressed.current && performance.now() - opened.current <= GHOST_CLICK_MS) e.preventDefault();
+        }}
         onClickCapture={(e) => {
           if (pressed.current || e.detail === 0 || performance.now() - opened.current > GHOST_CLICK_MS) return;
           e.preventDefault();
