@@ -51,7 +51,10 @@ test('per element, a move writes exactly the attributes in the table and changes
     ['<g id="e" transform="translate(5 5) rotate(10)"/>', '<g id="e" transform="translate(8 3) rotate(10)"/>', 'g: the leading translate'],
     ['<g id="e" transform="rotate(10)"/>', '<g id="e" transform="translate(3 -2) rotate(10)"/>', 'g: a translate is prepended'],
     ['<g id="e"/>', '<g id="e" transform="translate(3 -2)"/>', 'g: a transform is added'],
-    ['<text id="e" x="1 2 3" y="4">Hi</text>', '<text id="e" x="1 2 3" y="4" transform="translate(3 -2)">Hi</text>', 'text moves by translate, its x list untouched'],
+    ['<text id="e" x="1 2 3" y="4">Hi</text>', '<text id="e" x="1 2 3" y="4" transform="translate(3 -2)">Hi</text>', 'a text with an x list moves by translate, its x list untouched'],
+    ['<text id="e" x="1" y="4">Hi</text>', '<text id="e" x="4" y="2">Hi</text>', 'a text with single x and y: its own numbers (P1-M4)'],
+    ['<text id="e" y="4">Hi</text>', '<text id="e" y="2" x="3">Hi</text>', 'a text: a missing x is added last'],
+    ['<text id="e" x="50" y="55"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>', '<text id="e" x="53" y="53"><tspan x="53" dy="0em">Big</tspan><tspan x="53" dy="1.3em">Idea</tspan></text>', 'a text with Draw’s line tspans: their x with it, dy never'],
     ['<g id="e" transform="translate(5)"/>', '<g id="e" transform="translate(8 -2)"/>', 'translate(tx) gains its y'],
   ];
   for (const [was, want, what] of cases) {
@@ -61,6 +64,21 @@ test('per element, a move writes exactly the attributes in the table and changes
   }
   const doc = load(svg('<rect id="e"/>'));
   assert.equal(refusal(planMove(doc, doc.root, 1, 1, OPTS)), 'The artboard doesn’t move; pan the view instead.');
+});
+
+test('a text moves by its own numbers only when its x and y and every tspan’s x and y are single numbers, with no list and no textPath: an x, y, dx, dy or rotate list, or a textPath, keeps translate; units convert; its own transform turns the delta', () => {
+  const move = (body: string, dx = 3, dy = -2) => {
+    const src = svg(body);
+    const doc = load(src);
+    return run(doc, planMove(doc, byId(doc, 'e'), dx, dy, OPTS)).replace(svg('').slice(0, -8), '').replace('\n</svg>\n', '');
+  };
+  assert.equal(move('<text id="e" x="10" y="20"><tspan y="30" dx="2">a</tspan><tspan>b</tspan></text>'), '<text id="e" x="13" y="18"><tspan y="28" dx="2">a</tspan><tspan>b</tspan></text>', 'a tspan’s own y moves; dx stays; a tspan without x gains none');
+  assert.equal(move('<text id="e" x="10" y="20"><tspan dx="0 2 4">a</tspan></text>'), '<text id="e" x="10" y="20" transform="translate(3 -2)"><tspan dx="0 2 4">a</tspan></text>', 'a dx list: translate');
+  assert.equal(move('<text id="e" x="10" y="20" rotate="0 10">ab</text>'), '<text id="e" x="10" y="20" rotate="0 10" transform="translate(3 -2)">ab</text>', 'a rotate list');
+  assert.equal(move('<text id="e" x="10" y="20"><tspan x="1 2">a</tspan></text>'), '<text id="e" x="10" y="20" transform="translate(3 -2)"><tspan x="1 2">a</tspan></text>', 'a tspan’s x list');
+  assert.equal(move('<text id="e" x="10" y="20"><textPath href="#p">a</textPath></text>'), '<text id="e" x="10" y="20" transform="translate(3 -2)"><textPath href="#p">a</textPath></text>', 'a textPath');
+  assert.equal(move('<text id="e" x="1in" y="20">a</text>', 96, 0), '<text id="e" x="2in" y="20">a</text>', 'a unit converts');
+  assert.equal(move('<text id="e" x="10" y="20" transform="scale(2)">a</text>', 4, 2), '<text id="e" x="12" y="21" transform="scale(2)">a</text>', 'its own transform: the delta in its own units');
 });
 
 test('a path move leaves relative commands byte for byte, over every corpus path, and moves each absolute coordinate by exactly (dx, dy)', () => {

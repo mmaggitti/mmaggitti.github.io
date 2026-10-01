@@ -1711,7 +1711,7 @@ test('a marquee and Select all pass by a shape visibility hides (inherited; a ch
   assert.equal(r.editor.source(), V.replace('<rect id="a" x="10" y="10" width="10" height="10"/>', '<rect id="a" x="10" y="10" width="10" height="10" display="none"/>'), 'Hide writes display, never visibility');
 });
 
-test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (text by a translate), one entry each', () => {
+test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (a text with single x and y by its own numbers, P1-M4), one entry each', () => {
   const RAW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <defs><circle id="dot" r="4"/></defs>
   <use id="u" href="#dot" x="10" y="10"/>
@@ -1723,13 +1723,13 @@ test('no raw items: every rendered element, use, image, foreignObject and text i
     u: ['<use id="u" href="#dot" x="10" y="10"/>', '<use id="u" href="#dot" x="11" y="10"/>'],
     i: ['<image id="i" x="20"', '<image id="i" x="21"'],
     f: ['<foreignObject id="f" x="40"', '<foreignObject id="f" x="41"'],
-    t: ['<text id="t" x="60" y="80">', '<text id="t" x="60" y="80" transform="translate(1 0)">'],
+    t: ['<text id="t" x="60" y="80">', '<text id="t" x="61" y="80">'],
   };
   const copied: Record<string, string> = {
     u: '<use id="u-2" href="#dot" x="15" y="15"/>',
     i: '<image id="i-2" x="25" y="25"',
     f: '<foreignObject id="f-2" x="45" y="45"',
-    t: '<text id="t-2" x="60" y="80" transform="translate(5 5)">',
+    t: '<text id="t-2" x="65" y="85">',
   };
   for (const name of ['u', 'i', 'f', 't']) {
     const r = rig();

@@ -50,20 +50,26 @@ const VALUES: Record<string, [string, string]> = {
   color: ['black', 'hsl(12 76% 61%)'],
   'stop-color': ['red', 'oklch(0.66 0.15 36)'],
   'stop-opacity': ['1', '0.5'],
+  // P1-M4: Inspect's Text section.
+  'font-family': ['sans-serif', 'Archivo, sans-serif'],
+  'font-size': ['14', '20'],
+  'font-weight': ['400', '700'],
+  'font-style': ['normal', 'italic'],
+  'text-anchor': ['start', 'middle'],
 };
 
 test('each property is written where it lives: the style="" declaration’s value alone, the attribute’s value (its quote and spacing kept), or a new attribute at the end of the start tag; every other byte unchanged', () => {
   assert.deepEqual(Object.keys(VALUES).sort(), Object.keys(STYLE_PROPS).sort(), 'every property of the table');
   for (const [prop, [was, now]] of Object.entries(VALUES)) {
-    let r = write(`<rect id="a" x="1" style="${prop}: ${was} ; font-weight:bold"/>`, ['a'], prop, now);
-    assert.equal(r.out, svg(`<rect id="a" x="1" style="${prop}: ${now} ; font-weight:bold"/>`), `${prop} in style=""`);
+    let r = write(`<rect id="a" x="1" style="${prop}: ${was} ; word-spacing:2"/>`, ['a'], prop, now);
+    assert.equal(r.out, svg(`<rect id="a" x="1" style="${prop}: ${now} ; word-spacing:2"/>`), `${prop} in style=""`);
     r = write(`<rect id="a" ${prop} = '${was}'  x="1"/>`, ['a'], prop, now);
     assert.equal(r.out, svg(`<rect id="a" ${prop} = '${now}'  x="1"/>`), `${prop} as the attribute`);
     const w = prop === 'stroke' ? ' stroke-width="1"' : ''; // a width, so the width-2 rule stays out
     r = write(`<rect id="a" x="1"${w}/>`, ['a'], prop, now);
     assert.equal(r.out, svg(`<rect id="a" x="1"${w} ${prop}="${now}"/>`), `${prop} added`);
-    r = write(`<rect id="a" style="font-weight:bold" ${prop}="${was}"/>`, ['a'], prop, now);
-    assert.equal(r.out, svg(`<rect id="a" style="font-weight:bold" ${prop}="${now}"/>`), `${prop}: a style="" without it leaves the attribute to hold it`);
+    r = write(`<rect id="a" style="word-spacing:2" ${prop}="${was}"/>`, ['a'], prop, now);
+    assert.equal(r.out, svg(`<rect id="a" style="word-spacing:2" ${prop}="${now}"/>`), `${prop}: a style="" without it leaves the attribute to hold it`);
   }
 });
 

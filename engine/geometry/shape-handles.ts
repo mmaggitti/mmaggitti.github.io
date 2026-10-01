@@ -11,6 +11,7 @@
 // | polygon, polyline  | a vertex each (at most 200 points): that pair = the point                  |
 // | generated polygon, star | centre (draw:cx, draw:cy); radius at the first vertex or tip, (cx, cy − r): draw:r; a star's inner point: draw:inner = distance ÷ r (0.01, 0.05–0.95) |
 // | generated spiral   | centre; radius at its end P(Θ): draw:r                                     |
+// | text (P1-M4)       | pos at (x, y) when the text moves by its numbers (write.ts textByNumbers) and has both: x and y, and its tspans' with them; beside the resize corners, which it keeps |
 //
 // A length is a distance, never signed, so a mirror keeps its sign and no handle writes the
 // transform. Each written length keeps its unit (r="2em" stays in em) and refuses what the move and
@@ -25,7 +26,7 @@ import { fmt, parseNumberList } from '../values/number-format.ts';
 import { generatorOf, type Generated } from '../generators/index.ts';
 import { spiralEnd } from '../generators/spiral.ts';
 import { lengthAttr, listMatrix, transformUnknown, type GeoContext } from './ctm.ts';
-import { FLATTENS, lengthEdit, numberTokens, placesOf, rewrite, type AttrEdit, type Plan, type Point, type WriteOpts } from './write.ts';
+import { FLATTENS, lengthEdit, moveText, numberTokens, placesOf, rewrite, textByNumbers, type AttrEdit, type Plan, type Point, type WriteOpts } from './write.ts';
 
 export interface ShapeHandle {
   id: string;
@@ -42,6 +43,7 @@ export const MAX_VERTEX_HANDLES = 200;
 export function shapeHandleLabel(handleId: string): string {
   if (handleId === 'p1' || handleId === 'p2') return 'Move end';
   if (/^v\d+$/.test(handleId)) return 'Move point';
+  if (handleId === 'pos') return 'Move text';
   return `Set ${handleId}`;
 }
 
@@ -89,6 +91,8 @@ function generatedHandles(doc: Doc, n: ElementNode, g: Generated): ShapeHandle[]
  * polygon or polyline past MAX_VERTEX_HANDLES points, or whose points don't read, has none.
  */
 export function shapeHandles(doc: Doc, id: NodeId, ctx: GeoContext): ShapeHandle[] | null {
+  const t = textPosition(doc, id, ctx);
+  if (t) return [{ id: 'pos', kind: 'anchor', at: t, role: 'position', tip: `x ${written(doc, el(doc, id), 'x')}, y ${written(doc, el(doc, id), 'y')}` }];
   if (!takesShapeHandles(doc, id)) return null;
   const n = el(doc, id);
   const g = generatorOf(doc, id);
@@ -133,6 +137,15 @@ export function shapeHandles(doc: Doc, id: NodeId, ctx: GeoContext): ShapeHandle
   }
 }
 
+/** A text's (x, y) in its own user units, when it takes the pos handle (see the header); else null. */
+export function textPosition(doc: Doc, id: NodeId, ctx: GeoContext): Point | null {
+  const n = doc.nodes.get(id);
+  if (n?.kind !== 'element' || id === doc.root || !textByNumbers(doc, n) || !findAttr(n, null, 'x') || !findAttr(n, null, 'y')) return null;
+  const x = lengthAttr(doc, n, 'x', 'x', ctx);
+  const y = lengthAttr(doc, n, 'y', 'y', ctx);
+  return x === null || y === null ? null : { x, y };
+}
+
 /** A value on the step (in the units the step is in), written as the step writes it. */
 const onStep = (v: number, step: number): number => Number(fmt(Math.round(v / step) * step, placesOf(step, 10)));
 
@@ -166,6 +179,11 @@ export function planShapeHandle(doc: Doc, id: NodeId, handleId: string, to: Poin
     return { edits };
   };
   const length = (d: number) => Math.max(1, onStep(d, opts.step));
+  // A text's pos (P1-M4): the text moves by its own numbers, its tspans with it.
+  if (handleId === 'pos') {
+    const at = handles.find((h) => h.id === 'pos')!.at;
+    return moveText(doc, n, to.x - at.x, to.y - at.y, opts);
+  }
   const g = generatorOf(doc, id);
   if (g) {
     const d = Math.hypot(to.x - g.inputs.cx, to.y - g.inputs.cy);

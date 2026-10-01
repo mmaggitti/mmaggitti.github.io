@@ -66,7 +66,7 @@ import { MAX_GUIDES, NO_STATE, declare, hiddenGuides, isLocked, moveGuide, readS
 import { DRAW_NS } from '../../../engine/model/draw-ns.ts';
 import { adoptDonut, detachGenerator, finishGenerators, generatorOf, type GeneratorKind } from '../../../engine/generators/index.ts';
 import { donutCandidateFor, donutFor, donutParts, VALUE_MAX, VALUE_MIN, type Donut } from '../../../engine/generators/donut.ts';
-import { planShapeHandle, shapeHandleLabel, shapeHandles } from '../../../engine/geometry/shape-handles.ts';
+import { planShapeHandle, shapeHandleLabel, shapeHandles, takesShapeHandles } from '../../../engine/geometry/shape-handles.ts';
 import { insertMarkup } from '../../../engine/model/space.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
 import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
@@ -1295,7 +1295,8 @@ export class Editor {
     // geometry/shape-handles.ts) instead of the corners, placed through their own CTM; the centre on
     // the shape's own centre.
     const sh = shapeHandles(doc, n.id, this.geo);
-    const base = handlesFor({ quad: quadOf(m.box, m.toHost), corners: sh === null && RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
+    // A text's pos handle (P1-M4) goes beside its corners, which it keeps.
+    const base = handlesFor({ quad: quadOf(m.box, m.toHost), corners: !takesShapeHandles(doc, n.id) && RESIZABLE.has(n.local), rotPivot: movesBy(doc, n.id) === 'none' ? null : p.rot, scalePivot: p.scale }, active);
     if (!sh) return bounds.length ? { handles: [...base.handles, ...bounds], rotGuide: base.rotGuide } : base;
     const host = (q: Point): Point => {
       const [x, y] = applyM(m.toHost, q.x, q.y);

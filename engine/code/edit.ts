@@ -31,6 +31,12 @@ const NOT_XML_CHAR = /[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
 /** An XML id, as the Text sheet and Rename take it: the lexer's name rule without a colon (Namespaces in XML). */
 export const ID = new RegExp(`^${NAME_PATTERN.replaceAll(':', '')}$`);
 
+/** Why XML can't hold `text` (a character no escape can write: U+FFFE, a lone surrogate), or null: P0's message. */
+export function xmlCharError(text: string): string | null {
+  const bad = NOT_XML_CHAR.exec(text);
+  return bad ? `XML can't hold the character U+${bad[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` : null;
+}
+
 /** Why `text` can't be an id, or null: a name the lexer reads, with no colon and no character XML can't hold (U+FFFE, a lone surrogate). */
 export function idError(text: string): string | null {
   const bad = NOT_XML_CHAR.exec(text);

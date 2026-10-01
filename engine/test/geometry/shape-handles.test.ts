@@ -62,6 +62,23 @@ test('each shape’s handles sit where SVG Lab’s KITS put them, for the Shapes
   assert.equal(shapeHandles(two, firstEl(two, 'polygon').id, ctx)!.length, 200);
 });
 
+test('a text’s pos handle (P1-M4) sits at its (x, y) in its own units when it moves by its numbers and has both, tooltip "x N, y N", and keeps the resize corners; its drag moves the text by its numbers, its tspans with it, one undo giving the bytes back', () => {
+  const body = '<text x="50" y="55" font-size="14"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>';
+  const doc = load(svg(body));
+  const t = firstEl(doc, 'text');
+  assert.deepEqual(shapeHandles(doc, t.id, ctx)!.map((h) => `${h.id}:${h.kind}:${h.role}@${h.at.x},${h.at.y} "${h.tip}"`), ['pos:anchor:position@50,55 "x 50, y 55"']);
+  assert.equal(takesShapeHandles(doc, t.id), false, 'it keeps the resize corners');
+  const ops = drag(doc, t, 'pos', { x: 60, y: 50 });
+  assert.ok(Array.isArray(ops), String(ops));
+  assert.equal(serialize(doc), svg('<text x="60" y="50" font-size="14"><tspan x="60" dy="0em">Big</tspan><tspan x="60" dy="1.3em">Idea</tspan></text>'));
+  for (const op of [...ops].reverse()) undoOp(doc, op);
+  assert.equal(serialize(doc), svg(body));
+  for (const other of ['<text x="1 2" y="5">a</text>', '<text y="5">a</text>', '<text x="5" y="5"><textPath href="#p">a</textPath></text>']) {
+    const d = load(svg(other));
+    assert.equal(shapeHandles(d, firstEl(d, 'text').id, ctx), null, other);
+  }
+});
+
 test('a drag writes the lab’s numbers: a radius from the distance on the step, rx and ry from their own axis, a line end and a vertex at the point; each at least 1; only that attribute’s number changes', () => {
   const src = svg('<circle cx="30" cy="30" r="10" fill="red"/><ellipse cx="70" cy="30" rx="20" ry="10"/><line x1="10" y1="80" x2="40" y2="60" stroke="#264653"/><polygon points="50,17 83,41 71,80"/>');
   const doc = load(src);

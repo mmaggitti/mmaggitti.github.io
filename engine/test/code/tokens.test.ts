@@ -195,6 +195,17 @@ test('keywords: option tables, element-scoped options, parts of a value', () => 
   assert.deepEqual(attr(doc, 'font-face', 'font-weight'), []);
 });
 
+test('font-family (P1-M4): a value that is exactly one of SVG Lab’s three generics is a keyword token cycling sans-serif, serif, monospace, in an attribute and in CSS; any other value has none', () => {
+  const doc = load('<text font-family="serif"/><text font-family="Archivo, sans-serif"/><text font-family="cursive"/><text style="font-family: monospace"/><text font-family=" sans-serif "/>');
+  const [serif] = attr(doc, 'text', 'font-family');
+  assert.ok(serif.kind === 'enum' && serif.options === ENUMS['font-family']);
+  assert.deepEqual(ENUMS['font-family'], ['sans-serif', 'serif', 'monospace']);
+  assert.deepEqual(attr(doc, 'text', 'font-family', null, 1), [], 'a family list: no token');
+  assert.deepEqual(attr(doc, 'text', 'font-family', null, 2), [], 'another generic: no token');
+  assert.deepEqual(texts(attr(doc, 'text', 'style', null, 3)), ['monospace']);
+  assert.deepEqual(texts(attr(doc, 'text', 'font-family', null, 4)), ['sans-serif'], 'spaces around it, as other keywords');
+});
+
 test('SMIL: values read as the animated attribute, timing, and splines', () => {
   const doc = load(
     '<animate attributeName="fill" values="red; #00f;currentColor" dur="1.5s" begin="0.5s; x.end" repeatCount="indefinite" keyTimes="0; .25;1" keySplines=".5 0 .5 1"/>' +

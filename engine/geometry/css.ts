@@ -239,6 +239,32 @@ function readSheet(css: string, into: Sheet, inKeyframes = false): void {
   }
 }
 
+/**
+ * The bodies of a sheet's @font-face rules (P1-M4: engine/text/font-faces.ts), at the top level or
+ * inside a grouping rule (@media, @supports…), in order; comments read as readSheet reads them.
+ */
+export function fontFaceBodies(css: string): string[] {
+  const out: string[] = [];
+  const read = (t: string): void => {
+    let i = 0;
+    while (i < t.length) {
+      const open = findTop(t, i, '{', ';');
+      if (open === -1) return;
+      if (t[open] === ';') {
+        i = open + 1;
+        continue;
+      }
+      const close = matching(t, open);
+      const prelude = t.slice(i, open).trim();
+      if (/^@font-face$/i.test(prelude)) out.push(t.slice(open + 1, close));
+      else if (GROUPING.test(prelude)) read(t.slice(open + 1, close));
+      i = close + 1;
+    }
+  };
+  read(stripComments(css));
+  return out;
+}
+
 /** The rule's last compound selector (after the last combinator), read for what it names. */
 function lastCompound(selector: string): Compound {
   const s = selector.trim();
