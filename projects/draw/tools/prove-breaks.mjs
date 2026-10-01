@@ -3026,6 +3026,49 @@ const BREAKS = [
     file: 'projects/draw/tools/prove-breaks.mjs', from: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/g,", to: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/y,",
     run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B525 +BAD +a sticky anchor plants only at index 0/,
   },
+  // P1-M4 S0: stroke to path (M3's spillover), quick unless marked.
+  {
+    id: 'B570', what: 'a miter join ignores stroke-miterlimit (a right angle under a limit of 1.2 is still mitered)',
+    file: 'engine/path/offset.ts', from: "  if (style.join === 'miter' && Math.abs(cr) >= 1e-12 && miterRatio(cos) <= style.miterLimit) {", to: "  if (style.join === 'miter' && Math.abs(cr) >= 1e-12) {",
+    run: engineTests('path/offset.test.ts'), expect: /✖ joins: a miter up to stroke-miterlimit/,
+  },
+  {
+    id: 'B571', what: 'an open subpath gets no round cap (round ends as butt)',
+    file: 'engine/path/offset.ts', from: "  if (kind === 'butt') return [{ type: 'L', to: R }];", to: "  if (kind === 'butt' || kind === 'round') return [{ type: 'L', to: R }];",
+    run: engineTests('path/offset.test.ts'), expect: /✖ caps: butt stops at the end, round adds a half disc/,
+  },
+  {
+    id: 'B572', what: 'toSubpaths closes every subpath (an open one, returning to its start or not, would get no caps)',
+    file: 'engine/path/loops.ts', from: '    if (cur && (cur.segs.length || cur.closed)) out.push(cur);', to: '    if (cur && (cur.segs.length || cur.closed)) out.push({ ...cur, closed: true });',
+    run: engineTests('path/loops.test.ts'), expect: /✖ toSubpaths: each subpath as drawn, closed only by a Z/,
+  },
+  {
+    id: 'B573', what: 'a filled shape’s outline loses its transform (drawn in the parent’s space, off the shape)',
+    file: 'projects/draw/src/paths/write.ts', from: '    if (t) m += ` transform=${t.quote}${t.raw}${t.quote}`;\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Stroke to path: a filled shape keeps its fill/,
+  },
+  // P1-M4 S0, the M3 follow-up: a shape that becomes a <path> a <style> rule may paint.
+  {
+    id: 'B574', what: 'a boolean’s bottom shape becomes a <path> that a `path { fill }` rule paints (the converted-<path> check skipped)',
+    file: 'projects/draw/src/editor.ts', from: '    const asPath = pathRuleRefusal(doc, bottom.id);\n    if (asPath) return { refused: asPath };\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  {
+    id: 'B575', what: 'Stroke to path turns a line into a <path> that a `path { fill }` rule paints (the converted-<path> check skipped)',
+    file: 'projects/draw/src/editor.ts', from: '    const ruled = pathRuleRefusal(doc, id, s.filled);\n    if (ruled) return void this.notice.set(ruled);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  {
+    id: 'B576', what: 'the selector reading asks about a shape as itself when asked as a <path> (so `path { … }` never matches it)',
+    file: 'engine/geometry/css.ts', from: '  const node = subjectOf(doc, el(doc, id), as);', to: '  const node = subjectOf(doc, el(doc, id));',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  // P1-M4 S0, slow (one per new e2e check, naming it).
+  {
+    id: 'B577', what: 'Stroke to path writes the outline in the parent’s units instead of the element’s own (its transform applied twice)', slow: true, checks: ['strokeToPathCoversTheStroke'],
+    file: 'projects/draw/src/editor.ts', from: '    const outline = loopsD(out.loops);\n', to: "    const outline = loopsD(mapLoops(out.loops, parseTransform(attrValueOf(doc, id, 'transform') ?? '')?.matrix ?? IDENTITY));\n",
+    run: DRAW_E2E, expect: /strokeToPathCoversTheStroke: the rotated line: \d+ pixels differ/,
+  },
 ];
 
 const args = process.argv.slice(2);

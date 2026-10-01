@@ -887,6 +887,13 @@ export class Editor {
     return { inputs };
   }
 
+  // After a conversion's await (Stroke to path, P1-M4): the drawing changed meanwhile (its document, or
+  // its version, which every applied op moves), or an edit is live now, which writing would go over
+  // (combine's rule).
+  #movedOn(doc: Doc, version: number): boolean {
+    return this.#doc !== doc || doc.version !== version || !!(this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge);
+  }
+
   /** Whether More offers Stroke to path: one selected shape (not the root) that has an outline. */
   canStrokeToPath(): boolean {
     const doc = this.#doc;
@@ -929,7 +936,7 @@ export class Editor {
     const libs = this.#ports.booleans ?? LAZY_LIBRARIES;
     let out = await runPipeline([{ loops: groups.flat(), rule: 'nonzero' }], 'union', libs);
     if ('refused' in out && out.refused === REFUSED && groups.length > 1) out = await runPipeline(groups.map((loops): BoolInput => ({ loops, rule: 'nonzero' })), 'union', libs);
-    if (this.#doc !== doc || doc.version !== version || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);
+    if (this.#movedOn(doc, version)) return void this.notice.set(DRAWING_CHANGED);
     if ('refused' in out) return void this.notice.set(out.refused);
     const outline = loopsD(out.loops);
     let result: NodeId | null = null;

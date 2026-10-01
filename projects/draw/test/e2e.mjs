@@ -70,6 +70,9 @@
 // a hand edit of a slice turning it plain, the comment's tokens going with it. Then booleans: Union,
 // Subtract, Intersect and Exclude from the More sheet, drawn where they cover, path-bool loading only
 // then, in a chunk of its own.
+// P1-M4 adds text, fonts and accessibility, and first M3's spillover: Stroke to path, whose filled
+// outline covers the pixels its stroke covered (within 1%) for a round-capped line, a round-joined
+// polyline, a mitered heart that keeps its fill, and a thin stroke under a rotation.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -268,6 +271,8 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(holesCutTwoWays);
   await check(theDonutRegeneratesFromItsData);
   await check(booleansCombineWhatIsDrawn);
+  // P1-M4: text, fonts and accessibility.
+  await check(strokeToPathCoversTheStroke);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -6665,6 +6670,84 @@ async function booleansCombineWhatIsDrawn(browser, origin) {
     await page.locator('.draw-toast').waitFor();
     must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first (P1-M4).', `with the text: ${await page.locator('.draw-toast').textContent()}`);
     must(await source(page) === BOOL_E2E, 'the refused Union wrote something');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M4 S0: stroke to path ────────────────────────────────────────────────────────────────────
+
+const HEART_D = /<path\s+d="([^"]+)"/.exec(LAB('create-icon.svg'))[1].replace(/\s+/g, ' ');
+const STROKE_CASES = [
+  // lab/paths.svg's path (width 3, round caps and joins), an id added so the check can tap it.
+  { name: 'lab/paths.svg', id: 's', text: LAB('paths.svg').replace('<path', '<path id="s"'), ink: '#264653', filled: false },
+  // lab/style.svg's polyline (width 8, round), drawn alone.
+  { name: 'lab/style.svg', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  ${/<polyline[^>]*\/>/.exec(LAB('style.svg'))[0].replace('<polyline', '<polyline id="s"')}\n</svg>`, ink: '#e76f51', filled: false },
+  // lab/create-icon.svg's heart, given a mitered stroke: it keeps its fill. Its stroke is 6 wide: at 4,
+  // Chromium's antialiasing alone left 1.01% of the stroke's pixels differing (a fit 20 times tighter
+  // changed nothing), where 6 leaves about 0.4%.
+  { name: 'the heart', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <path id="s" d="${HEART_D}" fill="#e76f51" stroke="#264653" stroke-width="6" stroke-linejoin="miter"/>\n</svg>`, ink: '#264653', filled: true, under: '#e76f51' },
+  // A thin stroke under a rotation: the outline is written in the line's own units, where its stroke is.
+  { name: 'the rotated line', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <line id="s" x1="20" y1="50" x2="80" y2="50" stroke="#264653" stroke-width="2" transform="rotate(30 50 50)"/>\n</svg>`, ink: '#264653', filled: false },
+];
+
+// Each case's element drawn alone; its stroke's pixels taken from a screenshot of the drawing (the
+// overlay hidden): a pixel is the stroke's when its colour is nearer the stroke's than the paper's two
+// checker colours (or the shape's own fill, under a kept fill), i.e. over about half its coverage. More
+// → Stroke to path, the pixels again: those in one mask and not the other are at most 1% of the
+// stroke's own. One "Stroke to path" entry; a shape with no fill becomes a filled <path> keeping its id
+// and with no stroke attribute; the heart keeps its fill with stroke="none" and the outline goes right
+// after it. Undo gives the file back byte for byte.
+async function strokeToPathCoversTheStroke(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const mask = async (c) => {
+      const [tl, br] = await page.evaluate(rootToScreen, [[0, 0], [100, 100]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x), height: Math.ceil(br.y - tl.y) };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const ink = hex(c.ink);
+      const behind = [[238, 238, 238], [255, 255, 255], ...(c.under ? [hex(c.under)] : [])];
+      const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+      const out = [];
+      for (let y = 0; y < clip.height; y++) {
+        for (let x = 0; x < clip.width; x++) {
+          const px = shot.rgb(x, y);
+          out.push(behind.every((b) => d2(px, ink) < d2(px, b)));
+        }
+      }
+      return out;
+    };
+    for (const c of STROKE_CASES) {
+      must((await page.evaluate((t) => window.drawTest.render(t), c.text)).ok, `test setup: ${c.name} did not open`);
+      await toPeek(page);
+      const before = await mask(c);
+      const own = before.filter(Boolean).length;
+      must(own > 200, `${c.name}: only ${own} stroke pixels before`);
+      await tapShape(page, c.id);
+      must(await label(page) !== null, `${c.name}: the tap selected nothing`);
+      await moreCommand(page, 'Stroke to path');
+      await until(`${c.name}: Stroke to path writes`, async () => (await source(page)) !== c.text, 5000);
+      const src = await source(page);
+      must(await undo.getAttribute('aria-label') === 'Undo Stroke to path', `${c.name}: the entry is ${await undo.getAttribute('aria-label')}`);
+      if (c.filled) {
+        must(/<path id="s" d="[^"]+" fill="#e76f51" stroke="none" stroke-width="6" stroke-linejoin="miter"\/>\n  <path fill="#264653" d="[^"]+"\/>/.test(src), `${c.name}: it should keep its fill, its stroke none, the outline right after it:\n${src}`);
+      } else {
+        const el = /<path id="s"[^>]*\/>/.exec(src)?.[0] ?? '';
+        must(el && !/\sstroke/.test(el) && new RegExp(`fill="${c.ink}"`).test(el), `${c.name}: its element should be a filled <path id="s"> with no stroke attribute:\n${src}`);
+      }
+      await toPeek(page);
+      const after = await mask(c);
+      let differ = 0;
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) differ++;
+      console.log(`     draw e2e: stroke to path, ${c.name}: ${differ} of the stroke's ${own} pixels differ (${((100 * differ) / own).toFixed(2)}%)`);
+      must(differ <= 0.01 * own, `${c.name}: ${differ} pixels differ, ${((100 * differ) / own).toFixed(2)}% of the stroke's ${own}`);
+      await undo.tap();
+      must(await source(page) === c.text, `${c.name}: undo did not give the file back:\n${await source(page)}`);
+    }
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

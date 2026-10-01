@@ -26,6 +26,7 @@ import { donutSlices } from '../../../../engine/generators/donut.ts';
 import { parsePath } from '../../../../engine/path/parse.ts';
 import { toAbsolute } from '../../../../engine/path/abs.ts';
 import { insideAt, type BoolOp } from '../../../../engine/path/winding.ts';
+import { BOX_EFFECT, BOX_GRADIENT, DASHED, MARKERS, NO_STROKE, NON_SCALING, PAINT_ORDER, RULED, UNREADABLE_PAINT, ZERO_WIDTH } from '../../../../engine/path/offset.ts';
 import { DRAW_NS } from '../../../../engine/model/draw-ns.ts';
 import { OFFLINE, type Libraries } from '../../src/paths/pipeline.ts';
 import { combine as pathBoolCombine } from '../../src/paths/booleans.ts';
@@ -2606,4 +2607,154 @@ test('a boolean whose chunk resolves during a live move drag, or while a press i
   await p.pending;
   assert.equal(p.r.editor.notice.get(), null);
   assert.equal(p.r.editor.history.get().undoLabel, 'Union');
+});
+
+// ── P1-M4 S0: Stroke to path ───────────────────────────────────────────────────────────────────
+
+const STP = (body: string, defs = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${defs}${body}\n</svg>`;
+/** Where `d` fills (nonzero) at each point. */
+const fillsAt = (d: string, pts: readonly [number, number][]) => pts.map(([x, y]) => insideAt(toAbsolute(parsePath(d)), x, y, 'nonzero'));
+
+test('Stroke to path: a line becomes a filled <path> in its place keeping its id (its stroke attributes gone, fill the stroke’s paint), one "Stroke to path" entry, the outline selected; it fills the stroke and nothing past it; one undo gives the file back byte for byte', async () => {
+  const LINE = '<line id="l" x1="20" y1="75" x2="50" y2="30" stroke="#264653" stroke-width="3" stroke-linecap="round"/>';
+  const F = STP(LINE);
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'l')]);
+  assert.equal(r.editor.canStrokeToPath(), true);
+  await r.editor.strokeToPath();
+  assert.equal(r.editor.notice.get(), null);
+  const src = r.editor.source();
+  const d = /<path id="l" fill="#264653" d="([^"]+)"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, F.replace(LINE, `<path id="l" fill="#264653" d="${d}"/>`));
+  assert.equal(r.editor.history.get().undoLabel, 'Stroke to path');
+  assert.deepEqual(sel(r), [idOf(r, 'l')]);
+  // On the line, at its round ends, and just past the half width (1.5) and the caps.
+  const along = (t: number, off: number): [number, number] => {
+    const [dx, dy] = [30 / Math.hypot(30, 45), -45 / Math.hypot(30, 45)];
+    return [20 + 30 * t - dy * off, 75 - 45 * t + dx * off];
+  };
+  assert.deepEqual(fillsAt(d, [along(0.5, 0), along(0.5, 1.3), along(0.5, -1.3), along(1, 0), [20 - 1.3 * 30 / Math.hypot(30, 45), 75 + 1.3 * 45 / Math.hypot(30, 45)]]), [true, true, true, true, true], 'the stroke and its round caps');
+  assert.deepEqual(fillsAt(d, [along(0.5, 1.7), along(0.5, -1.7), [20 - 1.7 * 30 / Math.hypot(30, 45), 75 + 1.7 * 45 / Math.hypot(30, 45)]]), [false, false, false], 'nothing past them');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('Stroke to path: a filled shape keeps its fill, its stroke written none where it lives, and the outline goes right after it with its transform and opacity; a <path> keeps its element, only its d, fill and stroke attributes changing (its style="" losing only its stroke declarations)', async () => {
+  const RECT = '<rect id="r" x="20" y="20" width="40" height="30" fill="#e9c46a" stroke="#264653" stroke-width="4" opacity="0.8" transform="rotate(10 40 35)"/>';
+  const F = STP(RECT);
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'r')]);
+  await r.editor.strokeToPath();
+  const src = r.editor.source();
+  const d = /<path transform="rotate\(10 40 35\)" opacity="0\.8" fill="#264653" d="([^"]+)"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, F.replace(RECT, `${RECT.replace('stroke="#264653"', 'stroke="none"')}\n  <path transform="rotate(10 40 35)" opacity="0.8" fill="#264653" d="${d}"/>`));
+  // In the rect's own units: the band ±2 about its edges, and not its middle.
+  assert.deepEqual(fillsAt(d, [[20, 35], [21.5, 35], [18.5, 35], [40, 20], [40, 50], [60, 21]]), [true, true, true, true, true, true]);
+  assert.deepEqual(fillsAt(d, [[40, 35], [17.5, 35], [22.5, 35], [15, 15]]), [false, false, false, false]);
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+  // A <path>: the same element, its d replaced in place, fill="none" now the stroke's paint, its own
+  // stroke attributes and style declarations gone, and Draw's generator inputs with them.
+  const P = '<path id="p" d="M 10 10 L 50 50" fill="none" stroke="red" stroke-width="2" style="stroke-linecap: round; opacity: 0.5"/>';
+  const G = STP(P);
+  const q = rig(HOST, {}, LIBS);
+  q.editor.open(G);
+  const p = idOf(q, 'p');
+  q.editor.select([p]);
+  await q.editor.strokeToPath();
+  const out = q.editor.source();
+  const pd = /<path id="p" d="([^"]+)" fill="red" style="opacity: 0\.5"\/>/.exec(out)?.[1];
+  assert.ok(pd, out);
+  assert.equal(out, G.replace(P, `<path id="p" d="${pd}" fill="red" style="opacity: 0.5"/>`));
+  assert.deepEqual(sel(q), [p], 'the same element, selected');
+  q.editor.undo();
+  assert.equal(q.editor.source(), G);
+  // A stroke from an ancestor: the result says stroke="none", so the group's stroke doesn't outline it again.
+  const INH = '<g stroke="#264653" stroke-width="2" fill="none"><line id="k" x1="10" y1="10" x2="90" y2="10"/></g>';
+  const w = rig(HOST, {}, LIBS);
+  w.editor.open(STP(INH));
+  w.editor.select([idOf(w, 'k')]);
+  await w.editor.strokeToPath();
+  assert.match(w.editor.source(), /<g stroke="#264653" stroke-width="2" fill="none"><path id="k" fill="#264653" stroke="none" d="[^"]+"\/><\/g>/);
+});
+
+test('Stroke to path refuses, saying why and writing nothing: no stroke, none, a width of 0, a dash, a non-scaling stroke, a marker, a paint it can’t read, a gradient laid out on the box, a clip-path, the stroke painted under a kept fill, a stroke a <style> rule decides, a <path> rule that would paint the result, a d with an error, and text; a dasharray of none converts', async () => {
+  const S = 'stroke="#264653" stroke-width="2"';
+  const cases: [body: string, notice: string, defs?: string][] = [
+    ['<line id="a" x1="10" y1="10" x2="90" y2="90"/>', NO_STROKE],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="none"/>`, NO_STROKE],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#000" stroke-width="0"/>`, ZERO_WIDTH],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} stroke-dasharray="4 2"/>`, DASHED],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} vector-effect="non-scaling-stroke"/>`, NON_SCALING],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} marker-end="url(#m)"/>`, MARKERS, '<marker id="m"><path d="M 0 0 L 5 5"/></marker>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="context-stroke" stroke-width="2"/>`, UNREADABLE_PAINT],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="url(#g)" stroke-width="2"/>`, BOX_GRADIENT, '<linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} clip-path="url(#c)"/>`, BOX_EFFECT('clip-path'), '<clipPath id="c"><rect width="50" height="50"/></clipPath>\n  '],
+    [`<rect id="a" x="10" y="10" width="50" height="50" fill="#e9c46a" ${S} paint-order="stroke"/>`, PAINT_ORDER],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke-width="2"/>`, RULED, '<style>line { stroke: #264653 }</style>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S}/>`, RULED, '<style>path { fill: #2a9d8f }</style>\n  '],
+    [`<path id="a" d="M 0 0 L 10 Q" ${S}/>`, 'Its path data has an error at character 12.'],
+    [`<text id="a" x="10" y="50" ${S}>Hi</text>`, 'Only shapes have an outline.'],
+  ];
+  for (const [body, notice, defs] of cases) {
+    const F = STP(body, defs);
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(F);
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    assert.equal(r.editor.notice.get(), notice, body);
+    assert.equal(r.editor.source(), F, `${notice}: nothing written`);
+    assert.equal(r.editor.history.get().canUndo, false);
+  }
+  // lab/style.svg's polyline says stroke-dasharray="none": not dashed. A gradient in user space converts.
+  for (const [body, defs] of [
+    ['<polyline id="a" points="14,88 32,68 50,88" fill="none" stroke="#e76f51" stroke-width="8" stroke-dasharray="none"/>', ''],
+    ['<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="url(#u)" stroke-width="2"/>', '<linearGradient id="u" gradientUnits="userSpaceOnUse" x1="0" x2="100"><stop offset="0" stop-color="red"/></linearGradient>\n  '],
+  ]) {
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(STP(body, defs));
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    assert.equal(r.editor.history.get().undoLabel, 'Stroke to path', `${body}: ${r.editor.notice.get()}`);
+  }
+});
+
+test('a Stroke to path the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+  r.editor.open(STP('<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#000" stroke-width="2"/>\n  <rect id="b" width="5" height="5"/>'));
+  r.editor.select([idOf(r, 'a')]);
+  const pending = r.editor.strokeToPath();
+  r.editor.select([idOf(r, 'b')]);
+  r.editor.delete();
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+});
+
+// The P1-M4 S0 follow-up (M3's fixer): a rule that paints a <path> may repaint the <path> that takes a
+// shape's place, so both conversions refuse it (pathRuleRefusal, shared).
+test('a boolean whose bottom shape would become a <path> a <style> rule may paint refuses (a rule for <path> only); the same rule refuses Stroke to path on a line', async () => {
+  const F = STP('<rect id="a" x="10" y="10" width="50" height="50" fill="#e76f51"/>\n  <circle id="b" cx="60" cy="60" r="25" fill="#e76f51"/>', '<style>path { fill: #2a9d8f }</style>\n  ');
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.notice.get(), STYLE_PAINT);
+  assert.equal(r.editor.source(), F);
+  const G = STP('<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#264653" stroke-width="2"/>', '<style>path { fill: #2a9d8f }</style>\n  ');
+  const q = rig(HOST, {}, LIBS);
+  q.editor.open(G);
+  q.editor.select([idOf(q, 'a')]);
+  await q.editor.strokeToPath();
+  assert.equal(q.editor.notice.get(), STYLE_PAINT);
+  assert.equal(q.editor.source(), G);
 });

@@ -30,8 +30,8 @@ import { TokenEditError } from '../../../../engine/code/edit.ts';
 import { RULED, type StrokeOf } from '../../../../engine/path/offset.ts';
 import { remove } from '../interact/structure.ts';
 
-/** A shape's geometry attributes, which the result's d replaces. */
-export const GEOMETRY_ATTRS: ReadonlySet<string> = new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'points', 'pathLength']);
+/** A shape's geometry attributes, which the result's d replaces (a line's ends too: Stroke to path takes lines, P1-M4). */
+export const GEOMETRY_ATTRS: ReadonlySet<string> = new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'points', 'pathLength', 'x1', 'y1', 'x2', 'y2']);
 
 /** The draw: attributes of the element's generator (draw:gen and its inputs), when it has one. */
 function generatorAttrs(doc: Doc, id: NodeId): string[] {
@@ -128,8 +128,9 @@ function withoutStroke(raw: string): string | null {
     const d = declarations(p)[0];
     return !(d && isStroke(d.name));
   });
-  const out = kept.join(';');
-  return out.trim() === '' || /^[\s;]*$/.test(out) ? null : out;
+  // The first declaration kept starts the value without the space that followed a removed one.
+  const out = kept.map((p, i) => (i === 0 && p !== parts[0] ? p.replace(/^\s+/, '') : p)).join(';');
+  return /^[\s;]*$/.test(out) ? null : out;
 }
 
 /**
