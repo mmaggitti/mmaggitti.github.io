@@ -2917,12 +2917,23 @@ export class Editor {
     const f = this.#field;
     if (!f) return;
     this.#field = null;
+    if (commit && f.field.kind === 'access' && (f.field.name === 'title' || f.field.name === 'el-title')) this.#dropEmptyTitle(f.drag, f.field.name, f.ids[0]);
     if (commit) f.drag.commit();
     else f.drag.cancel();
     if (commit && f.field.kind === 'style') this.#kept(f.field.prop, f.ids, f.refused);
     this.#bump();
     this.#changed();
     this.#show();
+  }
+
+  // A title emptied in its field is taken away as the field closes, in the field's one entry: the
+  // drawing's with what named the drawing by it (and role="img" when nothing names it then), or an
+  // element's.
+  #dropEmptyTitle(drag: Drag, name: 'title' | 'el-title', id: NodeId): void {
+    const doc = this.#doc!;
+    const title = name === 'title' ? accessOf(doc).title : elementAccess(doc, id).title;
+    if (!title || title.text.trim() !== '') return;
+    drag.update((apply) => (name === 'title' ? planDrawingTitle(doc, null, apply) : planElementTitle(doc, id, null, apply)));
   }
 
   // ── style: Inspect's properties, its sliders and fields, and the style sheet (P1-M2) ─────────

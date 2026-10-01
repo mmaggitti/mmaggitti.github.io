@@ -3218,6 +3218,35 @@ test('the Access tab’s switches (P1-M4 S3) are one entry each: Title and Descr
   assert.equal(a().selected, 1);
 });
 
+test('a title emptied in its field is taken away as the field closes: typed into a drawing with none and erased leaves the file as it was; the drawing’s own title emptied goes with its aria-labelledby and role="img", one entry; an element’s goes too', () => {
+  const create = LAB_FILE('create.svg');
+  const r = rig();
+  r.editor.open(create);
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('A'), null);
+  assert.equal(r.editor.fieldInput(''), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), create, 'no empty <title>, no role="img"');
+  assert.equal(r.editor.history.get().canUndo, false, 'nothing to undo');
+  r.editor.setDrawingTitle(true);
+  const titled = r.editor.source();
+  assert.match(titled, /role="img" aria-labelledby="drawing-title"[\s\S]*<title id="drawing-title">My drawing<\/title>/);
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('  '), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), create, 'the title, its aria-labelledby and role="img" gone: nothing names the drawing');
+  assert.equal(r.editor.history.get().undoLabel, 'Set title');
+  r.editor.undo();
+  assert.equal(r.editor.source(), titled, 'one entry');
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"><title>Sun</title></circle></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  r.editor.fieldStart({ kind: 'access', name: 'el-title', id: c });
+  assert.equal(r.editor.fieldInput(''), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"></circle></svg>');
+});
+
 test('the Role field takes only ARIA role tokens: “picture” is refused, naming it, and the last good role stays; a fallback list is taken', () => {
   const r = rig();
   r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"/></svg>');

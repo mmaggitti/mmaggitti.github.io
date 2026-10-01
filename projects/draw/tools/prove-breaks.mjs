@@ -3467,6 +3467,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "    const row = this.styleRow('font-family', this.#textIds());\n", to: "    for (let i = 0; i < this.#textIds().length / 50; i++) this.styleRow('font-family', this.#textIds());\n    const row = this.styleRow('font-family', this.#textIds());\n",
     run: drawTests('large-selection.test.ts'), expect: /✖ Set font and Inspect’s Text section over a large selection take linear time[\s\S]*Inspect’s Text section, over/,
   },
+  {
+    id: 'B656', what: 'a title emptied in its field stays as an empty <title> (with role="img" naming nothing)',
+    file: 'projects/draw/src/editor.ts', from: "    if (commit && f.field.kind === 'access' && (f.field.name === 'title' || f.field.name === 'el-title')) this.#dropEmptyTitle(f.drag, f.field.name, f.ids[0]);\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a title emptied in its field is taken away as the field closes/,
+  },
 ];
 
 const args = process.argv.slice(2);
