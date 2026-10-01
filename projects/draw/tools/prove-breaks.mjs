@@ -3625,9 +3625,7 @@ const BREAKS = [
     run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): 440×956:\n(top|bottom): tap targets under 44pt/,
   },
   {
-    // A second slow break for this check: whether the bar scrolls in its own box is layout, which only
-    // a browser has.
-    id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach)', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
+    id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach): a second slow break for this check, since whether the bar scrolls is layout, which only a browser has', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
     file: 'projects/draw/src/app.css', from: '  overflow-x: auto;\n  overflow-y: hidden;\n  overscroll-behavior-x: contain;\n', to: '',
     run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): the bar doesn't scroll/,
   },
