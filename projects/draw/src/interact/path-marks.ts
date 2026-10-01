@@ -12,7 +12,8 @@
 //   toHost, and a flag label (`draw-flag-label`, the lab's .fl) "L S" beside each arc and the arc's
 //   own (`on`); a tap within 22 px of a ghost picks it (ghostAt);
 // - direction arrows (`draw-dir`, the lab's .dir, every subpath after the first `draw-dir--in`): the
-//   lab's triangle at the parameter midpoint of every drawing segment, along its direction;
+//   lab's triangle at the parameter midpoint of every drawing segment, along its direction; on a
+//   straight segment, whose bend handle is drawn on top at its midpoint, just past that handle;
 // - a donut's percentage labels (`draw-donut-label`, the lab's .gt) at each slice's middle angle.
 
 import { apply, type Affine } from '../../../../engine/values/affine.ts';
@@ -185,6 +186,12 @@ export function ghostAt(ghosts: readonly Ghost[], at: Point, within = 22): Ghost
 /** At most this many arrows are drawn (the rest aren't). */
 export const MAX_ARROWS = 200;
 const ARROW = 4.5; // SVG Lab's s, px
+// What a straight segment's arrow keeps clear of (the handles' sizes in canvas/overlay/marks.ts,
+// HANDLE): its bend handle, a circle of radius 6.5 px when active, and its end anchor, a square of
+// half-side 7 px when active (7√2 at 45°), each by the arrow's own reach (its tip, 1.7s from its centre).
+const BEND_REACH = 6.5;
+const ANCHOR_REACH = 7 * Math.SQRT2;
+const ARROW_REACH = 1.7 * ARROW;
 
 // A segment's point and direction at its parameter midpoint (t = 0.5), in its units; null when it has no length.
 function midway(s: AbsSeg): { p: [number, number]; d: [number, number] } | null {
@@ -218,7 +225,10 @@ function midway(s: AbsSeg): { p: [number, number]; d: [number, number] } | null 
  * A path's direction arrows (for a path of two or more subpaths): SVG Lab's triangle (tip (1.7s, 0),
  * base (−s, ±s), s = 4.5 px) at the parameter midpoint of every drawing segment of nonzero length (a
  * Z's closing line too), pointing along the segment there (its derivative through toHost's linear
- * part); every subpath after the first is `inner`. At most MAX_ARROWS.
+ * part); every subpath after the first is `inner`. At most MAX_ARROWS. A straight segment (an L, H or
+ * V: the Node tool draws its bend handle on top at its midpoint) has its arrow moved along it, towards
+ * its end, just clear of that handle, when it is long enough to stay clear of its end anchor too;
+ * one shorter keeps it at the midpoint. Curves keep theirs at the midpoint.
  */
 export function directionArrows(abs: readonly AbsSeg[], toHost: Affine): Arrow[] {
   const out: Arrow[] = [];
@@ -234,7 +244,9 @@ export function directionArrows(abs: readonly AbsSeg[], toHost: Affine): Arrow[]
     if (!(len > 0)) continue;
     const ux = dx / len;
     const uy = dy / len;
-    const P = (a: number, b: number): Point => ({ x: c.x + a * ux - b * uy, y: c.y + a * uy + b * ux });
+    const past = BEND_REACH + ARROW_REACH;
+    const shift = s.type === 'L' && 'LHV'.includes(s.cmd.toUpperCase()) && len / 2 - past >= ANCHOR_REACH + ARROW_REACH ? past : 0;
+    const P = (a: number, b: number): Point => ({ x: c.x + (a + shift) * ux - b * uy, y: c.y + (a + shift) * uy + b * ux });
     out.push({ points: [P(1.7 * ARROW, 0), P(-ARROW, -ARROW), P(-ARROW, ARROW)], inner: s.sub > 0 });
   }
   return out;

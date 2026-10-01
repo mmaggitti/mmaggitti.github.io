@@ -2991,6 +2991,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "    if (bottom.local !== 'path' && Object.keys(STYLE_PROPS).some((p) => sheetSets(doc, bottom.id, p) !== 'no')) return { refused: STYLE_PAINT };\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ booleans refuse, saying why and writing nothing/,
   },
+  {
+    id: 'B564', what: 'R9: a straight segment’s arrow is drawn at its midpoint again, under its bend handle',
+    file: 'projects/draw/src/interact/path-marks.ts', from: "    const shift = s.type === 'L' && 'LHV'.includes(s.cmd.toUpperCase()) && len / 2 - past >= ANCHOR_REACH + ARROW_REACH ? past : 0;", to: '    const shift = 0;',
+    run: drawTests('editor.test.ts'), expect: /✖ the direction arrows clear the handles/,
+  },
 ];
 
 const args = process.argv.slice(2);

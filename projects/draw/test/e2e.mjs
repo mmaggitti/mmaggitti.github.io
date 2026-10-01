@@ -6397,7 +6397,8 @@ const PAPER = (px) => px.every((v) => v >= 200); // the light checkerboard, 238 
 // right (± 10°), and (50, 86), pointing left. Inspect's Fill rule → Evenodd: the pixel at (50, 55), in
 // the keyhole, is the paper's and (50, 20) is #264653; Nonzero: (50, 55) is #264653 again. An inner
 // anchor tapped, then Reverse: the source holds SVG Lab's HOLE_REV, (50, 55) is the paper's again, and
-// the inner arrow on the bottom line (50, 66) now points right; one undo gives the file back.
+// the inner arrow on the bottom line, which sits on it just past its bend handle at (50, 66) towards
+// its end (clear of the handle), now points right; one undo gives the file back.
 async function holesCutTwoWays(browser, origin) {
   const F = LAB('arcs--holes.svg');
   await withPage(browser, origin, 956, async (page, errors) => {
@@ -6419,8 +6420,15 @@ async function holesCutTwoWays(browser, origin) {
     const bottom = await arrowNear(50, 86);
     must(top && top.off <= 2 && Math.abs(top.deg) <= 10 && !top.inner, `the arrow near (50, 14) is ${JSON.stringify(top)}: not there, pointing right`);
     must(bottom && bottom.off <= 2 && Math.abs(Math.abs(bottom.deg) - 180) <= 10 && !bottom.inner, `the arrow near (50, 86) is ${JSON.stringify(bottom)}: not there, pointing left`);
-    const line = await arrowNear(50, 66);
-    must(line && line.off <= 2 && line.inner && Math.abs(Math.abs(line.deg) - 180) <= 10, `the inner bottom line's arrow is ${JSON.stringify(line)}: not an inner one pointing left`);
+    // The bottom line's inner arrow: on the line, past its bend handle (at the midpoint, radius 4.5) by more
+    // than the handle's radius and its own half-size (4.5), before the line's end, the way the line runs.
+    const lineArrow = async (dir) => {
+      const [mid, end] = await page.evaluate(rootToScreen, [[50, 66], [50 + 11 * dir, 66]]);
+      const arrows = await page.evaluate(arrowsNow);
+      return { mid, a: arrows.find((a) => a.inner && Math.abs(a.y - mid.y) <= 2 && (a.x - mid.x) * dir >= 9 && (end.x - a.x) * dir > 0) ?? null };
+    };
+    const line = await lineArrow(-1);
+    must(line.a && Math.abs(Math.abs(line.a.deg) - 180) <= 10, `the inner bottom line's arrow is not on it past its bend handle (${JSON.stringify(line.mid)}), pointing left: ${JSON.stringify(await page.evaluate(arrowsNow))}`);
     const pixels = async () => {
       await toPeek(page);
       const [hole, ring] = await page.evaluate(rootToScreen, [[50, 55], [50, 20]]);
@@ -6452,8 +6460,8 @@ async function holesCutTwoWays(browser, origin) {
     must(await undo.getAttribute('aria-label') === 'Undo Reverse', `Reverse is ${await undo.getAttribute('aria-label')}`);
     px = await pixels();
     must(PAPER(px.hole) && near3(px.ring, INK, 8), `the inner subpath reversed: the keyhole is drawn ${px.hole} (not the paper), the ring ${px.ring}`);
-    const turned = await arrowNear(50, 66);
-    must(turned && turned.off <= 2 && turned.inner && Math.abs(turned.deg) <= 10, `after Reverse the bottom line's arrow is ${JSON.stringify(turned)}: not pointing right`);
+    const turned = await lineArrow(1);
+    must(turned.a && Math.abs(turned.a.deg) <= 10, `after Reverse the bottom line's arrow is not on it past its bend handle (${JSON.stringify(turned.mid)}), pointing right: ${JSON.stringify(await page.evaluate(arrowsNow))}`);
     await undo.tap();
     must(await source(page) === F, `undo did not give the file back:\n${await source(page)}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);

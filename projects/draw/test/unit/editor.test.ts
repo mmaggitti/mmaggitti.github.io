@@ -16,6 +16,7 @@ import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
 import { rootToHostMatrix, type OverlayModel } from '../../src/interact/overlay-model.ts';
 import { measureWith } from './fakes.ts';
+import { HANDLE } from '../../src/canvas/overlay/marks.ts';
 import { layerRows } from '../../src/panels/layer-rows.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
@@ -2279,6 +2280,54 @@ test('Reverse: with an inner anchor chosen it turns that subpath alone (SVG Lab�
   assert.equal(r.editor.source(), src.replace('M 14 50 A 36 36 0 1 1 86 50\n   A 36 36 0 1 1 14 50 Z', 'M 14 50 A 36 36 0 1 0 86 50\n   A 36 36 0 1 0 14 50 Z').replace(HOLE_IN, HOLE_REV), 'every subpath, in its order');
   r.editor.undo();
   assert.equal(r.editor.source(), src, 'one entry');
+});
+
+// R9 (the P1-M3 review): a straight segment's arrow sat at its midpoint, where its bend handle is drawn
+// on top, so the keyhole's line arrows (the ones Reverse turns) hid under b6 and b7.
+test('the direction arrows clear the handles: on lab/arcs--holes.svg in the Node tool no arrow’s centre is within a handle’s radius plus the arrow’s half-size of any handle; the lines’ arrows sit past their bend handles, on the line and along it; the arcs’ stay at their midpoints; a line too short to clear its handles keeps its arrow at its midpoint', () => {
+  const S = 4.5; // the arrow's half-size (SVG Lab's s)
+  const arrowsOf = (r: Rig) => r.editor.overlayModel().paths!.arrows.map((a) => {
+    const base = { x: (a.points[1].x + a.points[2].x) / 2, y: (a.points[1].y + a.points[2].y) / 2 };
+    const len = Math.hypot(a.points[0].x - base.x, a.points[0].y - base.y);
+    const u = { x: (a.points[0].x - base.x) / len, y: (a.points[0].y - base.y) / len };
+    return { at: { x: base.x + S * u.x, y: base.y + S * u.y }, u, inner: a.inner };
+  });
+  const open = (size = HOST) => {
+    const r = rig(size);
+    r.editor.open(LAB_FILE('arcs--holes.svg'));
+    r.editor.pickTool('node');
+    r.editor.select([pathsOf(r)[0]]);
+    return r;
+  };
+  const r = open();
+  const handles = r.editor.overlayModel().handles;
+  const arrows = arrowsOf(r);
+  assert.equal(arrows.length, 6, 'test setup: two arcs, then the keyhole’s arc, two lines and closing line');
+  for (const a of arrows) {
+    for (const h of handles) {
+      const radius = HANDLE[h.kind][h.active ? 2 : 1];
+      const d = Math.hypot(a.at.x - h.at.x, a.at.y - h.at.y);
+      assert.ok(d >= radius + S, `the arrow at (${a.at.x.toFixed(1)}, ${a.at.y.toFixed(1)}) is ${d.toFixed(1)} px from ${h.id} (radius ${radius} + ${S})`);
+    }
+  }
+  // The keyhole's lines, L 61 66 from (56.7, 42) and L 39 66: each arrow on its line, past its bend handle, pointing along it.
+  for (const [from, to, bend] of [[[56.7, 42], [61, 66], 'b6'], [[61, 66], [39, 66], 'b7']] as const) {
+    const [p, q] = [hostAt(r, from[0], from[1]), hostAt(r, to[0], to[1])];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const u = { x: (q.x - p.x) / len, y: (q.y - p.y) / len };
+    const b = handleAt(r, bend);
+    const a = arrows.find((x) => Math.hypot(x.u.x - u.x, x.u.y - u.y) < 1e-6 && Math.abs((x.at.x - p.x) * u.y - (x.at.y - p.y) * u.x) < 1e-6);
+    assert.ok(a && a.inner, `an inner arrow on the line to (${to})`);
+    const along = (a.at.x - b.x) * u.x + (a.at.y - b.y) * u.y;
+    assert.ok(along > HANDLE.bend[2] && (a.at.x - q.x) * u.x + (a.at.y - q.y) * u.y < 0, `${bend}: the arrow is ${along.toFixed(1)} px past its bend handle, before its end`);
+  }
+  // The arcs keep theirs at their midpoints: SVG Lab's (50, 14) and (50, 86).
+  for (const [x, y] of [[50, 14], [50, 86]] as const) assert.ok(arrows.some((a) => !a.inner && Math.hypot(a.at.x - hostAt(r, x, y).x, a.at.y - hostAt(r, x, y).y) < 1e-6), `the ring’s arrow at (${x}, ${y})`);
+  // A small canvas: the bottom line is too short to clear its bend handle and its end anchor, so its arrow
+  // is drawn at its midpoint (under the bend handle), not moved.
+  const small = open({ width: 120, height: 150 });
+  const mid = hostAt(small, 50, 66);
+  assert.ok(arrowsOf(small).some((a) => a.inner && Math.hypot(a.at.x - mid.x, a.at.y - mid.y) < 1e-6), 'too short: the bottom line’s arrow stays at its midpoint');
 });
 
 test('the donut: Edit as donut changes only the holder’s start tag (one entry); a slice then shows only its donut’s boundary handles, in Select and the Node tool alike, and the % labels; a boundary drag is one "Set donut values" entry whose frames regenerate the slices (SVG Lab’s rule, each value at least 1); a slice moved by M1’s drag detaches the donut with M2’s notice, and one undo restores it', () => {
