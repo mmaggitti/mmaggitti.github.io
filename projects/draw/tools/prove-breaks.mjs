@@ -2975,6 +2975,17 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    if (this.#pen && !PEN_LABELS.has(label)) this.#endPen(true);\n', to: '',
     run: drawTests('pen.test.ts'), expect: /✖ an entry the Pen doesn’t own ends the Pen first/,
   },
+  {
+    id: 'B561', what: 'R6: a boolean flattens within 0.01 units again (the absolute tolerance back: ×10⁶ flattens to a thousand times the points)',
+    file: 'engine/path/winding.ts', from: '  return diag > 0 && Number.isFinite(diag) ? FLAT_SHARE * diag : FLAT;', to: '  return FLAT;',
+    run: drawTests('booleans.test.ts'), expect: /✖ a boolean’s cost follows what is drawn, not its units/,
+  },
+  {
+    // The points check reads the tolerance helper itself, so only the timing sees the score alone go back to 0.01 units.
+    id: 'B562', what: 'R6: the self-check (booleanScore) flattens within 0.01 units again, so its cost grows with the drawing’s units',
+    file: 'engine/path/winding.ts', from: '  const flat = flatFor(inputs.map((i) => i.abs));', to: '  const flat = FLAT;',
+    run: drawTests('booleans.test.ts'), expect: /✖ a boolean’s cost follows what is drawn, not its units/,
+  },
 ];
 
 const args = process.argv.slice(2);

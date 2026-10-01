@@ -16,7 +16,7 @@ import type { AbsSeg } from './abs.ts';
 import { arcToCubics } from './arc.ts';
 import { fmt } from '../values/number-format.ts';
 import { apply, type Affine } from '../values/affine.ts';
-import { polygons, windingOf, type Pt } from './winding.ts';
+import { flatFor, polygons, windingOf, type Pt } from './winding.ts';
 
 export type LoopSeg = { type: 'L'; to: Pt } | { type: 'C'; c1: Pt; c2: Pt; to: Pt };
 export interface Loop {
@@ -172,9 +172,10 @@ function depthOf(polys: readonly Pt[][], boxes: readonly Box[], holders: readonl
   return depth;
 }
 
-/** The loops turned by nesting depth: even depths clockwise on screen, odd ones the other way. */
+/** The loops turned by nesting depth: even depths clockwise on screen, odd ones the other way (curves flattened within FLAT_SHARE of the loops' box). */
 export function orientLoops(loops: readonly Loop[]): Loop[] {
-  const polys = loops.map((l) => polygons(loopsToAbs([l]))[0] ?? []);
+  const flat = flatFor([loopsToAbs(loops)]);
+  const polys = loops.map((l) => polygons(loopsToAbs([l]), flat)[0] ?? []);
   const boxes = polys.map(boxOf);
   const holders = holdersOf(boxes);
   return loops.map((l, i) => ((shoelace(polys[i]) > 0) === (depthOf(polys, boxes, holders(i), i) % 2 === 0) ? l : reversed(l)));

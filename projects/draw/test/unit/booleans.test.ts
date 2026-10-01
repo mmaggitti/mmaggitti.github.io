@@ -14,7 +14,9 @@ import assert from 'node:assert/strict';
 import { attrValue, descendants, parseDoc, type ElementNode } from '../../../../engine/model/doc.ts';
 import { shapeOutline } from '../../../../engine/path/from-shape.ts';
 import { loopsToAbs, toLoops, type Loop } from '../../../../engine/path/loops.ts';
-import { booleanScore, crossingsOf, polygons, windingOf, type BoolOp, type Score } from '../../../../engine/path/winding.ts';
+import { booleanScore, crossingsOf, flatFor, polygons, windingOf, type BoolOp, type Score } from '../../../../engine/path/winding.ts';
+import { parsePath } from '../../../../engine/path/parse.ts';
+import { toAbsolute } from '../../../../engine/path/abs.ts';
 import { EMPTY, OFFLINE, REFUSED, resultLoops, runPipeline, worst, type BoolInput, type Combine, type Libraries } from '../../src/paths/pipeline.ts';
 import { combine as pathBool } from '../../src/paths/booleans.ts';
 import { combine as paperCore } from '../../src/paths/paper-fallback.ts';
@@ -173,4 +175,54 @@ test('a polyline combines as SVG fills it, closed back to its start', async () =
   assert.ok('loops' in out, `refused: ${'refused' in out ? out.refused : ''}`);
   assert.ok(worst(scoreOf(inputs, 'union', out.loops)) <= CORPUS.limit);
   assert.notEqual(windingOf(polygons(loopsToAbs(out.loops)), 50, 40), 0, 'the inside the closing edge encloses is filled');
+});
+
+// R6 (the P1-M3 review): a boolean flattened every curve to within 0.01 units, so the same drawing cost
+// more the larger its coordinates (a CAD or GIS export): 200 curves and a circle at ×10⁶ flattened to
+// 1.66 M points and Union took 2.6 s (1,000 curves: 8.1 s and 1 GB). The score and the result's
+// orientation flatten within a share of the operands' box now. The library is a stand-in that answers
+// at once with path-bool's own union (found once, outside the timing), so what is timed is Draw's
+// work. Measured in node: about 4 ms a run at both scales; with the absolute flattening, 2.3 s at ×10⁶.
+test('a boolean’s cost follows what is drawn, not its units: the same union at ×1 and ×10⁶ flattens to the same points, and Draw’s own work on it (the result oriented and scored) takes about the same time at both', async () => {
+  const at = (k: number) => {
+    const s = (v: number) => String(v * k);
+    let wavy = `M ${s(10)} ${s(50)}`;
+    for (let i = 0; i < 200; i++) {
+      const [x0, x1] = [10 + (80 * i) / 200, 10 + (80 * (i + 1)) / 200];
+      wavy += ` C ${s(x0 + (x1 - x0) / 3)} ${s(i % 2 ? 40 : 60)} ${s(x0 + (2 * (x1 - x0)) / 3)} ${s(i % 2 ? 40 : 60)} ${s(x1)} ${s(50)}`;
+    }
+    wavy += ` L ${s(90)} ${s(90)} L ${s(10)} ${s(90)} Z`;
+    const arc = (x: number, y: number) => `A ${s(30)} ${s(30)} 0 0 1 ${s(x)} ${s(y)}`;
+    const circle = `M ${s(80)} ${s(50)} ${arc(50, 80)} ${arc(20, 50)} ${arc(50, 20)} ${arc(80, 50)} Z`;
+    const abs = [wavy, circle].map((d) => toAbsolute(parsePath(d)));
+    const inputs: BoolInput[] = abs.map((a) => ({ loops: toLoops(a), rule: 'nonzero' }));
+    const flat = flatFor(abs);
+    return { inputs, points: abs.map((a) => polygons(a, flat).reduce((n, p) => n + p.length, 0)), union: pathBool(inputs, 'union') };
+  };
+  const one = at(1);
+  const big = at(1e6);
+  assert.deepEqual(big.points, one.points, 'the same points at ×10⁶ as at ×1');
+  const work = (c: ReturnType<typeof at>) => async () => {
+    const out = await runPipeline(c.inputs, 'union', { primary: async () => () => c.union, fallback: () => Promise.reject(new Error('the stand-in never fails')) });
+    assert.ok('loops' in out, 'test setup: the union is written');
+  };
+  // Five runs back to back are timed together (one is a few ms); past 2 s the rest aren't run and the time is extrapolated.
+  const time = async (act: () => Promise<void>) => {
+    const t = performance.now();
+    for (let i = 1; i <= 5; i++) {
+      await act();
+      if (performance.now() - t > 2000 && i < 5) return ((performance.now() - t) * 5) / i;
+    }
+    return performance.now() - t;
+  };
+  await work(one)(); // warm the engine up
+  let small = await time(work(one));
+  let large = await time(work(big));
+  // A pause of the runner's can land in one run: a miss is measured twice more, and the fastest run of each scale counts.
+  for (let again = 0; again < 2 && (large >= 2 * small || large >= 1000) && large < 4000; again++) {
+    small = Math.min(small, await time(work(one)));
+    large = Math.min(large, await time(work(big)));
+  }
+  assert.ok(large < 2 * small, `Draw’s work on the union, five times: ${small.toFixed(0)} ms at ×1, ${large.toFixed(0)} ms at ×10⁶ (×${(large / small).toFixed(1)}; the most is ×2)`);
+  assert.ok(large < 1000, `Draw’s work on the union at ×10⁶, five times: ${large.toFixed(0)} ms (the limit is 1000)`);
 });
