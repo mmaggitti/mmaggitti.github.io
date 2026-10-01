@@ -4,7 +4,7 @@
   "name": "Car engine (cad-kernel reference model)",
   "asset": {
     "format": "cad-core",
-    "version": "0.2",
+    "version": "0.3",
     "generator": "cadk-conformance engine 0.1.0"
   },
   "dependencies": {},

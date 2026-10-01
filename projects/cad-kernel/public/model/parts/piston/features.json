@@ -7,7 +7,7 @@
       "name": "Piston body",
       "angle": 360,
       "axis": "@sk1.l18",
-      "operation": "new",
+      "combine": "new",
       "profile": "@sk1"
     },
     {
@@ -37,10 +37,10 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Pin bore",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk2"
     },
     {

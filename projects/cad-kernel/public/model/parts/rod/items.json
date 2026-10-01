@@ -50,12 +50,12 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Rod blank",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 22,
         "symmetric": true
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -83,12 +83,12 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Big and small end bores",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 44,
         "symmetric": true
       },
-      "operation": "cut",
       "profile": "@sk2"
     },
     {
@@ -124,11 +124,11 @@
       "id": "ex3",
       "type": "feature.extrude",
       "name": "Rod bolt holes",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 92
       },
-      "operation": "cut",
       "profile": "@sk3"
     },
     {
@@ -168,20 +168,20 @@
       "id": "ex4",
       "type": "feature.extrude",
       "name": "Rod",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 44,
         "symmetric": true
       },
-      "operation": "new",
       "profile": "@sk4"
     },
     {
       "id": "b1",
       "type": "feature.boolean",
       "name": "Rod from blank",
+      "combine": "intersect",
       "keepTools": true,
-      "operation": "intersect",
       "target": "@ex4",
       "tools": ["@ex1"]
     },
@@ -189,8 +189,8 @@
       "id": "b2",
       "type": "feature.boolean",
       "name": "Cap from blank",
+      "combine": "cut",
       "keepTools": true,
-      "operation": "cut",
       "target": "@ex1",
       "tools": ["@ex4"]
     },

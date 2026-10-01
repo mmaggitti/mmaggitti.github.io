@@ -1,0 +1,57 @@
+{
+ "about": "What this WebAssembly build is and how it was made (Core & Seams ADR-011).",
+ "kernel": {
+  "name": "cad-kernel",
+  "version": "0.1.0",
+  "standard": "geometry kernel standard 0.3",
+  "tier": 4
+ },
+ "commit": "8de2237e92fe94bb0f6101f42beec4c54dd9916e",
+ "build": {
+  "target": "wasm32-unknown-unknown",
+  "profile": "wasm",
+  "rustc": "1.94.1",
+  "rustcCommit": "e408947bfd200af42db322daf0fadfe7e26d3bd1",
+  "wasmBindgen": "0.2.129",
+  "pathsRemapped": true
+ },
+ "files": {
+  "cadk_wasm_bg.wasm": {
+   "bytes": 3711900,
+   "gzipBytes": 1120580,
+   "sha256": "4d7fcb9591bf00fb45a6e45416bf13d59dc66157dfd2f5fe9558f0d0b64e54d3"
+  },
+  "cadk_wasm.js": {
+   "bytes": 37445,
+   "sha256": "bc5b9dac64ff2af734633b4a0346bcdee4d1a4350ff3bd9df6d604f5681766e2"
+  }
+ },
+ "conformance": {
+  "requirementsPassing": 65,
+  "throughTier": 4,
+  "determinismDigest": "eeb97372a1b9f1b50b0e22fd7defba85c2f9a63aec92499179263cd954e1329c",
+  "engineTier": 5
+ },
+ "linkedCrates": [
+  "allocator-api2 0.2.21",
+  "block-buffer 0.12.1",
+  "cfg-if 1.0.5",
+  "crypto-common 0.2.2",
+  "digest 0.11.3",
+  "equivalent 1.0.2",
+  "foldhash 0.2.0",
+  "hashbrown 0.16.1",
+  "hybrid-array 0.4.15",
+  "libm 0.2.16",
+  "num-traits 0.2.19",
+  "once_cell 1.21.4",
+  "robust 1.2.0",
+  "sha2 0.11.0",
+  "smallvec 1.16.2",
+  "spade 2.15.1",
+  "typenum 1.20.1",
+  "unicode-ident 1.0.26",
+  "wasm-bindgen 0.2.129",
+  "wasm-bindgen-shared 0.2.129"
+ ]
+}

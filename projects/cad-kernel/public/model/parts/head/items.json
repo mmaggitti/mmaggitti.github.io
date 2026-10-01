@@ -38,11 +38,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Head",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 100
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -64,11 +64,11 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Combustion chamber",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 10
       },
-      "operation": "cut",
       "profile": "@sk2"
     },
     {
@@ -107,10 +107,10 @@
       "id": "ex3",
       "type": "feature.extrude",
       "name": "Valve guide bore",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk3"
     },
     {
@@ -140,11 +140,11 @@
       "id": "ex5",
       "type": "feature.extrude",
       "name": "Valve pocket",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 20.64213562373095
       },
-      "operation": "cut",
       "profile": "@sk5"
     },
     {
@@ -183,10 +183,10 @@
       "id": "ex4",
       "type": "feature.extrude",
       "name": "Valve guide bore",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk4"
     },
     {
@@ -216,11 +216,11 @@
       "id": "ex6",
       "type": "feature.extrude",
       "name": "Valve pocket",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 18.64213562373095
       },
-      "operation": "cut",
       "profile": "@sk6"
     },
     {
@@ -320,11 +320,11 @@
       "id": "ex7",
       "type": "feature.extrude",
       "name": "Spring pocket",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 35.47827855400848
       },
-      "operation": "cut",
       "profile": "@sk7"
     },
     {
@@ -354,11 +354,11 @@
       "id": "ex8",
       "type": "feature.extrude",
       "name": "Spring pocket",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 35.47827855400848
       },
-      "operation": "cut",
       "profile": "@sk8"
     },
     {
@@ -433,7 +433,7 @@
       "id": "sw1",
       "type": "feature.sweep",
       "name": "Intake port",
-      "operation": "cut",
+      "combine": "cut",
       "path": "@sk9",
       "profile": "@sk10"
     },
@@ -496,7 +496,7 @@
       "id": "lo1",
       "type": "feature.loft",
       "name": "Exhaust port",
-      "operation": "cut",
+      "combine": "cut",
       "profiles": ["@sk11", "@sk12"]
     },
     {

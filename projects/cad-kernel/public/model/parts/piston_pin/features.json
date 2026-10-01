@@ -5,12 +5,12 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Pin body",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": "=pin_len",
         "symmetric": true
       },
-      "operation": "new",
       "profile": {
         "regionPoints": [
           [8, 0]

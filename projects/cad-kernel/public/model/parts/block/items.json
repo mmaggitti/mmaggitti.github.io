@@ -62,11 +62,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Block",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": "=deck + 70 mm"
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -106,11 +106,11 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Crankcase bay",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": 160
       },
-      "operation": "cut",
       "profile": "@sk2"
     },
     {
@@ -141,12 +141,12 @@
       "id": "ex3",
       "type": "feature.extrude",
       "name": "Cylinder bore",
+      "combine": "cut",
       "extent": {
         "type": "distance",
         "distance": "=deck - 90 mm",
         "reverse": true
       },
-      "operation": "cut",
       "profile": "@sk3"
     },
     {
@@ -177,10 +177,10 @@
       "id": "ex4",
       "type": "feature.extrude",
       "name": "Main bearing bore",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk4"
     },
     {
@@ -202,10 +202,10 @@
       "id": "ex5",
       "type": "feature.extrude",
       "name": "Main oil gallery",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk5"
     },
     {
@@ -257,7 +257,7 @@
           "ex1.side[l3]/ex1.side[l4]",
           "ex1.side[l1]/ex1.side[l4]"
         ],
-        "query": {
+        "rule": {
           "edgesOf": "@ex1",
           "where": {
             "curve": "line",

@@ -52,7 +52,8 @@ export class AssemblyModel {
     /**
      * A motion study: sweep `param` through `values` (a JSON array, base units), solving at
      * each from the last, and clash-check at the step indices `checks` (a JSON array) every
-     * pair of bodies whose boxes come within `near`. Returns `cadk.motion` JSON.
+     * pair of bodies whose boxes come within `near`, in the package's length unit; a `near` of 0
+     * picks the default, 5 mm in that unit. Returns `cadk.motion` JSON.
      * @param {string} param
      * @param {string} values
      * @param {string} checks
@@ -221,7 +222,9 @@ export class Rebuilt {
         return v1;
     }
     /**
-     * Each part's state and the items that failed, as JSON.
+     * Each part's and assembly's state, the items that failed and the errors of it as a whole,
+     * as JSON: `{id: {state, bodies | instances, errors, messages?}}` for the configuration
+     * rebuilt, or `{configuration: {id: …}}` for every one (`rebuildPackage(…, 'all')`).
      * @returns {string}
      */
     get summary() {
@@ -451,7 +454,8 @@ export class Session {
     }
     /**
      * Mass properties (Q4.1): [volume, area, mass, centroid x, y, z, inertia (9, row-major,
-     * about the centroid)].
+     * about the centroid)]. A density that isn't finite fails as `input.not_finite`, a negative
+     * one as `mass_properties.negative_density` (standard 5.1).
      * @param {number} h
      * @param {number} density
      * @returns {Float64Array}
@@ -472,7 +476,9 @@ export class Session {
         return this;
     }
     /**
-     * Read brep.json (T3.1): `{"bodies": [handles], "names": {...}, "header": {...}}`.
+     * Read brep.json (T3.1): `{"bodies": [handles], "names": {...}, "header": {...}}`. The
+     * bodies are built at the file's tolerance, or without one at 1e-7 mm in its length unit
+     * (standard 5.2).
      * @param {string} text
      * @param {string} version
      * @returns {string}
@@ -568,7 +574,9 @@ export class Session {
     }
     /**
      * Tessellate (H1.1, H1.2). A chord of 0 picks the default for the body's size (standard
-     * 15.1); an angle of 0 picks the default, 0.2 rad.
+     * 15.1); an angle of 0 picks the default, 0.2 rad. Any other value goes to the kernel as
+     * given, which refuses NaN and infinity as `input.not_finite` (standard 5.1) and a
+     * negative tolerance as `mesh.invalid_tolerance`.
      * @param {number} h
      * @param {number} chord
      * @param {number} angle
@@ -635,7 +643,8 @@ export class Session {
     }
     /**
      * Write brep.json (T3.1) for bodies, with the Rebuilder's names and header (the same shapes
-     * `readBrepJson` returns).
+     * `readBrepJson` returns). A header without a tolerance is written at 1e-7 mm in its length
+     * unit.
      * @param {Uint32Array} handles
      * @param {string} names_json
      * @param {string} header_json

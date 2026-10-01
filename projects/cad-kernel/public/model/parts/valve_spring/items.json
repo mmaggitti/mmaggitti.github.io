@@ -40,7 +40,7 @@
       "id": "sw1",
       "type": "feature.sweep",
       "name": "Coil",
-      "operation": "new",
+      "combine": "new",
       "path": "@coil",
       "profile": "@sk1"
     },
