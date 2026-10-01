@@ -6211,7 +6211,7 @@ async function theLetterCycleAndRelativeKeepTheRestOfThePath(browser, origin) {
 }
 
 // At 956 and 796 tall: the ToolRail's Pen and Node at least 44 × 44; the Pen's bar (Undo point,
-// Close, Done) and the Node tool's bar (Deselect, Smooth, Close, Relative, Reverse, More) each inside the
+// Close, Done, Done with the accent background of the primary look) and the Node tool's bar (Deselect, Smooth, Close, Relative, Reverse, More) each inside the
 // 440 pt bar, every button at least 44 × 44, in order without overlap, in the bottom thumb zone and
 // above the home indicator; no sideways scroll and every tap target and field as the phone rules
 // say; and a press 20 pt from a node handle takes it.
@@ -6247,6 +6247,16 @@ async function phoneRulesOnThePenAndNodeTools(browser, origin, height) {
       await page.waitForTimeout(50);
     }
     await bar('the Pen', ['Undo point', 'Close', 'Done']);
+    // Done has the primary look (§5.2): the accent background, as ds.css's .ds-btn--primary paints it.
+    const done = await page.locator('.draw-ctx-btn[aria-label="Done"]').evaluate((el) => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--accent)';
+      document.body.append(probe);
+      const accent = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return { background: getComputedStyle(el).backgroundColor, accent };
+    });
+    if (done.background !== done.accent) problems.push(`the Pen: Done's background is ${done.background}, not the accent (${done.accent})`);
     await page.locator('.draw-ctx-btn[aria-label="Done"]').tap();
     // The Node tool's bar on the wave, its middle node chosen (Q into Q: Smooth applies).
     const w = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 44 });

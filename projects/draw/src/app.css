@@ -547,6 +547,8 @@
 .draw-ctx-btn { display: inline-grid; place-items: center; width: var(--tap-min); padding: 0; }
 .draw-ctx-btn svg { width: 1.5rem; height: 1.5rem; }
 .draw-ctx-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* A key with the primary look (the Pen's Done): .draw-key's own background would win over ds.css's. */
+.draw-key.ds-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .draw-ctx-btn:disabled { color: var(--text-muted); opacity: 0.5; }
 /* The Shapes tool's kind picker: seven 44 pt buttons spaced as the bar spaces Cancel after them. */
 .draw-shape-kinds { display: flex; gap: var(--space-2); flex: 0 0 auto; }
