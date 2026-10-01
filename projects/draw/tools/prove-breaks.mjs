@@ -3367,6 +3367,11 @@ const BREAKS = [
     file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bFontFace\\b|\\bdocument\\s*\\??\\.\\s*fonts\\b|\\[\\s*['\"`]fonts['\"`]\\s*\\]|\\{[^}]*\\bfonts\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*document\\b/,", to: "['font-face', /\\bnew\\s+FontFace\\s*\\(|\\bdocument\\.fonts\\b/,",
     run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks bans the name FontFace in any spelling/,
   },
+  {
+    id: 'B636', what: 'a Reserved Font Name counts only when quoted (“…with Reserved Font Name Oswald.” reserves nothing, so With fonts would embed it)',
+    file: 'projects/draw/src/platform/fonts.ts', from: ' : bare ? bare[0].split(/\\s+(?:and|&)\\s+/i) : [family];', to: ' : [];',
+    run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
+  },
 ];
 
 const args = process.argv.slice(2);

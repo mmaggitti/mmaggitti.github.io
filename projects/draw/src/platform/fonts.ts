@@ -127,12 +127,22 @@ export function sniffFont(b: Uint8Array): FontFormat | null {
   return null;
 }
 
-/** The Reserved Font Names a copyright or licence string gives ("…with Reserved Font Name 'Source'"). */
-export function reservedNames(...texts: string[]): string[] {
+/**
+ * The Reserved Font Names a font's copyright or licence string gives. Any mention of "Reserved Font
+ * Name(s)" or "Reserved Name(s)" reserves (strict, as Mark chose: a wrong reservation only writes
+ * paths): the quoted names after it ("…with Reserved Font Name 'Source'", "Reserved Names "PT Sans"
+ * and "ParaType""), else the name that follows it, up to punctuation ("…with Reserved Font Name
+ * Oswald.", "Reserved Font Name: Gentium."), else `family` itself.
+ */
+export function reservedNames(family: string, ...texts: string[]): string[] {
   const out = new Set<string>();
   for (const t of texts) {
-    for (const m of t.matchAll(/Reserved\s+Font\s+Names?\s*((?:["“'‘][^"”'’]+["”'’]\s*(?:,|and|&)?\s*)+)/gi)) {
-      for (const q of m[1].matchAll(/["“'‘]([^"”'’]+)["”'’]/g)) out.add(q[1].trim());
+    for (const m of t.matchAll(/Reserved\s+(?:Font\s+)?Names?\b/gi)) {
+      const after = t.slice(m.index + m[0].length).replace(/^\s*:?\s*/, '');
+      const quoted = /^(?:["“'‘][^"”'’]+["”'’]\s*(?:,|and\b|&)?\s*)+/i.exec(after);
+      const bare = quoted ? null : /^[\p{L}\p{N}][^.,;:()[\]"“”'‘’\r\n]*/u.exec(after);
+      const names = quoted ? [...quoted[0].matchAll(/["“'‘]([^"”'’]+)["”'’]/g)].map((q) => q[1]) : bare ? bare[0].split(/\s+(?:and|&)\s+/i) : [family];
+      for (const n of names) if (n.trim()) out.add(n.trim());
     }
   }
   return [...out];
@@ -314,7 +324,7 @@ export function createFonts(deps: FontDeps): Fonts {
       if (badName) throw new FontError(badName);
       if (appFontName(family)) throw new FontError(namedLikeApp(family));
       const id = await deps.sha256(bytes);
-      const font: MyFont = { id, family, weight: info.weight, style: info.italic ? 'italic' : 'normal', fileName, format, bytes: copy(bytes), added: deps.now(), copyright: info.copyright, licence: info.licence, reserved: reservedNames(info.copyright, info.licence), fsType: info.fsType };
+      const font: MyFont = { id, family, weight: info.weight, style: info.italic ? 'italic' : 'normal', fileName, format, bytes: copy(bytes), added: deps.now(), copyright: info.copyright, licence: info.licence, reserved: reservedNames(family, info.copyright, info.licence), fsType: info.fsType };
       try {
         await deps.kv.set(FONT_PREFIX + id, font);
       } catch (e) {

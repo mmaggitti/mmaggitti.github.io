@@ -14,6 +14,7 @@ import { parseDoc, serialize, type Doc } from '../../../../engine/model/doc.ts';
 import { exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { LATIN_RANGE, catalogueFamily, faceFile, hasFace } from '../../src/platform/font-catalogue.ts';
+import { reservedNames } from '../../src/platform/fonts.ts';
 import { NOT_HELD } from '../../../../engine/text/outline.ts';
 import { cssAllowed } from '../../../../scripts/lib/svg-profile.mjs';
 
@@ -100,6 +101,23 @@ test('embedding by OS/2 fsType: bitmapOnly never; editable always; otherwise onl
   assert.equal(embeddable(0x2 | 0x8), true, 'editable wins');
   assert.equal(embeddable(0x100), true, 'noSubsetting');
   assert.equal(embeddable(0x8 | 0x200), false, 'bitmapOnly');
+});
+
+test('With fonts writes one of your fonts whose copyright reserves a name without quotes (“…with Reserved Font Name Oswald.”) as paths, saying so, and embeds nothing', async () => {
+  const copyright = 'Copyright (c) 2011, Vernon Adams, with Reserved Font Name Oswald.';
+  const inter = file('inter', 'inter-latin-400-normal.woff2');
+  // One of yours (editor.ts exportDeps: its record’s reserved names, read when it was added), drawn from Inter’s file here.
+  const mine: ExportDeps = {
+    textDeps: (own) => ({ ...deps.textDeps(own), bytes: async (f) => (f.family === 'Oswald' ? inter : deps.textDeps(own).bytes(f)), range: (f) => (f.family === 'Oswald' ? null : LATIN_RANGE) }),
+    faces: (family) => (family === 'Oswald' ? { weights: [400], italics: [] } : deps.faces(family)),
+    held: (f) => (f.family === 'Oswald' && f.weight === 400 && f.style === 'normal' ? { family: 'Oswald', reserved: reservedNames('Oswald', copyright, 'SIL Open Font License 1.1'), copyright, licence: 'SIL Open Font License 1.1', format: 'woff2' } : deps.held(f)),
+  };
+  const out = await prepareExport(load('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text id="o" x="5" y="30" font-family="Oswald, sans-serif" font-size="20">Mine</text></svg>'), 'mine', 'fonts', mine);
+  assert.ok(!('refused' in out), 'refused' in out ? out.refused : '');
+  const t = text(out as Prepared);
+  assert.match(t, /<path id="o" d="M [^"]+" aria-label="Mine"\/>/);
+  assert.doesNotMatch(t, /@font-face/);
+  assert.deepEqual((out as Prepared).notes, [reservesName('Oswald', 'Oswald')]);
 });
 
 test('a text library that won’t load refuses (the sheet falls back to As text)', async () => {

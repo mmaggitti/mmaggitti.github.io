@@ -208,7 +208,19 @@ test('the format comes from the first four bytes; reserved names from a copyrigh
   assert.equal(sniffFont(b('true....')), 'truetype');
   assert.equal(sniffFont(b([0, 1, 0, 0, 9])), 'truetype');
   assert.equal(sniffFont(b('<svg')), null);
-  assert.deepEqual(reservedNames('Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name \'Source\'. Copyright 2019 Google LLC.'), ['Source']);
-  assert.deepEqual(reservedNames('with Reserved Font Names “Alpha” and “Beta”', 'no names here'), ['Alpha', 'Beta']);
-  assert.deepEqual(reservedNames('Copyright 2017 IBM Corp. All rights reserved.'), []);
+  assert.deepEqual(reservedNames('Source Sans 3', 'Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name \'Source\'. Copyright 2019 Google LLC.'), ['Source']);
+  assert.deepEqual(reservedNames('Alpha Beta', 'with Reserved Font Names “Alpha” and “Beta”', 'no names here'), ['Alpha', 'Beta']);
+  assert.deepEqual(reservedNames('IBM Plex Sans', 'Copyright 2017 IBM Corp. All rights reserved.'), []);
+});
+
+test('any mention of a Reserved Font Name reserves (strict: a wrong reservation only writes paths): the quoted names, else the name that follows it, else the family itself; one of your fonts added with such a copyright is stored with it', async () => {
+  assert.deepEqual(reservedNames('Oswald', 'Copyright (c) 2011, Vernon Adams, with Reserved Font Name Oswald.'), ['Oswald']);
+  assert.deepEqual(reservedNames('PT Sans', 'Copyright © 2009 ParaType Ltd. with Reserved Names "PT Sans" and "ParaType".'), ['PT Sans', 'ParaType']);
+  assert.deepEqual(reservedNames('Gentium Plus', 'with Reserved Font Name: Gentium.'), ['Gentium']);
+  assert.deepEqual(reservedNames('Noto Sans', 'Reserved Font Names Noto and Roboto.'), ['Noto', 'Roboto']);
+  assert.deepEqual(reservedNames('Odd Sans', 'This licence defines “Reserved Font Name” as any name given after the copyright.'), ['Odd Sans'], 'no name given: the family itself');
+  assert.deepEqual(reservedNames('Plain', 'Copyright 2020 Someone. All rights reserved.', 'SIL Open Font License 1.1'), [], 'no mention: nothing reserved');
+  const r = rig();
+  r.info.set('wOF2oswald', INFO('Oswald', 400, false, 'Copyright (c) 2011, Vernon Adams, with Reserved Font Name Oswald.'));
+  assert.deepEqual((await r.fonts.add(fontFile('oswald'), 'Oswald.woff2')).reserved, ['Oswald']);
 });
