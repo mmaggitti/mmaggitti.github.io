@@ -430,16 +430,6 @@ const pathTokens = (letters: boolean): Grammar => (v, at, emit, prop) => {
 const path: Grammar = pathTokens(false);
 const pathD: Grammar = pathTokens(true);
 
-/**
- * The tokens a <path>'s d would have for this raw text, which must hold no reference (Draw's segment
- * rewrites refuse one first): what engine/path/segments.ts re-reads an edit with.
- */
-export function tokenizePathData(raw: string): Token[] {
-  const out: Token[] = [];
-  pathD(raw, 0, collector({ raw, s: raw, map: null, bad: null }, out), 'd');
-  return inOrder(out);
-}
-
 const FN = /([A-Za-z][\w-]*)[ \t\n\r\f]*\(/y;
 
 /**
