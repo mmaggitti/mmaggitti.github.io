@@ -3422,6 +3422,11 @@ const BREAKS = [
     file: 'projects/draw/src/export/svg.ts', from: '    if (ruled.length) notes.push(ruledFonts(ruled));\n', to: '',
     run: drawTests('export-text.test.ts'), expect: /✖ With fonts names the texts whose font a <style> rule sets/,
   },
+  {
+    id: 'B647', what: 'the import report files the Dublin Core items the Access tab edits under Kept as-is without a word',
+    file: 'engine/report/import-report.ts', from: "  if (dc.length) notes.push(", to: "  if (dc.length < 0) notes.push(",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ metadata \(RDF, Dublin Core, Creative Commons\) is kept as-is; from P1-M4 the Access tab edits/,
+  },
 ];
 
 const args = process.argv.slice(2);

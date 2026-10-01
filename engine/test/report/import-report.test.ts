@@ -92,7 +92,7 @@ test('external entities a DOCTYPE declares are listed in the notes: never fetche
   assert.ok(!importReport(load('tools/inkscape-plain-svg.svg')).notes.some((n) => /external entit/.test(n)), 'a file without any says nothing');
 });
 
-test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is, never editable', () => {
+test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is; from P1-M4 the Access tab edits its Dublin Core items, and a note says so', () => {
   const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:cc="http://creativecommons.org/ns#" xmlns:ccl="http://web.resource.org/cc/">
   <metadata><rdf:RDF><cc:Work rdf:about=""><dc:format>image/svg+xml</dc:format><dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/><dcterms:created>2026</dcterms:created><cc:license rdf:resource="http://creativecommons.org/licenses/by/4.0/"/></cc:Work>
   <cc:License rdf:about="http://creativecommons.org/licenses/by/4.0/"><cc:permits rdf:resource="http://creativecommons.org/ns#Reproduction"/></cc:License><ccl:Work/></rdf:RDF></metadata>
@@ -104,12 +104,16 @@ test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is, never editabl
   assert.deepEqual([...new Set(metadata.map((i) => i.bucket))], ['kept'], metadata.map((i) => `${i.name} ${i.bucket}`).join(', '));
   assert.equal(metadata.reduce((n, i) => n + i.count, 0), 14, 'every metadata element (9) and attribute (5) is counted');
   assert.deepEqual(report.items.filter((i) => i.bucket === 'editable').map((i) => i.name).sort(), ['height', 'metadata', 'rect', 'svg', 'width']);
+  assert.ok(report.notes.includes('Its Dublin Core item (dcterms:created) is kept as written and edited in the Access tab.'), report.notes.join(' | '));
 
   // A real Inkscape file: its Creative Commons block and its own settings are all kept; nothing is unclassified.
   const ink = importReport(load('tools/inkscape-1x-layers.svg'));
   const editable = ink.items.filter((i) => i.bucket === 'editable').map((i) => i.name);
   assert.deepEqual(editable.filter((n) => /^(rdf|dc|dcterms|cc|inkscape|sodipodi):/.test(n)), [], 'no metadata or editor data under Editable');
   assert.deepEqual(ink.totals, { editable: 93, kept: 72, preview: 0, unclassified: 0 });
+  assert.deepEqual(ink.notes, ['Its Dublin Core item (dc:title) is kept as written and edited in the Access tab.']);
+  assert.ok(importReport(load('tools/matplotlib-line-plot.svg')).notes.includes('Its Dublin Core items (dc:date, dc:creator) are kept as written and edited in the Access tab.'));
+  assert.ok(!importReport(load('lab/access.svg')).notes.some((n) => /Dublin Core/.test(n)), 'a file with none says nothing');
 });
 
 test("a plain attribute on a foreign element takes that element's class, not an SVG attribute's", () => {

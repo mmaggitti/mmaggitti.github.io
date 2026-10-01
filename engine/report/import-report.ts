@@ -9,7 +9,8 @@
 // the external entities a DOCTYPE declares (never fetched). P1-M4: the file's own fonts (its data:
 // @font-face faces, which Draw registers so both engines draw them), and the ones it doesn't load: a
 // face named like Draw's own interface fonts (it would restyle Draw itself), and faces over the limits.
-// P1-M4 S3: the style rules that can't match on the canvas (focus, tabindex and link selectors).
+// P1-M4 S3: the style rules that can't match on the canvas (focus, tabindex and link selectors), and
+// the Dublin Core items the Access tab shows: kept as written (their rows' class), and edited there.
 
 import { descendants, NS, type Doc, type ElementNode } from '../model/doc.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
@@ -20,6 +21,7 @@ import { cssSets, unmatchableRules } from '../geometry/css.ts';
 import { rootFontSize } from '../geometry/lengths.ts';
 import { fmt } from '../values/number-format.ts';
 import { FACE_MAX, FACES_MAX, appFontName, fontFaces } from '../text/font-faces.ts';
+import { metaOf } from '../access/metadata.ts';
 
 export type Bucket = 'editable' | 'kept' | 'preview' | 'unclassified';
 
@@ -120,6 +122,8 @@ export function importReport(doc: Doc): ImportReport {
   notes.push(...fontNotes(doc));
   const unmatchable = unmatchableRules(doc);
   if (unmatchable) notes.push(`${unmatchable} style rule${unmatchable > 1 ? 's' : ''} can’t match on the canvas: its shapes are never focused and never links.`);
+  const dc = [...new Set(metaOf(doc).items.map((i) => i.key))];
+  if (dc.length) notes.push(`Its Dublin Core ${dc.length > 1 ? 'items' : 'item'} (${dc.slice(0, 5).join(', ')}${dc.length > 5 ? ', …' : ''}) ${dc.length > 1 ? 'are' : 'is'} kept as written and edited in the Access tab.`);
   return { totals, items, notes, rem: { count: rems.attributes, convertible, why: convertible ? null : REM_UNCONVERTIBLE } };
 }
 
