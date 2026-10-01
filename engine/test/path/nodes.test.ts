@@ -88,6 +88,20 @@ test('pathNodes on SVG Lab’s presets (PRESETS) written as paths: the heart (cl
   assert.equal(n.hidden, 451 - MAX_NODE_HANDLES);
 });
 
+// R8 (the P1-M3 review): value:path/implicit says letter-less segments get handles; the corpus sweep
+// drags only what pathNodes gives, so it can't see one missing.
+test('pathNodes on letter-less (implicit) segments: each gets the handles its command gives a written one: an anchor and a bend on a line, a curve’s controls and arms', () => {
+  const same = (implicit: string, written: string) => {
+    assert.deepEqual(ids(implicit), ids(written), implicit);
+    assert.deepEqual(nodesOfD(implicit).arms, nodesOfD(written).arms, `${implicit}: the arms`);
+  };
+  same('M 0 0 10 0 20 10', 'M 0 0 L 10 0 L 20 10');
+  same('m 0 0 10 0 10 10', 'm 0 0 l 10 0 l 10 10');
+  same('M 0 0 C 0 10 10 10 10 0 10 -10 20 -10 20 0', 'M 0 0 C 0 10 10 10 10 0 C 10 -10 20 -10 20 0');
+  same('M 0 0 Q 5 10 10 0 15 -10 20 0', 'M 0 0 Q 5 10 10 0 Q 15 -10 20 0');
+  assert.deepEqual(ids('M 0 0 10 0 20 10'), ['b1 bend 5,0', 'b2 bend 15,5', 'a0 start 0,0', 'a1 anchor 10,0', 'a2 anchor 20,10']);
+});
+
 // ── the corpus property ────────────────────────────────────────────────────────────────────────
 
 /** Each segment's written points in absolute form (the end, the controls its letter writes, an arc's numbers). */

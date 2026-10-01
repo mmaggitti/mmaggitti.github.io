@@ -2945,6 +2945,31 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: /    let code: CodeBlocks;\n    try \{\n      code = this\.#codeOf\(doc\);\n    \} catch \(e\) \{\n      return \{ ok: false, error: String\(e\), \.\.\.NO_STATS \};\n    \}\n([\s\S]*?)    this\.#setCode\(code\);\n/, to: '$1    this.#resetCode();\n',
     run: drawTests('editor.test.ts'), expect: /✖ Open refuses a document whose code view throws while it is built/,
   },
+  {
+    id: 'B555', what: 'R8: a selected root that holds a donut shows no handles (SVG Lab’s own file: no boundary handles on its holder)',
+    file: 'projects/draw/src/editor.ts', from: "|| !ids.length || ids.some((id) => isLocked(doc, id))) return none;", to: "|| !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;",
+    run: drawTests('editor.test.ts'), expect: /✖ a donut’s holder selected: the root/,
+  },
+  {
+    id: 'B556', what: 'R8: a boundary drag needs the selection and its parent measured first, so a root holder’s never starts',
+    file: 'projects/draw/src/editor.ts', from: '      const d = donutFor(doc, id);\n      const toHost = d && this.#unitsToHost(d.holder);', to: '      const d = this.#ports.canvas.measure([id, el(doc, id).parent!]).size === 2 ? donutFor(doc, id) : null;\n      const toHost = d && this.#unitsToHost(d.holder);',
+    run: drawTests('editor.test.ts'), expect: /✖ a donut’s holder selected: the root/,
+  },
+  {
+    id: 'B557', what: 'R8: a letter-less (implicit) segment gets no handles',
+    file: 'engine/path/nodes.ts', from: '    const U = p.segs[k].cmd.toUpperCase();\n', to: '    if (p.segs[k].implicit) return;\n    const U = p.segs[k].cmd.toUpperCase();\n',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ pathNodes on letter-less \(implicit\) segments/,
+  },
+  {
+    id: 'B558', what: 'R8: dragging a subpath’s start drags an arc’s end with it (as if linked)',
+    file: 'engine/path/nodes.ts', from: '    for (let j = k + 1; j < abs.length && abs[j].sub === abs[k].sub; j++) if (linked.has(j)) move(j);', to: "    for (let j = k + 1; j < abs.length && abs[j].sub === abs[k].sub; j++) if (linked.has(j) || abs[j].type === 'A') move(j);",
+    run: drawTests('editor.test.ts'), expect: /✖ an arc’s start and end anchors drag its ends/,
+  },
+  {
+    id: 'B559', what: 'R8: a boolean maps the operands into root units, not the bottom’s (a bottom with its own transform is written off)',
+    file: 'projects/draw/src/editor.ts', from: '    const toBottom = base && invert(base.toHost);', to: '    const toBottom = base && invert(this.#unitsToHost(doc.root)!);',
+    run: drawTests('editor.test.ts'), expect: /✖ a bottom with its own transform/,
+  },
 ];
 
 const args = process.argv.slice(2);

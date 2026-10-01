@@ -1189,8 +1189,14 @@ export class Editor {
     const g = this.#gesture;
     const none = { handles: [], rotGuide: null };
     if (this.tool.get() === 'pen') return { handles: this.#penHandles(), rotGuide: null }; // only the Pen's own
-    if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;
+    if (g?.mode === 'marquee' || this.tool.get() === 'shapes' || !ids.length || ids.some((id) => isLocked(doc, id))) return none;
     const active = g?.hd?.handle ?? (g?.mode === 'move' && g.handle === 'center' ? 'center' : null);
+    // The root has no handles of its own; a root that holds a donut (SVG Lab's own file) shows its
+    // donut's boundary handles, and only those.
+    if (ids.some((id) => id === doc.root)) {
+      const donut = ids.length === 1 ? this.#donutShown(ids[0]) : null;
+      return donut ? { handles: this.#donutHandles(donut, active), rotGuide: null } : none;
+    }
     // Edit on canvas: the gradient's handles instead of the shape's (none when they can't be placed).
     if (gv) return 'refused' in gv.out ? none : { handles: gv.out.handles.map((h) => ({ id: h.id, kind: h.kind, at: h.at, active: h.id === active })), rotGuide: null };
     if (ids.length > 1) {
@@ -1276,30 +1282,14 @@ export class Editor {
     const id = sel[0];
     if (sel.length !== 1 || !this.#session || !this.#writable()) return;
     if (isLocked(doc, id)) return void this.notice.set(LOCKED);
-    const n = doc.nodes.get(id) as ElementNode;
-    const parent = n.parent!;
-    const measured = this.#ports.canvas.measure([id, parent]);
-    const m = measured.get(id);
-    const pm = measured.get(parent);
-    if (!m || !pm) return;
-    const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : CORNERS.has(g.handle!) ? 'Resize' : 'Shape';
     // The offset from the finger to the handle at the press: the handle moves by the finger's
     // movement, never jumping to it (26 pt pick radius).
     const grab = g.handleAt ? { x: g.handleAt.x - g.at0.x, y: g.handleAt.y - g.at0.y } : { x: 0, y: 0 };
-    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: m.box, tip: null, refused: null, targets: null, shape: null, gradient: null, node: null, donut: null, grab };
-    if (g.handle!.startsWith('g-')) {
-      // A gradient handle (Edit on canvas): raw, no snapping (as in the lab), so no targets.
-      const gv = this.#gradientView([id], measured);
-      if (!gv || 'refused' in gv.out) return;
-      hd.gradient = { prop: gv.prop, geo: gv.geo, handle: g.handle as GradientHandleId };
-      hd.drag = this.#drag(GRADIENT_LABELS[g.handle as GradientHandleId]);
-      g.hd = hd;
-      g.mode = 'handle';
-      return;
-    }
+    const hd: HandleDrag = { handle: g.handle!, id, drag: null as unknown as Drag, corner: null, toUnits: null, box: null, uniform: false, step: 1, pivot: g.at0, a0: 0, flip: 1, local: null, tip: null, refused: null, targets: null, shape: null, gradient: null, node: null, donut: null, grab };
     if (g.handle!.startsWith('donut-b')) {
       // A donut's boundary handle (P1-M3): raw, no snapping (the lab's), in the holder's units; its
       // frames rewrite two numbers of the data comment, and the finish hook draws the slices again.
+      // It measures nothing here: its holder may be the root, which has no parent to measure.
       const d = donutFor(doc, id);
       const toHost = d && this.#unitsToHost(d.holder);
       const toUnits = toHost && invert(toHost);
@@ -1308,6 +1298,24 @@ export class Editor {
       hd.donut = { holder: d.holder, j, values: d.values.slice(), cx: d.cx, cy: d.cy };
       hd.toUnits = toUnits;
       hd.drag = this.#drag('Set donut values');
+      g.hd = hd;
+      g.mode = 'handle';
+      return;
+    }
+    const n = doc.nodes.get(id) as ElementNode;
+    const parent = n.parent!;
+    const measured = this.#ports.canvas.measure([id, parent]);
+    const m = measured.get(id);
+    const pm = measured.get(parent);
+    if (!m || !pm) return;
+    hd.local = m.box;
+    const kind = g.handle === 'rot' ? 'Rotate' : g.handle === 'scale' ? 'Scale' : CORNERS.has(g.handle!) ? 'Resize' : 'Shape';
+    if (g.handle!.startsWith('g-')) {
+      // A gradient handle (Edit on canvas): raw, no snapping (as in the lab), so no targets.
+      const gv = this.#gradientView([id], measured);
+      if (!gv || 'refused' in gv.out) return;
+      hd.gradient = { prop: gv.prop, geo: gv.geo, handle: g.handle as GradientHandleId };
+      hd.drag = this.#drag(GRADIENT_LABELS[g.handle as GradientHandleId]);
       g.hd = hd;
       g.mode = 'handle';
       return;

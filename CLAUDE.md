@@ -145,9 +145,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
 - **Generated shapes** (polygon, star, spiral) keep their inputs in `draw:*` attributes; the Session's
   `finish` hook regenerates a shape whose inputs changed and detaches one whose geometry was edited by
   hand, in the same transaction.
-- **Paths (P1-M3).** The Pen and the Node tool write `d` through `engine/path/segments.ts`: numbers
-  rewritten in place (`rewriteNumbers`' glue rule), one segment's text at a time, never the whole
-  attribute. Booleans load path-bool (and paper-core only as a fallback) from lazy chunks in
+- **Paths (P1-M3).** Every write to `d` is byte-local: the Pen appends through `src/interact/pen.ts`;
+  the Node tool, the letter tokens, Relative and Reverse write through `engine/path/segments.ts`:
+  numbers rewritten in place (`rewriteNumbers`' glue rule), one segment's text at a time, never the
+  whole attribute. Booleans load path-bool (and paper-core only as a fallback) from lazy chunks in
   `src/paths/`; `tools/check-bundle.mjs` fails the build on `eval` or `new Function` in `dist/`.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.

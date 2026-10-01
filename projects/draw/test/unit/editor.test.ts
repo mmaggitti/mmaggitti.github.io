@@ -2211,6 +2211,40 @@ test('a tap on a ghost arc is one "Set arc flags" entry that sets exactly its tw
   assert.equal(r.editor.source(), packed.replace('0 01 76', '0 10 76'), 'packed flags rewritten in place');
 });
 
+// R8 (the P1-M3 review): arcs/arc-endpoints and arc-editing say the Node tool's start and end anchors drag
+// the arc's ends, its radii, rotation and flags keeping their text, and the ghosts follow; the e2e drags
+// the end alone.
+test('an arc’s start and end anchors drag its ends: on lab/arcs.svg, a0 (the M) and a1 each write only their own numbers, the radii, rotation and flags keeping their text (one "Move point" each), and the ghosts follow, from the start to the end where they are now', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs.svg');
+  const D = 'M 24 50\n   A 30 30 0 0 1 76 50';
+  assert.ok(src.includes(D), 'test setup: lab/arcs.svg’s arc');
+  r.editor.open(src);
+  r.editor.pickTool('node');
+  r.editor.select([pathsOf(r)[0]]);
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-6;
+  const CASES: [string, [number, number], [number, number], [number, number], string][] = [
+    ['a0', [24, 50], [30, 56], [76, 50], 'M 30 56\n   A 30 30 0 0 1 76 50'],
+    ['a1', [76, 50], [70, 40], [24, 50], 'M 24 50\n   A 30 30 0 0 1 70 40'],
+  ];
+  for (const [h, from, to, other, want] of CASES) {
+    const at = handleAt(r, h);
+    assert.ok(near(at, hostAt(r, ...from)), `${h} is drawn at (${from})`);
+    drag(r, at, hostAt(r, ...to), []);
+    assert.equal(r.editor.source(), src.replace(D, want), `${h} dragged to (${to})`);
+    assert.equal(r.editor.history.get().undoLabel, 'Move point');
+    const [start, end] = h === 'a0' ? [to, other] : [other, to];
+    const ghosts = r.editor.overlayModel().paths!.ghosts;
+    assert.deepEqual(ghosts.map((g) => g.flags).sort(), ['0 0', '1 0', '1 1']);
+    for (const g of ghosts) {
+      assert.ok(near(g.start, hostAt(r, ...start)), `${h}: the ${g.flags} ghost starts at (${start})`);
+      assert.ok(near(g.cubics.at(-1)![2], hostAt(r, ...end)), `${h}: the ${g.flags} ghost ends at (${end})`);
+    }
+    r.editor.undo();
+    assert.equal(r.editor.source(), src, 'one undo');
+  }
+});
+
 const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
 const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z';
 
@@ -2297,6 +2331,49 @@ test('the donut: Edit as donut changes only the holder’s start tag (one entry)
   assert.equal(r.editor.source(), adopted, 'one undo brings the donut back');
 });
 
+// R8 (the P1-M3 review): arcs/donut-boundaries and arcs/donut-percent-labels say a selected slice "or its
+// holder" shows them, but SVG Lab's own file holds its donut in the root, which showed no handles at all.
+test('a donut’s holder selected: the root (SVG Lab’s own file) shows only its boundary handles, and a drag on one is one "Set donut values" entry; a <g> holder shows M1’s handles plus its boundaries; both show the % labels, in Select and the Node tool', () => {
+  const r = rig();
+  const lab = LAB_FILE('arcs--donut.svg');
+  const ns = 'xmlns:draw="https://mmaggitti.github.io/draw/ns"';
+  const inRoot = lab.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100" ${ns} draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">`);
+  const body = lab.slice(lab.indexOf('>', lab.indexOf('<svg')) + 1, lab.lastIndexOf('</svg>'));
+  const inG = lab.replace(/<svg([^>]*)>[\s\S]*<\/svg>/, `<svg$1 ${ns}>\n<g draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">${body}</g>\n</svg>`);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id);
+  const labels = () => r.editor.overlayModel().paths?.donut.map((l) => l.text);
+  const BOUNDS = ['donut-b0', 'donut-b1', 'donut-b2'];
+  const PCT = ['40%', '25%', '20%', '15%'];
+  assert.ok(r.editor.open(inRoot).ok);
+  r.editor.select([doc(r).root]);
+  assert.equal(r.editor.donut()?.recognized, true, 'test setup: the root holds a donut');
+  for (const tool of ['select', 'node'] as const) {
+    r.editor.pickTool(tool);
+    r.editor.select([doc(r).root]);
+    assert.deepEqual(ids(), BOUNDS, `${tool}: the root holder shows its boundaries only (the root has no handles of its own)`);
+    assert.deepEqual(labels(), PCT, `${tool}: the root holder’s % labels`);
+  }
+  r.editor.pickTool('select');
+  r.editor.select([doc(r).root]);
+  const ring = (f: number) => hostAt(r, 50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI));
+  r.editor.pointerDown(handleAt(r, 'donut-b0'), [], { add: false });
+  for (const f of [0.45, 0.5]) r.editor.pointerDrag(ring(f));
+  r.editor.pointerUp(ring(0.5));
+  assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
+  assert.deepEqual(r.editor.donut()?.values, [50, 15, 20, 15], 'the root holder’s boundary 0 dragged to half the turn');
+  r.editor.undo();
+  assert.equal(r.editor.source(), inRoot, 'one entry');
+  assert.ok(r.editor.open(inG).ok);
+  const g = element(doc(r), (n) => n.local === 'g').id;
+  for (const tool of ['select', 'node'] as const) {
+    r.editor.pickTool(tool);
+    r.editor.select([g]);
+    assert.equal(r.editor.donut()?.recognized, true, 'test setup: the <g> holds a donut');
+    assert.deepEqual(ids(), ['tl', 'tr', 'br', 'bl', 'center', 'rot', ...BOUNDS], `${tool}: a <g> holder shows M1’s handles plus its boundaries`);
+    assert.deepEqual(labels(), PCT, `${tool}: the <g> holder’s % labels`);
+  }
+});
+
 // ── P1-M3 S3: booleans ─────────────────────────────────────────────────────────────────────────
 
 // The libraries themselves, as the chunks give them (node imports them directly).
@@ -2351,6 +2428,32 @@ test('a bottom <path> keeps its own element: only its d changes, in place and in
   assert.deepEqual(sel(r), [p], 'the same element, selected');
   r.editor.undo();
   assert.equal(r.editor.source(), F);
+});
+
+// R8 (the P1-M3 review): feature:booleans says each operand is mapped into the bottom's units through the
+// measured matrices; every other test's bottom has no transform of its own, so root units would pass them.
+test('a bottom with its own transform: the union is written in its units, so, its transform kept, it fills what the two shapes filled (400 root sample points)', async () => {
+  const r = rig(HOST, {}, LIBS);
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <rect id="a" x="10" y="10" width="50" height="50" transform="rotate(30 35 35)"/>\n  <circle id="b" cx="65" cy="65" r="20"/>\n</svg>\n';
+  r.editor.open(src);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.notice.get(), null);
+  const path = element(doc(r), (n) => n.local === 'path');
+  assert.equal(attr(path, 'transform'), 'rotate(30 35 35)', 'the result keeps the bottom’s transform');
+  const abs = toAbsolute(parsePath(attr(path, 'd')!));
+  // A root point in the rect's units, and so the result's: rotate(30 35 35) undone.
+  const [c, s30] = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6)];
+  const units = (x: number, y: number): [number, number] => [35 + c * (x - 35) + s30 * (y - 35), 35 - s30 * (x - 35) + c * (y - 35)];
+  const wrong: string[] = [];
+  for (let y = 2.5; y < 100; y += 5) {
+    for (let x = 2.5; x < 100; x += 5) {
+      const [u, v] = units(x, y);
+      const want = (u > 10 && u < 60 && v > 10 && v < 60) || Math.hypot(x - 65, y - 65) < 20;
+      if (insideAt(abs, u, v, 'nonzero') !== want) wrong.push(`(${x}, ${y})`);
+    }
+  }
+  assert.deepEqual(wrong, [], 'root points the result fills differently from the rect and the circle');
 });
 
 test('booleans refuse, saying why and writing nothing: one shape, a line, text, a group, a <use>, CSS geometry, a d with an error, a fill-rule a <style> rule may set, a bottom with a <title>, a shape the canvas can’t measure, nothing left, and a chunk that can’t load', async () => {
