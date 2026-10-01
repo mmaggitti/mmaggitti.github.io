@@ -215,3 +215,10 @@ test('the outline fills the stroke: miter and bevel joins, butt and square caps 
     assert.deepEqual(wrong.slice(0, 5), [], `${d} (${st.join}, ${st.cap}, limit ${st.miterLimit}): ${wrong.length} of ${checked} samples`);
   }
 });
+
+test('a curve tighter than half the width folds: a circle of radius 2 under a stroke 8 wide fills its ring out to 6 and leaves its middle (within 2 of the centre) empty under nonzero, as Chromium draws it', () => {
+  const fills = filler(stroke('M 52 50 A 2 2 0 0 1 50 52 A 2 2 0 0 1 48 50 A 2 2 0 0 1 50 48 A 2 2 0 0 1 52 50 Z', style({ width: 8 })));
+  assert.ok(fills(55.5, 50) && fills(50, 44.5) && fills(47.5, 50), 'the ring from 2 to 6 about the centre');
+  assert.ok(!fills(50, 50) && !fills(51, 50.5), 'the middle, where the folded inner offset winds the other way');
+  assert.ok(!fills(56.5, 50), 'nothing past 6');
+});

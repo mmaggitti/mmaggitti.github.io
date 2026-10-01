@@ -2723,6 +2723,28 @@ test('Stroke to path refuses, saying why and writing nothing: no stroke, none, a
   }
 });
 
+test('Stroke to path on a circle, an ellipse, a polygon and a polyline with no fill: each a filled <path> keeping its id, filling the band of its stroke and not its middle', async () => {
+  const cases: [string, [number, number][], [number, number][]][] = [
+    ['<circle id="a" cx="50" cy="50" r="20" fill="none" stroke="#264653" stroke-width="4"/>', [[70, 50], [71.5, 50], [50, 28.5]], [[50, 50], [72.5, 50], [67.5, 50]]],
+    ['<ellipse id="a" cx="50" cy="50" rx="30" ry="15" fill="none" stroke="#264653" stroke-width="4"/>', [[80, 50], [50, 36.5], [50, 63.5]], [[50, 50], [82.5, 50], [50, 32.5]]],
+    ['<polygon id="a" points="20,20 80,20 50,80" fill="none" stroke="#264653" stroke-width="4"/>', [[50, 20], [50, 18.5], [20, 20]], [[50, 40], [50, 17.5], [50, 22.5]]],
+    ['<polyline id="a" points="20,20 80,20 80,80" fill="none" stroke="#264653" stroke-width="4"/>', [[50, 20], [80, 50], [81.5, 50]], [[50, 50], [20, 80], [50, 22.5]]],
+  ];
+  for (const [body, inside, outside] of cases) {
+    const F = STP(body);
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(F);
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    const d = /<path id="a" fill="#264653" d="([^"]+)"\/>/.exec(r.editor.source())?.[1];
+    assert.ok(d, `${body}:\n${r.editor.source()}`);
+    assert.deepEqual(fillsAt(d, inside), inside.map(() => true), `${body}: the stroke`);
+    assert.deepEqual(fillsAt(d, outside), outside.map(() => false), `${body}: nothing else`);
+    r.editor.undo();
+    assert.equal(r.editor.source(), F);
+  }
+});
+
 test('a Stroke to path the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {
   let release!: () => void;
   const gate = new Promise<void>((ok) => (release = ok));

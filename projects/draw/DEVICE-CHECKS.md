@@ -64,5 +64,6 @@ To take the house's group: tap the roof, then More → Select group.
 | 42 | Union by thumb | Draw a rect and a circle that overlap, select both with a marquee, then More → Union: one shape is left where the two were, drawn in the rect's colour, and Undo brings both back; Subtract, Intersect and Exclude each do what they say the same way | ☐ |
 | 43 | Union offline | Open Draw, then turn on Airplane mode without reloading and try Union: it works (Safari kept its code from an earlier Union) or the notice says Draw couldn't load the shape tools and nothing changes; back online, Union works, and from then on it works offline too until Draw is reloaded | ☐ |
 | 44 | More after a marquee | After a one-finger marquee by touch, the first tap on More opens the sheet (CI's touch harness swallowed it in M2 and M3) | ☐ |
+| 45 | Stroke to path | Draw a thick curved line with the Pen (Inspect: a stroke about 8 wide, round ends), then More → Stroke to path: zoomed in to about 4×, it looks the same before and after, now a filled shape; do the same on a filled shape with a stroke: its fill stays, and the outline sits exactly where the stroke was | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
