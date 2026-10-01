@@ -3238,6 +3238,78 @@ const BREAKS = [
     file: 'projects/draw/src/panels/FileSheets.tsx', from: "const ready = choice === 'text' ? clean : prep?.choice === choice ? prep.file : null;", to: "const ready = choice === 'text' ? clean : prep?.choice === choice && prep.file ? prep.file : clean;",
     run: DRAW_E2E, expect: /exportWritesTextAsPathsOrWithFonts: while As paths prepares, Clean's button reads/,
   },
+  // P1-M4 S3: the accessibility panel, quick unless marked.
+  {
+    id: 'B611', what: 'Title off leaves the aria-labelledby that named its id',
+    file: 'engine/access/model.ts', from: '    if (own !== null && names !== null && names.trim() === own) apply(opSetAttr(doc, doc.root, null, ref, null));', to: "    if (own !== null && names !== null && names.trim() === own && which === 'desc') apply(opSetAttr(doc, doc.root, null, ref, null));",
+    run: engineTests('access/access.test.ts'), expect: /✖ on lab\/access\.svg, Title off then Description off gives SVG Lab’s states/,
+  },
+  {
+    id: 'B612', what: 'Title on writes role="img" over the file’s own role',
+    file: 'engine/access/model.ts', from: "  if (findAttr(root, null, 'role') === undefined) apply(opSetAttr(doc, doc.root, null, 'role', 'img'));", to: "  apply(opSetAttr(doc, doc.root, null, 'role', 'img'));",
+    run: engineTests('access/access.test.ts'), expect: /✖ Draw never writes over a file’s own role or label/,
+  },
+  {
+    id: 'B613', what: 'role="img" stays when neither a title, a description nor a label is left',
+    file: 'engine/access/model.ts', from: "  if (a.role?.trim().toLowerCase() !== 'img' || a.title", to: "  if (a.role?.trim().toLowerCase() !== 'gone' || a.title",
+    run: engineTests('access/access.test.ts'), expect: /✖ on lab\/access\.svg, Title off then Description off gives SVG Lab’s states/,
+  },
+  {
+    id: 'B614', what: 'an element’s title goes last, not as its first child',
+    file: 'engine/access/model.ts', from: "  insertMarkup(doc, firstPlace(doc, id), `<${tagOf(doc, 'title')}>", to: "  insertMarkup(doc, { last: id }, `<${tagOf(doc, 'title')}>",
+    run: engineTests('access/access.test.ts'), expect: /✖ an element’s Title is its first child/,
+  },
+  {
+    id: 'B615', what: 'the Language field takes "english" (a tag’s first part may be up to 8 letters)',
+    file: 'engine/access/model.ts', from: 'export const LANG_TAG = /^[A-Za-z]{2,3}(', to: 'export const LANG_TAG = /^[A-Za-z]{2,8}(',
+    run: engineTests('access/access.test.ts'), expect: /✖ Language: the root’s lang/,
+  },
+  {
+    id: 'B616', what: 'the preview ignores aria-labelledby (it reads the aria-label or the <title>)',
+    file: 'engine/access/speak.ts', from: "  const name = named(a.labelledby) || squash(a.label ?? '')", to: "  const name = squash(a.label ?? '')",
+    run: engineTests('access/speak.test.ts'), expect: /✖ the name: the texts aria-labelledby names/,
+  },
+  {
+    id: 'B617', what: 'the stray labels read a text’s own characters only, skipping its tspans',
+    file: 'engine/access/speak.ts', from: 'const t = squash(renderedText(doc, c));', to: "const t = squash(el(doc, c).children.map((k) => { const x = doc.nodes.get(k)!; return x.kind === 'text' ? x.raw : ''; }).join(''));",
+    run: engineTests('access/speak.test.ts'), expect: /✖ stray labels: every text’s characters as laid out/,
+  },
+  {
+    id: 'B618', what: 'Metadata on makes a second <metadata> where the file’s holds no RDF',
+    file: 'engine/access/metadata.ts', from: '  if (m.metadata === null) {', to: '  if (m.metadata === null || m.work === null) {',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ Draw’s own <metadata draw:made> is shared/,
+  },
+  {
+    id: 'B619', what: 'an RDF file’s new dc:creator and dc:date are written bare in its <metadata>, outside its cc:Work',
+    file: 'engine/access/metadata.ts', from: '  const into = m.work ?? m.metadata;', to: '  const into = m.metadata;',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ an RDF file \(tools\/inkscape-1x-layers\.svg\)/,
+  },
+  {
+    id: 'B620', what: 'the import report’s style-rule note misses :focus',
+    file: 'engine/geometry/css.ts', from: '|:(?:focus(?:-visible|-within)?|link|', to: '|:(?:focus-visible|focus-within|link|',
+    run: engineTests('report/import-report.test.ts'), expect: /✖ the style-rule note \(P1-M4 S3\)/,
+  },
+  {
+    id: 'B621', what: 'xml:lang is rendered on the canvas again',
+    file: 'engine/policy/render-policy.ts', from: "  if (attrNs === NS.xml && attrLocal === 'base') return false;", to: "  if (attrNs === NS.xml && attrLocal === 'base') return false;\n  if (attrNs === NS.xml && attrLocal === 'lang') return true;",
+    run: engineTests('policy/render-policy.test.ts'), expect: /✖ xml:lang \(P1-M4 S3\) is refused on every element/,
+  },
+  // P1-M4 S3, slow (one per new e2e check, naming it).
+  {
+    id: 'B622', what: 'the Access tab subscribes to no version bump (it reads the drawing again only when the selection changes), so its switches and its preview don’t follow an edit or an undo', slow: true, checks: ['theAccessPanelNamesTheDrawing'],
+    file: 'projects/draw/src/panels/Access.tsx', from: '  useStore(editor.selection);\n  useStore(editor.version);\n  const a = editor.access();', to: '  useStore(editor.selection);\n  const a = editor.access();',
+    run: DRAW_E2E, expect: /theAccessPanelNamesTheDrawing: the preview reads/,
+  },
+  {
+    id: 'B623', what: 'the screen-reader preview is computed once, when the tab opens', slow: true, checks: ['theScreenReaderPreviewFollowsTheFile'],
+    file: 'projects/draw/src/panels/Access.tsx', from: '  useStore(editor.version);\n  const a = editor.access();', to: '  useStore(editor.version);\n  const [first] = useState(() => editor.access());\n  const now = editor.access();\n  const a = now && first ? { ...now, said: first.said } : now;',
+    run: DRAW_E2E, expect: /theScreenReaderPreviewFollowsTheFile: Title off: the preview reads/,
+  },
+  {
+    id: 'B624', what: 'the tabs’ padding grows to --space-8, pushing the five tabs past 440 pt', slow: true, checks: ['phoneRulesOnTheAccessPanel'],
+    file: 'projects/draw/src/app.css', from: '.draw-tabs > button { padding: 0 var(--space-4); }', to: '.draw-tabs > button { padding: 0 var(--space-8); }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheAccessPanel \((956|796)\)[\s\S]*(is outside the 440 pt row|scrolls sideways)/,
+  },
 ];
 
 const args = process.argv.slice(2);
