@@ -125,7 +125,7 @@ const BREAKS = [
     // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
     id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
     file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
-    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*252 nested elements declaring 600 prefixes each took \d+ ms, [\d.]+× the \d+ ms 63 took/,
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*63 and 252 nested elements declaring 600 prefixes each: \d+ ms(, then \d+ ms for 4× the work| for the larger)/,
   },
   {
     id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
