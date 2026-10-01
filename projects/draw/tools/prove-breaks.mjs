@@ -13,9 +13,12 @@
 //                                         shows only when someone runs that break. Writes nothing.
 //                                         STALE: the anchor is gone; NOOP: replacing it changes
 //                                         nothing; AMBIG: a string anchor, or a RegExp without the
-//                                         g flag, matches more than once, so the break plants only
-//                                         the first match (a g RegExp replaces every match on
-//                                         purpose). Any of them fails the run.
+//                                         g flag, matches more than once (counted with CRLF line
+//                                         ends read as LF, so a copy in the other ending counts),
+//                                         so the break plants only the first match (a g RegExp
+//                                         replaces every match on purpose); BAD: a break that can't
+//                                         run as written (a sticky RegExp plants only at index 0).
+//                                         Any of them fails the run.
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
@@ -3006,6 +3009,23 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: ' || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);', to: ') return void this.notice.set(DRAWING_CHANGED);',
     run: drawTests('editor.test.ts'), expect: /✖ a boolean whose chunk resolves during a live move drag/,
   },
+  {
+    // As B518 proves AMBIG: a block comment holding B527's two-line anchor with a CRLF between its lines.
+    id: 'B567', what: 'N2: the dry run misses a CRLF twin of a multi-line anchor (B527’s, appended in a comment with a CRLF line end: B527 would plant only the first)',
+    file: 'engine/generators/donut.ts', append: '\n/* a CRLF twin of an anchor:\n  const want = donutSlices(parts.data.values, cx, cy, r);\r\n  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;\n*/\n',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B527 +AMBIG +engine\/generators\/donut\.ts: the anchor matches 2 times/,
+  },
+  {
+    // A break of this file's own dry run: with CRLF no longer read as LF, B567's twin goes unseen.
+    id: 'B568', what: 'N2: the dry run counts an anchor’s matches with CRLF as written (a twin in the other line ending is missed)',
+    file: 'projects/draw/tools/prove-breaks.mjs', from: "  const text = original.replace(/\\r\\n/g, '\\n');", to: '  const text = original;',
+    run: ['node', ['tools/prove-breaks.mjs', 'B567'], DRAW], expect: /GREEN ✗  B567/,
+  },
+  {
+    id: 'B569', what: 'N2: the dry run calls a sticky anchor fine (B525’s RegExp made sticky: it would plant only at index 0)',
+    file: 'projects/draw/tools/prove-breaks.mjs', from: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/g,", to: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/y,",
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B525 +BAD +a sticky anchor plants only at index 0/,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -3022,16 +3042,19 @@ function applyBreak(b, original) {
 /**
  * How many places a break's anchor matches, for the dry run's AMBIG rule: a string counts every
  * occurrence (overlapping ones too), a RegExp without g every match. An append, or a g RegExp
- * (which replaces every match on purpose), counts as one.
+ * (which replaces every match on purpose), counts as one. Counted with CRLF line ends read as LF
+ * (the anchor's too): a copy of a multi-line anchor in the other line ending is a twin.
  */
 function anchorMatches(b, original) {
   if (b.append != null || b.from == null) return 1;
+  const text = original.replace(/\r\n/g, '\n');
   if (b.from instanceof RegExp) {
     if (b.from.global) return 1;
-    return [...original.matchAll(new RegExp(b.from.source, b.from.flags.replace('y', '') + 'g'))].length;
+    return [...text.matchAll(new RegExp(b.from.source, b.from.flags.replace('y', '') + 'g'))].length;
   }
+  const from = b.from.replace(/\r\n/g, '\n');
   let n = 0;
-  for (let i = original.indexOf(b.from); i !== -1; i = original.indexOf(b.from, i + 1)) n++;
+  for (let i = text.indexOf(from); i !== -1; i = text.indexOf(from, i + 1)) n++;
   return n;
 }
 
@@ -3051,6 +3074,10 @@ if (dry) {
     if (!edits && !creates) missing.push('file with from/to or append, or create with content');
     if (missing.length) {
       say('BAD', `no ${missing.join(', no ')}`);
+      continue;
+    }
+    if (b.from instanceof RegExp && b.from.sticky) {
+      say('BAD', 'a sticky anchor plants only at index 0');
       continue;
     }
     if (b.create && existsSync(join(REPO, b.create))) say('TAKEN', `${b.create}: the path already exists`);
