@@ -255,6 +255,12 @@ interface StyleLive {
 }
 type Live = TokenLive | StyleLive;
 
+// A document's code view: its blocks, and how the view shows each.
+interface CodeBlocks {
+  blocks: Block[];
+  views: ViewBlock[];
+}
+
 export class Editor {
   readonly history: Store<HistoryState> = createStore(NO_HISTORY);
   readonly selection: Store<ReadonlySet<NodeId>> = createStore<ReadonlySet<NodeId>>(new Set());
@@ -356,8 +362,9 @@ export class Editor {
 
   /**
    * Open a document: the engine's parser (src/import.ts parses first and passes the Doc), then the
-   * renderer and the sink. A file that can't be drawn says so: one that fails to parse or throws
-   * while drawing (the previous document and drawing stay), and one whose root the canvas refuses
+   * renderer and the sink. A file that can't be drawn says so: one that fails to parse, or throws
+   * while its code view is built or while drawing (the previous document, drawing and code stay: the
+   * code view's blocks are built before anything is swapped), and one whose root the canvas refuses
    * (nothing would show).
    */
   open(input: string | Doc): OpenResult {
@@ -368,6 +375,12 @@ export class Editor {
       if (!parsed.ok) return { ok: false, error: parsed.error.message, ...NO_STATS };
       doc = parsed.doc;
     } else doc = input;
+    let code: CodeBlocks;
+    try {
+      code = this.#codeOf(doc);
+    } catch (e) {
+      return { ok: false, error: String(e), ...NO_STATS };
+    }
     this.#endLive(false);
     this.#stepDrag = null; // the field's entry belonged to the document that is closing
     this.#field = null;
@@ -393,7 +406,7 @@ export class Editor {
     this.selection.set(new Set());
     this.focus.set(null);
     this.sheet.set(null);
-    this.#resetCode();
+    this.#setCode(code);
     this.#bump();
     try {
       this.#applyView();
@@ -447,11 +460,19 @@ export class Editor {
   }
 
   #resetCode(): void {
-    const doc = this.#doc!;
+    this.#setCode(this.#codeOf(this.#doc!));
+  }
+
+  // The code view's blocks for a document: its tokens read, which is where a document's content can throw.
+  #codeOf(doc: Doc): CodeBlocks {
     const blocks = codeBlocks(doc);
-    this.#blocks = new Map(blocks.map((b) => [blockKey(b.node, b.part), b]));
     const memo = new Map<NodeId, boolean>();
-    this.#ports.code.set(blocks.map((b) => viewBlock(doc, b, memo)));
+    return { blocks, views: blocks.map((b) => viewBlock(doc, b, memo)) };
+  }
+
+  #setCode(code: CodeBlocks): void {
+    this.#blocks = new Map(code.blocks.map((b) => [blockKey(b.node, b.part), b]));
+    this.#ports.code.set(code.views);
     this.#ports.code.select(this.selection.get());
   }
 

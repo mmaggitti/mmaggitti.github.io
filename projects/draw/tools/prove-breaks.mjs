@@ -2799,7 +2799,7 @@ const BREAKS = [
   },
   {
     id: 'B527', what: 'Edit as donut adopts a holder whose slices differ from the generator’s (the hook would then rewrite them)',
-    file: 'engine/generators/donut.ts', from: '  const want = donutSlices(parts.data.values, cx, cy, r);\n  if (!parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;', to: '  const want = donutSlices(parts.data.values, cx, cy, r);',
+    file: 'engine/generators/donut.ts', from: '  const want = donutSlices(parts.data.values, cx, cy, r);\n  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;', to: '  const want = donutSlices(parts.data.values, cx, cy, r);',
     run: engineTests('generators/donut.test.ts'), expect: /✖ Edit as donut’s candidate/,
   },
   {
@@ -2919,6 +2919,31 @@ const BREAKS = [
     id: 'B549', what: 'R5: every comment under a donut holder asks whether the holder is a donut (each ask walks the holder’s children: quadratic)',
     file: 'engine/code/tokens.ts', from: '  if (dataCommentOf(doc, leaf.parent) !== leaf.id) return [];\n', to: '',
     run: engineTests('code/tokens.test.ts'), expect: /✖ the tokens of many comments under a donut holder take linear time/,
+  },
+  {
+    id: 'B550', what: 'R4: the donut takes any finite plain decimal as an input again (no FLT_MAX bound: a centre at 1e39 reads as a donut)',
+    file: 'engine/generators/donut.ts', from: "    if (!(Math.abs(v) <= FLT_MAX) || (name === 'r' && !(v > 0))) return null;", to: "    if (!Number.isFinite(v) || (name === 'r' && !(v > 0))) return null;",
+    run: engineTests('generators/donut.test.ts'), expect: /✖ hostile inputs stay plain and never throw: cx, cy or r written as 309-digit plain decimals/,
+  },
+  {
+    id: 'B551', what: 'R4: the generators take any finite centre again (no FLT_MAX bound: a polygon centred at 1e39 reads as generated)',
+    file: 'engine/generators/index.ts', from: 'const coordinate = (v: number) => Math.abs(v) <= FLT_MAX;', to: 'const coordinate = (v: number) => Number.isFinite(v);',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals/,
+  },
+  {
+    id: 'B552', what: 'R4: donutSlices hands back slices with a coordinate it couldn’t write, rather than null',
+    file: 'engine/generators/donut.ts', from: '  return finite ? out : null;\n', to: '  return out;\n',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ hostile inputs stay plain and never throw: cx, cy or r written as 309-digit plain decimals/,
+  },
+  {
+    id: 'B553', what: 'R4: a generator whose coordinate overflows throws (fmt’s RangeError) rather than reading as plain',
+    file: 'engine/generators/index.ts', from: '    if (e instanceof RangeError) return null;\n    throw e;', to: '    throw e;',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals/,
+  },
+  {
+    id: 'B554', what: 'R4: Open builds the code view after it has swapped in the new document (a throw there leaves the editor half-swapped)',
+    file: 'projects/draw/src/editor.ts', from: /    let code: CodeBlocks;\n    try \{\n      code = this\.#codeOf\(doc\);\n    \} catch \(e\) \{\n      return \{ ok: false, error: String\(e\), \.\.\.NO_STATS \};\n    \}\n([\s\S]*?)    this\.#setCode\(code\);\n/, to: '$1    this.#resetCode();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Open refuses a document whose code view throws while it is built/,
   },
 ];
 

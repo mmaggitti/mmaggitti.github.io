@@ -15,8 +15,9 @@
 //   rounds (Math.round(v · 10) / 10, half up) and written with fmt(·, 1); R is fmt(r, 2), and the
 //   large-arc flag is 1 only when the slice is over half the total. So generating from
 //   lab/arcs--donut.svg's comment with centre (50, 50) and r 28 gives its four paths byte for byte.
-// - donutOf says whether a holder IS a donut now: every input valid, the comment read, one slice per
-//   value, and every slice's d exactly what they generate. Anything else is plain: its draw:*
+// - donutOf says whether a holder IS a donut now: every input valid (a plain decimal no larger than
+//   FLT_MAX, as path data reads numbers, so every coordinate computed from it stays finite; r > 0), the
+//   comment read, one slice per value, and every slice's d exactly what they generate. Anything else is plain: its draw:*
 //   attributes are kept untouched, and its comment is a plain comment. The slices' other attributes
 //   (their colours) are theirs.
 // - donutCandidate is Edit as donut's rule: a holder without draw:gen whose children read as a donut's
@@ -26,7 +27,7 @@
 import { NS, attrValue, findAttr, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { DRAW_NS } from '../model/draw-ns.ts';
 import { fmt } from '../values/number-format.ts';
-import { parsePath } from '../path/parse.ts';
+import { FLT_MAX, parsePath } from '../path/parse.ts';
 
 export const VALUE_MIN = 1;
 export const VALUE_MAX = 100;
@@ -82,11 +83,21 @@ export function dataCommentOf(doc: Doc, id: NodeId | null | undefined): NodeId |
 
 const lab1 = (v: number): number => Math.round(v * 10) / 10; // SVG Lab's rnd(v, 1)
 
-/** Each slice's d for these values, centre and radius (the header's rule, SVG Lab's arithmetic). */
-export function donutSlices(values: readonly number[], cx: number, cy: number, r: number): string[] {
+/**
+ * Each slice's d for these values, centre and radius (the header's rule, SVG Lab's arithmetic); null
+ * when a coordinate isn't finite: such a donut is plain, never a throw.
+ */
+export function donutSlices(values: readonly number[], cx: number, cy: number, r: number): string[] | null {
   const S = values.reduce((a, b) => a + b, 0);
+  if (!Number.isFinite(r)) return null;
   const R = fmt(r, 2);
-  const at = (a: number) => `${fmt(lab1(cx + r * Math.cos(a)), 1)} ${fmt(lab1(cy + r * Math.sin(a)), 1)}`;
+  let finite = true;
+  const at = (a: number) => {
+    const x = lab1(cx + r * Math.cos(a));
+    const y = lab1(cy + r * Math.sin(a));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) finite = false;
+    return finite ? `${fmt(x, 1)} ${fmt(y, 1)}` : '';
+  };
   const out: string[] = [];
   let acc = 0;
   for (const v of values) {
@@ -95,7 +106,7 @@ export function donutSlices(values: readonly number[], cx: number, cy: number, r
     const a1 = -Math.PI / 2 + (acc / S) * 2 * Math.PI;
     out.push(`M ${at(a0)} A ${R} ${R} 0 ${v / S > 0.5 ? 1 : 0} 1 ${at(a1)}`);
   }
-  return out;
+  return finite ? out : null;
 }
 
 /** An element that may hold a donut: an SVG <g>, or the root <svg>. */
@@ -130,14 +141,14 @@ export function donutParts(doc: Doc, holder: ElementNode): DonutParts | null {
   return comment !== null && data ? { comment, data, slices } : null;
 }
 
-/** The holder's draw:cx, draw:cy and draw:r, or null when one is missing or invalid (plain decimals, r > 0). */
+/** The holder's draw:cx, draw:cy and draw:r, or null when one is missing or invalid (plain decimals no larger than FLT_MAX, r > 0). */
 export function donutInputs(doc: Doc, holder: ElementNode): { cx: number; cy: number; r: number } | null {
   const out: Record<string, number> = {};
   for (const name of DONUT_INPUTS) {
     const raw = attrValue(doc, holder, DRAW_NS, name)?.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
     if (raw === undefined || !PLAIN.test(raw)) return null;
     const v = Number(raw);
-    if (!Number.isFinite(v) || (name === 'r' && !(v > 0))) return null;
+    if (!(Math.abs(v) <= FLT_MAX) || (name === 'r' && !(v > 0))) return null;
     out[name] = v;
   }
   return { cx: out.cx, cy: out.cy, r: out.r };
@@ -164,7 +175,7 @@ export function donutOf(doc: Doc, holderId: NodeId): Donut | null {
   const parts = inputs && donutParts(doc, n);
   if (!inputs || !parts || parts.slices.length !== parts.data.values.length) return null;
   const want = donutSlices(parts.data.values, inputs.cx, inputs.cy, inputs.r);
-  if (!parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;
+  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;
   return { holder: holderId, values: parts.data.values, ...parts, ...inputs };
 }
 
@@ -207,7 +218,7 @@ export function donutCandidate(doc: Doc, holderId: NodeId): DonutCandidate | nul
   const r = Number(fmt(rx, 2));
   if (!(r > 0)) return null;
   const want = donutSlices(parts.data.values, cx, cy, r);
-  if (!parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;
+  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;
   return { holder: holderId, values: parts.data.values, cx, cy, r };
 }
 

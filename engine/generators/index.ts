@@ -6,8 +6,9 @@
 // - A table of generators (element, the attribute it writes, its inputs in order, generate), so a
 //   later one (P1-M3's donut) joins without a switch.
 // - generatorOf says whether an element IS generated now: the generator's element in the SVG
-//   namespace, draw:gen naming it, every input present and valid, and the geometry attribute,
-//   decoded, exactly what the inputs generate. Anything else is a plain shape, and its draw:*
+//   namespace, draw:gen naming it, every input present and valid (a centre or radius no larger than
+//   FLT_MAX, as path data reads numbers, so every coordinate computed from it stays finite), and the
+//   geometry attribute, decoded, exactly what the inputs generate. Anything else is a plain shape, and its draw:*
 //   attributes are kept untouched as unknown editor data. Reading never changes the file.
 // - finishGenerators is the Session's finish hook (commands/session.ts): the one place a generated
 //   shape is regenerated (its inputs changed) or detached (its geometry was edited by hand, or its
@@ -20,6 +21,7 @@ import { NS, attrValue, el, findAttr, type Doc, type ElementNode, type NodeId } 
 import { DRAW_NS } from '../model/draw-ns.ts';
 import { dropDrawAttrs, setDrawAttr, undeclareIfUnused } from '../model/draw-state.ts';
 import { fmt } from '../values/number-format.ts';
+import { FLT_MAX } from '../path/parse.ts';
 import { opSetAttr, type Op } from '../commands/ops.ts';
 import { polygonPoints, starPoints } from './radial.ts';
 import { spiralPath } from './spiral.ts';
@@ -45,10 +47,11 @@ export interface Generator {
   generate: (v: Readonly<Record<string, number>>) => string;
 }
 
-const finite = (v: number) => Number.isFinite(v);
-const CX: GeneratorInput = { name: 'cx', valid: finite };
-const CY: GeneratorInput = { name: 'cy', valid: finite };
-const R: GeneratorInput = { name: 'r', valid: (v) => Number.isFinite(v) && v > 0 };
+// A centre or a radius as path data can hold it (the parser's FLT_MAX), so no coordinate computed from them overflows.
+const coordinate = (v: number) => Math.abs(v) <= FLT_MAX;
+const CX: GeneratorInput = { name: 'cx', valid: coordinate };
+const CY: GeneratorInput = { name: 'cy', valid: coordinate };
+const R: GeneratorInput = { name: 'r', valid: (v) => v > 0 && v <= FLT_MAX };
 const count = (name: string): GeneratorInput => ({ name, integer: true, valid: (v) => Number.isInteger(v) && v >= 3 && v <= 24 });
 
 export const GENERATORS: readonly Generator[] = [
@@ -106,14 +109,29 @@ export interface Generated {
   attr: 'points' | 'd';
 }
 
+/**
+ * What a generator writes from these inputs, or null when a coordinate it would write isn't finite
+ * (fmt refuses one with a RangeError): such a shape is plain, never a throw. The bound on the inputs
+ * keeps every coordinate finite; this is the backstop.
+ */
+export function generatedFrom(g: Generator, inputs: Readonly<Record<string, number>>): string | null {
+  try {
+    return g.generate(inputs);
+  } catch (e) {
+    if (e instanceof RangeError) return null;
+    throw e;
+  }
+}
+
 /** The element's generator and inputs when it is generated now (see the header), else null: a plain shape. */
 export function generatorOf(doc: Doc, id: NodeId): Generated | null {
   const n = doc.nodes.get(id);
   if (!n || n.kind !== 'element') return null;
   const g = generatorFor(doc, n);
   const inputs = g && readInputs(doc, n, g);
-  if (!g || !inputs) return null;
-  return attrValue(doc, n, null, g.attr) === g.generate(inputs) ? { kind: g.kind, generator: g, inputs, attr: g.attr } : null;
+  const want = g && inputs && generatedFrom(g, inputs);
+  if (!g || !inputs || want === null) return null;
+  return attrValue(doc, n, null, g.attr) === want ? { kind: g.kind, generator: g, inputs, attr: g.attr } : null;
 }
 
 /**
@@ -214,7 +232,7 @@ export function finishGenerators(doc: Doc, ops: readonly Op[], apply: (op: Op) =
     const geometryTouched = !!t && t.plain.has(g.attr);
     if (!inputsTouched && !geometryTouched && !inserted.has(id)) continue;
     const inputs = readInputs(doc, n, g);
-    const expected = inputs && g.generate(inputs);
+    const expected = inputs && generatedFrom(g, inputs);
     if (expected !== null && attrValue(doc, n, null, g.attr) === expected) continue;
     if (expected !== null && inputsTouched && !geometryTouched) {
       apply(opSetAttr(doc, id, null, g.attr, expected));

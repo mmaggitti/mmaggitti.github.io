@@ -908,7 +908,7 @@ test('lab/arcs--donut.svg, goal "A slice over half": Edit as donut, then boundar
   assert.deepEqual(d.values, [64, 1, 20, 15]);
   const total = d.values.reduce((a, b) => a + b, 0);
   assert.ok(d.values.some((v) => v / total > 0.5), 'the goal: a slice over half');
-  assert.equal(attrValue(doc(r), slices[0], null, 'd'), donutSlices([64, 1, 20, 15], 50, 50, 28)[0]);
+  assert.equal(attrValue(doc(r), slices[0], null, 'd'), donutSlices([64, 1, 20, 15], 50, 50, 28)![0]);
   assert.match(attrValue(doc(r), slices[0], null, 'd')!, /^M 50 22 A 28 28 0 1 1 /, 'large-arc 1');
   r.editor.undo();
   assert.equal(r.editor.source(), adopted, 'one entry');

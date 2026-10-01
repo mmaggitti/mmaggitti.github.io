@@ -9,7 +9,8 @@ import { opInsert, opRemove, opSetAttr, opSetAttrRaw } from '../../commands/ops.
 import { parseFragment } from '../../model/fragment.ts';
 import { Session } from '../../commands/session.ts';
 import { DRAW_NS } from '../../model/draw-ns.ts';
-import { finishGenerators, generatorOf } from '../../generators/index.ts';
+import { GENERATORS, finishGenerators, generatedFrom, generatorOf } from '../../generators/index.ts';
+import { FLT_MAX } from '../../path/parse.ts';
 import { polygonPoints, starPoints } from '../../generators/radial.ts';
 import { spiralEnd, spiralPath } from '../../generators/spiral.ts';
 import { applyPlan, planMove } from '../../geometry/write.ts';
@@ -217,4 +218,20 @@ test('the finish hook: a node drag, a letter cycle and Make relative on a genera
     assert.equal(serialize(doc), src, `${what}: one undo gives the generated spiral back`);
     assert.equal(generatorOf(doc, n.id)?.kind, 'spiral');
   }
+});
+
+// R4 (the P1-M3 review): the generators' inputs take the same plain-decimal rule, so a polygon whose cx
+// and r were 1e308 written out made generatorOf throw (cx + r overflowed, and fmt threw). The inputs are
+// bounded where they are read (|v| ≤ FLT_MAX), and a generator that can't write a coordinate gives null.
+test('hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals, and a centre past FLT_MAX even with its points written out (finite); at FLT_MAX itself it is generated; a generator whose coordinate would overflow gives null', () => {
+  const big = '1' + '0'.repeat(308);
+  const plainly = (v: number) => BigInt(v).toString(); // a whole number written out in digits
+  const polygon = (cx: string, points: string, r = '30') => load(svg(`<polygon points="${points}" draw:gen="polygon" draw:cx="${cx}" draw:cy="0" draw:r="${r}" draw:sides="5"/>`));
+  const hostile = polygon(big, '0,0 1,1 2,0', big);
+  assert.equal(generatorOf(hostile, first(hostile, 'polygon').id), null, 'cx and r 1e308');
+  const past = polygon(plainly(1e39), polygonPoints(1e39, 0, 30, 5));
+  assert.equal(generatorOf(past, first(past, 'polygon').id), null, 'a centre past FLT_MAX');
+  const edge = polygon(plainly(FLT_MAX), polygonPoints(FLT_MAX, 0, 30, 5));
+  assert.ok(generatorOf(edge, first(edge, 'polygon').id), 'a centre at FLT_MAX is generated');
+  for (const g of GENERATORS) assert.equal(generatedFrom(g, { cx: 1e308, cy: 0, r: 1e308, sides: 5, tips: 5, inner: 0.4, turns: 1 }), null, `${g.kind}: a coordinate that overflows`);
 });

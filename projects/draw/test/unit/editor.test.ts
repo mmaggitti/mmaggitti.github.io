@@ -179,6 +179,41 @@ test('opening fits the artboard into the host and lists the whole source as code
   assert.equal(r.editor.source(), SAMPLE, 'and the open document stays');
 });
 
+// R4 (the P1-M3 review): a donut whose draw:cy was written as a 309-digit plain decimal made Open throw
+// while it built the code view, after the new document and Session were swapped in (the canvas showed
+// the new file, the code the old one, and edits went unsaved). The code view's blocks are built first
+// now, and the donut's inputs are bounded (donut.test.ts).
+test('Open refuses a document whose code view throws while it is built, before anything is swapped: the open drawing, its code, history and selection stay; a donut written with 309-digit inputs opens, plain', () => {
+  const r = rig();
+  assert.ok(r.editor.open(SAMPLE).ok);
+  const poly = element(doc(r), (n) => n.local === 'polyline');
+  const { block, token } = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.editor.tapToken(block, token);
+  r.editor.select([poly.id]);
+  const before = { doc: doc(r), source: r.editor.source(), code: text(r), history: r.editor.history.get(), selection: [...r.editor.selection.get()] };
+  // A document whose code view can't be built: a child the model has no node for, so reading its tokens throws.
+  const broken = parseDoc('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="5" height="5"/></svg>');
+  assert.ok(broken.ok);
+  broken.doc.nodes.delete((broken.doc.nodes.get(broken.doc.root) as ElementNode).children[0]);
+  r.log.length = 0;
+  const res = r.editor.open(broken.doc);
+  assert.ok(!res.ok && /TypeError/.test(res.error ?? ''), JSON.stringify(res));
+  assert.deepEqual(r.log, [], 'nothing drawn, listed or shown');
+  assert.equal(doc(r), before.doc, 'the open document stays');
+  assert.equal(r.editor.source(), before.source);
+  assert.equal(text(r), before.code, 'and its code');
+  assert.deepEqual(r.editor.history.get(), before.history, 'and its history');
+  assert.deepEqual([...r.editor.selection.get()], before.selection, 'and its selection');
+  // The review's file: draw:cy written as −1e308 in 309 digits. It opens, its source kept and listed, its comment plain.
+  const donut = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">\n <g draw:gen="donut" draw:cx="50" draw:cy="-1${'0'.repeat(308)}" draw:r="28">\n  <!-- data: 40, 60 -->\n  <path d="M 0 0"/>\n  <path d="M 0 0"/>\n </g>\n</svg>\n`;
+  const opened = r.editor.open(donut);
+  assert.ok(opened.ok, opened.error);
+  assert.equal(r.editor.source(), donut);
+  assert.equal(text(r), donut, 'the code lists it');
+  const comment = [...descendants(doc(r), doc(r).root)].find((n) => n.kind === 'comment')!;
+  assert.deepEqual(r.listing.get(`${comment.id}:leaf`)!.tokens, [], 'its comment is a plain comment');
+});
+
 // ── canvas and code: two live views of one document ────────────────────────────────────────────
 
 test('an edit reaches the canvas, then the code, then the overlay, then the stores; the listing stays the source', () => {
@@ -2239,7 +2274,7 @@ test('the donut: Edit as donut changes only the holder’s start tag (one entry)
   r.editor.pointerUp(ring(0.7));
   assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
   assert.deepEqual(r.editor.donut()?.values, [64, 1, 20, 15]);
-  const want = donutSlices([64, 1, 20, 15], 50, 50, 28);
+  const want = donutSlices([64, 1, 20, 15], 50, 50, 28)!;
   assert.deepEqual(pathsOf(r).map((id) => attr(element(doc(r), (n) => n.id === id), 'd')), want, 'the slices regenerated');
   assert.match(want[0], / 0 1 1 /, 'the first slice the long way round');
   r.editor.undo();

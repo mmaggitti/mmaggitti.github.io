@@ -14,6 +14,8 @@ import { DRAW_NS } from '../../model/draw-ns.ts';
 import { adoptDonut, detachGenerator, finishGenerators } from '../../generators/index.ts';
 import { dataRaw, donutCandidate, donutCandidateFor, donutFor, donutOf, donutSlices, readData } from '../../generators/donut.ts';
 import { applyPlan, planMove } from '../../geometry/write.ts';
+import { tokenizeText } from '../../code/tokens.ts';
+import { FLT_MAX } from '../../path/parse.ts';
 
 const LAB = readFileSync(new URL('../fixtures/corpus/lab/arcs--donut.svg', import.meta.url), 'utf8');
 const ATTRS = ' xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28"';
@@ -35,7 +37,7 @@ const session = (doc: Doc) => {
 };
 /** A donut in a <g> of the root, generated from these values, centre and radius. */
 const gDonut = (values: number[], cx: number, cy: number, r: number, attrs = ` draw:gen="donut" draw:cx="${cx}" draw:cy="${cy}" draw:r="${r}"`, extra = '') =>
-  `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">\n  <g id="d"${attrs}>\n    ${dataRaw(values)}\n${donutSlices(values, cx, cy, r).map((d, i) => `    <path d="${d}" stroke="#${i}${i}${i}" stroke-width="10" fill="none"/>\n`).join('')}${extra}  </g>\n</svg>\n`;
+  `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">\n  <g id="d"${attrs}>\n    ${dataRaw(values)}\n${donutSlices(values, cx, cy, r)!.map((d, i) => `    <path d="${d}" stroke="#${i}${i}${i}" stroke-width="10" fill="none"/>\n`).join('')}${extra}  </g>\n</svg>\n`;
 /** The holder written with id="d". */
 const gOf = (doc: Doc): NodeId => ([...descendants(doc, doc.root)].find((n) => n.kind === 'element' && n.attrs.some((a) => a.local === 'id' && a.raw === 'd')) as ElementNode).id;
 
@@ -70,8 +72,8 @@ test('the acceptance test: generating from lab/arcs--donut.svg’s comment (40, 
 
 test('exact halves: 50 and 50 give large-arc 0 on both slices (1 only over half); 51 and 49 give 1 then 0', () => {
   const large = (d: string) => d.split(' ')[7]; // M sx sy A R R 0 L 1 ex ey
-  assert.deepEqual(donutSlices([50, 50], 50, 50, 28).map(large), ['0', '0']);
-  assert.deepEqual(donutSlices([51, 49], 50, 50, 28).map(large), ['1', '0']);
+  assert.deepEqual(donutSlices([50, 50], 50, 50, 28)!.map(large), ['0', '0']);
+  assert.deepEqual(donutSlices([51, 49], 50, 50, 28)!.map(large), ['1', '0']);
   assert.deepEqual(donutSlices([50, 50], 50, 50, 28), ['M 50 22 A 28 28 0 0 1 50 78', 'M 50 78 A 28 28 0 0 1 50 22']);
 });
 
@@ -99,7 +101,7 @@ test('recognition: a donut only with draw:gen="donut" on a <g> or the root, vali
     const x = load(s);
     assert.equal(donutOf(x, gOf(x)), null, why);
   };
-  const three = donutSlices([30, 30, 40], 60, 40, 20);
+  const three = donutSlices([30, 30, 40], 60, 40, 20)!;
   plain(src.replace('<!-- data: 30, 30, 40 -->', '<!-- data: 0, 30, 40 -->'), 'a value of 0');
   plain(src.replace('<!-- data: 30, 30, 40 -->', '<!-- data: 101, 30, 40 -->'), 'a value of 101');
   plain(gDonut(Array(13).fill(5), 60, 40, 20), 'thirteen values');
@@ -192,4 +194,28 @@ test('the finish hook leaves a donut a donut when its <g> is moved, duplicated o
   s.dispatch('Duplicate', (apply) => apply(opInsert(doc, made.nodes[0], doc.root, el(doc, doc.root).children.length)));
   assert.ok(donutOf(doc, made.nodes[0]), 'the copy is a donut');
   assert.ok(detached.every((d) => d.length === 0), 'nothing was detached');
+});
+
+// R4 (the P1-M3 review): draw:cx, draw:cy or draw:r written as a 309-digit plain decimal passed M2's
+// plain-decimal rule, then SVG Lab's rounding overflowed and fmt threw, from the code view's tokens (so
+// Open threw half-way), the overlay and the finish hook. The inputs are bounded where they are read
+// (|v| ≤ FLT_MAX, as path data reads numbers), and donutSlices gives null rather than throw.
+test('hostile inputs stay plain and never throw: cx, cy or r written as 309-digit plain decimals (±1e308), and a centre past FLT_MAX even with its slices written out (finite); at FLT_MAX itself it is a donut; donutSlices gives null when a coordinate would overflow', () => {
+  const big = '1' + '0'.repeat(308);
+  const plainly = (v: number) => BigInt(v).toString(); // a whole number written out in digits
+  for (const [what, cx, cy, r] of [['cy −1e308', '50', `-${big}`, '28'], ['cx 1e308', big, '50', '28'], ['r 1e308', '50', '50', big]]) {
+    const doc = load(gDonut([40, 60], 50, 50, 28, ` draw:gen="donut" draw:cx="${cx}" draw:cy="${cy}" draw:r="${r}"`));
+    const g = all(doc, 'g')[0].id;
+    assert.equal(donutOf(doc, g), null, what);
+    assert.equal(donutFor(doc, all(doc, 'path')[0].id), null, what);
+    assert.deepEqual(tokenizeText(doc, commentOf(doc, g)), [], `${what}: its comment is a plain comment`);
+  }
+  // Past FLT_MAX, though every coordinate it generates is finite: only the bound makes it plain.
+  const past = load(gDonut([40, 60], 1e39, 50, 28, ` draw:gen="donut" draw:cx="${plainly(1e39)}" draw:cy="50" draw:r="28"`));
+  assert.equal(donutOf(past, all(past, 'g')[0].id), null, 'a centre past FLT_MAX');
+  const edge = load(gDonut([40, 60], FLT_MAX, 50, 28, ` draw:gen="donut" draw:cx="${plainly(FLT_MAX)}" draw:cy="50" draw:r="28"`));
+  assert.ok(donutOf(edge, all(edge, 'g')[0].id), 'a centre at FLT_MAX is a donut');
+  assert.equal(donutSlices([40, 60], 1e308, 0, 1e308), null, 'a coordinate that overflows');
+  assert.equal(donutSlices([40, 60], 50, 50, Infinity), null);
+  assert.equal(donutSlices([40, 60], NaN, 50, 28), null);
 });
