@@ -3518,6 +3518,119 @@ const BREAKS = [
     file: 'engine/policy/font-face-rules.ts', from: "      ruleStart = c === '}' && parens === 0;", to: '      ruleStart = false;',
     run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ a face rule goes, and only it/,
   },
+  // P1-M5 S1: quick starts, the Finish sheet and PNG.
+  {
+    id: 'B666', what: 'SVG Lab’s Logo preset drifts from the lab’s own export (its wave’s stroke-width)',
+    file: 'engine/presets/quick-starts.ts', from: '    stroke-width="4"\n', to: '    stroke-width="5"\n',
+    run: engineTests('presets/quick-starts.test.ts'), expect: /✖ SVG Lab’s three are its own exports of Blank, Icon and Logo/,
+  },
+  {
+    id: 'B667', what: 'the Icon 24 quick start loses stroke-linejoin="round"',
+    file: 'engine/presets/quick-starts.ts', from: 'stroke-linecap="round" stroke-linejoin="round">', to: 'stroke-linecap="round">',
+    run: engineTests('presets/quick-starts.test.ts'), expect: /✖ the quick starts are exactly a stroke icon’s 24 × 24 board/,
+  },
+  {
+    id: 'B668', what: 'pngSize gives an icon size to the artboard’s shorter side',
+    file: 'engine/export/raster.ts', from: 'return board.width >= board.height ? { w: n, h: other } : { w: other, h: n };', to: 'return board.width >= board.height ? { w: other, h: n } : { w: n, h: other };',
+    run: engineTests('export/raster.test.ts'), expect: /✖ pngSize: an icon size is the longer side/,
+  },
+  {
+    id: 'B669', what: 'clampArea rounds its sides up, past the cap',
+    file: 'engine/export/raster.ts', from: '  let cw = Math.max(1, Math.floor(w * k));\n  let ch = Math.max(1, Math.floor(h * k));\n', to: '  let cw = Math.max(1, Math.ceil(w * k));\n  let ch = Math.max(1, Math.ceil(h * k));\n  if (cw) return { w: cw, h: ch, clamped: true };\n',
+    run: engineTests('export/raster.test.ts'), expect: /✖ clampArea: the largest size of the same aspect within the area/,
+  },
+  {
+    id: 'B670', what: 'gridShows ignores the devicePixelRatio (the grid at 32 dots never shows on a @3x phone)',
+    file: 'engine/export/raster.ts', from: 'Math.round(paneCssPx * devicePixelRatio)', to: 'Math.round(paneCssPx)',
+    run: engineTests('export/raster.test.ts'), expect: /✖ gridShows: SVG Lab’s rule/,
+  },
+  {
+    id: 'B671', what: 'the Pixels caption loses its thousands separator (“1024 dots”)',
+    file: 'engine/export/raster.ts', from: "${(res * res).toLocaleString('en-US')} dots", to: '${res * res} dots',
+    run: engineTests('export/raster.test.ts'), expect: /✖ the captions are SVG Lab’s/,
+  },
+  {
+    id: 'B672', what: 'shapeCount counts the shapes waiting in <defs>',
+    file: 'engine/export/raster.ts', from: "new Set(['defs', 'symbol', 'clipPath', 'mask', 'pattern', 'marker'])", to: "new Set(['symbol', 'clipPath', 'mask', 'pattern', 'marker'])",
+    run: engineTests('export/raster.test.ts'), expect: /✖ shapeCount: what the canvas draws as shapes/,
+  },
+  {
+    id: 'B673', what: 'the PNG copy keeps a <foreignObject> nested in a group (only the root’s own children are looked at)',
+    file: 'engine/export/png-source.ts', from: '      else walk(c);\n', to: '',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ a <foreignObject> leaves the copy at any depth/,
+  },
+  {
+    id: 'B674', what: 'the PNG copy keeps the root’s own width (the image is drawn at the file’s size, not the PNG’s)',
+    file: 'engine/export/png-source.ts', from: "  setAttr(doc, doc.root, null, 'width', String(w));\n", to: '',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ the root’s width and height become the PNG’s/,
+  },
+  {
+    id: 'B675', what: 'the clamp gives up after 8192² instead of trying 4096² (no PNG past 4096² on iOS 17)',
+    file: 'projects/draw/src/export/png.ts', from: "    if (r === 'too-large') continue;", to: "    if (r === 'too-large') break;",
+    run: drawTests('png.test.ts'), expect: /✖ the clamp: a PNG past 8192² is clamped to it/,
+  },
+  {
+    id: 'B676', what: 'the PNG source takes Clean’s text as text (an image draws it in its fallback font)',
+    file: 'projects/draw/src/export/png.ts', from: '  if (!hasText(doc)) return { text: cleanExport(doc).text, notes: [] };', to: '  if (hasText(doc) || !hasText(doc)) return { text: cleanExport(doc).text, notes: [] };',
+    run: drawTests('png.test.ts'), expect: /✖ the PNG source is Clean’s file with its text as paths/,
+  },
+  {
+    id: 'B677', what: 'shareFiles awaits before navigator.share (WebKit refuses: the tap’s activation is gone)',
+    file: 'projects/draw/src/platform/share.ts', from: "    if (!nav?.canShare?.(data)) return 'unshared';\n    asked = nav.share(data);", to: "    if (!nav?.canShare?.(data)) return 'unshared';\n    await Promise.resolve();\n    asked = nav.share(data);",
+    run: drawTests('share.test.ts'), expect: /✖ shareFiles asks for the share sheet before anything is awaited/,
+  },
+  {
+    id: 'B678', what: 'check-sinks misses new OffscreenCanvas outside src/platform/',
+    file: 'projects/draw/tools/check-sinks.mjs', from: '/\\bnew\\s+(Image|OffscreenCanvas)\\s*\\(|', to: '/\\bnew\\s+(Image)\\s*\\(|',
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps rasterizing to src\/platform\//,
+  },
+  {
+    id: 'B679', what: 'New drawing opens a preset bound to the open drawing’s draft (the preset is saved over it)',
+    file: 'projects/draw/src/workspace.ts', from: "return p ? this.#open({ via: 'new', name: p.drawing, text: p.text }, {}) : Promise.resolve(false);", to: "return p ? this.#open({ via: 'draft', name: p.drawing, text: p.text }, { draft: this.autosave.draftId ?? undefined }) : Promise.resolve(false);",
+    run: drawTests('workspace.test.ts'), expect: /✖ New drawing from each preset/,
+  },
+  {
+    id: 'B680', what: 'Replace this one keeps the open drawing’s root attributes (the file is not the preset’s)',
+    file: 'engine/model/replace.ts', from: '  for (const a of [...root.attrs]) apply(opPutAttr(doc, root.id, a.ns, a.local, null));\n', to: '',
+    run: engineTests('replace.test.ts'), expect: /✖ a drawing with nothing before or after its root becomes the other file byte for byte/,
+  },
+  {
+    id: 'B681', what: 'Replace this one leaves the import report of the drawing that was there',
+    file: 'projects/draw/src/workspace.ts', from: '    if (current) this.current.set({ ...current, report: importReport(doc) });\n    return true;', to: '    return true;',
+    run: drawTests('workspace.test.ts'), expect: /✖ Replace this one: the open drawing’s content becomes the preset’s/,
+  },
+  {
+    id: 'B682', what: 'the e2e’s pixelShare compares colours without their alpha (a transparent pixel’s colour counts)',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: 'const pm = (c, i) => (i === 3 ? c[3] : (c[i] * c[3]) / 255);', to: 'const pm = (c, i) => c[i];',
+    run: drawTests('png-compare.test.ts'), expect: /✖ pixelShare: the share of pixels differing/,
+  },
+  {
+    id: 'B683', what: 'the New sheet’s SVG Lab Icon row picks the Logo preset', slow: true, checks: ['newSheetOpensTemplatesAndQuickStarts'],
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: 'onClick={() => setPicked(p.id)}', to: "onClick={() => setPicked(p.id === 'lab-icon' ? 'lab-logo' : p.id)}",
+    run: DRAW_E2E, expect: /newSheetOpensTemplatesAndQuickStarts: lab-icon opened as/,
+  },
+  {
+    id: 'B684', what: 'the Pixels pane is drawn smoothed (image-rendering: auto), not as dots', slow: true, checks: ['theFinishSheetPreviewsAndComparesPixels'],
+    file: 'projects/draw/src/app.css', from: '.draw-pane-pixels { image-rendering: pixelated; }', to: '.draw-pane-pixels { image-rendering: auto; }',
+    run: DRAW_E2E, expect: /theFinishSheetPreviewsAndComparesPixels \(1\): the Pixels image is 32×32, auto/,
+  },
+  {
+    id: 'B685', what: 'the PNGs are drawn from Clean’s file with its text as text (the image’s fallback font, not the text’s)', slow: true, checks: ['pngIsPreparedAndSharedInsideTheTap'],
+    file: 'projects/draw/src/export/png.ts', from: '  if (!hasText(doc)) return { text: cleanExport(doc).text, notes: [] };', to: '  if (hasText(doc) || !hasText(doc)) return { text: cleanExport(doc).text, notes: [] };',
+    run: DRAW_E2E, expect: /pngIsPreparedAndSharedInsideTheTap: (while the PNGs are prepared|the 64 px PNG)/,
+  },
+  {
+    id: 'B686', what: 'the Finish sheet’s dot chips drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
+    file: 'projects/draw/src/app.css', from: '.draw-dots { margin-bottom: var(--space-3); }', to: '.draw-dots { margin-bottom: var(--space-3); }\n.draw-dots > button { min-height: 2rem; height: 2rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): 440×956:\n(top|bottom): tap targets under 44pt/,
+  },
+  {
+    // A second slow break for this check: whether the bar scrolls in its own box is layout, which only
+    // a browser has.
+    id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach)', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
+    file: 'projects/draw/src/app.css', from: '  overflow-x: auto;\n  overflow-y: hidden;\n  overscroll-behavior-x: contain;\n', to: '',
+    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): the bar doesn't scroll/,
+  },
 ];
 
 const args = process.argv.slice(2);

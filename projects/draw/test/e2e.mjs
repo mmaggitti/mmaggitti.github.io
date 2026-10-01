@@ -86,6 +86,13 @@
 // reading the drawing (the canvas host stays aria-hidden); on lab/access.svg the screen-reader
 // preview following each switch, a shape's title, a code edit and an undo at once; and the phone
 // rules on the Access tab and its five-tab row at 440 pt.
+// P1-M5 adds New… and Finish: the New sheet's presets (Draw's blank, three quick starts, SVG Lab's
+// templates byte for byte), each as a new drawing or written over the open one in one entry Undo takes
+// back; the Finish sheet's PNG previews on light, dark and the checkerboard and SVG Lab's Pixels and
+// vector comparison (its chips, its 12-device-pixel grid and its captions) at 1× and 3×; PNGs made
+// before the tap from Clean's copy with its text as paths, shared once inside the tap (or downloaded one
+// by one), a 2× file, and nothing in an active file running; and the phone rules on the sheet and the
+// top bar, which scrolls sideways in its own box while the page never does.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -5302,7 +5309,7 @@ async function pixelAt(page, p) {
 const channels = (css) => (css.match(/-?[\d.]+/g) ?? []).map(Number);
 const near3 = (a, b, tol) => a.length >= 3 && b.length >= 3 && [0, 1, 2].every((i) => Math.abs(a[i] - b[i]) <= tol);
 
-// Inspect writes each value where it lives (§5.4 of the plan's M2 brief), through its controls: on
+// Inspect writes each value where it lives (its own attribute, a style="" declaration, or neither), through its controls: on
 // the ellipse, which holds nothing, every property of the table in turn (fill, stroke, and with it
 // the width-2 rule's stroke-width, then the width, the three opacities, miterlimit, cap, join, dash,
 // dash offset, paint order, non-scaling stroke, shape-rendering and color) is added as an attribute
@@ -8020,14 +8027,18 @@ async function phoneRulesOnTheFinishSheet(browser, origin, height) {
       const b = document.querySelector('.draw-bar');
       const de = document.documentElement;
       const name = document.querySelector('.draw-name');
+      const left = b.scrollLeft;
+      b.scrollLeft = 1e6;
+      const scrolls = b.scrollLeft > 0; // only a scroller scrolls
+      b.scrollLeft = 0;
       return {
-        sw: b.scrollWidth, cw: b.clientWidth, left: b.scrollLeft, height: b.getBoundingClientRect().height,
+        sw: b.scrollWidth, cw: b.clientWidth, left, scrolls, height: b.getBoundingClientRect().height,
         page: de.scrollWidth - de.clientWidth, name: name.textContent, nameCut: name.scrollWidth - name.clientWidth,
         buttons: [...b.querySelectorAll('button')].map((x) => x.className.split(' ').pop()),
       };
     });
     must(bar.buttons.join() === 'draw-files,draw-fit,draw-finish,draw-export', `the bar's buttons are ${bar.buttons}`);
-    must(bar.sw > bar.cw, `the bar doesn't scroll (${bar.sw} ≤ ${bar.cw}) with a long name`);
+    must(bar.sw > bar.cw && bar.scrolls, `the bar doesn't scroll (${bar.sw} against ${bar.cw}${bar.scrolls ? '' : ', and it won’t move'}) with a long name`);
     must(bar.left === 0, `the bar opens scrolled to ${bar.left}, not its start`);
     must(bar.page <= 0, `the page scrolls sideways by ${bar.page}`);
     must(bar.height === 44, `the bar is ${bar.height} tall, not 44`);

@@ -158,6 +158,11 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   tab writes a drawing's title, description, role, language and Dublin Core metadata through
   `engine/access/`; its screen-reader preview is computed from the model, never the page (the
   canvas host stays aria-hidden).
+- **Finish and PNG (P1-M5).** PNG is made only by `src/platform/raster.ts` (check-sinks' `raster`
+  rule), from Clean's copy with its text as paths and no `<foreignObject>`, prepared before the tap
+  and shared inside it, its area clamped to the device's canvas. New… opens a preset
+  (`engine/presets/`) as a new drawing, or writes it over the open drawing in one entry
+  (`engine/model/replace.ts`); the top bar scrolls sideways in its own box, never the page.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

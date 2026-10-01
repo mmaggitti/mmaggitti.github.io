@@ -33,7 +33,7 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 Signed: ______  Date: ______  Device / iOS: ______
 
-## P1 — Select, transform, shapes, colour, paths, text and accessibility
+## P1 — Select, transform, shapes, colour, paths, text, accessibility, finish, export, iPad and Create
 
 The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
 To take the house's group: tap the roof, then More → Select group.
@@ -75,5 +75,9 @@ To take the house's group: tap the roof, then More → Select group.
 | 53 | The Access fields and the keyboard | Access tab: tap the Title field, the Description box and the Language field in turn; the page never zooms, each field stays in view above the keyboard (scroll the sheet if it must), and Done or Return keeps what you typed | ☐ |
 | 54 | The five tabs | The code sheet's tab row (Code, Layers, Inspect, Access, Support) fits across the screen with a shape selected, every tab easy to hit with your thumb, and the selection's name still shows (shortened if it must) | ☐ |
 | 55 | A text's two handles | On a text, the position handle and the centre handle sit close together; both move the text. Check that each is easy to hit, and that the pair isn't confusing | ☐ |
+| 56 | New from a quick start | Files → New…, then Icon, App icon and Wordmark in turn, each with New drawing: each opens as a new drawing you can draw on at once, and the drawing before is still in Files; then SVG Lab's Logo with Replace this one: the open drawing becomes the logo, keeping its name, and Undo brings it back | ☐ |
+| 57 | Finish's previews | A drawing with a thin line: Finish: the 16 and 32 px previews show its real pixels (blocky, not blurred), the big ones fit the screen, and the light, dark and checkerboard strips read clearly; with a long drawing name, the top bar slides sideways to reach Export while the page itself never moves sideways | ☐ |
+| 58 | PNG through the share sheet | Finish → Share (Icon set): the share sheet offers to save the images, and the saved PNGs open in Photos or Files with a transparent background where the drawing has none | ☐ |
+| 59 | A big PNG | A 2000 × 2000 artboard at 3×: the sheet says it was scaled to fit this device, and the file is that size | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
