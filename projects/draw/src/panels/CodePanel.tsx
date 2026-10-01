@@ -196,6 +196,11 @@ export function CodePanel({ editor, views, files, copy, source }: Props) {
               Tidy
             </button>
           )}
+          {!source && !readOnly && (
+            <button type="button" className="draw-key draw-code-edit" aria-haspopup="dialog" aria-label="Edit the drawing’s source" onClick={() => editor.openDrawingSource()}>
+              Edit
+            </button>
+          )}
           <button type="button" className="draw-bar-key draw-copy" onClick={copy}>
             Copy
           </button>

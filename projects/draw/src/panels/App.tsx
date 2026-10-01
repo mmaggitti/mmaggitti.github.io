@@ -136,10 +136,11 @@ export function App() {
       hitPath,
       measureAll: () => measureAll(editor, views),
     };
-    // A paste anywhere but a field opens SVG (⌘V on the iPad or a Mac); a field keeps its own paste.
+    // A paste anywhere but a field opens SVG (⌘V on the iPad or a Mac); a field keeps its own paste,
+    // and while the Insert sheet is open its field takes every paste (P1-M5).
     const paste = (e: ClipboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (t?.closest?.('input, textarea, select, [contenteditable]') || editor.sheet.get()?.kind === 'insert') return;
       const p = pasted(e);
       if (!p?.svg) return;
       e.preventDefault();
@@ -213,7 +214,7 @@ export function App() {
       <Guard files={files}>
         <ContextBar ctx={ctx} unparsed={unparsed} files={files} />
         <ToolRail editor={editor} />
-        <Sheets editor={editor} />
+        <Sheets editor={editor} workspace={workspace} />
         <FileSheets workspace={workspace} editor={editor} theme={theme} setTheme={chooseTheme} />
         <Palette ctx={ctx} ui={ui} />
       </Guard>

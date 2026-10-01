@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, PEN_MODE_NOTICE, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, EMPTY_HINT, Editor, LOCKED, lineColumn, PEN_MODE_NOTICE, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
 import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
 import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
@@ -3431,4 +3431,78 @@ test('pen mode: the Stage’s latch sets penMode and says so once a visit; the P
   r.editor.enterPenMode();
   assert.equal(r.editor.penMode.get(), true, 'latched again');
   assert.equal(r.editor.notice.get(), null, 'the notice is said once a visit');
+});
+
+// ── P1-M5 S3: Insert, Edit the drawing's source, the empty state ───────────────────────────────
+
+const INSERT_INTO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+</svg>`;
+
+test('Insert puts SVG in as one <g>, last in the root: one "Insert" entry that undo takes back, the <g> selected, the tool kept; a refusal is the notice and the sheet stays', () => {
+  const r = rig();
+  r.editor.open(INSERT_INTO);
+  r.editor.pickTool('node');
+  r.editor.openInsert();
+  assert.equal(r.editor.sheet.get()?.kind, 'insert');
+  assert.equal(r.editor.insert('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle id="a" cx="50" cy="40" r="24"/><use href="#a"/></svg>'), true);
+  assert.equal(r.editor.source(), INSERT_INTO.replace('\n</svg>', '\n  <g><circle id="a-2" cx="50" cy="40" r="24"/><use href="#a-2"/></g>\n</svg>'), 'its clashing id renamed with its reference');
+  const g = element(doc(r), (n) => n.local === 'g');
+  assert.deepEqual([...r.editor.selection.get()], [g.id], 'the <g> is selected');
+  assert.equal(r.editor.tool.get(), 'node', 'the tool is kept');
+  assert.equal(r.editor.sheet.get(), null, 'the sheet closed');
+  assert.equal(r.editor.history.get().undoLabel, 'Insert');
+  r.editor.undo();
+  assert.equal(r.editor.source(), INSERT_INTO, 'undo gives the file back');
+  assert.equal(r.editor.history.get().canUndo, false, 'it was one entry');
+  r.editor.openInsert();
+  assert.equal(r.editor.insert('<svg xmlns="http://www.w3.org/2000/svg"><rect</svg>'), false);
+  assert.match(r.editor.notice.get() ?? '', /can’t be read \(line 1, column/);
+  assert.equal(r.editor.sheet.get()?.kind, 'insert', 'the sheet stays for another try');
+  assert.equal(r.editor.source(), INSERT_INTO);
+});
+
+test('Edit the drawing’s source: the sheet holds everything between the root’s tags; Apply is one "Edit source" entry undo takes back; text that doesn’t parse changes nothing and says where', () => {
+  const r = rig();
+  const file = `<?xml version="1.0"?>\n${INSERT_INTO}\n`;
+  r.editor.open(file);
+  assert.equal(r.editor.canEditDrawingSource(), true);
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.openDrawingSource();
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'source' && sheet.whole, 'the source sheet, on the whole drawing');
+  assert.deepEqual(sheet.whole, { start: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">', end: '</svg>' });
+  assert.equal(sheet.text, '\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n');
+  const text = '\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <circle cx="50" cy="50" r="5"/>\n';
+  assert.equal(r.editor.applyDrawingSource(text), null);
+  assert.equal(r.editor.source(), `<?xml version="1.0"?>\n${sheet.whole.start}${text}${sheet.whole.end}\n`, 'exactly the start tag, the text and the end tag; the prolog and epilog kept');
+  assert.equal(r.editor.sheet.get(), null);
+  assert.equal(r.editor.selection.get().size, 0, 'the selection empties');
+  assert.equal(r.editor.history.get().undoLabel, 'Edit source');
+  r.editor.undo();
+  assert.equal(r.editor.source(), file, 'one undo gives the bytes back');
+  r.editor.openDrawingSource();
+  const bad = r.editor.applyDrawingSource('\n  <rect\n');
+  assert.ok(bad && bad.line === 3 && bad.column === 1, JSON.stringify(bad));
+  assert.equal(r.editor.source(), file, 'nothing changed');
+  assert.equal(r.editor.history.get().canUndo, false);
+  assert.equal(r.editor.sheet.get()?.kind, 'source', 'the sheet keeps the text');
+});
+
+test('the empty state: an open drawing with nothing the canvas draws as a shape (lab/create.svg, only a <title>, only a <defs>) is empty, until a shape; the hint’s words with the rail below and on the left', () => {
+  const r = rig();
+  for (const body of ['', '<title>Nothing yet</title>', '<defs><linearGradient id="g"/><rect id="r" width="1" height="1"/></defs>']) {
+    r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`);
+    assert.equal(r.editor.isEmpty(), true, body || 'nothing');
+  }
+  r.editor.pickTool('shapes');
+  const at = hostAt(r, 50, 50);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+  assert.equal(r.editor.isEmpty(), false, 'a shape placed');
+  r.editor.undo();
+  assert.equal(r.editor.isEmpty(), true, 'and undone');
+  r.editor.open(INSERT_INTO);
+  assert.equal(r.editor.isEmpty(), false);
+  assert.deepEqual(EMPTY_HINT, { below: 'Add a shape below', left: 'Add a shape with the tools' });
 });

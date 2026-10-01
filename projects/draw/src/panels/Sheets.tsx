@@ -18,9 +18,17 @@
 // each name drawn in its own 400 face, yours with Remove, the generics, and Add a font…; its groups
 // come from a list, so P2's library fonts join it); and the Weight sheet (each weight by name and
 // number, drawn in its own). A pick is one entry and closes the sheet.
+//
+// P1-M5: Edit source on the whole drawing (the code panel's Edit): the root's start tag above the field
+// and its end tag below, read-only, and everything between them in the field; Apply replaces it in one
+// entry. The Insert sheet (the ToolRail's Insert): SVG pasted (read through platform/files.ts pasted():
+// Draw never reads the clipboard), typed, or picked from Files, put into the drawing as one group; while
+// it is open its field takes a paste made anywhere.
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Editor, Sheet, SourceError } from '../editor.ts';
+import type { Workspace } from '../workspace.ts';
+import { decodeSvg, pasted, readFile } from '../platform/files.ts';
 import { colorChoices, styleSlot, type ColorSlot } from '../color-choices.ts';
 import { hueCss, pickAlpha, pickHue, pickSV, pickText, pickerCss, pickerStart, pickerText, type Picker } from '../color-picker.ts';
 import { widthRange } from '../style-edit.ts';
@@ -36,11 +44,12 @@ import { useStore } from './store.ts';
 
 const GHOST_CLICK_MS = 350; // the tap that opened a sheet must not close it through the dim
 
-export function Sheets({ editor }: { editor: Editor }) {
+export function Sheets({ editor, workspace }: { editor: Editor; workspace: Workspace }) {
   const sheet = useStore(editor.sheet);
   if (!sheet) return null;
   const key =
-    sheet.kind === 'source' ? `source:${sheet.node}`
+    sheet.kind === 'insert' ? 'insert'
+    : sheet.kind === 'source' ? `source:${sheet.node}${sheet.whole ? ':whole' : ''}`
     : sheet.kind === 'style' ? `style:${sheet.prop}:${sheet.ids.join(',')}`
     : sheet.kind === 'lines' ? `lines:${sheet.id}`
     : sheet.kind === 'font' ? `font:${sheet.ids.join(',')}`
@@ -50,22 +59,25 @@ export function Sheets({ editor }: { editor: Editor }) {
   // A path's number is named for what it is ("point 2 x", "control 1 y": P1-M3), else its property.
   const title =
     sheet.kind === 'source' ? 'Edit source'
+    : sheet.kind === 'insert' ? 'Insert'
     : sheet.kind === 'style' ? sheet.prop
     : sheet.kind === 'lines' ? 'Text'
     : sheet.kind === 'font' ? 'Font'
     : sheet.kind === 'weight' ? `${sheet.family} weight`
     : sheet.kind === 'number' ? (sheet.token.label ?? sheet.token.prop)
     : sheet.token.prop;
-  const mono = sheet.kind !== 'lines' && sheet.kind !== 'font' && sheet.kind !== 'weight';
+  const mono = sheet.kind !== 'lines' && sheet.kind !== 'font' && sheet.kind !== 'weight' && sheet.kind !== 'insert';
   return (
     <Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>
-      <Body editor={editor} sheet={sheet} close={close} />
+      <Body editor={editor} workspace={workspace} sheet={sheet} close={close} />
     </Modal>
   );
 }
 
-function Body({ editor, sheet, close }: { editor: Editor; sheet: Sheet; close: () => void }) {
+function Body({ editor, workspace, sheet, close }: { editor: Editor; workspace: Workspace; sheet: Sheet; close: () => void }) {
   switch (sheet.kind) {
+    case 'insert':
+      return <InsertBody editor={editor} workspace={workspace} />;
     case 'number':
       return <NumberBody editor={editor} sheet={sheet} close={close} />;
     case 'color':
@@ -411,7 +423,7 @@ function SourceBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'sourc
   const [problem, setProblem] = useState<SourceError | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const apply = () => {
-    const e = editor.applySource(sheet.node, text);
+    const e = sheet.whole ? editor.applyDrawingSource(text) : editor.applySource(sheet.node, text);
     setProblem(e);
     if (e && area.current) {
       area.current.focus();
@@ -420,10 +432,11 @@ function SourceBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'sourc
   };
   return (
     <>
+      {sheet.whole && <pre className="draw-source-tag draw-source-start ds-mono">{sheet.whole.start}</pre>}
       <textarea
         ref={area}
         className="draw-source ds-mono"
-        aria-label="Element source"
+        aria-label={sheet.whole ? 'The drawing’s content' : 'Element source'}
         autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"
@@ -432,6 +445,7 @@ function SourceBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'sourc
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      {sheet.whole && <pre className="draw-source-tag draw-source-end ds-mono">{sheet.whole.end}</pre>}
       <Problem message={problem && `Line ${problem.line}, column ${problem.column}: ${problem.message}`} />
       <div className="draw-actions">
         <button type="button" className="ds-btn" onClick={close}>
@@ -439,6 +453,70 @@ function SourceBody({ editor, sheet, close }: { editor: Editor; sheet: Of<'sourc
         </button>
         <button type="button" className="ds-btn ds-btn--primary" onClick={apply}>
           Apply
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The Insert sheet (P1-M5): a field for SVG (a paste, read through pasted(), or typing), Insert, and
+ * Choose a file… (read as the importer reads a file). The workspace inserts it as one group and reads
+ * the import report again; a refusal is the notice, and the sheet stays.
+ */
+function InsertBody({ editor, workspace }: { editor: Editor; workspace: Workspace }) {
+  const [text, setText] = useState('');
+  const file = useRef<HTMLInputElement>(null);
+  // While the sheet is open, a paste made anywhere but its field fills the field (App leaves it here).
+  useEffect(() => {
+    const paste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented || (e.target as Element | null)?.closest?.('.draw-insert-field')) return;
+      const p = pasted(e);
+      if (!p) return;
+      e.preventDefault();
+      setText(p.text);
+    };
+    window.addEventListener('paste', paste);
+    return () => window.removeEventListener('paste', paste);
+  }, []);
+  const pick = async (el: HTMLInputElement) => {
+    const f = el.files?.[0];
+    el.value = ''; // the same file can be picked again
+    if (!f) return;
+    try {
+      workspace.insert((await decodeSvg(await readFile(f))).text);
+    } catch (e) {
+      editor.notice.set(`That file can’t be inserted: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  return (
+    <>
+      <textarea
+        className="draw-field draw-insert-field ds-mono"
+        aria-label="SVG to insert"
+        placeholder="Paste SVG markup here"
+        rows={6}
+        autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          const p = pasted(e.nativeEvent);
+          if (!p?.svg) return; // plain text pastes where the caret is
+          e.preventDefault();
+          setText(p.text);
+        }}
+      />
+      {/* iOS offers only the types listed here: .svg must be named, not just image/svg+xml. */}
+      <input ref={file} type="file" accept=".svg,.svgz,image/svg+xml" hidden onChange={(e) => void pick(e.currentTarget)} />
+      <div className="draw-actions">
+        <button type="button" className="ds-btn draw-insert-file" onClick={() => file.current?.click()}>
+          Choose a file…
+        </button>
+        <button type="button" className="ds-btn ds-btn--primary draw-insert-go" disabled={!text.trim()} onClick={() => workspace.insert(text)}>
+          Insert
         </button>
       </div>
     </>

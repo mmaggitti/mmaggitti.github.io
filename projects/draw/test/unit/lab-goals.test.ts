@@ -1250,3 +1250,125 @@ test('SVG Lab’s Blank from New… (template-blank): lab/create-blank.svg byte 
   assert.deepEqual(drafts.map((d) => d.name), ['Sample'], 'the drawing open before is a draft');
   assert.equal((await store.load(drafts[0].id))!.text, before, 'with its change');
 });
+
+// ── P1-M5 S3: the rest of Create ─────────────────────────────────────────────────────────────
+
+/** The file changed, and only inside the value of attribute `attr` (written once in the file). */
+function onlyIn(r: Rig, attr: string): void {
+  const now = r.editor.source();
+  const i = r.file.indexOf(`${attr}="`);
+  assert.ok(i >= 0 && r.file.indexOf(`${attr}="`, i + 1) === -1, `${attr} occurs once`);
+  const start = i + attr.length + 2;
+  const end = r.file.indexOf('"', start);
+  assert.equal(now.slice(0, start), r.file.slice(0, start), `before ${attr}'s value`);
+  assert.equal(now.slice(now.length - (r.file.length - end)), r.file.slice(end), `after ${attr}'s value`);
+  assert.notEqual(now, r.file);
+}
+
+test('lab/create-icon.svg and lab/create-logo.svg (code-tokens): a number scrubbed and one set in its sheet, a fill and a stroke through the Colour sheet, a path letter’s cycle (the heart’s C, the wave’s Q), linecap and linejoin; each one entry and only its bytes', () => {
+  const icon = open('lab/create-icon.svg');
+  const rect = element(icon, 'rect');
+  const x = token(icon, rect.id, 'number', 'x=');
+  icon.editor.scrubStart(x.block, x.token);
+  icon.editor.scrub(2);
+  icon.editor.scrubEnd(true);
+  assert.equal(icon.editor.source(), edited(icon.file, '\n    x="12"', '\n    x="14"'));
+  oneEntry(icon, 'Scrub x');
+  icon.editor.undo();
+  setNumber(icon, rect.id, 'rx=', '9');
+  assert.equal(icon.editor.source(), edited(icon.file, 'rx="18"', 'rx="9"'));
+  oneEntry(icon, 'Set rx');
+  icon.editor.undo();
+  const fill = token(icon, rect.id, 'color', 'fill');
+  icon.editor.tapToken(fill.block, fill.token);
+  assert.equal(icon.editor.sheet.get()?.kind, 'color');
+  assert.ok('text' in icon.editor.sheetInput('#e9c46a'));
+  icon.editor.closeSheet();
+  assert.equal(icon.editor.source(), edited(icon.file, 'fill="#264653"', 'fill="#e9c46a"'));
+  oneEntry(icon, 'Set fill');
+  icon.editor.undo();
+  const heart = element(icon, 'path');
+  const C = token(icon, heart.id, 'enum', 'd=');
+  assert.equal(C.block.text.slice(C.token.start, C.token.end), 'C');
+  icon.editor.tapToken(C.block, C.token);
+  onlyIn(icon, 'd');
+  oneEntry(icon, 'Set segment');
+  icon.editor.undo();
+
+  const logo = open('lab/create-logo.svg');
+  const wave = element(logo, 'path');
+  const stroke = token(logo, wave.id, 'color', 'stroke');
+  logo.editor.tapToken(stroke.block, stroke.token);
+  assert.equal(logo.editor.sheet.get()?.kind, 'color');
+  assert.ok('text' in logo.editor.sheetInput('#e76f51'));
+  logo.editor.closeSheet();
+  assert.equal(logo.editor.source(), edited(logo.file, 'stroke="#264653"', 'stroke="#e76f51"'));
+  oneEntry(logo, 'Set stroke');
+  logo.editor.undo();
+  for (const name of ['stroke-linecap', 'stroke-linejoin']) {
+    const k = token(logo, wave.id, 'enum', name);
+    logo.editor.tapToken(k.block, k.token);
+    assert.notEqual(attrValue(doc(logo), wave, null, name), 'round', `${name} cycles`);
+    onlyIn(logo, name);
+    oneEntry(logo, `Set ${name}`);
+    logo.editor.undo();
+  }
+  const Q = token(logo, wave.id, 'enum', 'd=');
+  assert.equal(Q.block.text.slice(Q.token.start, Q.token.end), 'Q');
+  logo.editor.tapToken(Q.block, Q.token);
+  onlyIn(logo, 'd');
+  oneEntry(logo, 'Set segment');
+});
+
+/** The real editor in a Workspace over memoryKV() drafts, with lab/create.svg opened as a file. */
+async function createWorkspace() {
+  const { editor, listing } = listingEditor();
+  const store = new DraftStore(memoryKV());
+  const ws = new Workspace(editor, { store, lock: lockTable().lock, sample: SAMPLE, journal: memoryJournal() });
+  await ws.openSample();
+  assert.ok(await ws.openText(corpus('lab/create.svg'), 'create.svg', 'file'));
+  const r: Rig = { editor, file: editor.source(), listing };
+  return { r, ws, store };
+}
+
+test('lab/create.svg (export, goal-export): a shape placed; Copy puts the standalone file on the clipboard, xmlns and all; an As-is export is that file under the drawing’s name; and an export resets the draft’s “not exported” reminder', async () => {
+  const { r, ws, store } = await createWorkspace();
+  place(r, 'rect', 50, 50);
+  assert.ok(r.editor.source() !== r.file && /<rect /.test(r.editor.source()), 'a shape placed');
+  await ws.autosave.flush();
+  let copied: string | null = null;
+  assert.ok(await ws.copy(async (t) => ((copied = t), true)));
+  assert.equal(copied, r.editor.source(), 'Copy: the whole file');
+  assert.match(copied!, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/, 'standalone, with its xmlns');
+  const f = ws.exportFile('as-is')!;
+  assert.equal(f.fileName, 'create.svg', 'named for its drawing, not my-drawing.svg');
+  assert.equal(new TextDecoder().decode(f.bytes), r.editor.source());
+  const draft = async () => (await store.list()).find((d) => d.name === 'create')!;
+  assert.equal((await draft()).exported, null, 'a draft not exported yet');
+  await ws.exported({ fileName: f.fileName, kind: f.kind }, 'downloaded');
+  assert.notEqual((await draft()).exported, null, 'the goal: it left Draw, and the reminder reset');
+});
+
+test('lab/create.svg (paste-shapes): the Insert tool puts the lab’s logo in as one <g> holding its circle, path and text, with no transform (both boards are 100 units), selected, in one entry', () => {
+  const r = open('lab/create.svg');
+  assert.ok(r.editor.insert(corpus('lab/create-logo.svg')));
+  const root = doc(r).nodes.get(doc(r).root) as ElementNode;
+  const last = [...root.children].reverse().map((c) => doc(r).nodes.get(c)!).find((n): n is ElementNode => n.kind === 'element')!;
+  assert.equal(last.local, 'g');
+  assert.equal(attrValue(doc(r), last, null, 'transform'), null, 'no transform');
+  const kids = last.children.map((c) => doc(r).nodes.get(c)!).filter((n): n is ElementNode => n.kind === 'element').map((n) => n.local);
+  assert.deepEqual(kids, ['circle', 'path', 'text']);
+  assert.deepEqual([...r.editor.selection.get()], [last.id], 'selected');
+  oneEntry(r, 'Insert');
+});
+
+test('lab/create.svg (empty-state): empty at first, not once the Shapes tool places a shape, empty again after undo; the hint is the app’s, never in the file', () => {
+  const r = open('lab/create.svg');
+  assert.equal(r.editor.isEmpty(), true);
+  place(r, 'rect', 50, 50);
+  assert.equal(r.editor.isEmpty(), false);
+  r.editor.undo();
+  assert.equal(r.editor.isEmpty(), true);
+  assert.equal(r.editor.source(), r.file);
+  assert.ok(!r.editor.source().includes('Add a shape'), 'never in the file');
+});

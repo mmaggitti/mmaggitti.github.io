@@ -92,6 +92,7 @@ export const COMMANDS: readonly Command[] = [
   { id: 'duplicate', name: 'Duplicate', group: 'Edit', more: true, can: someNotRoot, run: (c) => c.editor.duplicate() },
   { id: 'edit-text', name: 'Edit text', group: 'Edit', bar: true, shown: (c) => c.editor.canEditText(), can: (c) => c.editor.canEditText(), run: (c) => c.editor.editText() },
   { id: 'edit-source', name: 'Edit source', group: 'Edit', more: true, shown: (c) => c.editor.canEditSource(), can: (c) => c.editor.canEditSource(), run: (c) => c.editor.openSource() },
+  { id: 'edit-drawing-source', name: 'Edit the drawing’s source', group: 'Edit', can: (c) => c.editor.canEditDrawingSource(), run: (c) => c.editor.openDrawingSource() },
   { id: 'fill', name: 'Fill…', group: 'Edit', more: true, can: someNotRoot, run: (c) => c.editor.openStyleSheet('fill') },
   { id: 'stroke', name: 'Stroke…', group: 'Edit', more: true, can: someNotRoot, run: (c) => c.editor.openStyleSheet('stroke') },
   { id: 'gloss', name: 'Gloss', group: 'Edit', more: true, can: someNotRoot, run: (c) => c.editor.toggleGloss() },
@@ -138,6 +139,7 @@ export const COMMANDS: readonly Command[] = [
   tool('pen', 'Pen'),
   tool('shapes', 'Shapes'),
   tool('text', 'Text'),
+  { id: 'insert', name: 'Insert…', group: 'Tools', can: writable, run: (c) => c.editor.openInsert() },
   // File
   { id: 'new', name: 'New…', group: 'File', can: (c) => !!c.workspace, run: (c) => c.workspace!.show('new') },
   { id: 'files', name: 'Files', group: 'File', can: (c) => !!c.workspace, run: (c) => c.workspace!.show('files') },

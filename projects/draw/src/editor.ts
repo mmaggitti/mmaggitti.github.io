@@ -42,8 +42,10 @@
 //   (Title, Description, Metadata, an element's Title and Hidden, Remove) and one field session per
 //   focus (Field kind 'access'); typing a title where there is none makes it, in that one entry.
 
-import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
-import { parseFragment } from '../../../engine/model/fragment.ts';
+import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, serializeParts, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
+import { parseFragment, replaceContent } from '../../../engine/model/fragment.ts';
+import { planInsert } from '../../../engine/model/insert.ts';
+import { shapeCount } from '../../../engine/export/raster.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, opSetLeafRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
 import { REM_UNCONVERTIBLE } from '../../../engine/report/import-report.ts';
@@ -232,7 +234,10 @@ export type Sheet =
   | { kind: 'number'; ref: TokenRef; token: NumberToken }
   | { kind: 'color'; ref: TokenRef; token: ColorToken }
   | { kind: 'text'; ref: TokenRef; token: TextToken }
-  | { kind: 'source'; node: NodeId; text: string }
+  /** Edit source: one element's markup; or (P1-M5) the whole drawing's content, the root's tags shown around the field (`whole`). */
+  | { kind: 'source'; node: NodeId; text: string; whole?: { start: string; end: string } }
+  /** The Insert tool's sheet (P1-M5): SVG pasted, typed or picked from Files, put into the drawing as one group. */
+  | { kind: 'insert' }
   /** The Colour sheet over the selection for a style property (Inspect's swatches, More's Fill… and Stroke…). */
   | { kind: 'style'; prop: string; ids: NodeId[]; text: string }
   /** The Text sheet's lines (P1-M4): one text's lines, one entry per visit; `select`: its text selected in the field (the Text tool's). */
@@ -3978,6 +3983,90 @@ export class Editor {
     if (this.sheet.get()?.kind === 'source') this.sheet.set(null);
   }
 
+  // ── Edit the drawing's source, Insert, the empty state (P1-M5) ─────────────────────────────────
+
+  /** Is Edit the drawing's source offered: an open drawing that can be written. */
+  canEditDrawingSource(): boolean {
+    return !!this.#doc && !this.readOnly.get();
+  }
+
+  /** The source sheet on the root's whole content: its start tag above the field, its end tag below, everything between them in it. */
+  openDrawingSource(): void {
+    if (this.tool.get() === 'pen') this.#endPen(true);
+    this.#endLines();
+    const doc = this.#doc;
+    if (!doc || this.#live || !this.#writable()) return;
+    this.focus.set(null);
+    const p = serializeParts(doc, doc.root);
+    this.sheet.set({ kind: 'source', node: doc.root, text: p.content, whole: { start: p.start, end: p.end } });
+  }
+
+  /**
+   * Apply the drawing's content (engine/model/fragment.ts replaceContent): every child of the root
+   * replaced by what `text` parses to there, in ONE transaction ("Edit source") that undo takes back
+   * byte for byte, so the file is exactly the root's start tag, the text and its end tag, with what
+   * lies outside the root kept. Text that doesn't parse changes nothing and says where.
+   */
+  applyDrawingSource(text: string): SourceError | null {
+    const doc = this.#doc;
+    if (!doc) return { message: 'Nothing is open', at: 0, line: 1, column: 1 };
+    if (this.readOnly.get()) return { message: READ_ONLY, at: 0, line: 1, column: 1 };
+    if (!this.#session || this.#live || this.#nudge || this.#gesture) return { message: 'Finish the edit in progress first', at: 0, line: 1, column: 1 };
+    let error: { at: number; message: string } | null = null;
+    this.#session.dispatch('Edit source', (apply) => {
+      const r = replaceContent(doc, doc.root, text, apply);
+      if (!r.ok) error = r.error;
+    });
+    if (error) {
+      const e: { at: number; message: string } = error;
+      return { message: e.message, at: e.at, ...lineColumn(text, e.at) };
+    }
+    this.#noteDetached();
+    this.sheet.set(null);
+    this.select([]);
+    return null;
+  }
+
+  /** The Insert sheet (the ToolRail's Insert): SVG to paste, type or pick, put in as one group. */
+  openInsert(): void {
+    if (this.tool.get() === 'pen') this.#endPen(true);
+    this.#endLines();
+    if (!this.#doc || this.#live || !this.#writable()) return;
+    this.focus.set(null);
+    this.sheet.set({ kind: 'insert' });
+  }
+
+  /**
+   * Insert SVG (engine/model/insert.ts planInsert) as one <g>, last in the root by the insertion rule,
+   * centred on the canvas, in ONE transaction ("Insert"); the <g> is selected, the tool kept and the
+   * sheet closed. A refusal (not SVG, not well-formed, past the drawing's limits) is the notice, and the
+   * sheet stays. What the insert holds that Draw doesn't draw is kept byte for byte and never drawn.
+   */
+  insert(text: string): boolean {
+    const doc = this.#doc;
+    const box = this.#box;
+    if (!doc || this.#live || !this.#writable()) return false;
+    if (this.#gesture) this.pointerCancel();
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = toHost && invert(toHost);
+    const [cx, cy] = inv ? applyM(inv, this.#size.width / 2, this.#size.height / 2) : [0, 0];
+    const plan = planInsert(doc, text, { x: cx, y: cy }, this.#board);
+    if ('refused' in plan) {
+      this.notice.set(plan.refused);
+      return false;
+    }
+    let g: NodeId | null = null;
+    if (!this.#dispatch('Insert', (apply) => (g = insertMarkup(doc, { last: doc.root }, plan.markup, apply)))) return false;
+    if (this.sheet.get()?.kind === 'insert') this.sheet.set(null);
+    this.select([g!]);
+    return true;
+  }
+
+  /** An open drawing with nothing the canvas draws as a shape (no shape, text, image or use, raster.ts shapeCount): the empty state's hint. */
+  isEmpty(): boolean {
+    return !!this.#doc && shapeCount(this.#doc) === 0;
+  }
+
   /** The artboard's larger side (the Number sheet's slider spans from minus it to twice it), or 100. */
   extent(): number {
     const b = this.#board;
@@ -4228,6 +4317,8 @@ interface PenGesture {
   label: string | null;
 }
 export const PEN_NOTICE = 'Tap to add points, or drag to curve.';
+/** The empty state's hint (P1-M5): SVG Lab's words with the rail below, and with the rail on the left (media.ts WIDE). */
+export const EMPTY_HINT = { below: 'Add a shape below', left: 'Add a shape with the tools' } as const;
 /** Said once a visit, when the Pencil's first press or hover latches pen mode (P1-M5). */
 export const PEN_MODE_NOTICE = 'Apple Pencil draws; fingers move the view. Tap Pencil in the rail to draw with a finger.';
 /** The Pen's own history entries: any other ends the Pen first. */

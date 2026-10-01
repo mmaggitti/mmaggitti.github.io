@@ -62,6 +62,11 @@ export interface Current {
 /** New: a blank artboard (engine/presets/quick-starts.ts, the New sheet's Blank). */
 export { BLANK };
 
+export const INSERTED = 'Inserted.';
+export const INSERTED_NOT_DRAWN = 'Inserted. Files → Import report lists what isn’t drawn.';
+/** How many things the report lists that the canvas doesn't draw: active content, what's kept hidden or dropped, and the unknown. */
+const notDrawn = (r: ImportReport): number => r.items.reduce((n, i) => n + (i.bucket === 'preview' || i.bucket === 'unclassified' || (i.bucket === 'kept' && i.cls !== 'preserve') ? i.count : 0), 0);
+
 /** What left Draw (exported): a file's name, or a summary of several, and its kind. */
 export interface Exported {
   fileName: string;
@@ -264,6 +269,23 @@ export class Workspace {
     this.panel.set(null);
     const current = this.current.get();
     if (current) this.current.set({ ...current, report: importReport(doc) });
+    return true;
+  }
+
+  /**
+   * Insert SVG into the open drawing as one group (the Insert sheet: editor.insert), then read the import
+   * report again: the notice says "Inserted.", or that the report lists what isn't drawn when the insert
+   * brought something Draw keeps but doesn't draw. False when nothing was inserted (the notice says why).
+   */
+  insert(text: string): boolean {
+    const doc = this.#editor.doc;
+    if (!doc || this.unparsed.get()) return false;
+    const before = notDrawn(importReport(doc));
+    if (!this.#editor.insert(text)) return false;
+    const report = importReport(doc);
+    const current = this.current.get();
+    if (current) this.current.set({ ...current, report });
+    this.#editor.notice.set(notDrawn(report) > before ? INSERTED_NOT_DRAWN : INSERTED);
     return true;
   }
 

@@ -289,6 +289,13 @@
 .draw-over-title { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 .draw-over-text { margin: var(--space-1) 0 var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .draw-broken .draw-over-title { color: var(--draw-danger); }
+/* The empty state (P1-M5): a hint in the middle of the canvas that every tap passes through. */
+.draw-over.draw-empty { pointer-events: none; border: 0; background: none; box-shadow: none; text-align: center; color: var(--text-muted); font-size: var(--text-md); }
+/* Edit the drawing's source (P1-M5): the root's start and end tags around the field, read-only. */
+.draw-source-tag { margin: 0 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--text-sm); }
+.draw-source-end { margin: var(--space-2) 0 0; }
+/* The Insert sheet (P1-M5). */
+.draw-insert-field { width: 100%; min-height: max(var(--tap-min), 8rem); padding: var(--space-2) var(--space-3); resize: vertical; }
 /* Play, for a drawing reduced motion opened paused. */
 .draw-play-btn {
   position: absolute;

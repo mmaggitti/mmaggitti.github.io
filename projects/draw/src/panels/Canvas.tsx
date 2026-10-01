@@ -12,11 +12,14 @@
 // Draw's own state; it is rendered in the app's root, outside the canvas, whose containment would
 // clip it and whose chrome and marks would paint over it, as the ContextBar's More sheet is); and when there is something to say, a file that isn't well-formed (it is shown only as
 // source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
-// under reduced motion, Play for a drawing that animates (it opens paused, top-right).
+// under reduced motion, Play for a drawing that animates (it opens paused, top-right). Over a drawing
+// with nothing to draw (no shape, text, image or use: P1-M5's empty state, SVG Lab's "Add a shape
+// below"), a hint the taps pass through, "Add a shape with the tools" where the rail is on the left;
+// it is the app's, never in the file, and goes with the first shape.
 
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import type { Editor } from '../editor.ts';
+import { EMPTY_HINT, type Editor } from '../editor.ts';
 import type { Unparsed } from '../workspace.ts';
 import { failureText } from '../files-view.ts';
 import { useStore } from './store.ts';
@@ -28,6 +31,7 @@ import type { Views } from './views.ts';
 import { Modal } from './Sheets.tsx';
 import type { SnapPrefs } from '../interact/snap.ts';
 import type { PanelUi } from './ui.ts';
+import { WIDE, useMedia } from './media.ts';
 
 interface Props {
   editor: Editor;
@@ -222,6 +226,9 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
 function Over({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed | null; files: () => void }) {
   const broken = useStore(editor.canvasError);
   const motion = useStore(editor.motion);
+  const tool = useStore(editor.tool);
+  useStore(editor.version);
+  const wide = useMedia(WIDE);
   if (unparsed) {
     return (
       <div className="draw-over draw-chrome draw-unparsed" role="status">
@@ -242,6 +249,13 @@ function Over({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed 
           Files
         </button>
       </div>
+    );
+  }
+  if (tool !== 'pen' && editor.isEmpty()) {
+    return (
+      <p className="draw-over draw-empty" role="status">
+        {wide ? EMPTY_HINT.left : EMPTY_HINT.below}
+      </p>
     );
   }
   if (motion === 'paused' || motion === 'playing') {
