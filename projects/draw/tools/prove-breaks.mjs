@@ -3622,7 +3622,7 @@ const BREAKS = [
   {
     id: 'B686', what: 'the Finish sheet’s dot chips drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
     file: 'projects/draw/src/app.css', from: '.draw-dots { margin-bottom: var(--space-3); }', to: '.draw-dots { margin-bottom: var(--space-3); }\n.draw-dots > button { min-height: 2rem; height: 2rem; }',
-    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): 440×956:\n(top|bottom): tap targets under 44pt/,
+    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): 440×956:\n\s+(top|bottom): tap targets under 44pt/,
   },
   {
     id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach): a second slow break for this check, since whether the bar scrolls is layout, which only a browser has', slow: true, checks: ['phoneRulesOnTheFinishSheet'],

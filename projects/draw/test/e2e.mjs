@@ -8015,14 +8015,15 @@ async function pngIsPreparedAndSharedInsideTheTap(browser, origin) {
 // The phone rules on the Finish sheet (at 956 and 796 tall), with a drawing whose name is long: the
 // top bar (Files, the name, preview, Fit, Finish, Export) scrolls sideways in its own box, opening at
 // its start, while the page never does; every bar button is at least 44 × 44 and comes fully into the
-// window somewhere in the bar's scroll range; the name shows in full. In the sheet: every chip,
-// choice, row and button at least 44 × 44, no sideways scroll at its top or bottom, and Share in the
-// bottom quarter of the window, above the home indicator, wherever the sheet is scrolled.
+// window somewhere in the bar's scroll range; the name shows in full. The bar is measured as the file
+// opens, under its import report and before any tap, so a page that scrolls sideways fails here, by
+// name, rather than on the next tap it would put out of reach. In the sheet: every chip, choice, row
+// and button at least 44 × 44, no sideways scroll at its top or bottom, and Share in the bottom
+// quarter of the window, above the home indicator, wherever the sheet is scrolled.
 async function phoneRulesOnTheFinishSheet(browser, origin, height) {
   await withPage(browser, origin, height, async (page, errors) => {
     const NAME = 'A long drawing name that makes the bar scroll';
     await pickFile(page, `${NAME}.svg`, Buffer.from(LAB('vector.svg')));
-    await closeModal(page);
     const bar = await page.evaluate(() => {
       const b = document.querySelector('.draw-bar');
       const de = document.documentElement;
@@ -8052,6 +8053,7 @@ async function phoneRulesOnTheFinishSheet(browser, origin, height) {
       }, cls);
       must(r.w >= TAP_MIN - 0.5 && r.h >= TAP_MIN - 0.5 && r.left >= -0.5 && r.right <= 440.5 && r.scrollX === 0 && r.page <= 0, `${cls} is ${Math.round(r.w)}×${Math.round(r.h)} at ${Math.round(r.left)}–${Math.round(r.right)} in the bar's range (page scrolled to ${r.scrollX})`);
     }
+    await closeModal(page);
     await page.evaluate(() => {
       document.querySelector('.draw-bar').scrollLeft = 0;
       navigator.canShare = (d) => Array.isArray(d?.files);
