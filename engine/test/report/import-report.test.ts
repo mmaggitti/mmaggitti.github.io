@@ -198,3 +198,16 @@ test('the font notes (P1-M4): a file’s own data: faces are counted as drawn on
   const none = parse('<svg xmlns="http://www.w3.org/2000/svg"><text>a</text></svg>');
   assert.deepEqual(importReport(none).notes.filter((n) => /font/i.test(n)), []);
 });
+
+test('the style-rule note (P1-M4 S3): rules that ask for focus, a tabindex or a link can’t match on the canvas (its shapes are never focused and never links); a selector naming one only inside :not() is never counted', () => {
+  const notes = (css: string) => {
+    const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg"><style>${css}</style><rect width="1" height="1" tabindex="0"/></svg>`);
+    assert.ok(r.ok);
+    return importReport(r.doc).notes.filter((n) => /style rule/.test(n));
+  };
+  const NOTE = (n: number) => `${n} style rule${n > 1 ? 's' : ''} can’t match on the canvas: its shapes are never focused and never links.`;
+  assert.deepEqual(notes('rect:focus{fill:red}'), [NOTE(1)]);
+  assert.deepEqual(notes('[tabindex]{stroke:red} [ tabindex="0"]{x:1} a:link{fill:blue} a:any-link{fill:blue} a:visited{fill:blue} g:focus-visible{opacity:.5} g:focus-within{opacity:.5} @media (min-width:1px){circle:focus{fill:red}}'), [NOTE(8)]);
+  assert.deepEqual(notes('rect:not(:focus){fill:red} rect:hover{fill:red} rect, a:link{fill:red} .focused{fill:red} :is(:focus, rect){fill:red} rect[data-tabindexes]{fill:red}'), [], 'none of these needs focus or a link to match');
+  assert.deepEqual(notes('/* rect:focus{} */ rect{fill:red}'), [], 'comments are not rules');
+});

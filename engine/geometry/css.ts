@@ -187,6 +187,7 @@ const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\
 // ── the document's sheets, read again only when what its <style> elements say may have changed ──
 
 interface Rule {
+  prelude: string; // the selector list as written (comments blanked)
   selectors: Compound[]; // each selector's last compound
   decls: { name: string; important: boolean }[]; // what it declares, and which are !important
 }
@@ -234,7 +235,7 @@ function readSheet(css: string, into: Sheet, inKeyframes = false): void {
     else if (prelude.startsWith('@')) {
       // @font-face, @page, @property: nothing that styles an element
     } else if (inKeyframes) for (const d of declarations(body)) into.keyframes.add(d.name);
-    else into.rules.push({ selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => ({ name: d.name, important: d.important })) });
+    else into.rules.push({ prelude, selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => ({ name: d.name, important: d.important })) });
     i = close + 1;
   }
 }
@@ -321,6 +322,37 @@ export function sheetProps(doc: Doc): ReadonlySet<string> {
   const out = new Set<string>();
   for (const r of sheet.rules) for (const d of r.decls) out.add(d.name);
   if (sheet.keyframes.size) out.add('animation');
+  return out;
+}
+
+// A selector that asks for focus, a tabindex or a link (P1-M4 S3). The canvas never draws tabindex
+// (so nothing on it is focused) nor an <a>'s href (so nothing on it is a link).
+const FOCUS_OR_LINK = /\[\s*(?:[\w-]*\|)?tabindex(?![\w-])|:(?:focus(?:-visible|-within)?|link|any-link|visited)(?![\w-])/i;
+
+/**
+ * How many style rules can't match anything on the canvas (the import report's note, P1-M4 S3): each
+ * of the rule's selectors asks for focus (:focus, :focus-visible, :focus-within), a tabindex
+ * ([tabindex) or a link (:link, :any-link, :visited). Read outside parentheses, so a selector that
+ * names one only inside :not(), :is() or :has() is never counted (rect:not(:focus) matches every rect).
+ */
+export function unmatchableRules(doc: Doc): number {
+  let n = 0;
+  for (const r of sheetOf(doc).rules) {
+    const list = splitTop(r.prelude, ',');
+    if (list.length && list.every((sel) => FOCUS_OR_LINK.test(outsideParens(sel)))) n++;
+  }
+  return n;
+}
+
+// The selector with what is inside its parentheses (pseudo-class arguments) left out.
+function outsideParens(sel: string): string {
+  let out = '';
+  let depth = 0;
+  for (const c of sel) {
+    if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += c;
+  }
   return out;
 }
 

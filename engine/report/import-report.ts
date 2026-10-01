@@ -9,13 +9,14 @@
 // the external entities a DOCTYPE declares (never fetched). P1-M4: the file's own fonts (its data:
 // @font-face faces, which Draw registers so both engines draw them), and the ones it doesn't load: a
 // face named like Draw's own interface fonts (it would restyle Draw itself), and faces over the limits.
+// P1-M4 S3: the style rules that can't match on the canvas (focus, tabindex and link selectors).
 
 import { descendants, NS, type Doc, type ElementNode } from '../model/doc.ts';
 import { buildRefIndex, duplicateIds } from '../model/refs.ts';
 import { classifyAttribute, classifyElement, type Classified } from '../policy/classify.ts';
 import { elementRenders } from '../policy/render-policy.ts';
 import type { LedgerClass } from '../policy/tables.ts';
-import { cssSets } from '../geometry/css.ts';
+import { cssSets, unmatchableRules } from '../geometry/css.ts';
 import { rootFontSize } from '../geometry/lengths.ts';
 import { fmt } from '../values/number-format.ts';
 import { FACE_MAX, FACES_MAX, appFontName, fontFaces } from '../text/font-faces.ts';
@@ -117,6 +118,8 @@ export function importReport(doc: Doc): ImportReport {
   }
   if (rems.styleText) notes.push(`${rems.styleText} rem length${rems.styleText > 1 ? 's' : ''} inside <style> text ${rems.styleText > 1 ? 'are' : 'is'} left as written.`);
   notes.push(...fontNotes(doc));
+  const unmatchable = unmatchableRules(doc);
+  if (unmatchable) notes.push(`${unmatchable} style rule${unmatchable > 1 ? 's' : ''} can’t match on the canvas: its shapes are never focused and never links.`);
   return { totals, items, notes, rem: { count: rems.attributes, convertible, why: convertible ? null : REM_UNCONVERTIBLE } };
 }
 
