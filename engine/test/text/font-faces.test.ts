@@ -5,7 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseDoc, type Doc } from '../../model/doc.ts';
+import { el, parseDoc, type Doc } from '../../model/doc.ts';
+import { Session } from '../../commands/session.ts';
+import { opSetLeafRaw } from '../../commands/ops.ts';
 import { FACE_MAX, FACES_MAX, UI_STACKS, appFontName, familyList, fontFaces, usedFaces } from '../../text/font-faces.ts';
 
 const load = (src: string): Doc => {
@@ -41,6 +43,16 @@ test('the first usable source is taken: local() and a data: URL that isn’t bas
   assert.deepEqual(fontFaces(doc).faces, [], 'an @import');
   doc = load(svg(`<style>${face('D', 'local(Arial)')}${face('', ok)}</style>`));
   assert.deepEqual(fontFaces(doc).faces, [], 'no data: source, and no family');
+});
+
+test('each <style>’s guard verdict is kept by its text: an edit that makes one unsafe (an @import) drops its faces at once, and the other keeps its own', () => {
+  const ok = (family: string) => face(family, `url(data:font/woff2;base64,${b64('wOF2')})`);
+  const doc = load(svg(`<style>${ok('A')}</style><style>${ok('B')}</style><text>x</text>`));
+  assert.deepEqual(fontFaces(doc).faces.map((f) => f.family), ['A', 'B']);
+  const [a] = el(doc, doc.root).children;
+  const leaf = el(doc, a).children[0];
+  new Session(doc).dispatch('Edit source', (apply) => apply(opSetLeafRaw(doc, leaf, `@import "x.css"; ${ok('A')}`)));
+  assert.deepEqual(fontFaces(doc).faces.map((f) => f.family), ['B'], 'the edited <style> is judged again');
 });
 
 test('the size limits, 5 MB a face and 20 MB in all (here a test’s smaller ones): a face over the one, and faces past the other, are counted by family and not read', () => {

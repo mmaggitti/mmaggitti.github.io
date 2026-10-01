@@ -5,7 +5,8 @@
 //   a grouping rule, each from its FIRST src that is a url(data:font/…;base64,…) whose format() is
 //   woff2, woff, truetype or opentype, or absent (local() and anything else skipped). The base64 is
 //   decoded with whitespace ignored. At most 5 MB a face and 20 MB in all; what is over is counted by
-//   family. Read again only when the document's <style> text changes (doc.styleVersion).
+//   family. Read again only when the document's <style> text changes (doc.styleVersion), and each
+//   <style>'s guard verdict is kept by its text, so an edit to one judges only that one again.
 // - The name guard (appFontName): a family the page must never register from a file, because the
 //   app's own UI draws with it (ds.css's --font-ui and --font-mono), or because it is a CSS generic
 //   family or a CSS-wide keyword. src/platform/fonts.ts registers a file's own faces page-wide
@@ -159,6 +160,18 @@ function decodeBase64(b64: string): Uint8Array | null {
 }
 
 const cache = new WeakMap<Doc, { version: number; read: OwnFaces }>();
+// The canvas's CSS guards' verdict on each <style>, by its text: a <style> edit judges only that one again.
+const judged = new WeakMap<Doc, Map<NodeId, { css: string; ok: boolean }>>();
+
+function drawn(doc: Doc, id: NodeId, css: string): boolean {
+  let seen = judged.get(doc);
+  if (!seen) judged.set(doc, (seen = new Map()));
+  const hit = seen.get(id);
+  if (hit && hit.css === css) return hit.ok;
+  const ok = cssAllowed(css) && cssUrlsLocal(css);
+  seen.set(id, { css, ok });
+  return ok;
+}
 
 /** The document's own faces (see the header), cached by its <style> text. `limits`: a test's own (not cached). */
 export function fontFaces(doc: Doc, limits: { face: number; total: number } = { face: FACE_MAX, total: FACES_MAX }): OwnFaces {
@@ -170,7 +183,7 @@ export function fontFaces(doc: Doc, limits: { face: number; total: number } = { 
   for (const n of descendants(doc, doc.root)) {
     if (n.kind !== 'element' || n.ns !== NS.svg || n.local !== 'style') continue;
     const css = textContent(doc, n.id);
-    if (!cssAllowed(css) || !cssUrlsLocal(css)) continue; // the canvas draws none of it
+    if (!drawn(doc, n.id, css)) continue; // the canvas draws none of it
     for (const body of fontFaceBodies(css)) {
       const desc = new Map<string, string>();
       for (const d of declarations(body)) desc.set(d.name, d.value);

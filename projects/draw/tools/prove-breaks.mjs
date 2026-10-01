@@ -1341,7 +1341,7 @@ const BREAKS = [
   },
   {
     id: 'B243', what: "the served profile's CSS guard lets @namespace's url() through",
-    file: 'scripts/lib/svg-profile.mjs', from: "    if (u.startsWith('#')) continue;", to: "    if (u.startsWith('#') || u.startsWith('http://www.w3.org/2000/svg')) continue;",
+    file: 'scripts/lib/svg-profile.mjs', from: "  if (u.startsWith('#')) return true;\n  if (/^data:(image", to: "  if (u.startsWith('#') || u.startsWith('http://www.w3.org/2000/svg')) return true;\n  if (/^data:(image",
     run: drawTests('svg-profile.test.ts'), expect: /✖ @namespace: a file with the string form is served; one with the url\(\) form is refused/,
   },
   // P0-M5: e2e checks as ledger evidence, and the phase gate after the P0 exit.
@@ -1379,7 +1379,7 @@ const BREAKS = [
   // P0-M5 review fixes: the served profile (version 4).
   {
     id: 'B250', what: "the served profile reads a url() only when it is closed",
-    file: 'scripts/lib/svg-profile.mjs', from: "  for (const m of t.matchAll(/url\\s*\\(\\s*['\"]?/g)) {\n    const u = squash(t.slice(m.index + m[0].length));", to: "  for (const m of t.matchAll(/url\\s*\\(\\s*(['\"]?)(.*?)\\1\\s*\\)/g)) {\n    const u = squash(m[2]);",
+    file: 'scripts/lib/svg-profile.mjs', from: "  for (const m of t.matchAll(/url\\s*\\(\\s*['\"]?/g)) {\n    const from = m.index + m[0].length;\n    if (urlStart(squash(t.slice(from, from + URL_WINDOW)), from + URL_WINDOW >= t.length) !== true) return false;", to: "  for (const m of t.matchAll(/url\\s*\\(\\s*(['\"]?)(.*?)\\1\\s*\\)/g)) {\n    if (urlStart(squash(m[2]), true) !== true) return false;",
     run: drawTests('svg-profile.test.ts'), expect: /✖ never served: a resource on another site[^\n]*\n[\s\S]*a fill never closed/,
   },
   {
@@ -3381,6 +3381,21 @@ const BREAKS = [
     id: 'B638', what: 'the screen-reader preview reads the texts in a <mask>, <marker> or <pattern> (drawn nowhere by themselves)',
     file: 'engine/access/speak.ts', from: "new Set(['defs', 'symbol', 'clipPath', 'mask', 'marker', 'pattern'])", to: "new Set(['defs', 'symbol', 'clipPath'])",
     run: engineTests('access/speak.test.ts'), expect: /✖ the preview never reads what a reader never reaches/,
+  },
+  {
+    id: 'B639', what: 'the served profile’s CSS guard reads each url() to the end of the text again (a sheet of many url()s costs its square)',
+    file: 'scripts/lib/svg-profile.mjs', from: '    if (urlStart(squash(t.slice(from, from + URL_WINDOW)), from + URL_WINDOW >= t.length) !== true) return false;', to: '    if (urlStart(squash(t.slice(from)), true) !== true) return false;',
+    run: engineTests('policy/css-urls.test.ts'), expect: /✖ the canvas’s CSS guards take linear time/,
+  },
+  {
+    id: 'B640', what: 'the render policy’s cssUrlsLocal reads each url() to the end of the text again (a sheet of many url()s costs its square)',
+    file: 'engine/policy/render-policy.ts', from: '    const arg = t.slice(from, from + URL_WINDOW);', to: '    const arg = t.slice(from);',
+    run: engineTests('policy/css-urls.test.ts'), expect: /✖ the canvas’s CSS guards take linear time/,
+  },
+  {
+    id: 'B641', what: 'a <style>’s guard verdict is kept whatever its text becomes (an edit adding @import still has its faces read)',
+    file: 'engine/text/font-faces.ts', from: '  if (hit && hit.css === css) return hit.ok;', to: '  if (hit) return hit.ok;',
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ each <style>’s guard verdict is kept by its text/,
   },
 ];
 
