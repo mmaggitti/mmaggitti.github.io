@@ -10,9 +10,13 @@
 //   nested svg write x and y (an absent one is added); circle and ellipse cx and cy; line both
 //   ends; polyline and polygon every point; path the coordinates of its absolute commands only
 //   (the first m too, which is absolute), so relative commands keep their bytes and arc radii,
-//   rotation and flags never change. g, a, switch and text (whose x and y may be lists) edit the
-//   numbers of a leading translate(), else prepend `translate(dx dy) ` (a new item, never a
-//   collapse), else add transform="translate(dx dy)". The root never moves. An element with its
+//   rotation and flags never change. g, a and switch edit the numbers of a leading translate(),
+//   else prepend `translate(dx dy) ` (a new item, never a collapse), else add
+//   transform="translate(dx dy)". A text (P1-M4) moves by its own numbers when its x and y and every
+//   x and y on its tspans are single numbers and it has no list (two or more numbers in x, y, dx, dy
+//   or rotate) and no textPath: each of those numbers moves in place (a missing x or y on the text
+//   is added, as a rect's is), dx and dy never change; else it moves by translate as a group does
+//   (decision 8: text with position lists moves by translate). The root never moves. An element with its
 //   own transform moves its geometry by L⁻¹·(dx, dy) (L its linear part; with transform-box:
 //   fill-box the origin moves with the geometry, so by (dx, dy) itself).
 // - Resize: a corner dragged to a point in the element's own units (a nested svg's: its x, y,
@@ -219,7 +223,7 @@ export function planMove(doc: Doc, id: NodeId, dx: number, dy: number, opts: Wri
   const how = movesBy(doc, id);
   const n = el(doc, id);
   if (how === 'none') return refuse(n.ns === NS.svg && (n.local === 'tspan' || n.local === 'textPath') ? 'A text run moves with its text: select the <text> to move it.' : 'It isn’t drawn where it is, so it can’t move on the canvas.');
-  if (how === 'translate') return moveByTranslate(doc, n, dx, dy, opts);
+  if (how === 'translate' && !textByNumbers(doc, n)) return moveByTranslate(doc, n, dx, dy, opts);
   // Geometry: the delta in the element's own units.
   const why = transformUnknown(doc, id);
   if (why) return refuse(why);
@@ -272,8 +276,68 @@ export function planMove(doc: Doc, id: NodeId, dx: number, dy: number, opts: Wri
     case 'path':
       problem = add(movePath(doc, n, lx, ly, opts));
       break;
+    case 'text': {
+      const plan = moveText(doc, n, lx, ly, opts);
+      if ('refused' in plan) return plan;
+      edits.push(...plan.edits);
+      break;
+    }
   }
   return problem ? refuse(problem) : { edits };
+}
+
+// ── text by its own numbers (P1-M4) ────────────────────────────────────────────────────────────
+
+// The text and its descendant elements.
+function* textParts(doc: Doc, n: ElementNode): Generator<ElementNode> {
+  yield n;
+  for (const c of n.children) {
+    const k = doc.nodes.get(c);
+    if (k?.kind === 'element') yield* textParts(doc, k);
+  }
+}
+
+// How many numbers an attribute holds as written (-1: it doesn't read as numbers).
+function countNumbers(doc: Doc, n: ElementNode, local: string): number {
+  const a = findAttr(n, null, local);
+  if (!a) return 0;
+  const list = parseNumberList(attrValue(doc, n, null, local)!.replace(/(\d)(px|pt|pc|mm|cm|in|em|ex|rem|%)/gi, '$1'));
+  return list === null ? -1 : list.length;
+}
+
+/**
+ * Does this <text> move by its own numbers: its x and y and every x and y on its tspans one number
+ * each, nothing in it with a list (two or more numbers in x, y, dx, dy or rotate), and no textPath?
+ */
+export function textByNumbers(doc: Doc, n: ElementNode): boolean {
+  if (n.ns !== NS.svg || n.local !== 'text') return false;
+  for (const p of textParts(doc, n)) {
+    if (p.ns === NS.svg && p.local === 'textPath') return false;
+    for (const local of ['x', 'y', 'dx', 'dy', 'rotate']) {
+      const k = countNumbers(doc, p, local);
+      if (k === -1 || k > 1 || (k === 1 && (local === 'x' || local === 'y') && numberTokens(doc, p, local, findAttr(p, null, local)!.raw).length !== 1)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * A text moved by (lx, ly) of its own user units (textByNumbers holds): its x and y (added when
+ * missing) and every x and y its tspans have, each number in place.
+ */
+export function moveText(doc: Doc, n: ElementNode, lx: number, ly: number, opts: WriteOpts): Plan {
+  const edits: AttrEdit[] = [];
+  for (const p of textParts(doc, n)) {
+    const own = p === n;
+    if (!own && !(p.ns === NS.svg && p.local === 'tspan')) continue;
+    for (const [local, v] of [['x', lx], ['y', ly]] as const) {
+      if (!own && !findAttr(p, null, local)) continue;
+      const e = lengthEdit(doc, p, local, local, { delta: v }, opts);
+      if (e && 'refused' in e) return refuse(e.refused);
+      if (e) edits.push(e);
+    }
+  }
+  return { edits };
 }
 
 const INPUT_NUMBER = /-?(?:\d*\.\d+|\d+)/;

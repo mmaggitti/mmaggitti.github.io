@@ -1,7 +1,7 @@
 // A command over a large selection costs time in proportion to it (the P1-M1 review, F5): a drag, a
 // held arrow, Align, Duplicate, Delete and Group over 4,000 selected shapes, against 1,000, in node
-// with the fake views (fakes.ts); and Union (P1-M3). Its own file, so the deliberate breaks that run
-// editor.test.ts don't wait for it.
+// with the fake views (fakes.ts); Union (P1-M3); and Text to path, Set font and Inspect's Text section
+// (P1-M4). Its own file, so the deliberate breaks that run editor.test.ts don't wait for it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +9,10 @@ import { Editor } from '../../src/editor.ts';
 import { loopsD } from '../../../../engine/path/loops.ts';
 import type { Libraries } from '../../src/paths/pipeline.ts';
 import { bind, fakeEditor, fakePorts } from './fakes.ts';
+import type { TextLib } from '../../src/text/load.ts';
+import { descendants } from '../../../../engine/model/doc.ts';
+import type { Fonts } from '../../src/platform/fonts.ts';
+import { linear, linearAsync } from '../../../../engine/test/timing.ts';
 
 /** An editor on `n` rects in a grid, every one selected (with these boolean libraries, when given). */
 function manySelected(n: number, booleans?: Libraries): Editor {
@@ -98,4 +102,80 @@ test('Union over a large selection takes linear time: over 4,000 shapes it costs
     big = Math.min(big, await cost(4000));
   }
   assert.ok(big < 6 * small, `Union: ${small.toFixed(0)} ms over 1,000 shapes, ${big.toFixed(0)} ms over 4,000 (×${(big / small).toFixed(1)}; linear is ×4, the most ×6)`);
+});
+
+// Text to path (P1-M4 S2) over the same grids, of short texts: each text read once (outlineText), its
+// face shaped once for all of them by a stand-in library (a square per character, at once), and the
+// paths written with one fragment parse per parent (engine/text/to-path.ts); then one undo, and every
+// text selected again. Then Set font over the selected texts (one entry, then its undo), and what
+// Inspect's Text section reads over them (its rows, the family and its faces). What is timed is
+// Draw's own work, through engine/test/timing.ts.
+const square = { commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [500, 0] }, { command: 'lineTo', args: [500, 500] }, { command: 'closePath', args: [] }] as const, xAdvance: 600, xOffset: 0, yOffset: 0 };
+const squares: TextLib = {
+  openFont: () => {
+    throw new Error('not here');
+  },
+  shape: (_bytes, runs) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ ...square, commands: [...square.commands] })), missing: [] })) }),
+};
+const interOnly: Fonts = {
+  use: () => {},
+  documentFaces: () => {},
+  bytes: async () => new Uint8Array(1),
+  holds: (f) => f === 'Inter',
+  faces: (f) => (f === 'Inter' ? { weights: [400], italics: [] } : null),
+  mine: () => [],
+  add: async () => {
+    throw new Error('not here');
+  },
+  remove: async () => {},
+  subscribe: () => () => {},
+};
+/** An editor on `n` short texts in a grid, every one selected, and how to select them again. */
+function manyTexts(n: number): { e: Editor; reselect: () => void } {
+  const side = Math.ceil(Math.sqrt(n));
+  const texts = Array.from({ length: n }, (_, i) => `  <text id="t${i}" x="${((i % side) * 100 / side).toFixed(2)}" y="${(Math.floor(i / side) * 100 / side).toFixed(2)}" font-family="Inter" font-size="1">ab</text>`).join('\n');
+  const ports = fakePorts();
+  ports.fonts = interOnly;
+  ports.text = async () => squares;
+  const e = bind(ports, new Editor(ports));
+  assert.ok(e.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n${texts}\n</svg>`).ok);
+  const reselect = () => e.select([...descendants(e.doc!, e.doc!.root)].filter((m) => m.kind === 'element' && m.local === 'text').map((m) => m.id));
+  reselect();
+  assert.equal(e.selection.get().size, n, 'test setup: every text selected');
+  return { e, reselect };
+}
+
+// Measured in node: Text to path and its undo about 160 to 220 and 520 to 700 ms over 1,000 and 4,000
+// texts; Set font and its undo 40 and 130 to 200 ms; four reads of Inspect's Text section 20 and 80 to
+// 130 ms. The limits leave four times that or more.
+test('Text to path over a large selection takes linear time: over 4,000 short texts it (and its undo) costs under 6× what it costs over 1,000, and under 3 s', async () => {
+  const run = (n: number) => {
+    const { e, reselect } = manyTexts(n);
+    return async () => {
+      await e.textToPath();
+      assert.equal(e.history.get().undoLabel, 'Text to path', `test setup: Text to path did something over ${n} texts (${e.notice.get()})`);
+      e.undo();
+      reselect();
+    };
+  };
+  await linearAsync('Text to path, then its undo, over 1,000 and 4,000 texts', run(1000), run(4000), { limit: 3000 });
+});
+
+test('Set font and Inspect’s Text section over a large selection take linear time: over 4,000 texts each costs under 6× what it costs over 1,000', () => {
+  const small = manyTexts(1000).e;
+  const big = manyTexts(4000).e;
+  const setFont = (e: Editor) => () => {
+    e.setFont('Inter');
+    assert.equal(e.history.get().undoLabel, 'Set font', `test setup: Set font did something (${e.notice.get()})`);
+    e.undo();
+  };
+  linear('Set font, then its undo, over 1,000 and 4,000 texts', setFont(small), setFont(big), { limit: 1500 });
+  const inspect = (e: Editor) => () => {
+    for (const prop of ['font-family', 'font-size', 'font-weight', 'font-style', 'text-anchor']) assert.ok(e.styleRow(prop), prop);
+    const fam = e.textFamily();
+    assert.equal(fam?.family, 'Inter');
+    assert.ok(e.familyFaces('Inter'));
+    e.canEditText();
+  };
+  linear('Inspect’s Text section, over 1,000 and 4,000 texts', inspect(small), inspect(big), { limit: 1000, reps: 4 });
 });

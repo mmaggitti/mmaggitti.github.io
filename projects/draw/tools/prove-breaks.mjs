@@ -87,7 +87,7 @@ const BREAKS = [
   },
   {
     id: 'B6', what: 'the ledger and the served profile disagree on the version',
-    file: 'engine/ledger/ledger.json', from: '"profileVersion": 4', to: '"profileVersion": 5',
+    file: 'engine/ledger/ledger.json', from: '"profileVersion": 5', to: '"profileVersion": 6',
     run: ['node', ['tools/ledger-check.mjs'], DRAW], expect: /profileVersion/,
   },
   {
@@ -125,7 +125,7 @@ const BREAKS = [
     // P1-M0 review (F3): the namespaces in scope are one map, set and put back, not a copy per element.
     id: 'B307', what: 'every element copies the namespace declarations in scope again (quadratic over nested declarations)',
     file: 'engine/model/doc.ts', from: '    const map = scope; // what is in scope here', to: '    const map = new Map(scope); // what is in scope here',
-    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*252 nested elements declaring 600 prefixes each took \d+ ms, [\d.]+× the \d+ ms 63 took/,
+    run: XML_TESTS, expect: /✖ namespace declarations hold for their element only, at no cost per element[\s\S]*63 and 252 nested elements declaring 600 prefixes each: \d+ ms(, then \d+ ms for 4× the work| for the larger)/,
   },
   {
     id: 'B308', what: "an element's namespace declarations are never put back (they leak to what follows it)",
@@ -917,7 +917,7 @@ const BREAKS = [
   },
   {
     id: 'B161', what: 'export re-derives the encoding from the text (UTF-16 without a declaration becomes UTF-8)',
-    file: 'projects/draw/src/workspace.ts', from: "current?.encoding ?? undefined", to: 'undefined',
+    file: 'projects/draw/src/workspace.ts', from: "kind, current?.encoding ?? undefined)", to: 'kind, undefined)',
     run: drawTests('workspace.test.ts'), expect: /✖ export: as-is is the file byte for byte/,
   },
   {
@@ -1341,7 +1341,7 @@ const BREAKS = [
   },
   {
     id: 'B243', what: "the served profile's CSS guard lets @namespace's url() through",
-    file: 'scripts/lib/svg-profile.mjs', from: "    if (u.startsWith('#')) continue;", to: "    if (u.startsWith('#') || u.startsWith('http://www.w3.org/2000/svg')) continue;",
+    file: 'scripts/lib/svg-profile.mjs', from: "  if (u.startsWith('#')) return true;\n  if (/^data:(image", to: "  if (u.startsWith('#') || u.startsWith('http://www.w3.org/2000/svg')) return true;\n  if (/^data:(image",
     run: drawTests('svg-profile.test.ts'), expect: /✖ @namespace: a file with the string form is served; one with the url\(\) form is refused/,
   },
   // P0-M5: e2e checks as ledger evidence, and the phase gate after the P0 exit.
@@ -1379,7 +1379,7 @@ const BREAKS = [
   // P0-M5 review fixes: the served profile (version 4).
   {
     id: 'B250', what: "the served profile reads a url() only when it is closed",
-    file: 'scripts/lib/svg-profile.mjs', from: "  for (const m of t.matchAll(/url\\s*\\(\\s*['\"]?/g)) {\n    const u = squash(t.slice(m.index + m[0].length));", to: "  for (const m of t.matchAll(/url\\s*\\(\\s*(['\"]?)(.*?)\\1\\s*\\)/g)) {\n    const u = squash(m[2]);",
+    file: 'scripts/lib/svg-profile.mjs', from: "  for (const m of t.matchAll(/url\\s*\\(\\s*['\"]?/g)) {\n    const from = m.index + m[0].length;\n    if (urlStart(squash(t.slice(from, from + URL_WINDOW)), from + URL_WINDOW >= t.length) !== true) return false;", to: "  for (const m of t.matchAll(/url\\s*\\(\\s*(['\"]?)(.*?)\\1\\s*\\)/g)) {\n    if (urlStart(squash(m[2]), true) !== true) return false;",
     run: drawTests('svg-profile.test.ts'), expect: /✖ never served: a resource on another site[^\n]*\n[\s\S]*a fill never closed/,
   },
   {
@@ -2293,7 +2293,7 @@ const BREAKS = [
   },
   {
     id: 'B429', what: 'M1’s resize corners still show on a circle (and every shape-handle kind)',
-    file: 'projects/draw/src/editor.ts', from: 'corners: sh === null && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
+    file: 'projects/draw/src/editor.ts', from: 'corners: !takesShapeHandles(doc, n.id) && RESIZABLE.has(n.local)', to: "corners: RESIZABLE.has(n.local) || ['circle', 'ellipse', 'line', 'polygon', 'polyline'].includes(n.local)",
     run: drawTests('editor.test.ts'), expect: /✖ the overlay gives circles, ellipses, lines, polygons, polylines and generated shapes their own handles and no corners/,
   },
   // P1-M2 S1 (slow: one per new e2e check, each naming it).
@@ -2409,8 +2409,8 @@ const BREAKS = [
   {
     id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
     file: 'projects/draw/src/panels/Sheets.tsx',
-    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
-    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
     run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
   },
   // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).
@@ -3025,6 +3025,472 @@ const BREAKS = [
     id: 'B569', what: 'N2: the dry run calls a sticky anchor fine (B525’s RegExp made sticky: it would plant only at index 0)',
     file: 'projects/draw/tools/prove-breaks.mjs', from: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/g,", to: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/y,",
     run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B525 +BAD +a sticky anchor plants only at index 0/,
+  },
+  // P1-M4 S0: stroke to path (M3's spillover), quick unless marked.
+  {
+    id: 'B570', what: 'a miter join ignores stroke-miterlimit (a right angle under a limit of 1.2 is still mitered)',
+    file: 'engine/path/offset.ts', from: "  if (style.join === 'miter' && Math.abs(cr) >= 1e-12 && miterRatio(cos) <= style.miterLimit) {", to: "  if (style.join === 'miter' && Math.abs(cr) >= 1e-12) {",
+    run: engineTests('path/offset.test.ts'), expect: /✖ joins: a miter up to stroke-miterlimit/,
+  },
+  {
+    id: 'B571', what: 'an open subpath gets no round cap (round ends as butt)',
+    file: 'engine/path/offset.ts', from: "  if (kind === 'butt') return [{ type: 'L', to: R }];", to: "  if (kind === 'butt' || kind === 'round') return [{ type: 'L', to: R }];",
+    run: engineTests('path/offset.test.ts'), expect: /✖ caps: butt stops at the end, round adds a half disc/,
+  },
+  {
+    id: 'B572', what: 'toSubpaths closes every subpath (an open one, returning to its start or not, would get no caps)',
+    file: 'engine/path/loops.ts', from: '    if (cur && (cur.segs.length || cur.closed)) out.push(cur);', to: '    if (cur && (cur.segs.length || cur.closed)) out.push({ ...cur, closed: true });',
+    run: engineTests('path/loops.test.ts'), expect: /✖ toSubpaths: each subpath as drawn, closed only by a Z/,
+  },
+  {
+    id: 'B573', what: 'a filled shape’s outline loses its transform (drawn in the parent’s space, off the shape)',
+    file: 'projects/draw/src/paths/write.ts', from: '    if (t) m += ` transform=${t.quote}${t.raw}${t.quote}`;\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Stroke to path: a filled shape keeps its fill/,
+  },
+  // P1-M4 S0, the M3 follow-up: a shape that becomes a <path> a <style> rule may paint.
+  {
+    id: 'B574', what: 'a boolean’s bottom shape becomes a <path> that a `path { fill }` rule paints (the converted-<path> check skipped)',
+    file: 'projects/draw/src/editor.ts', from: '    const asPath = pathRuleRefusal(doc, bottom.id);\n    if (asPath) return { refused: asPath };\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  {
+    id: 'B575', what: 'Stroke to path turns a line into a <path> that a `path { fill }` rule paints (the converted-<path> check skipped)',
+    file: 'projects/draw/src/editor.ts', from: '    const ruled = pathRuleRefusal(doc, id, s.filled);\n    if (ruled) return void this.notice.set(ruled);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  {
+    id: 'B576', what: 'the selector reading asks about a shape as itself when asked as a <path> (so `path { … }` never matches it)',
+    file: 'engine/geometry/css.ts', from: '  const node = subjectOf(doc, el(doc, id), as);', to: '  const node = subjectOf(doc, el(doc, id));',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose bottom shape would become a <path> a <style> rule may paint refuses/,
+  },
+  // P1-M4 S0, slow (one per new e2e check, naming it).
+  {
+    id: 'B577', what: 'Stroke to path writes the outline in the parent’s units instead of the element’s own (its transform applied twice)', slow: true, checks: ['strokeToPathCoversTheStroke'],
+    file: 'projects/draw/src/editor.ts', from: '    const outline = loopsD(out.loops);\n', to: "    const outline = loopsD(mapLoops(out.loops, parseTransform(attrValueOf(doc, id, 'transform') ?? '')?.matrix ?? IDENTITY));\n",
+    run: DRAW_E2E, expect: /strokeToPathCoversTheStroke: the rotated line: \d+ pixels differ/,
+  },
+  // P1-M4 S1: text and fonts, quick unless marked.
+  {
+    id: 'B578', what: 'the catalogue leaves a face out (Caveat’s 600)',
+    file: 'projects/draw/src/platform/font-catalogue.ts', from: "generic: 'cursive', weights: [400, 500, 600, 700],", to: "generic: 'cursive', weights: [400, 500, 700],",
+    run: drawTests('font-catalogue.test.ts'), expect: /✖ the catalogue: each family’s every latin \.woff2 face/,
+  },
+  {
+    id: 'B579', what: 'the name guard lets Arial through (a file’s face named Arial would restyle the app)',
+    file: 'engine/text/font-faces.ts', from: '  return UI_NAMES.has(f) || GENERIC_FAMILIES.has(f) || KEYWORDS.has(f);', to: "  return (UI_NAMES.has(f) && f !== 'arial') || GENERIC_FAMILIES.has(f) || KEYWORDS.has(f);",
+    run: drawTests('fonts.test.ts'), expect: /✖ the name guard \(fonts\.ts’s appFontName\)/,
+  },
+  {
+    id: 'B580', what: 'use registers a face twice (every use makes another FontFace for it)',
+    file: 'projects/draw/src/platform/fonts.ts', from: '    if (registered.has(key) || ownFamilies.has(lower(f.family))) return;', to: '    if (ownFamilies.has(lower(f.family))) return;',
+    run: drawTests('fonts.test.ts'), expect: /✖ use registers exactly the faces asked for, each once/,
+  },
+  {
+    id: 'B581', what: 'documentFaces([]) leaves the old drawing’s faces on document.fonts',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      for (const f of own) deps.set.delete(f);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ documentFaces replaces the drawing’s own faces/,
+  },
+  {
+    id: 'B582', what: 'fontFaces takes the first source whatever it is (a local(), which has no data: font)',
+    file: 'engine/text/font-faces.ts', from: "const src = srcItems(desc.get('src') ?? '').map(dataSource).find((s) => s !== null);", to: "const src = srcItems(desc.get('src') ?? '').map(dataSource)[0];",
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ the first usable source is taken/,
+  },
+  {
+    id: 'B583', what: 'readLines accepts a tspan with more attributes than x and dy (SVG Lab’s Typography, its fills)',
+    file: 'engine/text/lines.ts', from: '    if (k.attrs.length !== 2 || ax.ns !== null', to: '    if (k.attrs.length < 2 || ax.ns !== null',
+    run: engineTests('text/lines.test.ts'), expect: /✖ readLines refuses anything else/,
+  },
+  {
+    id: 'B584', what: 'planLines writes a space between the tspans (it lays out, and moves a middle-anchored line)',
+    file: 'engine/text/lines.ts', from: '${escape(l, null)}</${tag}>`).join(\'\');', to: '${escape(l, null)}</${tag}>`).join(\' \');',
+    run: engineTests('text/lines.test.ts'), expect: /✖ planLines: one line is one text node/,
+  },
+  {
+    id: 'B585', what: 'the second line’s dy is 0em (every line drawn over the first)',
+    file: 'engine/text/lines.ts', from: ' dy="${i ? LINE_DY : FIRST_DY}">', to: ' dy="${FIRST_DY}">',
+    run: engineTests('text/lines.test.ts'), expect: /✖ planLines: one line is one text node/,
+  },
+  {
+    id: 'B586', what: 'a text with a position list moves by its numbers (decision 8 says translate)',
+    file: 'engine/geometry/write.ts', from: '      if (k === -1 || k > 1 || (k === 1 &&', to: '      if (k === -1 || (k === 1 &&',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ per element, a move writes exactly the attributes in the table/,
+  },
+  {
+    id: 'B587', what: 'a tspan’s x stays put when its text moves (the lines split apart)',
+    file: 'engine/geometry/write.ts', from: "    if (!own && !(p.ns === NS.svg && p.local === 'tspan')) continue;", to: '    if (!own) continue;',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ per element, a move writes exactly the attributes in the table/,
+  },
+  {
+    id: 'B588', what: 'the font-family token cycles values beyond SVG Lab’s three generics',
+    file: 'engine/code/tokens.ts', from: "  'font-family': ['sans-serif', 'serif', 'monospace'],", to: "  'font-family': ['sans-serif', 'serif', 'monospace', 'cursive', 'Archivo, sans-serif'],",
+    run: engineTests('code/tokens.test.ts'), expect: /✖ font-family \(P1-M4\)/,
+  },
+  {
+    id: 'B589', what: 'Inspect offers a weight the family lacks (Bebas Neue’s 700)',
+    file: 'projects/draw/src/style-edit.ts', from: '  return [...list];\n}', to: '  return [...new Set([...list, 700])].sort((a, b) => a - b);\n}',
+    run: drawTests('inspect.test.ts'), expect: /✖ the weights and styles Inspect offers for a family/,
+  },
+  {
+    id: 'B590', what: 'the Text tool’s y misses the 0.35·S offset (the tap lands on the baseline, not the word’s middle)',
+    file: 'projects/draw/src/interact/text-tool.ts', from: 'y="${w(q(p.y + 0.35 * size))}"', to: 'y="${w(q(p.y))}"',
+    run: drawTests('text-tool.test.ts'), expect: /✖ a tap on a 100-unit board places SVG Lab’s "Hello" exactly/,
+  },
+  {
+    id: 'B591', what: 'check-sinks misses new FontFace outside src/platform/',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bFontFace\\b|", to: "['font-face', /",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps registering a font face to src\/platform\//,
+  },
+  {
+    id: 'B592', what: 'a font over 10 MB is stored',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      if (file.size > MAX_FONT_BYTES) throw new FontError(ADD_REFUSED);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ your fonts: added/,
+  },
+  {
+    id: 'B593', what: 'a package with no licence file (dfa) is missing from the notices test’s table',
+    file: 'projects/draw/test/unit/notices.test.ts', from: "  dfa: 'Licence: MIT (its package.json and README; the package and its repository ship no licence text). Author: Devon Govett (package.json).',\n", to: '',
+    run: drawTests('notices.test.ts'), expect: /✖ the notices name every package whose code ships/,
+  },
+  {
+    id: 'B594', what: 'the Text tool’s font toggle is ignored: every new text is Archivo (Mark, 2026-10-01)',
+    file: 'projects/draw/src/editor.ts', from: '    const family = this.textFont.get();\n    const value = fontValue(family,', to: '    const family = TEXT_DEFAULTS[0];\n    const value = fontValue(family,',
+    run: drawTests('editor.test.ts'), expect: /✖ the Text tool’s font \(Mark, 2026-10-01\)/,
+  },
+  // P1-M4 S1, slow (one per new e2e check, naming it).
+  {
+    id: 'B595', what: 'the Text tool places at the host px instead of the root units (the text isn’t under the tap)', slow: true, checks: ['theTextToolPlacesHelloAndWritesLines'],
+    file: 'projects/draw/src/editor.ts', from: '    const p = this.#snapRoot(at, this.#snapTargets([]), step).p;\n', to: '    const p = at;\n',
+    run: DRAW_E2E, expect: /theTextToolPlacesHelloAndWritesLines: the tap wrote/,
+  },
+  {
+    id: 'B596', what: 'fonts.ts registers the whole catalogue at the first use (every face fetched, not only what a drawing uses)', slow: true, checks: ['fontsLoadOnlyWhatTheDrawingUses'],
+    file: 'projects/draw/src/platform/fonts.ts', from: '        for (const f of faces) register(f);\n', to: "        for (const f of [...faces, ...CATALOGUE.flatMap((c) => c.weights.map((weight) => ({ family: c.family, weight, style: 'normal' as const })))]) register(f);\n",
+    run: DRAW_E2E, expect: /fontsLoadOnlyWhatTheDrawingUses: (before any text, |the drawing fetched )/,
+  },
+  {
+    id: 'B597', what: 'the editor never registers a file’s own faces (documentFaces): Chromium draws the text in serif (WebKit draws a shadow tree’s own @font-face anyway, so Chromium is where this shows)', slow: true, checks: ['aFilesOwnFontDrawsInEveryEngine'],
+    file: 'projects/draw/src/editor.ts', from: '      fonts.documentFaces(fontFaces(doc).faces);\n', to: '',
+    run: DRAW_E2E, expect: /aFilesOwnFontDrawsInEveryEngine: iiiiiiii in the file's own face measures/,
+  },
+  {
+    id: 'B598', what: 'Inspect’s Text rows shrink below 44 pt (the Font button 18 pt tall)', slow: true, checks: ['phoneRulesOnTheTextTools'],
+    file: 'projects/draw/src/app.css', from: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); }', to: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); min-height: 1.5rem; height: 1.5rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheTextTools \((956|796)\)[\s\S]*Inspect's Text section at (half|full): tap targets under 44pt/,
+  },
+  // P1-M4 S2: text to path and export, quick unless marked.
+  {
+    id: 'B599', what: 'outlineD skips the y flip (a glyph is drawn upside down, below its baseline)',
+    file: 'engine/text/outline.ts', from: 'const p = (x: number, y: number) => `${fmt(ox + x * s, 3)} ${fmt(oy - y * s, 3)}`;', to: 'const p = (x: number, y: number) => `${fmt(ox + x * s, 3)} ${fmt(oy + y * s, 3)}`;',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD places a glyph at the pen/,
+  },
+  {
+    id: 'B600', what: 'a middle-anchored line starts at its x (not half its advance to the left)',
+    file: 'engine/text/outline.ts', from: "let pen = chunk.x - w * (chunk.anchor === 'middle' ? 0.5 : chunk.anchor === 'end' ? 1 : 0);", to: "let pen = chunk.x - w * (chunk.anchor === 'middle' ? 0 : chunk.anchor === 'end' ? 1 : 0);",
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD anchors a line at start, middle and end/,
+  },
+  {
+    id: 'B601', what: 'the outline scales by size ÷ 1000, not the font’s unitsPerEm (Inter’s is 2048)',
+    file: 'engine/text/outline.ts', from: /run\.size \/ shaped\[c\]\[r\]\.unitsPerEm/g, to: 'run.size / 1000',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD places a glyph at the pen, scales it by size ÷ unitsPerEm/,
+  },
+  {
+    id: 'B602', what: 'a text with a position list is outlined at its first position (it must refuse)',
+    file: 'engine/text/outline.ts', from: '.split(/[\\s,]+/).length > 1;', to: '.split(/[\\s,]+/).length > 99;',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineText refuses tools\/edge-text-xml-space-tspans\.svg’s position-list/,
+  },
+  {
+    id: 'B603', what: 'the path keeps the text’s font-family',
+    file: 'engine/text/to-path.ts', from: "  'font-family', 'font-size', 'font-size-adjust',", to: "  'font-size', 'font-size-adjust',",
+    run: engineTests('text/to-path.test.ts'), expect: /✖ the path keeps the text’s attributes in their order/,
+  },
+  {
+    id: 'B604', what: 'the path gets no aria-label (its characters are lost to a screen reader)',
+    file: 'engine/text/to-path.ts', from: "if (!moved.some((c) => el(doc, c).local === 'title')) s += ` aria-label=", to: "if (moved.some((c) => el(doc, c).local === 'none')) s += ` aria-label=",
+    run: engineTests('text/to-path.test.ts'), expect: /✖ the aria-label is the characters as laid out/,
+  },
+  {
+    id: 'B605', what: 'a character the face has no glyph for is outlined as .notdef (its box)',
+    file: 'projects/draw/src/text/pipeline.ts', from: '      if (s.missing.length) why[u.t] ??= NO_GLYPH(face.family, s.missing[0]);\n', to: '',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a character a face can’t draw refuses/,
+  },
+  {
+    id: 'B606', what: 'With fonts embeds a font with a Reserved Font Name (IBM Plex Sans’s “Plex”)',
+    file: 'projects/draw/src/export/svg.ts', from: 'const no = held.reserved.length ? reservesName(', to: 'const no = held.reserved.length < 0 ? reservesName(',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts: one <style> right after the <title>/,
+  },
+  {
+    id: 'B607', what: 'As paths converts Georgia, a font Draw holds no file for (outlined in another face)',
+    file: 'engine/text/outline.ts', from: '  if (!held) return { refused: NOT_HELD(family) };', to: "  if (!held) return { family: 'Inter', weight, style, own: null };",
+    run: drawTests('export-text.test.ts'), expect: /✖ As paths: the three texts in Draw’s fonts become paths/,
+  },
+  {
+    id: 'B608', what: 'the text library reads the face’s .woff, not the .woff2 the canvas draws (Archivo’s outlines differ)',
+    file: 'projects/draw/src/platform/font-catalogue.ts', from: '`${slug}-latin-${weight}-${style}.woff2`', to: '`${slug}-latin-${weight}-${style}.woff`',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ what is read is the \.woff2 the canvas registers/,
+  },
+  // P1-M4 S2, slow (one per new e2e check, naming it).
+  {
+    id: 'B609', what: 'the editor imports src/text/outline-lib.ts statically, so fontkit rides in the first chunk', slow: true, checks: ['textToPathLooksTheSame'],
+    file: 'projects/draw/src/editor.ts', from: "import { loadTextLib, type TextLib } from './text/load.ts';", to: "import type { TextLib } from './text/load.ts';\nimport * as staticTextLib from './text/outline-lib.ts';\nconst loadTextLib = async (): Promise<TextLib> => staticTextLib;",
+    run: DRAW_E2E, expect: /textToPathLooksTheSame: the first Text to path loaded/,
+  },
+  {
+    id: 'B610', what: 'the Export sheet shares the As text file while As paths is still preparing (Clean’s file would still hold <text>)', slow: true, checks: ['exportWritesTextAsPathsOrWithFonts'],
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: "const ready = choice === 'text' ? clean : prep?.choice === choice ? prep.file : null;", to: "const ready = choice === 'text' ? clean : prep?.choice === choice && prep.file ? prep.file : clean;",
+    run: DRAW_E2E, expect: /exportWritesTextAsPathsOrWithFonts: while As paths prepares, Clean's button reads/,
+  },
+  // P1-M4 S3: the accessibility panel, quick unless marked.
+  {
+    id: 'B611', what: 'Title off leaves the aria-labelledby that named its id',
+    file: 'engine/access/model.ts', from: '    if (own !== null && names !== null && names.trim() === own) apply(opSetAttr(doc, doc.root, null, ref, null));', to: "    if (own !== null && names !== null && names.trim() === own && which === 'desc') apply(opSetAttr(doc, doc.root, null, ref, null));",
+    run: engineTests('access/access.test.ts'), expect: /✖ on lab\/access\.svg, Title off then Description off gives SVG Lab’s states/,
+  },
+  {
+    id: 'B612', what: 'Title on writes role="img" over the file’s own role',
+    file: 'engine/access/model.ts', from: "  if (findAttr(root, null, 'role') === undefined) apply(opSetAttr(doc, doc.root, null, 'role', 'img'));", to: "  apply(opSetAttr(doc, doc.root, null, 'role', 'img'));",
+    run: engineTests('access/access.test.ts'), expect: /✖ Draw never writes over a file’s own role or label/,
+  },
+  {
+    id: 'B613', what: 'role="img" stays when neither a title, a description nor a label is left',
+    file: 'engine/access/model.ts', from: "  if (a.role?.trim().toLowerCase() !== 'img' || a.title", to: "  if (a.role?.trim().toLowerCase() !== 'gone' || a.title",
+    run: engineTests('access/access.test.ts'), expect: /✖ on lab\/access\.svg, Title off then Description off gives SVG Lab’s states/,
+  },
+  {
+    id: 'B614', what: 'an element’s title goes last, not as its first child',
+    file: 'engine/access/model.ts', from: "  insertMarkup(doc, firstPlace(doc, id), `<${tagOf(doc, 'title')}>", to: "  insertMarkup(doc, { last: id }, `<${tagOf(doc, 'title')}>",
+    run: engineTests('access/access.test.ts'), expect: /✖ an element’s Title is its first child/,
+  },
+  {
+    id: 'B615', what: 'the Language field takes "english" (a tag’s first part may be up to 8 letters)',
+    file: 'engine/access/model.ts', from: 'export const LANG_TAG = /^[A-Za-z]{2,3}(', to: 'export const LANG_TAG = /^[A-Za-z]{2,8}(',
+    run: engineTests('access/access.test.ts'), expect: /✖ Language: the root’s lang/,
+  },
+  {
+    id: 'B616', what: 'the preview ignores aria-labelledby (it reads the aria-label or the <title>)',
+    file: 'engine/access/speak.ts', from: "  const name = named(a.labelledby) || squash(a.label ?? '')", to: "  const name = squash(a.label ?? '')",
+    run: engineTests('access/speak.test.ts'), expect: /✖ the name: the texts aria-labelledby names/,
+  },
+  {
+    id: 'B617', what: 'the stray labels read a text’s own characters only, skipping its tspans',
+    file: 'engine/access/speak.ts', from: 'const t = squash(renderedText(doc, c));', to: "const t = squash(el(doc, c).children.map((k) => { const x = doc.nodes.get(k)!; return x.kind === 'text' ? x.raw : ''; }).join(''));",
+    run: engineTests('access/speak.test.ts'), expect: /✖ stray labels: every text’s characters as laid out/,
+  },
+  {
+    id: 'B618', what: 'Metadata on makes a second <metadata> where the file’s holds no RDF',
+    file: 'engine/access/metadata.ts', from: '  if (m.metadata === null) {', to: '  if (m.metadata === null || m.work === null) {',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ Draw’s own <metadata draw:made> is shared/,
+  },
+  {
+    id: 'B619', what: 'an RDF file’s new dc:creator and dc:date are written bare in its <metadata>, outside its cc:Work',
+    file: 'engine/access/metadata.ts', from: '  const into = m.work ?? m.metadata;', to: '  const into = m.metadata;',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ an RDF file \(tools\/inkscape-1x-layers\.svg\)/,
+  },
+  {
+    id: 'B620', what: 'the import report’s style-rule note misses :focus',
+    file: 'engine/geometry/css.ts', from: '|:(?:focus(?:-visible|-within)?|link|', to: '|:(?:focus-visible|focus-within|link|',
+    run: engineTests('report/import-report.test.ts'), expect: /✖ the style-rule note \(P1-M4 S3\)/,
+  },
+  {
+    id: 'B621', what: 'xml:lang is rendered on the canvas again',
+    file: 'engine/policy/render-policy.ts', from: "  if (attrNs === NS.xml && attrLocal === 'base') return false;", to: "  if (attrNs === NS.xml && attrLocal === 'base') return false;\n  if (attrNs === NS.xml && attrLocal === 'lang') return true;",
+    run: engineTests('policy/render-policy.test.ts'), expect: /✖ xml:lang \(P1-M4 S3\) is refused on every element/,
+  },
+  // P1-M4 S3, slow (one per new e2e check, naming it).
+  {
+    id: 'B622', what: 'the Access tab subscribes to no version bump (it reads the drawing again only when the selection changes), so its switches and its preview don’t follow an edit or an undo', slow: true, checks: ['theAccessPanelNamesTheDrawing'],
+    file: 'projects/draw/src/panels/Access.tsx', from: '  useStore(editor.selection);\n  useStore(editor.version);\n  const a = editor.access();', to: '  useStore(editor.selection);\n  const a = editor.access();',
+    run: DRAW_E2E, expect: /theAccessPanelNamesTheDrawing: the preview reads/,
+  },
+  {
+    id: 'B623', what: 'the screen-reader preview is computed once, when the tab opens', slow: true, checks: ['theScreenReaderPreviewFollowsTheFile'],
+    file: 'projects/draw/src/panels/Access.tsx', from: '  useStore(editor.version);\n  const a = editor.access();', to: '  useStore(editor.version);\n  const [first] = useState(() => editor.access());\n  const now = editor.access();\n  const a = now && first ? { ...now, said: first.said } : now;',
+    run: DRAW_E2E, expect: /theScreenReaderPreviewFollowsTheFile: Title off: the preview reads/,
+  },
+  {
+    id: 'B624', what: 'the tabs’ padding grows to --space-8, pushing the five tabs past 440 pt', slow: true, checks: ['phoneRulesOnTheAccessPanel'],
+    file: 'projects/draw/src/app.css', from: '.draw-tabs > button { padding: 0 var(--space-4); }', to: '.draw-tabs > button { padding: 0 var(--space-8); }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheAccessPanel \((956|796)\)[\s\S]*(is outside the 440 pt row|scrolls sideways)/,
+  },
+  // P1-M4, hardened: font names XML can hold, font files bounded by what they unpack to, a file's own
+  // <metadata> kept (quick unless marked).
+  {
+    id: 'B625', what: 'Add a font… stores a family XML can’t hold (U+0001: Set font would write a file that no longer parses)',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      const badName = familyNameError(family);\n      if (badName) throw new FontError(badName);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ a family XML can’t hold, holding a control character/,
+  },
+  {
+    id: 'B626', what: 'a stored font record whose family XML can’t hold (another script on the origin wrote it) is read back',
+    file: 'projects/draw/src/platform/fonts.ts', from: "f.family !== '' && familyNameError(f.family) === null && !appFontName(f.family) && ", to: "f.family !== '' && ",
+    run: drawTests('fonts.test.ts'), expect: /✖ a family XML can’t hold, holding a control character/,
+  },
+  {
+    id: 'B627', what: 'Set font writes a family XML can’t hold into the drawing',
+    file: 'projects/draw/src/editor.ts', from: '    const bad = xmlCharError(value);\n    if (bad) return void this.notice.set(bad);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Set font refuses a family XML can’t hold/,
+  },
+  {
+    id: 'B628', what: 'the Text tool’s name characters take U+FFFE and U+FFFF again (a family holding one is written bare)',
+    file: 'projects/draw/src/interact/text-tool.ts', from: '[_a-zA-Z\\u00A0-\\uFFFD])[-_a-zA-Z0-9\\u00A0-\\uFFFD]', to: '[_a-zA-Z\\u00A0-\\uFFFF])[-_a-zA-Z0-9\\u00A0-\\uFFFF]',
+    run: drawTests('text-tool.test.ts'), expect: /✖ a family holding U\+FFFE or U\+FFFF is never written bare/,
+  },
+  {
+    id: 'B629', what: 'fontkit gets a font whose header says it unpacks to 768 MB (no bound on what a WOFF or WOFF2 declares)',
+    file: 'projects/draw/src/text/outline-lib.ts', from: '  if (size > MAX_UNPACKED) throw new Error(`a font that unpacks to ${size} bytes (the most is ${MAX_UNPACKED})`);\n', to: '',
+    run: drawTests('text-lib.test.ts'), expect: /✖ a font whose header says it unpacks to more than 30 MB/,
+  },
+  {
+    id: 'B630', what: 'Metadata off takes away a <metadata> holding no element, with the comment, text or CDATA in it',
+    file: 'engine/access/metadata.ts', from: '    if (meta && empty(meta.id) && meta.attrs', to: '    if (meta && !kids(doc, meta.id).length && meta.attrs',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ Metadata on then off keeps a file’s own <metadata>/,
+  },
+  {
+    id: 'B631', what: 'Text to path takes a face whose unitsPerEm is 0 (or 15, or 16385): its outline is Infinity, or drawn at a size the browser never draws',
+    file: 'projects/draw/src/text/pipeline.ts', from: '    if (!Number.isInteger(out.unitsPerEm) || out.unitsPerEm < 16 || out.unitsPerEm > 16384) {', to: '    if (!Number.isFinite(out.unitsPerEm)) {',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a face whose unitsPerEm is outside 16 to 16384 is unreadable/,
+  },
+  {
+    id: 'B632', what: 'outlineD runs unguarded: a NaN advance throws out of the pipeline instead of refusing the text',
+    file: 'projects/draw/src/text/pipeline.ts', from: "    try {\n      d = outlineD(t, shaped[i] as ShapedRun[][]);\n    } catch {\n      return { refused: cantOutline(t.label) }; // a number fmt won't write (NaN, Infinity) from the face's data\n    }\n", to: '    d = outlineD(t, shaped[i] as ShapedRun[][]);\n',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a face whose unitsPerEm is outside 16 to 16384 is unreadable/,
+  },
+  {
+    id: 'B633', what: 'Text to path lets a failing pipeline reject (no notice, nothing said)',
+    file: 'projects/draw/src/editor.ts', from: "    } catch {\n      return void this.notice.set(cantOutline(reads.map((r) => r.label).join(' '))); // the library misbehaved: nothing is written\n    }\n", to: '    } finally {\n      // nothing said\n    }\n',
+    run: drawTests('editor.test.ts'), expect: /✖ a Text to path whose text library fails outright/,
+  },
+  {
+    id: 'B634', what: 'prepareExport rejects when the text library fails outright (the Export sheet would stay on Preparing…)',
+    file: 'projects/draw/src/export/svg.ts', from: '  try {\n    return await prepare(doc, name, choice, deps, read);\n  } catch (e) {\n    return { refused: unprepared(e) };\n  }\n', to: '  return prepare(doc, name, choice, deps, read);\n',
+    run: drawTests('export-text.test.ts'), expect: /✖ a text library that fails outright/,
+  },
+  {
+    id: 'B635', what: 'check-sinks’ font-face rule goes back to `new FontFace(` and `document.fonts` only (globalThis.FontFace, window[\'FontFace\'], an alias, [\'fonts\'] and a destructured fonts pass)',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bFontFace\\b|\\bdocument\\s*\\??\\.\\s*fonts\\b|\\[\\s*['\"`]fonts['\"`]\\s*\\]|\\{[^}]*\\bfonts\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*document\\b/,", to: "['font-face', /\\bnew\\s+FontFace\\s*\\(|\\bdocument\\.fonts\\b/,",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks bans the name FontFace in any spelling/,
+  },
+  {
+    id: 'B636', what: 'a Reserved Font Name counts only when quoted (“…with Reserved Font Name Oswald.” reserves nothing, so With fonts would embed it)',
+    file: 'projects/draw/src/platform/fonts.ts', from: ' : bare ? bare[0].split(/\\s+(?:and|&)\\s+/i) : [family];', to: ' : [];',
+    run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
+  },
+  {
+    id: 'B637', what: 'the screen-reader preview reads a text hidden from screen readers (aria-hidden="true", which the Access tab itself writes)',
+    file: 'engine/access/speak.ts', from: " || (attrValue(doc, n, null, 'aria-hidden') ?? '').trim() === 'true';", to: ';',
+    run: engineTests('access/speak.test.ts'), expect: /✖ the preview never reads what a reader never reaches/,
+  },
+  {
+    id: 'B638', what: 'the screen-reader preview reads the texts in a <mask>, <marker> or <pattern> (drawn nowhere by themselves)',
+    file: 'engine/access/speak.ts', from: "new Set(['defs', 'symbol', 'clipPath', 'mask', 'marker', 'pattern'])", to: "new Set(['defs', 'symbol', 'clipPath'])",
+    run: engineTests('access/speak.test.ts'), expect: /✖ the preview never reads what a reader never reaches/,
+  },
+  {
+    id: 'B639', what: 'the served profile’s CSS guard reads each url() to the end of the text again (a sheet of many url()s costs its square)',
+    file: 'scripts/lib/svg-profile.mjs', from: '    if (urlStart(squash(t.slice(from, from + URL_WINDOW)), from + URL_WINDOW >= t.length) !== true) return false;', to: '    if (urlStart(squash(t.slice(from)), true) !== true) return false;',
+    run: engineTests('policy/css-urls.test.ts'), expect: /✖ the canvas’s CSS guards take linear time/,
+  },
+  {
+    id: 'B640', what: 'the render policy’s cssUrlsLocal reads each url() to the end of the text again (a sheet of many url()s costs its square)',
+    file: 'engine/policy/render-policy.ts', from: '    const arg = t.slice(from, from + URL_WINDOW);', to: '    const arg = t.slice(from);',
+    run: engineTests('policy/css-urls.test.ts'), expect: /✖ the canvas’s CSS guards take linear time/,
+  },
+  {
+    id: 'B641', what: 'a <style>’s guard verdict is kept whatever its text becomes (an edit adding @import still has its faces read)',
+    file: 'engine/text/font-faces.ts', from: '  if (hit && hit.css === css) return hit.ok;', to: '  if (hit) return hit.ok;',
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ each <style>’s guard verdict is kept by its text/,
+  },
+  {
+    id: 'B642', what: 'Text to path’s pipeline has no budget: 20,001 characters are shaped and outlined (a long text outlines into tens of MB)',
+    file: 'projects/draw/src/text/pipeline.ts', from: '    if (n > left) why[i] = TOO_MUCH_TEXT;\n    else left -= n;', to: '    left -= n;',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a budget of 20,000 characters a call/,
+  },
+  {
+    id: 'B643', what: 'Text to path loads the library for a selection over 20,000 characters (no refusal up front naming the selection)',
+    file: 'projects/draw/src/editor.ts', from: '    if (chars > MAX_OUTLINE_CHARS) return void this.notice.set(tooMuchText(chars)); // before the library loads\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Text to path refuses a selection whose texts hold more than 20,000 characters/,
+  },
+  {
+    id: 'B644', what: 'a tap on a line of Draw’s multi-line text selects the line’s <tspan> again (no Edit text, no Text to path, a drag refused)',
+    file: 'projects/draw/src/selectable.ts', from: '    return text === p || [...selected].some((s) => textOf(doc, s) === text) ? p : text;', to: '    return p;',
+    run: drawTests('editor.test.ts'), expect: /✖ a tap on a line of Draw’s multi-line text selects the <text>/,
+  },
+  {
+    id: 'B645', what: 'Text to path takes only a selected <text>, not a selected line of one',
+    file: 'projects/draw/src/editor.ts', from: '    const texts = [...new Set(ids.map((id) => textOf(doc, id)))].filter((id) => {', to: '    const texts = [...new Set(ids)].filter((id) => {',
+    run: drawTests('editor.test.ts'), expect: /✖ a tap on a line of Draw’s multi-line text selects the <text>/,
+  },
+  {
+    id: 'B646', what: 'With fonts says nothing about a text whose font a <style> rule sets (its font silently not embedded)',
+    file: 'projects/draw/src/export/svg.ts', from: '    if (ruled.length) notes.push(ruledFonts(ruled));\n', to: '',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts names the texts whose font a <style> rule sets/,
+  },
+  {
+    id: 'B647', what: 'the import report files the Dublin Core items the Access tab edits under Kept as-is without a word',
+    file: 'engine/report/import-report.ts', from: "  if (dc.length) notes.push(", to: "  if (dc.length < 0) notes.push(",
+    run: engineTests('report/import-report.test.ts'), expect: /✖ metadata \(RDF, Dublin Core, Creative Commons\) is kept as-is; from P1-M4 the Access tab edits/,
+  },
+  {
+    id: 'B648', what: 'With fonts’ CSS string leaves a line break in a family as it is (the string could end early)',
+    file: 'projects/draw/src/export/svg.ts', from: '.replace(/[\\u0000-\\u001f\\u007f]/g, (c) => `\\\\${c.charCodeAt(0).toString(16)} `)', to: '',
+    run: drawTests('export-text.test.ts'), expect: /✖ a family in With fonts’ CSS string/,
+  },
+  {
+    id: 'B649', what: 'IBM Plex Mono’s notice no longer states its upstream Reserved Font Name “Plex”',
+    file: 'projects/draw/public/THIRD-PARTY-NOTICES.txt', from: "Reserved Font Name: \"Plex\" (IBM/plex LICENSE.txt and Google Fonts' ofl/ibmplexmono/OFL.txt, line 1: \"with Reserved Font Name \"Plex\"\"; this package's LICENSE, below, leaves it out).\n", to: '',
+    run: drawTests('notices.test.ts'), expect: /✖ each font’s section states the catalogue’s Reserved Font Names/,
+  },
+  {
+    id: 'B650', what: 'the licence’s own definition of “Reserved Font Name” reserves (a font whose licence string holds the OFL’s text would name junk)',
+    file: 'projects/draw/src/platform/fonts.ts', from: "      if (/[\"“'‘]$/.test(t.slice(0, m.index)) && /^[\"”'’]/.test(t.slice(m.index + m[0].length))) continue;\n", to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
+  },
+  {
+    id: 'B651', what: 'the Role field takes any text (“picture” written as a role)',
+    file: 'engine/access/model.ts', from: "  const bad = value.trim().split(/\\s+/).find((t) => t !== '' && !ARIA_ROLES.has(t.toLowerCase()));", to: "  const bad = value.trim().split(/\\s+/).find((t) => t === 'never-a-token');",
+    run: engineTests('access/access.test.ts'), expect: /✖ Role takes only ARIA role tokens/,
+  },
+  {
+    id: 'B652', what: 'a file’s own faces have no count cap (1,000 tiny faces would be 1,000 FontFaces on each open)',
+    file: 'engine/text/font-faces.ts', from: ' || read.faces.length >= count) {', to: ') {',
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ the count limit, 64 faces in all/,
+  },
+  {
+    id: 'B653', what: 'Text to path reads the file’s own faces again for every selected text (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: '      const r = outlineText(doc, id, fonts);\n', to: '      for (let i = 0; i < 4; i++) fontFaces(doc, { face: 1, total: 1 });\n      const r = outlineText(doc, id, fonts);\n',
+    run: drawTests('large-selection.test.ts'), expect: /✖ Text to path over a large selection takes linear time/,
+  },
+  {
+    id: 'B654', what: 'Set font reads every selected text’s weight again for each one (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: '        const w = computedWeight(doc, id);\n', to: '        for (const x of ids) computedWeight(doc, x);\n        const w = computedWeight(doc, id);\n',
+    run: drawTests('large-selection.test.ts'), expect: /✖ Set font and Inspect’s Text section over a large selection take linear time[\s\S]*Set font, then its undo/,
+  },
+  {
+    id: 'B655', what: 'Inspect’s Text section reads the selection’s font-family once per fifty selected texts (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: "    const row = this.styleRow('font-family', this.#textIds());\n", to: "    for (let i = 0; i < this.#textIds().length / 50; i++) this.styleRow('font-family', this.#textIds());\n    const row = this.styleRow('font-family', this.#textIds());\n",
+    run: drawTests('large-selection.test.ts'), expect: /✖ Set font and Inspect’s Text section over a large selection take linear time[\s\S]*Inspect’s Text section, over/,
+  },
+  {
+    id: 'B656', what: 'a title emptied in its field stays as an empty <title> (with role="img" naming nothing)',
+    file: 'projects/draw/src/editor.ts', from: "    if (commit && f.field.kind === 'access' && (f.field.name === 'title' || f.field.name === 'el-title')) this.#dropEmptyTitle(f.drag, f.field.name, f.ids[0]);\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a title emptied in its field is taken away as the field closes/,
+  },
+  {
+    id: 'B657', what: 'Inspect never says a family is not one of Draw’s fonts (Georgia looks held)',
+    file: 'projects/draw/src/editor.ts', from: '    return !GENERIC_FAMILIES.has(family.trim().toLowerCase()) && this.familyFaces(family) === null;', to: '    return false;',
+    run: drawTests('editor.test.ts'), expect: /✖ Inspect marks a family Draw holds no file for/,
+  },
+  {
+    id: 'B658', what: 'the bar echoes the drawing’s title in the page (the canvas host still aria-hidden), so the accessibility tree reads the drawing: only the ariaSnapshot assertion can see it', slow: true, checks: ['theAccessPanelNamesTheDrawing'],
+    file: 'projects/draw/src/panels/ContextBar.tsx', from: '    <div className="draw-context">\n      {notice && (', to: '    <div className="draw-context">\n      <span className="ds-small">{editor.access()?.drawing.title?.text}</span>\n      {notice && (',
+    run: DRAW_E2E, expect: /theAccessPanelNamesTheDrawing: the page's accessibility tree reads the drawing/,
+  },
+  {
+    id: 'B659', what: 'the Text tool’s "Tap to place text." toast stays up over the lines sheet after the text is placed',
+    file: 'projects/draw/src/editor.ts', from: "    if (this.notice.get() === TEXT_NOTICE) this.notice.set(null); // placed: the tool's toast closes, not over the lines sheet\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ the Text tool’s "Tap to place text\." toast closes/,
+  },
+  {
+    id: 'B660', what: 'With fonts embeds a face whatever its size (a 15 MB font makes an export larger than Draw opens)',
+    file: 'projects/draw/src/export/svg.ts', from: ' : cost > room ? overOpenLimit(held.family) : null;', to: ' : null;',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts writes a face as paths, saying so, when embedding its file would make the export larger/,
   },
 ];
 

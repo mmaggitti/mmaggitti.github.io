@@ -15,6 +15,12 @@
 // - P1-M3 S2: the Fill section's Fill rule (Nonzero, Evenodd: the holes); and a Donut section for a
 //   selected slice or its holder (engine/generators/donut.ts): each value a field from 1 to 100 with −
 //   and +, and Detach, or, for SVG Lab's own export, Edit as donut.
+// - P1-M4: a Text section, when everything selected is a text, tspan or textPath: Font (a button
+//   showing the first family, drawn in the text's own face, that opens the Font sheet), Size (a field
+//   and a slider from 2k to 80k), Weight (the family's real weights: segments for three or fewer,
+//   SVG Lab's 400, 700 and 900 for a generic or unknown family, else a button that opens the Weight
+//   sheet), Style (Italic only where the family has an italic face), Anchor, and Edit text for one
+//   text Draw edits as lines. Each value is written where it lives (M2's rules).
 // A field is one history entry while it has focus: each keystroke that reads as a value is written
 // live, and Done, Enter, Escape or a blur keeps it. While it has focus it shows what is typed; else
 // it follows the file (an undo, a handle drag, − or +).
@@ -28,7 +34,7 @@ import { fmt } from '../../../../engine/values/number-format.ts';
 import { STYLE_PROPS } from '../../../../engine/style/props.ts';
 import type { Editor, Field, PaintInfo, StyleRow } from '../editor.ts';
 import { INPUT_UI } from '../interact/shapes-tool.ts';
-import { ORDERS, dashPresets, joinSegments, paintKinds, showsMiterlimit, unlisted, widthRange, type PaintKind } from '../style-edit.ts';
+import { ORDERS, WEIGHT_NAMES, dashPresets, joinSegments, offeredWeights, paintKinds, showsMiterlimit, unlisted, widthRange, type PaintKind } from '../style-edit.ts';
 import { elementLabel } from './label.ts';
 import { useStore } from './store.ts';
 
@@ -45,6 +51,7 @@ export function Inspect({ editor }: { editor: Editor }) {
   return (
     <div className="draw-inspect">
       {!one && <p className="draw-subhead">{ids.length} selected</p>}
+      {editor.textSelected() && <TextSection editor={editor} />}
       <StyleSections editor={editor} locals={locals} />
       {gen && (
         <section className="draw-inspect-section" aria-label="Generator">
@@ -94,6 +101,68 @@ export function Inspect({ editor }: { editor: Editor }) {
         </>
       )}
     </div>
+  );
+}
+
+// ── text (P1-M4) ─────────────────────────────────────────────────────────────────────────────
+
+const STYLES: [string, string][] = [['normal', 'Normal'], ['italic', 'Italic']];
+const ANCHORS: [string, string][] = [['start', 'Start'], ['middle', 'Middle'], ['end', 'End']];
+/** A font-weight as a number (normal 400, bold 700), or the value as written. */
+const weightOf = (v: string) => (v.trim().toLowerCase() === 'normal' ? '400' : v.trim().toLowerCase() === 'bold' ? '700' : v.trim());
+
+function TextSection({ editor }: { editor: Editor }) {
+  const row = (prop: string) => editor.styleRow(prop)!;
+  const ctx = editor.styleCtx;
+  const fam = editor.textFamily();
+  const family = fam && !fam.mixed && fam.family !== 'Default' ? fam.family : null;
+  const faces = family ? editor.familyFaces(family) : null;
+  const weightRow = row('font-weight');
+  const weight = { ...weightRow, value: weightOf(weightRow.value) };
+  const styleRow = row('font-style');
+  const italic = !styleRow.mixed && /^(italic|oblique)/i.test(styleRow.value);
+  const weights = offeredWeights(faces, italic ? 'italic' : 'normal');
+  const styles = !faces || faces.italics.length ? STYLES : STYLES.slice(0, 1);
+  const shown = fam?.mixed ? 'Mixed' : (fam?.family ?? 'Default');
+  const missing = family !== null && editor.fontMissing(family);
+  const n = Number(weight.value);
+  return (
+    <Section title="Text">
+      <Row label="Font" row={row('font-family')}>
+        <button
+          type="button"
+          className="draw-inspect-swatch draw-font-btn"
+          aria-label={`Font: ${shown}${missing ? ', not one of Draw’s fonts' : ''}`}
+          disabled={!!row('font-family').disabled}
+          style={family ? { fontFamily: `"${family.replace(/["\\]/g, '\\$&')}", var(--font-ui)`, fontWeight: Number.isFinite(n) ? n : undefined, fontStyle: italic ? 'italic' : undefined } : undefined}
+          onClick={() => editor.openFontSheet()}
+        >
+          <span className="draw-inspect-text">{shown}</span>
+        </button>
+        {missing && (
+          <p className="draw-inspect-note draw-font-missing">
+            <span aria-hidden="true">⚠ </span>Not one of Draw’s fonts: it draws only where this device has it, else in a fallback.
+          </p>
+        )}
+      </Row>
+      <NumberRow editor={editor} prop="font-size" label="Size" row={row('font-size')} slider={{ min: 2 * ctx.k, max: 80 * ctx.k, step: ctx.step }} />
+      {weights.length <= 3 ? (
+        <SegRow editor={editor} prop="font-weight" label="Weight" row={weight} options={weights.map((w): [string, string] => [String(w), WEIGHT_NAMES[w] ?? String(w)])} />
+      ) : (
+        <Row label="Weight" row={weight}>
+          <button type="button" className="draw-inspect-swatch draw-weight-btn" aria-label={`Weight: ${weight.mixed ? 'Mixed' : weight.value}`} disabled={!!weight.disabled} onClick={() => editor.openWeightSheet(family!)}>
+            <span className="draw-inspect-text">{weight.mixed ? 'Mixed' : `${WEIGHT_NAMES[n] ?? 'Weight'} ${weight.value}`}</span>
+          </button>
+        </Row>
+      )}
+      <SegRow editor={editor} prop="font-style" label="Style" row={styleRow} options={styles} />
+      <SegRow editor={editor} prop="text-anchor" label="Anchor" row={row('text-anchor')} options={ANCHORS} />
+      {editor.canEditText() && (
+        <button type="button" className="ds-btn draw-inspect-btn draw-edit-text" onClick={() => editor.editText()}>
+          Edit text
+        </button>
+      )}
+    </Section>
   );
 }
 

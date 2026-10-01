@@ -16,8 +16,9 @@
 //
 // Known shadow-root gaps are reported, not gated, in the engines listed for them (a case's `gap`),
 // and gated like any other row everywhere else: a document's own @font-face does not register in a
-// shadow tree in Chromium (the probe shows it), so embedded fonts need a decision before Draw
-// depends on them (register them on document.fonts, or the light-DOM fallback). WebKit, the phone's
+// shadow tree in Chromium (the probe shows it). The decision (P1-M4): Draw registers a document's
+// own data: faces on document.fonts (src/platform/fonts.ts), so both engines draw them; this row
+// still tests the engine, not Draw, so Chromium's gap stays known here. WebKit, the phone's
 // engine, must pass every row.
 
 import { readFileSync } from 'node:fs';

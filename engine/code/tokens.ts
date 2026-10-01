@@ -108,6 +108,9 @@ export const ENUMS: Readonly<Record<string, readonly string[]>> = {
   'fill-rule': ['nonzero', 'evenodd'],
   'clip-rule': ['nonzero', 'evenodd'],
   'text-anchor': ['start', 'middle', 'end'],
+  // P1-M4: SVG Lab's three generics (KITS.text): a value that is exactly one of them cycles as the
+  // lab's does; any other family list has no token (Inspect's Font row edits it).
+  'font-family': ['sans-serif', 'serif', 'monospace'],
   'dominant-baseline': ['auto', 'text-bottom', 'alphabetic', 'ideographic', 'middle', 'central', 'mathematical', 'hanging', 'text-top'],
   'alignment-baseline': ['auto', 'baseline', 'before-edge', 'text-before-edge', 'middle', 'central', 'after-edge', 'text-after-edge', 'ideographic', 'alphabetic', 'hanging', 'mathematical', 'top', 'center', 'bottom'],
   'font-weight': ['normal', 'bold', 'bolder', 'lighter', '100', '200', '300', '400', '500', '600', '700', '800', '900'],

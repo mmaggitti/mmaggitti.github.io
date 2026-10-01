@@ -9,7 +9,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
+import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
+import { openFont, shape } from '../../src/text/outline-lib.ts';
+import type { TextLib } from '../../src/text/load.ts';
+import { OFFLINE as TEXT_OFFLINE } from '../../src/text/pipeline.ts';
+import { NOT_HELD } from '../../../../engine/text/outline.ts';
+import type { Fonts } from '../../src/platform/fonts.ts';
+import type { FaceRequest, OwnFace } from '../../../../engine/text/font-faces.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
@@ -26,6 +34,7 @@ import { donutSlices } from '../../../../engine/generators/donut.ts';
 import { parsePath } from '../../../../engine/path/parse.ts';
 import { toAbsolute } from '../../../../engine/path/abs.ts';
 import { insideAt, type BoolOp } from '../../../../engine/path/winding.ts';
+import { BOX_EFFECT, BOX_GRADIENT, DASHED, MARKERS, NO_STROKE, NON_SCALING, PAINT_ORDER, RULED, UNREADABLE_PAINT, ZERO_WIDTH } from '../../../../engine/path/offset.ts';
 import { DRAW_NS } from '../../../../engine/model/draw-ns.ts';
 import { OFFLINE, type Libraries } from '../../src/paths/pipeline.ts';
 import { combine as pathBoolCombine } from '../../src/paths/booleans.ts';
@@ -49,7 +58,7 @@ interface Rig {
   focused: (FocusMark | null)[];
 }
 
-function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries): Rig {
+function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries, extra: Partial<EditorPorts> = {}): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
@@ -123,6 +132,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries):
       hostSize: () => size,
       sinkReady: () => true,
       booleans,
+      ...extra,
     }),
   };
   r.editor.version.subscribe(() => log.push('stores'));
@@ -1710,7 +1720,7 @@ test('a marquee and Select all pass by a shape visibility hides (inherited; a ch
   assert.equal(r.editor.source(), V.replace('<rect id="a" x="10" y="10" width="10" height="10"/>', '<rect id="a" x="10" y="10" width="10" height="10" display="none"/>'), 'Hide writes display, never visibility');
 });
 
-test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (text by a translate), one entry each', () => {
+test('no raw items: every rendered element, use, image, foreignObject and text included, is selected by a tap, duplicated, reordered, deleted and moved (a text with single x and y by its own numbers, P1-M4), one entry each', () => {
   const RAW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <defs><circle id="dot" r="4"/></defs>
   <use id="u" href="#dot" x="10" y="10"/>
@@ -1722,13 +1732,13 @@ test('no raw items: every rendered element, use, image, foreignObject and text i
     u: ['<use id="u" href="#dot" x="10" y="10"/>', '<use id="u" href="#dot" x="11" y="10"/>'],
     i: ['<image id="i" x="20"', '<image id="i" x="21"'],
     f: ['<foreignObject id="f" x="40"', '<foreignObject id="f" x="41"'],
-    t: ['<text id="t" x="60" y="80">', '<text id="t" x="60" y="80" transform="translate(1 0)">'],
+    t: ['<text id="t" x="60" y="80">', '<text id="t" x="61" y="80">'],
   };
   const copied: Record<string, string> = {
     u: '<use id="u-2" href="#dot" x="15" y="15"/>',
     i: '<image id="i-2" x="25" y="25"',
     f: '<foreignObject id="f-2" x="45" y="45"',
-    t: '<text id="t-2" x="60" y="80" transform="translate(5 5)">',
+    t: '<text id="t-2" x="65" y="85">',
   };
   for (const name of ['u', 'i', 'f', 't']) {
     const r = rig();
@@ -2510,7 +2520,7 @@ test('booleans refuse, saying why and writing nothing: one shape, a line, text, 
   const cases: [file: string, op: BoolOp, notice: string, libs?: Libraries, over?: (r: () => Rig) => Partial<CanvasPort>][] = [
     [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Select two shapes or more to combine them.'],
     [W('<line id="b" x1="0" y1="0" x2="50" y2="50" stroke="#000"/>'), 'union', 'A line has no area.'],
-    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', 'Convert text to paths first (P1-M4).'],
+    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', TEXT_FIRST],
     [W('<g id="b"><rect x="0" y="0" width="5" height="5"/></g>'), 'union', 'Only shapes combine.'],
     [W('<use id="b" href="#a" x="5"/>'), 'union', 'Only shapes combine.'],
     [W('<circle id="b" cx="50" cy="50" r="10" style="r: 20px"/>'), 'union', 'Its r is set by CSS (its style attribute), which wins over the attribute.'],
@@ -2606,4 +2616,718 @@ test('a boolean whose chunk resolves during a live move drag, or while a press i
   await p.pending;
   assert.equal(p.r.editor.notice.get(), null);
   assert.equal(p.r.editor.history.get().undoLabel, 'Union');
+});
+
+// ── P1-M4 S0: Stroke to path ───────────────────────────────────────────────────────────────────
+
+const STP = (body: string, defs = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${defs}${body}\n</svg>`;
+/** Where `d` fills (nonzero) at each point. */
+const fillsAt = (d: string, pts: readonly [number, number][]) => pts.map(([x, y]) => insideAt(toAbsolute(parsePath(d)), x, y, 'nonzero'));
+
+test('Stroke to path: a line becomes a filled <path> in its place keeping its id (its stroke attributes gone, fill the stroke’s paint), one "Stroke to path" entry, the outline selected; it fills the stroke and nothing past it; one undo gives the file back byte for byte', async () => {
+  const LINE = '<line id="l" x1="20" y1="75" x2="50" y2="30" stroke="#264653" stroke-width="3" stroke-linecap="round"/>';
+  const F = STP(LINE);
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'l')]);
+  assert.equal(r.editor.canStrokeToPath(), true);
+  await r.editor.strokeToPath();
+  assert.equal(r.editor.notice.get(), null);
+  const src = r.editor.source();
+  const d = /<path id="l" fill="#264653" d="([^"]+)"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, F.replace(LINE, `<path id="l" fill="#264653" d="${d}"/>`));
+  assert.equal(r.editor.history.get().undoLabel, 'Stroke to path');
+  assert.deepEqual(sel(r), [idOf(r, 'l')]);
+  // On the line, at its round ends, and just past the half width (1.5) and the caps.
+  const along = (t: number, off: number): [number, number] => {
+    const [dx, dy] = [30 / Math.hypot(30, 45), -45 / Math.hypot(30, 45)];
+    return [20 + 30 * t - dy * off, 75 - 45 * t + dx * off];
+  };
+  assert.deepEqual(fillsAt(d, [along(0.5, 0), along(0.5, 1.3), along(0.5, -1.3), along(1, 0), [20 - 1.3 * 30 / Math.hypot(30, 45), 75 + 1.3 * 45 / Math.hypot(30, 45)]]), [true, true, true, true, true], 'the stroke and its round caps');
+  assert.deepEqual(fillsAt(d, [along(0.5, 1.7), along(0.5, -1.7), [20 - 1.7 * 30 / Math.hypot(30, 45), 75 + 1.7 * 45 / Math.hypot(30, 45)]]), [false, false, false], 'nothing past them');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('Stroke to path: a filled shape keeps its fill, its stroke written none where it lives, and the outline goes right after it with its transform and opacity; a <path> keeps its element, only its d, fill and stroke attributes changing (its style="" losing only its stroke declarations)', async () => {
+  const RECT = '<rect id="r" x="20" y="20" width="40" height="30" fill="#e9c46a" stroke="#264653" stroke-width="4" opacity="0.8" transform="rotate(10 40 35)"/>';
+  const F = STP(RECT);
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'r')]);
+  await r.editor.strokeToPath();
+  const src = r.editor.source();
+  const d = /<path transform="rotate\(10 40 35\)" opacity="0\.8" fill="#264653" d="([^"]+)"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, F.replace(RECT, `${RECT.replace('stroke="#264653"', 'stroke="none"')}\n  <path transform="rotate(10 40 35)" opacity="0.8" fill="#264653" d="${d}"/>`));
+  // In the rect's own units: the band ±2 about its edges, and not its middle.
+  assert.deepEqual(fillsAt(d, [[20, 35], [21.5, 35], [18.5, 35], [40, 20], [40, 50], [60, 21]]), [true, true, true, true, true, true]);
+  assert.deepEqual(fillsAt(d, [[40, 35], [17.5, 35], [22.5, 35], [15, 15]]), [false, false, false, false]);
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+  // A <path>: the same element, its d replaced in place, fill="none" now the stroke's paint, its own
+  // stroke attributes and style declarations gone, and Draw's generator inputs with them.
+  const P = '<path id="p" d="M 10 10 L 50 50" fill="none" stroke="red" stroke-width="2" style="stroke-linecap: round; opacity: 0.5"/>';
+  const G = STP(P);
+  const q = rig(HOST, {}, LIBS);
+  q.editor.open(G);
+  const p = idOf(q, 'p');
+  q.editor.select([p]);
+  await q.editor.strokeToPath();
+  const out = q.editor.source();
+  const pd = /<path id="p" d="([^"]+)" fill="red" style="opacity: 0\.5"\/>/.exec(out)?.[1];
+  assert.ok(pd, out);
+  assert.equal(out, G.replace(P, `<path id="p" d="${pd}" fill="red" style="opacity: 0.5"/>`));
+  assert.deepEqual(sel(q), [p], 'the same element, selected');
+  q.editor.undo();
+  assert.equal(q.editor.source(), G);
+  // A stroke from an ancestor: the result says stroke="none", so the group's stroke doesn't outline it again.
+  const INH = '<g stroke="#264653" stroke-width="2" fill="none"><line id="k" x1="10" y1="10" x2="90" y2="10"/></g>';
+  const w = rig(HOST, {}, LIBS);
+  w.editor.open(STP(INH));
+  w.editor.select([idOf(w, 'k')]);
+  await w.editor.strokeToPath();
+  assert.match(w.editor.source(), /<g stroke="#264653" stroke-width="2" fill="none"><path id="k" fill="#264653" stroke="none" d="[^"]+"\/><\/g>/);
+});
+
+test('Stroke to path refuses, saying why and writing nothing: no stroke, none, a width of 0, a dash, a non-scaling stroke, a marker, a paint it can’t read, a gradient laid out on the box, a clip-path, the stroke painted under a kept fill, a stroke a <style> rule decides, a <path> rule that would paint the result, a d with an error, and text; a dasharray of none converts', async () => {
+  const S = 'stroke="#264653" stroke-width="2"';
+  const cases: [body: string, notice: string, defs?: string][] = [
+    ['<line id="a" x1="10" y1="10" x2="90" y2="90"/>', NO_STROKE],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="none"/>`, NO_STROKE],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#000" stroke-width="0"/>`, ZERO_WIDTH],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} stroke-dasharray="4 2"/>`, DASHED],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} vector-effect="non-scaling-stroke"/>`, NON_SCALING],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} marker-end="url(#m)"/>`, MARKERS, '<marker id="m"><path d="M 0 0 L 5 5"/></marker>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="context-stroke" stroke-width="2"/>`, UNREADABLE_PAINT],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="url(#g)" stroke-width="2"/>`, BOX_GRADIENT, '<linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S} clip-path="url(#c)"/>`, BOX_EFFECT('clip-path'), '<clipPath id="c"><rect width="50" height="50"/></clipPath>\n  '],
+    [`<rect id="a" x="10" y="10" width="50" height="50" fill="#e9c46a" ${S} paint-order="stroke"/>`, PAINT_ORDER],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" stroke-width="2"/>`, RULED, '<style>line { stroke: #264653 }</style>\n  '],
+    [`<line id="a" x1="10" y1="10" x2="90" y2="90" ${S}/>`, RULED, '<style>path { fill: #2a9d8f }</style>\n  '],
+    [`<path id="a" d="M 0 0 L 10 Q" ${S}/>`, 'Its path data has an error at character 12.'],
+    [`<text id="a" x="10" y="50" ${S}>Hi</text>`, 'Only shapes have an outline.'],
+  ];
+  for (const [body, notice, defs] of cases) {
+    const F = STP(body, defs);
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(F);
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    assert.equal(r.editor.notice.get(), notice, body);
+    assert.equal(r.editor.source(), F, `${notice}: nothing written`);
+    assert.equal(r.editor.history.get().canUndo, false);
+  }
+  // lab/style.svg's polyline says stroke-dasharray="none": not dashed. A gradient in user space converts.
+  for (const [body, defs] of [
+    ['<polyline id="a" points="14,88 32,68 50,88" fill="none" stroke="#e76f51" stroke-width="8" stroke-dasharray="none"/>', ''],
+    ['<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="url(#u)" stroke-width="2"/>', '<linearGradient id="u" gradientUnits="userSpaceOnUse" x1="0" x2="100"><stop offset="0" stop-color="red"/></linearGradient>\n  '],
+  ]) {
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(STP(body, defs));
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    assert.equal(r.editor.history.get().undoLabel, 'Stroke to path', `${body}: ${r.editor.notice.get()}`);
+  }
+});
+
+test('Stroke to path on a circle, an ellipse, a polygon and a polyline with no fill: each a filled <path> keeping its id, filling the band of its stroke and not its middle', async () => {
+  const cases: [string, [number, number][], [number, number][]][] = [
+    ['<circle id="a" cx="50" cy="50" r="20" fill="none" stroke="#264653" stroke-width="4"/>', [[70, 50], [71.5, 50], [50, 28.5]], [[50, 50], [72.5, 50], [67.5, 50]]],
+    ['<ellipse id="a" cx="50" cy="50" rx="30" ry="15" fill="none" stroke="#264653" stroke-width="4"/>', [[80, 50], [50, 36.5], [50, 63.5]], [[50, 50], [82.5, 50], [50, 32.5]]],
+    ['<polygon id="a" points="20,20 80,20 50,80" fill="none" stroke="#264653" stroke-width="4"/>', [[50, 20], [50, 18.5], [20, 20]], [[50, 40], [50, 17.5], [50, 22.5]]],
+    ['<polyline id="a" points="20,20 80,20 80,80" fill="none" stroke="#264653" stroke-width="4"/>', [[50, 20], [80, 50], [81.5, 50]], [[50, 50], [20, 80], [50, 22.5]]],
+  ];
+  for (const [body, inside, outside] of cases) {
+    const F = STP(body);
+    const r = rig(HOST, {}, LIBS);
+    r.editor.open(F);
+    r.editor.select([idOf(r, 'a')]);
+    await r.editor.strokeToPath();
+    const d = /<path id="a" fill="#264653" d="([^"]+)"\/>/.exec(r.editor.source())?.[1];
+    assert.ok(d, `${body}:\n${r.editor.source()}`);
+    assert.deepEqual(fillsAt(d, inside), inside.map(() => true), `${body}: the stroke`);
+    assert.deepEqual(fillsAt(d, outside), outside.map(() => false), `${body}: nothing else`);
+    r.editor.undo();
+    assert.equal(r.editor.source(), F);
+  }
+});
+
+test('a Stroke to path the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+  r.editor.open(STP('<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#000" stroke-width="2"/>\n  <rect id="b" width="5" height="5"/>'));
+  r.editor.select([idOf(r, 'a')]);
+  const pending = r.editor.strokeToPath();
+  r.editor.select([idOf(r, 'b')]);
+  r.editor.delete();
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+});
+
+// The P1-M4 S0 follow-up (M3's fixer): a rule that paints a <path> may repaint the <path> that takes a
+// shape's place, so both conversions refuse it (pathRuleRefusal, shared).
+test('a boolean whose bottom shape would become a <path> a <style> rule may paint refuses (a rule for <path> only); the same rule refuses Stroke to path on a line', async () => {
+  const F = STP('<rect id="a" x="10" y="10" width="50" height="50" fill="#e76f51"/>\n  <circle id="b" cx="60" cy="60" r="25" fill="#e76f51"/>', '<style>path { fill: #2a9d8f }</style>\n  ');
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.notice.get(), STYLE_PAINT);
+  assert.equal(r.editor.source(), F);
+  const G = STP('<line id="a" x1="10" y1="10" x2="90" y2="90" stroke="#264653" stroke-width="2"/>', '<style>path { fill: #2a9d8f }</style>\n  ');
+  const q = rig(HOST, {}, LIBS);
+  q.editor.open(G);
+  q.editor.select([idOf(q, 'a')]);
+  await q.editor.strokeToPath();
+  assert.equal(q.editor.notice.get(), STYLE_PAINT);
+  assert.equal(q.editor.source(), G);
+});
+
+// ── P1-M4 S1: text and fonts ─────────────────────────────────────────────────────────────────────
+
+/** A fonts port that records what the editor asks for, holding the catalogue's families. */
+function fakeFonts(): Fonts & { used: FaceRequest[][]; documents: OwnFace[][] } {
+  const used: FaceRequest[][] = [];
+  const documents: OwnFace[][] = [];
+  return {
+    used,
+    documents,
+    use: (faces) => void used.push([...faces]),
+    documentFaces: (faces) => void documents.push([...faces]),
+    bytes: async () => null,
+    holds: (f) => !!catalogueFamily(f),
+    faces: (f) => {
+      const c = catalogueFamily(f);
+      return c ? { weights: [...c.weights], italics: [...c.italics] } : null;
+    },
+    mine: () => [],
+    add: async () => {
+      throw new Error('not here');
+    },
+    remove: async () => {},
+    subscribe: () => () => {},
+  };
+}
+/** Device preferences in a map, shared by two editors as a reload shares storage. */
+const fakePrefs = (m = new Map<string, string>()) => ({ m, read: (k: string) => m.get(k) ?? null, write: (k: string, v: string | null) => void (v === null ? m.delete(k) : m.set(k, v)) });
+const BOARD = (body = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n${body}</svg>`;
+// The engine doesn't measure text (the browser's getBBox does): a stand-in box around (x, y).
+const textBoxes = (r: () => Rig): Partial<CanvasPort> => ({
+  measure: (ids) => {
+    const m = measureWith(r().editor, ids, true);
+    const { box, viewport, M } = r().editor.rootBox;
+    for (const id of ids) {
+      const n = doc(r()).nodes.get(id);
+      if (!m.has(id) && n?.kind === 'element' && n.local === 'text') m.set(id, { box: { x: 30, y: 45, width: 40, height: 30 }, toHost: rootToHostMatrix(box!, viewport, M) });
+      // A root holding text: its box too, as the browser measures it.
+      if (!m.has(id) && id === doc(r()).root) m.set(id, { box: { x: 0, y: 0, width: 100, height: 100 }, toHost: rootToHostMatrix(box!, viewport, M) });
+    }
+    return m;
+  },
+});
+
+test('the Text tool’s "Tap to place text." toast closes when its tap places the text and the lines sheet opens', () => {
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  r.editor.pickTool('text');
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE);
+  tap(r, hostAt(r, 50, 50), []);
+  assert.equal(r.editor.sheet.get()?.kind, 'lines');
+  assert.equal(r.editor.notice.get(), null);
+});
+
+test('the Text tool (P1-M4): a tap places SVG Lab’s "Hello" in the Text tool’s font in one "Add text" entry, then Select, the text selected and the lines sheet open on it with its text selected; a drag places nothing and says so', () => {
+  const fonts = fakeFonts();
+  const r = rig(HOST, {}, undefined, { fonts, prefs: fakePrefs() });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  r.editor.pickTool('text');
+  assert.equal(r.editor.tool.get(), 'text');
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE);
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Archivo', weight: 400, style: 'normal' }, { family: 'Inter', weight: 400, style: 'normal' }], 'the toggle’s two labels, each in its own face');
+  drag(r, hostAt(r, 20, 20), hostAt(r, 60, 60), []);
+  assert.equal(r.editor.source(), BOARD(), 'a drag places nothing');
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.notice.set(null);
+  drag(r, hostAt(r, 20, 20), hostAt(r, 60, 60), []);
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE, 'and says so again');
+  tap(r, hostAt(r, 50, 50), []);
+  const hello = '<text x="50" y="55" font-size="14" font-family="Archivo, sans-serif" font-weight="700" text-anchor="middle" fill="#264653">Hello</text>';
+  assert.equal(r.editor.source(), BOARD(`  ${hello}\n`));
+  assert.equal(r.editor.history.get().undoLabel, 'Add text');
+  assert.equal(r.editor.tool.get(), 'select');
+  const t = element(doc(r), (n) => n.local === 'text').id;
+  assert.deepEqual(sel(r), [t]);
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'lines' && sheet.id === t && sheet.text === 'Hello' && sheet.select, JSON.stringify(sheet));
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Archivo', weight: 700, style: 'normal' }], 'the new text’s face, asked for once it is kept');
+  r.editor.closeSheet();
+  assert.equal(r.editor.history.get().undoLabel, 'Add text', 'a visit that typed nothing adds no entry');
+  r.editor.undo();
+  assert.equal(r.editor.source(), BOARD());
+});
+
+test('the Text tool’s font (Mark, 2026-10-01): Archivo by default; Inter once toggled, for the next text; a device preference that survives a reload through the storage, and no history entry', () => {
+  const prefs = fakePrefs();
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  assert.equal(r.editor.textFont.get(), 'Archivo');
+  r.editor.setTextFont('Inter');
+  assert.equal(r.editor.history.get().canUndo, false, 'a tap on the toggle makes no entry');
+  assert.equal(prefs.m.get('text-font'), 'Inter');
+  r.editor.setTextFont('Comic Sans');
+  assert.equal(r.editor.textFont.get(), 'Inter', 'only the toggle’s two');
+  r.editor.pickTool('text');
+  tap(r, hostAt(r, 50, 50), []);
+  assert.match(r.editor.source(), /font-family="Inter, sans-serif"/);
+  const again = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs });
+  assert.equal(again.editor.textFont.get(), 'Inter', 'after a reload');
+  again.editor.setTextFont('Archivo');
+  assert.equal(prefs.m.has('text-font'), false, 'the default is no preference at all');
+});
+
+test('a lines visit is one "Edit text" entry: each keystroke rewrites the lines into it (Draw’s tspans for two or more), a refused character keeps the last good lines, and one undo gives the file back; Edit text is offered only for one text Draw edits as lines', () => {
+  const src = BOARD('<text id="t" x="50" y="55" text-anchor="middle">Hello</text><text id="lab" x="50" y="20"><tspan x="50" dy="0em" fill="red">A</tspan></text><rect id="r" width="5" height="5"/>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select([idOf(r, 't')]);
+  assert.equal(r.editor.canEditText(), true);
+  r.editor.editText();
+  assert.ok(r.editor.sheet.get()?.kind === 'lines');
+  assert.equal(r.editor.linesInput('Big'), null);
+  assert.equal(r.editor.linesInput('Big\nIdea'), null);
+  const two = src.replace('>Hello<', '><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan><');
+  assert.equal(r.editor.source(), two);
+  assert.equal(r.editor.linesInput('Big\nIdea\uFFFE'), "XML can't hold the character U+FFFE");
+  assert.equal(r.editor.source(), two, 'the last good lines stay');
+  r.editor.closeSheet();
+  assert.equal(r.editor.history.get().undoLabel, 'Edit text');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+  for (const [ids, want] of [[['lab'], false], [['r'], false], [['t', 'r'], false], [['t'], true]] as const) {
+    r.editor.select(ids.map((i) => idOf(r, i)));
+    assert.equal(r.editor.canEditText(), want, ids.join());
+  }
+  r.editor.select([idOf(r, 't')]);
+  r.editor.editText();
+  r.editor.linesInput('Hi');
+  r.editor.pickTool('shapes');
+  assert.equal(r.editor.sheet.get(), null, 'a tool change ends the visit');
+  assert.equal(r.editor.history.get().undoLabel, 'Edit text', 'keeping what was typed');
+  assert.match(r.editor.source(), />Hi</);
+});
+
+test('a pick in the Font sheet is one "Set font" entry over the selected texts: the family with its generic, and the nearest real weight and style written with it (Bebas Neue has no bold and no italic); a generic alone; the sheet closes', () => {
+  const src = BOARD('<text id="a" font-weight="700" font-style="italic">A</text><g font-weight="900"><text id="b">B</text></g><text id="c">C</text>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select(['a', 'b', 'c'].map((i) => idOf(r, i)));
+  assert.equal(r.editor.textSelected(), true);
+  r.editor.openFontSheet();
+  assert.equal(r.editor.sheet.get()?.kind, 'font');
+  r.editor.setFont('Bebas Neue');
+  assert.equal(r.editor.sheet.get(), null);
+  assert.equal(r.editor.history.get().undoLabel, 'Set font');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="400" font-style="normal" font-family="Bebas Neue, sans-serif">A</text><g font-weight="900"><text id="b" font-family="Bebas Neue, sans-serif" font-weight="400">B</text></g><text id="c" font-family="Bebas Neue, sans-serif">C</text>\n'));
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+  r.editor.setFont('Fraunces');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="700" font-style="italic" font-family="Fraunces, serif">A</text><g font-weight="900"><text id="b" font-family="Fraunces, serif">B</text></g><text id="c" font-family="Fraunces, serif">C</text>\n'), 'Fraunces has 700 italic and 900: nothing else written');
+  r.editor.undo();
+  r.editor.setFont('IBM Plex Mono');
+  assert.match(r.editor.source(), /<text id="b" font-family="IBM Plex Mono, monospace" font-weight="700">/, 'IBM Plex Mono’s heaviest is 700: the nearest to 900');
+  r.editor.undo();
+  r.editor.setFont('serif');
+  assert.equal(r.editor.source(), BOARD('<text id="a" font-weight="700" font-style="italic" font-family="serif">A</text><g font-weight="900"><text id="b" font-family="serif">B</text></g><text id="c" font-family="serif">C</text>\n'), 'a generic alone');
+  r.editor.select([idOf(r, 'a'), doc(r).root]);
+  assert.equal(r.editor.textSelected(), false, 'the root selected too: no Text section');
+});
+
+test('Set font refuses a family XML can’t hold (U+FFFE, U+0001) with P0’s message: nothing is written and no entry is made', () => {
+  const src = BOARD('<text id="a">A</text>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.openFontSheet();
+  for (const [family, why] of [['Bad\uFFFEFont', "XML can't hold the character U+FFFE"], ['Bad\u0001Font', "XML can't hold the character U+0001"]]) {
+    r.editor.setFont(family);
+    assert.equal(r.editor.notice.get(), why, JSON.stringify(family));
+    assert.equal(r.editor.source(), src, 'nothing written');
+    assert.equal(r.editor.history.get().canUndo, false, 'no entry');
+  }
+});
+
+test('the fonts port: after open, the file’s own faces (documentFaces) and the faces its text asks for that Draw holds (use); again after a font edit and a <style> edit; [] when the drawing closes', () => {
+  const fonts = fakeFonts();
+  const face = '@font-face{font-family:Own;src:url(data:font/woff2;base64,d09GMg==)}';
+  const r = rig(HOST, {}, undefined, { fonts, prefs: fakePrefs() });
+  r.editor.open(BOARD(`<style>${face}</style><text id="t" font-family="Inter, sans-serif" font-weight="bold">A</text><text font-family="Own">B</text>\n`));
+  assert.deepEqual(fonts.documents.at(-1)!.map((f) => f.family), ['Own']);
+  assert.deepEqual(fonts.used.at(-1), [{ family: 'Inter', weight: 700, style: 'normal' }, { family: 'Own', weight: 400, style: 'normal' }]);
+  const documents = fonts.documents.length;
+  r.editor.select([idOf(r, 't')]);
+  r.editor.setStyle('font-weight', '900');
+  assert.deepEqual(fonts.used.at(-1)![0], { family: 'Inter', weight: 900, style: 'normal' }, 'a font edit asks again');
+  assert.equal(fonts.documents.length, documents, 'its own faces are registered again only when its <style> changes');
+  const style = element(doc(r), (n) => n.local === 'style');
+  r.editor.select([style.id]);
+  r.editor.openSource();
+  assert.equal(r.editor.applySource(style.id, '<style>@font-face{font-family:Next;src:url(data:font/woff2;base64,d09GMg==)}</style>'), null);
+  assert.deepEqual(fonts.documents.at(-1)!.map((f) => f.family), ['Next'], 'a <style> edit registers the faces again');
+  r.editor.showSource('<svg', 4);
+  assert.deepEqual(fonts.documents.at(-1), [], 'the drawing closes: its faces go');
+});
+
+test('a text’s pos handle (P1-M4) sits at its (x, y) beside its corners; its drag is one "Move text" entry moving its tspans’ x with it', () => {
+  const src = BOARD('<text id="t" x="50" y="55" font-size="14"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>\n');
+  let r!: Rig;
+  r = rig(HOST, textBoxes(() => r), undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.snap.set(NO_SNAP);
+  r.editor.select([idOf(r, 't')]);
+  const ids = handleIds(r);
+  assert.ok(ids.includes('pos') && ['tl', 'tr', 'br', 'bl', 'center'].every((h) => ids.includes(h)), ids.join());
+  const pos = r.editor.overlayModel().handles.find((h) => h.id === 'pos')!.at;
+  const want = hostAt(r, 50, 55);
+  assert.ok(Math.hypot(pos.x - want.x, pos.y - want.y) < 0.01, JSON.stringify([pos, want]));
+  drag(r, want, hostAt(r, 60, 50), [idOf(r, 't')]);
+  assert.equal(r.editor.source(), src.replace('x="50" y="55"', 'x="60" y="50"').replaceAll('<tspan x="50"', '<tspan x="60"'));
+  assert.equal(r.editor.history.get().undoLabel, 'Move text');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+});
+
+// ── P1-M4 S2: Text to path ─────────────────────────────────────────────────────────────────────
+
+/** The catalogue's file for a face, from node_modules (what the app fetches by its URL). */
+const fontFile = (f: FaceRequest): Uint8Array | null => {
+  const c = catalogueFamily(f.family);
+  return c ? new Uint8Array(readFileSync(new URL(`../../node_modules/@fontsource/${c.slug}/files/${faceFile(c.slug, f.weight, f.style)}`, import.meta.url))) : null;
+};
+/** A fonts port with the catalogue's files, and the real text library. */
+const textPorts = (lib: EditorPorts['text'] = async () => ({ openFont, shape })): Partial<EditorPorts> => {
+  const fonts = fakeFonts();
+  fonts.bytes = async (f) => fontFile(f);
+  return { fonts, text: lib, prefs: fakePrefs() };
+};
+
+test('Text to path: two texts become two <path>s in their places in one "Text to path" entry (a rect selected with them is left alone), each keeping its id, the text-only attributes gone, aria-label its characters (the lines joined by a space); the paths are selected; one undo gives the file back byte for byte', async () => {
+  const A = '<text id="a" x="10" y="20" font-family="Inter, sans-serif" font-size="10" fill="#264653">Hi</text>';
+  const B = '<text id="b" x="50" y="40" font-family="Archivo, sans-serif" font-size="10" font-weight="700" text-anchor="middle"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>';
+  const R = '<rect id="r" x="1" y="1" width="5" height="5"/>';
+  const F = BOARD(`  ${A}\n  ${R}\n  ${B}\n`);
+  const r = rig(HOST, {}, undefined, textPorts());
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'r'), idOf(r, 'b')]);
+  assert.equal(r.editor.canTextToPath(), true);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), null);
+  const src = r.editor.source();
+  const da = /<path id="a" fill="#264653" d="([^"]+)" aria-label="Hi"\/>/.exec(src)?.[1];
+  const db = /<path id="b" d="([^"]+)" aria-label="Big Idea"\/>/.exec(src)?.[1];
+  assert.ok(da && db, src);
+  assert.equal(src, F.replace(A, `<path id="a" fill="#264653" d="${da}" aria-label="Hi"/>`).replace(B, `<path id="b" d="${db}" aria-label="Big Idea"/>`));
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path');
+  assert.deepEqual(sel(r).sort(), [idOf(r, 'a'), idOf(r, 'b')].sort());
+  // Inter's H starts at x 10 plus its side bearing; Archivo's "Big" is centred on 50, its baseline at 40.
+  const first = /^M (-?[\d.]+) (-?[\d.]+)/.exec(da)!;
+  assert.ok(Number(first[1]) > 10 && Number(first[1]) < 11.5 && Number(first[2]) <= 20.001, `Hi starts at ${first[0]}`);
+  const xs = [...db.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  const line1 = xs.filter(([, y]) => y <= 40.5);
+  assert.ok(Math.abs((Math.min(...line1.map((p) => p[0])) + Math.max(...line1.map((p) => p[0]))) / 2 - 50) < 1, 'Big is centred on 50');
+  assert.ok(xs.some(([, y]) => y > 40 + 13 - 8), 'Idea sits a line below');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('Text to path refuses, saying why and writing nothing: a font Draw holds no file for (Georgia), any one refusing text in the selection, no text selected; a boolean names Text to path', async () => {
+  const r = rig(HOST, {}, undefined, textPorts());
+  const F = BOARD('  <text id="g" x="1" y="9" font-family="Georgia, serif">Hi</text>\n  <text id="i" x="1" y="19" font-family="Inter">Hi</text>\n  <rect id="r" width="5" height="5"/>\n');
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'g'), idOf(r, 'i')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), NOT_HELD('Georgia'));
+  assert.equal(r.editor.notice.get(), 'Draw can outline only its own fonts, yours and this file’s own; Georgia isn’t one of them.');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.select([idOf(r, 'r')]);
+  assert.equal(r.editor.canTextToPath(), false);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'Select a text to turn it into a path.');
+  assert.equal(TEXT_FIRST, 'Convert text to paths first: More → Text to path.');
+});
+
+test('Text to path refuses a selection whose texts hold more than 20,000 characters, before its library loads, saying so; 20,000 are outlined', async () => {
+  let loads = 0;
+  // A library that draws each character as a box (fontkit over 20,000 characters is the pipeline test’s matter).
+  const boxes = async (): Promise<TextLib> => {
+    loads++;
+    return { openFont, shape: (_b: Uint8Array, runs: readonly string[]) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [500, 0] }, { command: 'lineTo', args: [500, 700] }, { command: 'closePath', args: [] }], xAdvance: 500, xOffset: 0, yOffset: 0 })), missing: [] })) }) };
+  };
+  const r = rig(HOST, {}, undefined, textPorts(boxes));
+  const F = BOARD(`  <text id="a" x="1" y="9" font-family="Inter">${'a'.repeat(15000)}</text>\n  <text id="b" x="1" y="19" font-family="Inter">${'b'.repeat(5001)}</text>\n`);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'The selection holds too much text to turn into paths at once: 20,001 characters, and Draw outlines up to 20,000.');
+  assert.equal(loads, 0, 'refused before the library loads');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.open(F.replace('b'.repeat(5001), 'b'.repeat(5000)));
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path', '20,000 characters are outlined');
+});
+
+test('a tap on a line of Draw’s multi-line text selects the <text> (Edit text and Text to path offered); a second tap selects the line under the finger, as a group is entered; Edit text and Text to path on a selected line act on its text; a drag on a line of an unselected text moves the text', async () => {
+  const F = BOARD('  <text id="t" x="50" y="55" font-family="Inter" font-size="14" text-anchor="middle"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>\n  <rect id="r" width="5" height="5"/>\n');
+  const r = rig(HOST, {}, undefined, textPorts());
+  r.editor.open(F);
+  r.editor.snap.set(NO_SNAP);
+  const [t, rect] = ['t', 'r'].map((id) => idOf(r, id));
+  const [l1, l2] = (doc(r).nodes.get(t) as ElementNode).children; // Draw’s two lines
+  const leaf = (id: NodeId) => (doc(r).nodes.get(id) as ElementNode).children[0];
+  r.editor.tapCanvas(leaf(l2));
+  assert.deepEqual(sel(r), [t], 'the first tap: the <text>');
+  assert.equal(r.editor.canEditText(), true);
+  assert.equal(r.editor.canTextToPath(), true);
+  r.editor.tapCanvas(leaf(l2));
+  assert.deepEqual(sel(r), [l2], 'the second tap: the line under the finger');
+  r.editor.tapCanvas(leaf(l1));
+  assert.deepEqual(sel(r), [l1], 'inside the text, a tap takes another line');
+  assert.equal(r.editor.canEditText(), true, 'Edit text on a line: its text');
+  assert.equal(r.editor.canTextToPath(), true);
+  r.editor.editText();
+  assert.equal(r.editor.sheet.get()?.kind, 'lines');
+  assert.equal((r.editor.sheet.get() as { id: NodeId }).id, t, 'the lines sheet is the text’s');
+  r.editor.closeSheet();
+  r.editor.tapCanvas(rect);
+  r.editor.tapCanvas(leaf(l1));
+  assert.deepEqual(sel(r), [t], 'after another shape, a tap on a line is the <text> again');
+  // The same by the pointer: a tap, then a drag on a line of the selected text moves the whole text.
+  r.editor.deselect();
+  tap(r, hostAt(r, 50, 70), [l2]);
+  assert.deepEqual(sel(r), [t]);
+  r.editor.deselect();
+  drag(r, hostAt(r, 50, 70), hostAt(r, 60, 70), [l2]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', 'a drag on a line of an unselected text moves the text');
+  assert.deepEqual(sel(r), [t]);
+  assert.match(r.editor.source(), /<text id="t" x="60" y="55"/);
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+  // Text to path on a selected line converts its text.
+  r.editor.select([l2]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), null);
+  assert.match(r.editor.source(), /<path id="t" [^>]*aria-label="Big Idea"\/>/);
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path');
+});
+
+test('a Text to path whose text library fails outright (it returns no run for a text) says it can’t outline the text, naming it, and writes nothing', async () => {
+  const broken = async () => ({ openFont, shape: () => ({ unitsPerEm: 1000, runs: [] }) });
+  const r = rig(HOST, {}, undefined, textPorts(broken));
+  const F = BOARD('  <text id="a" x="1" y="9" font-family="Inter">Hi</text>\n  <text id="b" x="1" y="19" font-family="Inter">there</text>\n');
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'Draw can’t outline “Hi there”.');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+});
+
+test('a Text to path the drawing changes under while its chunk loads refuses, and writes nothing over the change; a chunk that won’t load says so', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, undefined, textPorts(async () => (await gate, { openFont, shape })));
+  r.editor.open(BOARD('  <text id="t" x="1" y="9" font-family="Inter">Hi</text>\n  <rect id="b" width="5" height="5"/>\n'));
+  r.editor.select([idOf(r, 't')]);
+  const pending = r.editor.textToPath();
+  r.editor.select([idOf(r, 'b')]);
+  r.editor.delete();
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+  const off = rig(HOST, {}, undefined, textPorts(() => Promise.reject(new Error('offline'))));
+  const G = BOARD('  <text id="t" x="1" y="9" font-family="Inter">Hi</text>\n');
+  off.editor.open(G);
+  off.editor.select([idOf(off, 't')]);
+  await off.editor.textToPath();
+  assert.equal(off.editor.notice.get(), TEXT_OFFLINE);
+  assert.equal(TEXT_OFFLINE, 'Draw couldn’t load the text tools. Try again when you’re online.');
+  assert.equal(off.editor.source(), G);
+});
+
+// ── P1-M4 S3: the Access tab ──────────────────────────────────────────────────────────────────
+
+const rects = (r: Rig): NodeId[] => [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'rect').map((n) => n.id);
+
+test('the Access tab’s switches (P1-M4 S3) are one entry each: Title and Description, Metadata, a shape’s Title and Hidden, Remove; access() reads the file again after each undo, the preview with it', () => {
+  const src = LAB_FILE('access.svg');
+  const r = rig();
+  r.editor.open(src);
+  const a = () => r.editor.access()!;
+  const entry = () => r.editor.history.get().undoLabel;
+  assert.equal(a().said, '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  assert.deepEqual(a().ids, { title: 'chart-title', desc: 'chart-desc' });
+  r.editor.setDrawingTitle(false);
+  assert.equal(entry(), 'Remove title');
+  assert.equal(a().drawing.title, null);
+  assert.equal(a().said, '“Image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  r.editor.setDrawingDesc(false);
+  assert.equal(entry(), 'Remove description');
+  assert.equal(a().said, 'no name, so it may skip the drawing or read stray labels: “Jan, Feb, Mar, Apr”');
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'two entries');
+  assert.equal(a().drawing.title?.text, 'Monthly visitors', 'after the undo, the tab reads the title again');
+  assert.equal(a().said, '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  r.editor.setMetadata(true, { creator: 'You', date: '2026-09-25' });
+  assert.equal(entry(), 'Add metadata');
+  assert.deepEqual(a().meta.items.map((i) => [i.key, i.text]), [['dc:creator', 'You'], ['dc:date', '2026-09-25']]);
+  r.editor.setMetadata(false);
+  assert.equal(entry(), 'Remove metadata');
+  assert.equal(r.editor.source(), src);
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  // The first bar.
+  const bar = rects(r)[0];
+  r.editor.select([bar]);
+  assert.equal(a().element?.tag, '<rect>');
+  assert.equal(a().element?.title, null);
+  r.editor.setElementTitle(true);
+  assert.equal(entry(), 'Add title');
+  assert.ok(r.editor.source().includes('fill="#2a9d8f"><title></title></rect>'), 'an empty title, its first child, for the field to fill');
+  r.editor.setAriaHidden(true);
+  assert.equal(entry(), 'Hide from screen readers');
+  assert.equal(a().element?.hidden, true);
+  r.editor.undo();
+  assert.equal(a().element?.hidden, false, 'the switch follows the undo');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  // Remove: one entry; the root is never the element section's.
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" aria-describedby="d" aria-live="polite"/></svg>');
+  r.editor.select([idOf(r, 'c')]);
+  assert.deepEqual(a().element?.aria.map((x) => x.name), ['aria-describedby', 'aria-live']);
+  r.editor.removeAria('aria-live');
+  assert.equal(entry(), 'Remove aria-live');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" aria-describedby="d"/></svg>');
+  r.editor.select([doc(r).root]);
+  assert.equal(a().element, null);
+  assert.equal(a().selected, 1);
+});
+
+test('Inspect marks a family Draw holds no file for (Georgia) as not one of Draw’s fonts; never a generic, one of the catalogue’s, or the drawing’s own face', () => {
+  const face = '@font-face{font-family:Own;src:url(data:font/woff2;base64,d09GMg==)}';
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(BOARD(`<style>${face}</style><text id="t">A</text>\n`));
+  assert.equal(r.editor.fontMissing('Georgia'), true);
+  for (const f of ['Inter', 'ibm plex sans', 'serif', 'system-ui', 'Own']) assert.equal(r.editor.fontMissing(f), false, f);
+});
+
+test('a title emptied in its field is taken away as the field closes: typed into a drawing with none and erased leaves the file as it was; the drawing’s own title emptied goes with its aria-labelledby and role="img", one entry; an element’s goes too', () => {
+  const create = LAB_FILE('create.svg');
+  const r = rig();
+  r.editor.open(create);
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('A'), null);
+  assert.equal(r.editor.fieldInput(''), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), create, 'no empty <title>, no role="img"');
+  assert.equal(r.editor.history.get().canUndo, false, 'nothing to undo');
+  r.editor.setDrawingTitle(true);
+  const titled = r.editor.source();
+  assert.match(titled, /role="img" aria-labelledby="drawing-title"[\s\S]*<title id="drawing-title">My drawing<\/title>/);
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('  '), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), create, 'the title, its aria-labelledby and role="img" gone: nothing names the drawing');
+  assert.equal(r.editor.history.get().undoLabel, 'Set title');
+  r.editor.undo();
+  assert.equal(r.editor.source(), titled, 'one entry');
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"><title>Sun</title></circle></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  r.editor.fieldStart({ kind: 'access', name: 'el-title', id: c });
+  assert.equal(r.editor.fieldInput(''), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"></circle></svg>');
+});
+
+test('the Role field takes only ARIA role tokens: “picture” is refused, naming it, and the last good role stays; a fallback list is taken', () => {
+  const r = rig();
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"/></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  r.editor.fieldStart({ kind: 'access', name: 'role', id: c });
+  assert.equal(r.editor.fieldInput('img'), null);
+  assert.equal(r.editor.fieldInput('picture'), '“picture” isn’t an ARIA role.');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" role="img"/></svg>', 'the last good role');
+  assert.equal(r.editor.fieldInput('switch checkbox'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" role="switch checkbox"/></svg>');
+  assert.equal(r.editor.history.get().undoLabel, 'Set role');
+});
+
+test('an Access field is one entry while it has focus (P1-M4 S3): the drawing’s Title typed on lab/create.svg makes SVG Lab’s title in that entry; Language refuses what isn’t a tag and keeps the last good value; a shape’s Title, Label and Role; a metadata item; one undo each', () => {
+  const create = LAB_FILE('create.svg');
+  const r = rig();
+  r.editor.open(create);
+  const entry = () => r.editor.history.get().undoLabel;
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('A'), null);
+  assert.equal(r.editor.fieldInput('Acme logo'), null);
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set title');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">Acme logo</title>\n</svg>\n');
+  r.editor.undo();
+  assert.equal(r.editor.source(), create, 'one entry');
+  r.editor.fieldStart({ kind: 'access', name: 'lang' });
+  assert.equal(r.editor.fieldInput('f'), 'That isn’t a language tag, like en or fr-CA.');
+  assert.equal(r.editor.source(), create, 'nothing written');
+  assert.equal(r.editor.fieldInput('fr'), null);
+  assert.equal(r.editor.fieldInput('fr_'), 'That isn’t a language tag, like en or fr-CA.');
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set language');
+  assert.equal(r.editor.source(), create.replace('viewBox="0 0 100 100"', 'viewBox="0 0 100 100" lang="fr"'), 'the last good value');
+  assert.equal(r.editor.access()!.said, 'no name, so it may skip the drawing.');
+  r.editor.undo();
+  // A shape: its Title, Label and Role, each one entry; a character XML can't hold is refused.
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"/></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  for (const [name, typed, want, label] of [
+    ['el-title', 'Sun', '<circle id="c" r="5"><title>Sun</title></circle>', 'Set title'],
+    ['label', 'Sun', '<circle id="c" r="5" aria-label="Sun"/>', 'Set label'],
+    ['role', 'button', '<circle id="c" r="5" role="button"/>', 'Set role'],
+  ] as const) {
+    r.editor.fieldStart({ kind: 'access', name, id: c });
+    assert.equal(r.editor.fieldInput('S￾'), "XML can't hold the character U+FFFE");
+    assert.equal(r.editor.fieldInput(typed), null);
+    r.editor.fieldEnd();
+    assert.equal(entry(), label);
+    assert.equal(r.editor.source(), `<svg xmlns="http://www.w3.org/2000/svg">${want}</svg>`, name);
+    r.editor.undo();
+  }
+  // A metadata item's text, where it lives (Matplotlib's creator agent).
+  const plot = readFileSync(`${HERE}../../../../engine/test/fixtures/corpus/tools/matplotlib-line-plot.svg`, 'utf8');
+  r.editor.open(plot);
+  const creator = r.editor.access()!.meta.items.find((i) => i.key === 'dc:creator')!;
+  r.editor.fieldStart({ kind: 'access', name: 'meta', id: creator.id });
+  r.editor.fieldInput('Mark');
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set metadata');
+  assert.equal(r.editor.source(), plot.replace('<dc:title>Matplotlib v3.8.2, https://matplotlib.org/</dc:title>', '<dc:title>Mark</dc:title>'));
 });

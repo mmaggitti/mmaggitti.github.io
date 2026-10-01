@@ -20,7 +20,7 @@
 // - Copy puts the file (or that source) on the clipboard, through src/platform/ (it never reads the
 //   clipboard); where the clipboard is blocked, a read-only sheet holds the text to select.
 
-import { serialize, type Doc } from '../../../engine/model/doc.ts';
+import { NS, descendants, serialize, type Doc } from '../../../engine/model/doc.ts';
 import { stripDrawState } from '../../../engine/model/draw-state.ts';
 import { importReport, type ImportReport } from '../../../engine/report/import-report.ts';
 import type { Editor } from './editor.ts';
@@ -29,7 +29,7 @@ import { Autosave, type Lock, type Timers } from './autosave.ts';
 import { localJournal, type DraftStore, type Journal } from './platform/drafts.ts';
 import { decodeImport } from './platform/files.ts';
 import type { Outcome } from './platform/share.ts';
-import { exportFile, type ExportFile, type ExportKind } from './export/svg.ts';
+import { exportFile, prepareExport, type ExportFile, type ExportKind, type Prepared } from './export/svg.ts';
 import { draftRows, type DraftRow } from './files-view.ts';
 import { createStore, type Store } from './panels/store.ts';
 
@@ -381,6 +381,20 @@ export class Workspace {
     const doc = this.#editor.doc;
     const current = this.current.get();
     return doc ? exportFile(doc, current?.name ?? 'drawing', kind, current?.encoding ?? undefined) : null;
+  }
+
+  /** Whether the open drawing holds text (the Export sheet then offers its Text choice). */
+  hasText(): boolean {
+    const doc = this.#editor.doc;
+    return !!doc && [...descendants(doc, doc.root)].some((n) => n.kind === 'element' && n.ns === NS.svg && n.local === 'text');
+  }
+
+  /** Clean's file with its text as paths or with fonts (P1-M4 S2, export/svg.ts), or why it can't be made. */
+  async prepareExport(choice: 'paths' | 'fonts'): Promise<Prepared | { refused: string }> {
+    const doc = this.#editor.doc;
+    const current = this.current.get();
+    if (!doc) return { refused: 'Nothing is open.' };
+    return prepareExport(doc, current?.name ?? 'drawing', choice, this.#editor.exportDeps(), current?.encoding ?? undefined);
   }
 
   /** After the share sheet or the download: say so (the sheet closes), and reset the draft's "not exported" reminder. */

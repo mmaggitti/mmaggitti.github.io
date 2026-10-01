@@ -70,6 +70,22 @@
 // a hand edit of a slice turning it plain, the comment's tokens going with it. Then booleans: Union,
 // Subtract, Intersect and Exclude from the More sheet, drawn where they cover, path-bool loading only
 // then, in a chunk of its own.
+// P1-M4 adds text, fonts and accessibility, and first M3's spillover: Stroke to path, whose filled
+// outline covers the pixels its stroke covered (within 1%) for a round-capped line, a round-joined
+// polyline, a mitered heart that keeps its fill, and a thin stroke under a rotation. Then text and
+// fonts: the Text tool placing SVG Lab's "Hello" where it is tapped and its lines written as tspans
+// that draw where SVG Lab's do, its pos handle, the font toggle; only the font files a drawing uses
+// fetched (the Font sheet's ten, a pick's face), your own font added, applied and kept across a
+// reload; a file's own data: font drawn in both engines, a face named like the app's fonts never
+// registered; and the phone rules on the text tools. Then Text to path: four texts (Inter, Fraunces
+// italic lines, IBM Plex Mono with two spaces kept, a file's own face) cover the same pixels as paths
+// (within 1%), the text library loading only then; and Export's text choices: As paths, and With
+// fonts embedding Inter whole while IBM Plex, whose font reserves "Plex", goes as paths. Then the
+// Access tab: on lab/create.svg a Title, its text typed, a Description, a Language and SVG Lab's
+// metadata, each one entry, a shape titled as its first child, the page's accessibility tree never
+// reading the drawing (the canvas host stays aria-hidden); on lab/access.svg the screen-reader
+// preview following each switch, a shape's title, a code edit and an undo at once; and the phone
+// rules on the Access tab and its five-tab row at 440 pt.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -94,6 +110,7 @@ import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
+import { shape as shapeText } from '../src/text/outline-lib.ts';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 import { geometryKnown } from './probe-helpers/geometry-known.mjs';
 
@@ -268,6 +285,18 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(holesCutTwoWays);
   await check(theDonutRegeneratesFromItsData);
   await check(booleansCombineWhatIsDrawn);
+  // P1-M4: text, fonts and accessibility.
+  await check(strokeToPathCoversTheStroke);
+  await check(theTextToolPlacesHelloAndWritesLines);
+  await check(fontsLoadOnlyWhatTheDrawingUses);
+  await check(aFilesOwnFontDrawsInEveryEngine);
+  for (const height of [956, 796]) await check(phoneRulesOnTheTextTools, height);
+  await check(textToPathLooksTheSame);
+  await check(exportWritesTextAsPathsOrWithFonts);
+  // P1-M4 S3: the Access tab.
+  await check(theAccessPanelNamesTheDrawing);
+  await check(theScreenReaderPreviewFollowsTheFile);
+  for (const height of [956, 796]) await check(phoneRulesOnTheAccessPanel, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -647,7 +676,11 @@ const LOOKS_DIFFERENT = new Map([
   ['lab/media.svg', 'its <video> is refused'],
   ['lab/media--audio.svg', 'its <video> is refused'],
   ['lab/texture--tiles.svg', 'its tile is a data: SVG on feImage, which the canvas does not load'],
+  ['tools/affinity-designer-serif.svg', "its text asks for Inter 600, which the canvas draws in Draw's own Inter (P1-M4); an <img> can't use the page's fonts, so the file alone falls back"],
 ]);
+// How far a difference named above may still go (of the pixels), where it can be bounded: the
+// Affinity file's text in Inter against the fallback measured 2.9%.
+const LOOKS_DIFFERENT_UP_TO = new Map([['tools/affinity-designer-serif.svg', 0.05]]);
 // Differences one engine shows because its <img> reference differs from the file opened on its own;
 // the canvas is right in each. By browser, then file; `scheme` limits one to light or dark.
 const LOOKS_DIFFERENT_IN = {
@@ -699,7 +732,7 @@ async function corpusLooksAsItDoesAlone(browser, origin, colorScheme) {
       }
       const share = n / Math.max(1, (x1 - x0) * (y1 - y0));
       if (!decoded) differ.push(`${f.name}: test setup: the file did not load as an <img>`);
-      else if (share > MAX_DIFFERENT && !LOOKS_DIFFERENT.has(f.name) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
+      else if (share > MAX_DIFFERENT && !(LOOKS_DIFFERENT.has(f.name) && share <= (LOOKS_DIFFERENT_UP_TO.get(f.name) ?? 1)) && !knownIn(browser, f.name, colorScheme)) differ.push(`${f.name}: ${(share * 100).toFixed(2)}% of it differs`);
     }
     must(differ.length === 0, `${colorScheme}: ${differ.length} corpus file(s) look different on the canvas than on their own:\n${differ.join('\n')}`);
   }, { colorScheme, viewport: { width: 456, height: 320 } });
@@ -1565,6 +1598,9 @@ const LATIN1 = Buffer.concat([
   Buffer.from([0xe9, 0x20, 0x80]),
   Buffer.from('</text></svg>\n'),
 ]);
+// The text it holds. Node's own TextDecoder('windows-1252') (22.22) gives 0x80 as U+0080; the
+// Encoding Standard, and every browser, gives €.
+const LATIN1_TEXT = new TextDecoder('windows-1252').decode(LATIN1).replace('\u0080', '€');
 // UTF-16 bytes, in either byte order.
 const utf16 = (text, le) => {
   const out = Buffer.alloc(text.length * 2);
@@ -1651,7 +1687,7 @@ async function openThroughTheFilePicker(browser, origin) {
     const cases = [
       ['a plain .svg', 'layers.svg', corpusBytes('tools/inkscape-1x-layers.svg'), corpusText('tools/inkscape-1x-layers.svg')],
       ['a gzip .svgz', 'spinner.svgz', gzipSync(corpusBytes('lab/spin--js.svg')), corpusText('lab/spin--js.svg')],
-      ['a Latin-1 file', 'café.svg', LATIN1, new TextDecoder('windows-1252').decode(LATIN1)],
+      ['a Latin-1 file', 'café.svg', LATIN1, LATIN1_TEXT],
     ];
     for (const [what, name, buffer, text] of cases) {
       await pickFile(page, name, buffer);
@@ -1809,7 +1845,8 @@ async function importReportBuckets(browser, origin) {
       for (const item of items) must(listed.some((t) => t.startsWith(item)), `${rel}: ${item} is not listed under ${bucket} (${listed.slice(0, 6).join(', ')})`);
       const notes = await page.locator('.draw-notes li').allTextContents();
       must(JSON.stringify(notes) === JSON.stringify(want.notes), `${rel}: the notes are ${JSON.stringify(notes)}`);
-      // The file's Creative Commons block (RDF, Dublin Core) is metadata Draw keeps, never edits.
+      // The file's Creative Commons block (RDF, Dublin Core) is metadata Draw keeps, never listed as
+      // editable (the Access tab edits its Dublin Core items, and a note says so).
       const editable = await page.locator('.draw-group[data-bucket="editable"] .draw-item .ds-mono').allTextContents();
       const metadata = editable.filter((t) => /^<?(rdf|dc|dcterms|cc):/.test(t));
       must(metadata.length === 0, `${rel}: metadata is listed as editable: ${metadata.join(', ')}`);
@@ -5022,7 +5059,8 @@ const HANDLE_SHAPES = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
 // handle is drawn at its own (90, 30) through its transform, and a drag along its own axis changes
 // only rx. A line's end lands on the snapped point (the artboard's centre in x, whole units in y); a
 // polygon's vertex moves only its pair; lab/vector.svg's star (a plain polygon) moves one vertex; a
-// <text>'s centre handle moves it by a translate (SVG Lab's text position handle). One entry each.
+// <text>'s centre handle moves it by its own x and y (P1-M4: they are single numbers; a text with
+// position lists still moves by a translate, theTextToolPlacesHelloAndWritesLines). One entry each.
 async function shapeHandlesEditTheLabsShapes(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const F = HANDLE_SHAPES;
@@ -5087,7 +5125,7 @@ async function shapeHandlesEditTheLabsShapes(browser, origin) {
     const centre = await handle('center');
     const k = await page.evaluate(unitPx);
     await drag('center', { x: centre.x + 6 * k, y: centre.y + 4 * k });
-    must(/^<text x="12" y="52" font-size="8" transform="translate\((5|6|7) (3|4|5)\)">Hi<\/text>$/m.test((await source(page)).split('\n').find((x) => x.includes('<text')).trim()), `the text's centre handle did not move it by a translate:\n${await source(page)}`);
+    must(/^<text x="(17|18|19)" y="(55|56|57)" font-size="8">Hi<\/text>$/m.test((await source(page)).split('\n').find((x) => x.includes('<text')).trim()), `the text's centre handle did not move it by its own x and y:\n${await source(page)}`);
     await oneEntry('Move', F);
     // lab/vector.svg's star: a plain polygon, one vertex.
     const V = readFileSync(join(CORPUS, 'lab/vector.svg'), 'utf8');
@@ -6663,8 +6701,494 @@ async function booleansCombineWhatIsDrawn(browser, origin) {
     await openMore(page);
     await page.locator('.draw-more-row', { hasText: /^Union$/ }).tap();
     await page.locator('.draw-toast').waitFor();
-    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first (P1-M4).', `with the text: ${await page.locator('.draw-toast').textContent()}`);
+    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first: More → Text to path.', `with the text: ${await page.locator('.draw-toast').textContent()}`);
     must(await source(page) === BOOL_E2E, 'the refused Union wrote something');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M4 S0: stroke to path ────────────────────────────────────────────────────────────────────
+
+const HEART_D = /<path\s+d="([^"]+)"/.exec(LAB('create-icon.svg'))[1].replace(/\s+/g, ' ');
+const STROKE_CASES = [
+  // lab/paths.svg's path (width 3, round caps and joins), an id added so the check can tap it.
+  { name: 'lab/paths.svg', id: 's', text: LAB('paths.svg').replace('<path', '<path id="s"'), ink: '#264653', filled: false },
+  // lab/style.svg's polyline (width 8, round), drawn alone.
+  { name: 'lab/style.svg', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  ${/<polyline[^>]*\/>/.exec(LAB('style.svg'))[0].replace('<polyline', '<polyline id="s"')}\n</svg>`, ink: '#e76f51', filled: false },
+  // lab/create-icon.svg's heart, given a mitered stroke: it keeps its fill. Its stroke is 6 wide: at 4,
+  // Chromium's antialiasing alone left 1.01% of the stroke's pixels differing (a fit 20 times tighter
+  // changed nothing), where 6 leaves about 0.4%.
+  { name: 'the heart', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <path id="s" d="${HEART_D}" fill="#e76f51" stroke="#264653" stroke-width="6" stroke-linejoin="miter"/>\n</svg>`, ink: '#264653', filled: true, under: '#e76f51' },
+  // A thin stroke under a rotation: the outline is written in the line's own units, where its stroke is.
+  { name: 'the rotated line', id: 's', text: `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <line id="s" x1="20" y1="50" x2="80" y2="50" stroke="#264653" stroke-width="2" transform="rotate(30 50 50)"/>\n</svg>`, ink: '#264653', filled: false },
+];
+
+// Each case's element drawn alone; its stroke's pixels taken from a screenshot of the drawing (the
+// overlay hidden): a pixel is the stroke's when its colour is nearer the stroke's than the paper's two
+// checker colours (or the shape's own fill, under a kept fill), i.e. over about half its coverage. More
+// → Stroke to path, the pixels again: those in one mask and not the other are at most 1% of the
+// stroke's own. One "Stroke to path" entry; a shape with no fill becomes a filled <path> keeping its id
+// and with no stroke attribute; the heart keeps its fill with stroke="none" and the outline goes right
+// after it. Undo gives the file back byte for byte.
+async function strokeToPathCoversTheStroke(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const mask = async (c) => {
+      const [tl, br] = await page.evaluate(rootToScreen, [[0, 0], [100, 100]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x), height: Math.ceil(br.y - tl.y) };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const ink = hex(c.ink);
+      const behind = [[238, 238, 238], [255, 255, 255], ...(c.under ? [hex(c.under)] : [])];
+      const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+      const out = [];
+      for (let y = 0; y < clip.height; y++) {
+        for (let x = 0; x < clip.width; x++) {
+          const px = shot.rgb(x, y);
+          out.push(behind.every((b) => d2(px, ink) < d2(px, b)));
+        }
+      }
+      return out;
+    };
+    for (const c of STROKE_CASES) {
+      must((await page.evaluate((t) => window.drawTest.render(t), c.text)).ok, `test setup: ${c.name} did not open`);
+      await toPeek(page);
+      const before = await mask(c);
+      const own = before.filter(Boolean).length;
+      must(own > 200, `${c.name}: only ${own} stroke pixels before`);
+      await tapShape(page, c.id);
+      must(await label(page) !== null, `${c.name}: the tap selected nothing`);
+      await moreCommand(page, 'Stroke to path');
+      await until(`${c.name}: Stroke to path writes`, async () => (await source(page)) !== c.text, 5000);
+      const src = await source(page);
+      must(await undo.getAttribute('aria-label') === 'Undo Stroke to path', `${c.name}: the entry is ${await undo.getAttribute('aria-label')}`);
+      if (c.filled) {
+        must(/<path id="s" d="[^"]+" fill="#e76f51" stroke="none" stroke-width="6" stroke-linejoin="miter"\/>\n  <path fill="#264653" d="[^"]+"\/>/.test(src), `${c.name}: it should keep its fill, its stroke none, the outline right after it:\n${src}`);
+      } else {
+        const el = /<path id="s"[^>]*\/>/.exec(src)?.[0] ?? '';
+        must(el && !/\sstroke/.test(el) && new RegExp(`fill="${c.ink}"`).test(el), `${c.name}: its element should be a filled <path id="s"> with no stroke attribute:\n${src}`);
+      }
+      await toPeek(page);
+      const after = await mask(c);
+      let differ = 0;
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) differ++;
+      console.log(`     draw e2e: stroke to path, ${c.name}: ${differ} of the stroke's ${own} pixels differ (${((100 * differ) / own).toFixed(2)}%)`);
+      must(differ <= 0.01 * own, `${c.name}: ${differ} pixels differ, ${((100 * differ) / own).toFixed(2)}% of the stroke's ${own}`);
+      await undo.tap();
+      must(await source(page) === c.text, `${c.name}: undo did not give the file back:\n${await source(page)}`);
+    }
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M4 S1: text and fonts ────────────────────────────────────────────────────────────────────
+
+const FONTS = join(HERE, '../node_modules/@fontsource');
+const fontBytes = (slug, name) => readFileSync(join(FONTS, slug, 'files', name));
+// The font files the page fetched: its resource entries and the requests seen since this was set up,
+// each by its name without Vite's hash (inter-latin-700-normal), as M3's chunks are found.
+function fontRequests(page) {
+  const seen = [];
+  page.on('request', (r) => seen.push(r.url()));
+  return async () => {
+    const entries = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name));
+    return [...new Set([...seen, ...entries].map((u) => new URL(u).pathname.split('/').pop()).filter((n) => /\.woff2?$/.test(n)).map((n) => n.replace(/-[A-Za-z0-9_-]{8}(\.woff2?)$/, '')))];
+  };
+}
+// Runs in the page: a drawn text's advance in screen px (its getComputedTextLength through its CTM),
+// and references drawn outside the canvas, in the light DOM, in each family at the same weight,
+// style and on-screen size.
+function textWidths({ id, families, weight, style = 'normal' }) {
+  const t = document.querySelector('.draw-host').shadowRoot.getElementById(id);
+  const k = t.getScreenCTM().a;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('style', 'position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; visibility: hidden');
+  document.body.append(svg);
+  const refs = families.map((family) => {
+    const r = document.createElementNS(ns, 'text');
+    for (const [a, v] of [['font-family', family], ['font-weight', String(weight)], ['font-style', style], ['font-size', String(parseFloat(getComputedStyle(t).fontSize) * k)], ['text-rendering', 'geometricPrecision']]) r.setAttribute(a, v);
+    r.textContent = t.textContent;
+    svg.append(r);
+    return r.getComputedTextLength();
+  });
+  svg.remove();
+  return { drawn: t.getComputedTextLength() * k, refs };
+}
+// Runs in the page: the families of document.fonts' faces, unquoted.
+const pageFaces = () => [...document.fonts].map((f) => f.family.replace(/^["']|["']$/g, ''));
+
+// lab/create.svg, with a second text whose x is a list (the check's own: the lab's file has none).
+// The Text button is at least 44 × 44 and pressed once picked, the bar's font toggle has Archivo and
+// Inter, each at least 44 × 44 (Archivo pressed). A tap at the screen point of (50, 50) inserts
+// exactly lab-goals' "Hello" (one "Add text") and the lines sheet opens with "Hello" selected; typing
+// Big, Return, Idea and Done writes Draw's two line tspans (one "Edit text"). On the canvas each
+// line's middle is at x 50 and its baseline at y 55, then 18.2 units below (getStartPositionOfChar and
+// getEndPositionOfChar through getScreenCTM, ± 1 px). The pos handle sits at the screen point of
+// (50, 55) ± 1 px, and dragged by (10, −5) units writes x 60 and y 50 on the text and x 60 on both
+// tspans (one "Move text"). The list text has no pos handle and no Edit text on the bar (the first
+// text has it), and M1's centre handle moves it by a translate. Undo walks back to the file byte for
+// byte. With Inter chosen on the toggle, the next text's family is Inter's.
+async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
+  const LIST = '<text id="list" x="10 20 30" y="90" font-size="8" fill="#264653">ABC</text>';
+  const F = LAB('create.svg').replace('\n</svg>', `\n  ${LIST}\n</svg>`);
+  const HELLO = '<text x="50" y="55" font-size="14" font-family="Archivo, sans-serif" font-weight="700" text-anchor="middle" fill="#264653">Hello</text>';
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    await toPeek(page);
+    await snapOff(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const tool = page.locator('.draw-text-tool');
+    const tb = await tool.evaluate((el) => el.getBoundingClientRect().toJSON());
+    must(tb.width >= TAP_MIN - 0.5 && tb.height >= TAP_MIN - 0.5, `the Text button is ${Math.round(tb.width)}×${Math.round(tb.height)}`);
+    await tool.tap();
+    must(await tool.getAttribute('aria-pressed') === 'true', 'the Text button is not pressed once picked');
+    const toggle = await page.locator('.draw-context .draw-text-font').evaluateAll((els) => els.map((el) => ({ name: el.textContent, pressed: el.getAttribute('aria-pressed'), ...el.getBoundingClientRect().toJSON() })));
+    must(JSON.stringify(toggle.map((t) => [t.name, t.pressed])) === JSON.stringify([['Archivo', 'true'], ['Inter', 'false']]), `the font toggle is ${JSON.stringify(toggle.map((t) => [t.name, t.pressed]))}`);
+    for (const t of toggle) must(t.width >= TAP_MIN - 0.5 && t.height >= TAP_MIN - 0.5 && t.right <= 440.5, `the toggle's ${t.name} is ${Math.round(t.width)}×${Math.round(t.height)} at ${Math.round(t.left)}–${Math.round(t.right)}`);
+    const [at] = await page.evaluate(rootToScreen, [[50, 50]]);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.locator('.draw-lines').waitFor();
+    const placed = F.replace(LIST, `${LIST}\n  ${HELLO}`);
+    must(await source(page) === placed, `the tap wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add text', `the tap is ${await undo.getAttribute('aria-label')}`);
+    const field = await page.locator('.draw-lines').evaluate((t) => [t.value, t.selectionStart, t.selectionEnd, document.activeElement === t]);
+    must(JSON.stringify(field) === JSON.stringify(['Hello', 0, 5, true]), `the lines sheet opened on ${JSON.stringify(field)}, not "Hello" selected in a focused field`);
+    await page.keyboard.type('Big');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Idea');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const written = placed.replace('>Hello<', '><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan><');
+    must(await source(page) === written, `Big, Return, Idea wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Edit text', `the lines visit is ${await undo.getAttribute('aria-label')}`);
+    // Where the lines draw.
+    const lines = await page.evaluate(() => {
+      const t = [...document.querySelector('.draw-host').shadowRoot.querySelectorAll('text')].find((x) => x.querySelector('tspan'));
+      const m = t.getScreenCTM();
+      const at = (p) => {
+        const q = new DOMPoint(p.x, p.y).matrixTransform(m);
+        return { x: q.x, y: q.y };
+      };
+      return [[0, 2], [3, 6]].map(([a, b]) => ({ start: at(t.getStartPositionOfChar(a)), end: at(t.getEndPositionOfChar(b)) }));
+    });
+    const want = await page.evaluate(rootToScreen, [[50, 55], [50, 55 + 18.2]]);
+    lines.forEach((l, i) => {
+      const mid = (l.start.x + l.end.x) / 2;
+      must(Math.abs(mid - want[i].x) <= 1, `line ${i + 1}'s middle draws at x ${mid.toFixed(1)}, not ${want[i].x.toFixed(1)} (x 50)`);
+      must(Math.abs(l.start.y - want[i].y) <= 1, `line ${i + 1}'s baseline draws at y ${l.start.y.toFixed(1)}, not ${want[i].y.toFixed(1)} (${i ? 'y 73.2: 18.2 below the first' : 'y 55'})`);
+    });
+    // The pos handle, and its drag.
+    const pos = (await page.evaluate(handlesNow)).find((h) => h.id === 'pos');
+    must(pos && Math.hypot(pos.x - want[0].x, pos.y - want[0].y) <= 1, `the pos handle is at ${pos ? `${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}` : 'nowhere'}, not (50, 55)'s ${want[0].x.toFixed(1)}, ${want[0].y.toFixed(1)}`);
+    const k = await page.evaluate(unitPx);
+    await dragOnCanvas(page, 'mouse', { x: pos.x, y: pos.y }, { x: 10 * k, y: -5 * k }, 6);
+    await page.waitForTimeout(50);
+    const moved = written.replace('<text x="50" y="55"', '<text x="60" y="50"').replaceAll('<tspan x="50"', '<tspan x="60"');
+    must(await source(page) === moved, `the pos handle's drag wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move text', `the drag is ${await undo.getAttribute('aria-label')}`);
+    must(await page.locator('.draw-context .draw-edit-text').count() === 1, 'Edit text is not on the bar for the text Draw edits as lines');
+    // A canvas tap on the second line selects the <text>, not its line's <tspan>: Edit text is on the
+    // bar, and More offers Text to path.
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const idea = await page.evaluate(() => {
+      const t = [...document.querySelector('.draw-host').shadowRoot.querySelectorAll('text')].find((x) => x.querySelector('tspan'));
+      const m = t.getScreenCTM();
+      const a = new DOMPoint(t.getStartPositionOfChar(3).x, t.getStartPositionOfChar(3).y).matrixTransform(m);
+      const b = new DOMPoint(t.getEndPositionOfChar(6).x, t.getEndPositionOfChar(6).y).matrixTransform(m);
+      return { x: (a.x + b.x) / 2, y: a.y - 3 };
+    });
+    await page.touchscreen.tap(idea.x, idea.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<text>', `a tap on the second line selected ${await label(page)}, not its <text>`);
+    must(await page.locator('.draw-context .draw-edit-text').count() === 1, 'Edit text is not on the bar after a tap on the second line');
+    await openMore(page);
+    must(await page.locator('.draw-more .ds-btn', { hasText: /^Text to path$/ }).count() === 1, `More offers ${JSON.stringify(await page.locator('.draw-more .ds-btn').allTextContents())} for the tapped text, no Text to path`);
+    await closeModal(page);
+    // The list text: no pos handle, no Edit text, and M1's centre handle moves it by a translate.
+    await tapShape(page, 'list');
+    must(await label(page) === '<text#list>', `a tap on the list text selected ${await label(page)}`);
+    const hs = await page.evaluate(handlesNow);
+    must(!hs.some((h) => h.id === 'pos'), 'a text with an x list has a pos handle');
+    must(await page.locator('.draw-context .draw-edit-text').count() === 0, 'Edit text is on the bar for a text with an x list');
+    const centre = hs.find((h) => h.id === 'center');
+    must(centre, 'the list text has no centre handle');
+    await dragOnCanvas(page, 'mouse', { x: centre.x, y: centre.y }, { x: 5 * k, y: 0 }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === moved.replace(LIST, LIST.replace('>ABC', ' transform="translate(5 0)">ABC')), `the centre handle's drag of the list text wrote:\n${await source(page)}`);
+    for (let i = 0; i < 4; i++) await undo.tap();
+    must(await source(page) === F, `undo did not walk back to the file:\n${await source(page)}`);
+    // Inter on the toggle: the next text is Inter's.
+    await tool.tap();
+    await page.locator('.draw-context .draw-text-font', { hasText: /^Inter$/ }).tap();
+    must(await page.locator('.draw-context .draw-text-font', { hasText: /^Inter$/ }).getAttribute('aria-pressed') === 'true', 'Inter is not pressed once tapped');
+    const [at2] = await page.evaluate(rootToScreen, [[50, 30]]);
+    await page.touchscreen.tap(at2.x, at2.y);
+    await page.locator('.draw-lines').waitFor();
+    await closeModal(page);
+    must((await source(page)).includes('<text x="50" y="35" font-size="14" font-family="Inter, sans-serif" font-weight="700"'), `with Inter chosen the tap wrote:\n${await source(page)}`);
+    await undo.tap();
+    must(await source(page) === F, 'undo did not take the Inter text away');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A file with one Inter 700 text (and a Georgia one, a family Draw holds no file for, which Inspect
+// marks in words and a sign). After it opens exactly one font file was fetched, Inter's latin 700,
+// and the text's drawn width equals a reference drawn outside the canvas in Inter 700 at its size
+// (± 0.5 px) and differs from sans-serif's. Inspect → Font opens the Font sheet, which fetches the ten
+// 400 faces and no others; Fraunces writes font-family="Fraunces, serif" (one "Set font") and fetches
+// Fraunces' latin 700; Style → Italic writes font-style="italic" and fetches its 700 italic; Bebas
+// Neue writes its family, font-weight 400 and font-style normal in one entry (it has no bold and no
+// italic). Add a font… takes @fontsource's Archivo latin 400 .woff2, whose name table calls its family
+// "Archivo SemiBold" (a variable font's instance): a family the catalogue doesn't hold. It is listed
+// under Your fonts and applied, and the text draws in it (as a reference from the same bytes does).
+// After a reload in the same context it is still listed and the text still draws in it, with no
+// request for any Archivo file.
+async function fontsLoadOnlyWhatTheDrawingUses(browser, origin) {
+  const F = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <text id="t" x="10" y="50" font-family="Inter, sans-serif" font-weight="700" font-size="12" text-rendering="geometricPrecision">Hamburgefonts</text>\n  <text id="g" x="10" y="80" font-family="Georgia, serif" font-size="8">Gg</text>\n</svg>`;
+  const fixture = fontBytes('archivo', 'archivo-latin-400-normal.woff2');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const fonts = fontRequests(page);
+    must((await fonts()).length === 0, `before any text, ${(await fonts()).join(', ')} loaded`);
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    await until('Inter 700 is fetched', async () => (await fonts()).includes('inter-latin-700-normal'), 8000);
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(200);
+    must(JSON.stringify(await fonts()) === '["inter-latin-700-normal"]', `the drawing fetched ${(await fonts()).join(', ')}`);
+    let w = await page.evaluate(textWidths, { id: 't', families: ['Inter', 'sans-serif'], weight: 700 });
+    must(Math.abs(w.drawn - w.refs[0]) <= 0.5, `the text draws ${w.drawn.toFixed(2)} px wide; Inter 700 is ${w.refs[0].toFixed(2)}`);
+    must(Math.abs(w.refs[1] - w.refs[0]) > 1, `test setup: Inter 700 is as wide as sans-serif (${w.refs.map((x) => x.toFixed(2))})`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const since = async (before) => (await fonts()).filter((n) => !before.includes(n)).sort();
+    // A family Draw holds no file for: Inspect says so, in words and a sign, not by colour alone.
+    await tapShape(page, 'g');
+    await showInspect(page);
+    const missing = (await page.locator('.draw-font-missing').count()) ? await page.locator('.draw-font-missing').textContent() : null;
+    must(missing === '⚠ Not one of Draw’s fonts: it draws only where this device has it, else in a fallback.', `Georgia's Font row says ${JSON.stringify(missing)}`);
+    must(await page.locator('.draw-font-btn').getAttribute('aria-label') === 'Font: Georgia, not one of Draw’s fonts', `Georgia's Font button reads ${await page.locator('.draw-font-btn').getAttribute('aria-label')}`);
+    await toPeek(page);
+    // The Font sheet: Draw's ten in their own 400 faces.
+    await tapShape(page, 't');
+    await showInspect(page);
+    must(await page.locator('.draw-font-missing').count() === 0, 'Inter is said to be missing');
+    let before = await fonts();
+    await page.locator('.draw-font-btn').tap();
+    await page.locator('.draw-fonts').waitFor();
+    await until('the ten 400 faces are fetched', async () => (await since(before)).length >= 10, 8000);
+    await page.waitForTimeout(300);
+    const TEN = ['archivo', 'ibm-plex-mono', 'inter', 'ibm-plex-sans', 'space-grotesk', 'bebas-neue', 'fraunces', 'dm-serif-display', 'caveat', 'jetbrains-mono'].map((s) => `${s}-latin-400-normal`).sort();
+    must(JSON.stringify(await since(before)) === JSON.stringify(TEN), `the Font sheet fetched ${(await since(before)).join(', ')}`);
+    // Fraunces.
+    let was = await source(page);
+    before = await fonts();
+    await page.locator('.draw-font-row', { hasText: /^Fraunces$/ }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === was.replace('font-family="Inter, sans-serif"', 'font-family="Fraunces, serif"'), `Fraunces wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set font', `the pick is ${await undo.getAttribute('aria-label')}`);
+    await until('Fraunces 700 is fetched', async () => (await since(before)).length > 0, 8000);
+    await page.waitForTimeout(200);
+    must(JSON.stringify(await since(before)) === '["fraunces-latin-700-normal"]', `Fraunces fetched ${(await since(before)).join(', ')}`);
+    // Style → Italic.
+    was = await source(page);
+    before = await fonts();
+    await inspectSegment(page, 'font-style', 'Italic');
+    must(await source(page) === was.replace(' text-rendering="geometricPrecision">', ' text-rendering="geometricPrecision" font-style="italic">'), `Italic wrote:\n${await source(page)}`);
+    await until('Fraunces 700 italic is fetched', async () => (await since(before)).length > 0, 8000);
+    await page.waitForTimeout(200);
+    must(JSON.stringify(await since(before)) === '["fraunces-latin-700-italic"]', `Italic fetched ${(await since(before)).join(', ')}`);
+    // Bebas Neue: no bold, no italic.
+    await page.locator('.draw-font-btn').tap();
+    await page.locator('.draw-font-row', { hasText: /^Bebas Neue$/ }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const bebas = F.replace('font-family="Inter, sans-serif" font-weight="700"', 'font-family="Bebas Neue, sans-serif" font-weight="400"').replace(' text-rendering="geometricPrecision">', ' text-rendering="geometricPrecision" font-style="normal">');
+    must(await source(page) === bebas, `Bebas Neue wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set font', `Bebas Neue is ${await undo.getAttribute('aria-label')}`);
+    // Add a font….
+    await page.locator('.draw-font-btn').tap();
+    const input = page.locator('.draw-modal input[type="file"]');
+    const accept = (await input.getAttribute('accept'))?.split(',') ?? [];
+    must(['.woff2', '.woff', '.ttf', '.otf'].every((x) => accept.includes(x)), `the font input takes ${accept.join(',')} (iOS offers only what it lists)`);
+    await input.setInputFiles({ name: 'Archivo-SemiBold.woff2', mimeType: 'font/woff2', buffer: fixture });
+    await until('the font is added and applied', async () => (await source(page)).includes('font-family="Archivo SemiBold, sans-serif"'), 8000);
+    must(await source(page) === bebas.replace('Bebas Neue, sans-serif', 'Archivo SemiBold, sans-serif'), `Add a font… wrote:\n${await source(page)}`);
+    const listed = async () => {
+      await page.locator('.draw-font-btn').tap();
+      await page.locator('.draw-fonts').waitFor();
+      const rows = await page.locator('.draw-font-group[aria-label="Your fonts"] .draw-font-row').allTextContents();
+      await closeModal(page);
+      return rows;
+    };
+    must(JSON.stringify(await listed()) === '["Archivo SemiBold"]', 'Your fonts doesn\'t list "Archivo SemiBold"');
+    const ref = async () => {
+      await page.evaluate(async (b64) => {
+        const bin = atob(b64);
+        const u = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+        const f = new FontFace('FixtureRef', u.buffer);
+        await f.load();
+        document.fonts.add(f);
+      }, fixture.toString('base64'));
+      await page.evaluate(() => document.fonts.ready);
+      return page.evaluate(textWidths, { id: 't', families: ['FixtureRef', 'sans-serif'], weight: 400 });
+    };
+    w = await ref();
+    must(Math.abs(w.drawn - w.refs[0]) <= 0.5 && Math.abs(w.refs[1] - w.refs[0]) > 1, `the text draws ${w.drawn.toFixed(2)} px wide; the added font's bytes ${w.refs[0].toFixed(2)}, sans-serif ${w.refs[1].toFixed(2)}`);
+    // A reload in the same context: still listed, and drawn from this device's copy.
+    const src = await source(page);
+    const again = fontRequests(page);
+    await page.reload({ waitUntil: 'networkidle' });
+    must((await page.evaluate((t) => window.drawTest.render(t), src)).ok, 'test setup: the file did not open after the reload');
+    await until('your font registers again', async () => (await page.evaluate(pageFaces)).includes('Archivo SemiBold'), 8000);
+    await page.evaluate(() => document.fonts.ready);
+    w = await ref();
+    must(Math.abs(w.drawn - w.refs[0]) <= 0.5, `after the reload the text draws ${w.drawn.toFixed(2)} px wide, not the added font's ${w.refs[0].toFixed(2)}`);
+    must(!(await again()).some((n) => n.startsWith('archivo-')), `after the reload, ${(await again()).join(', ')} was fetched`);
+    await tapShape(page, 't');
+    await showInspect(page);
+    must(JSON.stringify(await listed()) === '["Archivo SemiBold"]', 'after the reload, Your fonts doesn\'t list "Archivo SemiBold"');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A file whose <style> declares @font-face{font-family:Own;src:url(data:font/woff2;base64,…)}
+// (IBM Plex Mono's latin 400) and whose text iiiiiiii at font-size 10 says font-family="Own, serif":
+// on Draw's canvas its getComputedTextLength is IBM Plex Mono's 48 units (8 × 600/1000 × 10) ± 0.5,
+// not the serif fallback's: in Chromium only Draw's registration (document.fonts) does it, in WebKit
+// the shadow tree's own face too. A second file, opened through the picker, whose face is named
+// Arial: no face of that name is registered, the app's own UI text keeps its width, and the import
+// report says why; and opening it took the first file's faces out of document.fonts.
+async function aFilesOwnFontDrawsInEveryEngine(browser, origin) {
+  const plex = fontBytes('ibm-plex-mono', 'ibm-plex-mono-latin-400-normal.woff2').toString('base64');
+  const file = (family) => `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <style>@font-face{font-family:${family};src:url(data:font/woff2;base64,${plex})}</style>\n  <text id="t" x="10" y="50" font-size="10" font-family="${family}, serif" text-rendering="geometricPrecision">iiiiiiii</text>\n</svg>`;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), file('Own'))).ok, 'test setup: the file did not open');
+    const len = () => page.evaluate(() => document.querySelector('.draw-host').shadowRoot.getElementById('t').getComputedTextLength());
+    await until('the file\'s own face draws', async () => Math.abs((await len()) - 48) <= 0.5, 5000).catch(() => null);
+    const l = await len();
+    const serif = await page.evaluate(() => {
+      const ns = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('style', 'position: absolute; visibility: hidden');
+      const t = document.createElementNS(ns, 'text');
+      t.setAttribute('font-family', 'serif');
+      t.setAttribute('font-size', '10');
+      t.setAttribute('text-rendering', 'geometricPrecision');
+      t.textContent = 'iiiiiiii';
+      svg.append(t);
+      document.body.append(svg);
+      const v = t.getComputedTextLength();
+      svg.remove();
+      return v;
+    });
+    must(Math.abs(serif - 48) > 1, `test setup: serif's iiiiiiii is ${serif}, as wide as IBM Plex Mono's`);
+    must(Math.abs(l - 48) <= 0.5, `iiiiiiii in the file's own face measures ${l.toFixed(2)} units on the canvas, not IBM Plex Mono's 48 (serif's is ${serif.toFixed(2)})`);
+    must((await page.evaluate(pageFaces)).includes('Own'), 'the file\'s own face is not on document.fonts');
+    // A face named like one of Draw's interface fonts.
+    const ui = () => page.evaluate(() => {
+      const r = document.createRange();
+      r.selectNodeContents(document.querySelector('.draw-files'));
+      return r.getBoundingClientRect().width;
+    });
+    const ui0 = await ui();
+    await pickFile(page, 'arial.svg', Buffer.from(file('Arial')));
+    const notes = await page.locator('.draw-notes li').allTextContents();
+    must(notes.includes('Not loaded: Arial, which shares a name with Draw’s own interface fonts.'), `the import report's notes: ${JSON.stringify(notes)}`);
+    await closeModal(page);
+    await page.waitForTimeout(300);
+    const faces = await page.evaluate(pageFaces);
+    must(!faces.includes('Arial'), 'a face named Arial was registered on document.fonts');
+    must(!faces.includes('Own'), 'opening another drawing left the first file\'s face on document.fonts');
+    const ui1 = await ui();
+    must(Math.abs(ui1 - ui0) < 0.5, `the app's own text (Files) changed width: ${ui0.toFixed(2)} → ${ui1.toFixed(2)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/create-logo.svg, at 956 and 796 tall: the Text tool's bar (its toggle and Cancel), the lines
+// sheet after a tap, the selection's bar with Edit text, Inspect's Text section at half and full, and
+// the Font sheet: every control at least 44 × 44, the textarea and every field at least 16 px, the
+// sheets inside the viewport with Done in reach, the bars fitting 440 pt in the bottom thumb zone, no
+// sideways scroll.
+async function phoneRulesOnTheTextTools(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), LAB('create-logo.svg'))).ok, 'test setup: lab/create-logo.svg did not open');
+    await twoFrames(page);
+    const problems = [];
+    const rules = async (state) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+    };
+    const sheet = async (state) => {
+      await twoFrames(page);
+      await rules(state);
+      const r = await page.evaluate(() => {
+        const box = (el) => el?.getBoundingClientRect().toJSON() ?? null;
+        const done = document.querySelector('.draw-modal-done');
+        const b = done?.getBoundingClientRect();
+        const top = b && document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { modal: box(document.querySelector('.draw-modal')), done: box(done), onTop: !!done && (top === done || done.contains(top)), w: innerWidth, h: innerHeight };
+      });
+      const inside = (b) => b && b.x >= -0.5 && b.y >= -0.5 && b.right <= r.w + 0.5 && b.bottom <= r.h + 0.5;
+      if (!inside(r.modal)) problems.push(`${state}: the sheet ${r.modal ? rect(r.modal) : 'is missing'}, not inside ${r.w}×${r.h}`);
+      if (!inside(r.done) || !r.onTop) problems.push(`${state}: Done is not in reach (${r.done ? rect(r.done) : 'none'}${r.onTop ? '' : ', covered'})`);
+    };
+    const bar = async (state, names) => {
+      await rules(state);
+      const b = await barNow(page);
+      const extra = await page.evaluate(() => [...document.querySelectorAll('.draw-context .draw-text-font')].map((el) => ({ name: el.textContent, ...el.getBoundingClientRect().toJSON() })));
+      const all = [...b.buttons, ...extra];
+      if (names && JSON.stringify(b.buttons.map((x) => x.name)) !== JSON.stringify(names)) problems.push(`${state}: the bar holds ${JSON.stringify(b.buttons.map((x) => x.name))}, not ${JSON.stringify(names)}`);
+      for (const x of all) {
+        if (x.width < TAP_MIN - 0.5 || x.height < TAP_MIN - 0.5) problems.push(`${state}: ${x.name} is ${Math.round(x.width)}×${Math.round(x.height)}`);
+        if (x.left < b.ctx.left - 0.5 || x.right > b.ctx.right + 0.5 || x.right > 440.5) problems.push(`${state}: ${x.name} at ${Math.round(x.left)}–${Math.round(x.right)} is outside the 440 pt bar`);
+      }
+      if (b.ctx.top < b.vh * 0.6 || b.ctx.bottom > b.vh + 0.5) problems.push(`${state}: the bar is at ${Math.round(b.ctx.top)}–${Math.round(b.ctx.bottom)} of ${b.vh}, not in the bottom thumb zone`);
+      if (b.sideways > 0) problems.push(`${state}: the page scrolls sideways by ${b.sideways}`);
+    };
+    const tool = await page.locator('.draw-text-tool').evaluate((el) => el.getBoundingClientRect().toJSON());
+    if (tool.width < TAP_MIN - 0.5 || tool.height < TAP_MIN - 0.5) problems.push(`the Text button is ${Math.round(tool.width)}×${Math.round(tool.height)}`);
+    await page.locator('.draw-text-tool').tap();
+    await bar('the Text tool', ['Cancel']);
+    if ((await page.locator('.draw-context .draw-text-font').count()) !== 2) problems.push('the Text tool\'s bar has no Archivo and Inter toggle');
+    const [p] = await page.evaluate(rootToScreen, [[50, 12]]);
+    await page.touchscreen.tap(p.x, p.y);
+    await page.locator('.draw-lines').waitFor();
+    await sheet('the lines sheet');
+    await closeModal(page);
+    await page.locator('.draw-tool', { hasText: 'Undo' }).tap();
+    const c = await page.evaluate(drawnCentre, 'text');
+    await page.touchscreen.tap(c.x, c.y);
+    await page.waitForTimeout(50);
+    await bar('the selection with Edit text', ['Deselect', 'Select more', 'Edit text', 'Bring forward', 'Send back', 'Delete', 'More']);
+    await showInspect(page);
+    await twoFrames(page);
+    await rules('Inspect\'s Text section at half');
+    if ((await page.locator('.draw-inspect-section[aria-label="Text"]').count()) !== 1) problems.push('Inspect shows no Text section for the text');
+    for (let n = 0; n < 3 && (await page.locator('.draw-sheet--full').count()) === 0; n++) await page.locator('.draw-handle').tap();
+    await twoFrames(page);
+    await rules('Inspect\'s Text section at full');
+    await page.locator('.draw-font-btn').tap();
+    await page.locator('.draw-fonts').waitFor();
+    await sheet('the Font sheet');
+    const tall = await page.evaluate(() => {
+      const body = document.querySelector('.draw-fonts');
+      const t = body.scrollHeight > body.clientHeight + 1;
+      if (!t) return { tall: false, scrolled: false };
+      body.scrollTop = body.scrollHeight;
+      const s = body.scrollTop > 0;
+      body.scrollTop = 0;
+      return { tall: t, scrolled: s };
+    });
+    if (tall.tall && !tall.scrolled) problems.push('the Font sheet\'s body is taller than its room and doesn\'t scroll');
+    await closeModal(page);
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
@@ -6693,6 +7217,422 @@ function watch(page, context, origin) {
     must(seen.length === 0, `${label}: the page did what it shouldn't:\n${seen.join('\n')}`);
   };
 }
+
+// ── P1-M4 S2: text to path and export ──────────────────────────────────────────────────────────
+
+// The file's own face for Text to path: Space Grotesk's latin 400, named Own.
+const T2P_OWN = fontBytes('space-grotesk', 'space-grotesk-latin-400-normal.woff2').toString('base64');
+const T2P = (body, style = '') => `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">${style}\n  ${body}\n</svg>`;
+// Each text drawn alone, its advances unrounded (text-rendering="geometricPrecision": Chromium rounds
+// them to whole pixels otherwise), at the phone's own density (@3x) and at sizes whose glyphs are over
+// 256 device pixels. Below that, or at 1x, Chromium draws text from its glyph cache with each run's
+// origin and baseline on whole pixels, which a path never is: the outline was measured matching the
+// text to 0.18% on a plain page at 10 px a unit, yet Inter's "Draw" at size 20 on this canvas at 1x
+// differed by 3.07%, IBM Plex Mono's by 11.08%, every differing pixel on an edge. So each case's size
+// is raised (Inter 20 → 24, Fraunces 16 → 36, IBM Plex Mono 15 → 22, the own face 16 → 32), never the
+// 1%. `face`: the face the canvas must have loaded before its pixels are taken.
+const T2P_CASES = [
+  { name: 'Inter 700 "Draw", middle-anchored', face: ['Inter', '700', 'normal'], label: 'Draw', text: T2P('<text id="t" x="50" y="58" font-family="Inter, sans-serif" font-weight="700" font-size="24" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision">Draw</text>') },
+  { name: 'Fraunces italic in two of Draw’s lines', face: ['Fraunces', '400', 'italic'], label: 'Big Idea', text: T2P('<text id="t" x="50" y="34" font-family="Fraunces, serif" font-style="italic" font-size="36" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>') },
+  { name: 'IBM Plex Mono with two spaces kept', face: ['IBM Plex Mono', '400', 'normal'], label: 'A&amp;V  To', text: T2P('<text id="t" x="4" y="56" font-family="IBM Plex Mono, monospace" font-size="22" xml:space="preserve" fill="#264653" text-rendering="geometricPrecision">A&amp;V  To</text>') },
+  { name: 'the file’s own data: face', face: ['Own', 'normal', 'normal'], label: 'Own', text: T2P('<text id="t" x="50" y="58" font-family="Own, serif" font-size="32" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision">Own</text>', `\n  <style>@font-face{font-family:Own;src:url(data:font/woff2;base64,${T2P_OWN}) format("woff2")}</style>`) },
+];
+// Runs in the page: whether document.fonts holds this face, loaded.
+function faceLoaded([family, weight, style]) {
+  return [...document.fonts].some((f) => f.family.replace(/["']/g, '') === family && f.weight === weight && f.style === style && f.status === 'loaded');
+}
+// The text library's chunk fetched: the page's resource entries and the requests seen since, by name.
+function outlineChunks(page) {
+  const seen = [];
+  page.on('request', (r) => seen.push(new URL(r.url()).pathname.split('/').pop()));
+  return async () => [...new Set([...seen, ...(await page.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname.split('/').pop())))])].filter((n) => /^outline-lib-.*\.js$/.test(n));
+}
+
+// Text to path looks the same: four texts, each drawn alone in a face the canvas registers (Inter 700
+// "Draw" middle-anchored; Fraunces italic in two of Draw's lines; IBM Plex Mono "A&V  To" under
+// xml:space="preserve"; the file's own data: face), at @3x. Before the first conversion no outline-lib-
+// script was requested and the built index.html names none. For each: its ink pixels (a screenshot of
+// the artboard decoded with png.mjs, the overlay hidden), More → Text to path, the pixels again: the
+// pixels in one mask and not the other are at most 1% of the text's own; the source has <path id="t">
+// in its place with aria-label its characters as laid out (the two spaces kept), one "Text to path"
+// entry; after the first conversion exactly one outline-lib- script was requested; undo gives the
+// file back byte for byte. A text in Georgia refuses with its notice and writes nothing.
+async function textToPathLooksTheSame(browser, origin) {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  must(!/outline-lib-/.test(html), 'the built index.html names the text library’s chunk');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const chunks = outlineChunks(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const INK = hex('#264653');
+    const mask = async () => {
+      const [tl, br] = await page.evaluate(rootToScreen, [[0, 0], [100, 100]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x), height: Math.ceil(br.y - tl.y) };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+      const out = [];
+      for (let y = 0; y < shot.height; y++) for (let x = 0; x < shot.width; x++) {
+        const px = shot.rgb(x, y);
+        out.push([[238, 238, 238], [255, 255, 255]].every((b) => d2(px, INK) < d2(px, b)));
+      }
+      return out;
+    };
+    let first = true;
+    for (const c of T2P_CASES) {
+      must((await page.evaluate((t) => window.drawTest.render(t), c.text)).ok, `test setup: ${c.name} did not open`);
+      await until(`${c.name}: its face loads`, () => page.evaluate(faceLoaded, c.face), 8000);
+      await toPeek(page);
+      const before = await mask();
+      const own = before.filter(Boolean).length;
+      must(own > 300, `${c.name}: only ${own} ink pixels before`);
+      if (first) must((await chunks()).length === 0, `before any Text to path, ${(await chunks()).join(', ')} loaded`);
+      // Selected by its row in Layers.
+      if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+      await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+      await page.locator('.draw-layer-name', { hasText: /^#t$/ }).tap();
+      must(await label(page) === '<text#t>', `${c.name}: the row selected ${await label(page)}`);
+      await moreCommand(page, 'Text to path');
+      await until(`${c.name}: Text to path writes`, async () => (await source(page)) !== c.text, 8000);
+      const src = await source(page);
+      const el = /<path id="t" fill="#264653" d="M [^"]+" aria-label="([^"]*)"\/>/.exec(src);
+      must(el && el[1] === c.label && !/<text/.test(src), `${c.name}: a <path id="t"> with aria-label="${c.label}" should take its place:\n${src.replace(/base64,[^)]+/, 'base64,…')}`);
+      must(await undo.getAttribute('aria-label') === 'Undo Text to path', `${c.name}: the entry is ${await undo.getAttribute('aria-label')}`);
+      if (first) {
+        const loaded = await chunks();
+        must(loaded.length === 1, `the first Text to path loaded ${loaded.join(', ') || 'no outline-lib- chunk'}`);
+        first = false;
+      }
+      await toPeek(page);
+      const after = await mask();
+      let differ = 0;
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) differ++;
+      console.log(`     draw e2e: text to path, ${c.name}: ${differ} of the text's ${own} pixels differ (${((100 * differ) / own).toFixed(2)}%)`);
+      must(differ <= 0.01 * own, `${c.name}: ${differ} pixels differ, ${((100 * differ) / own).toFixed(2)}% of the text's ${own}`);
+      await undo.tap();
+      must(await source(page) === c.text, `${c.name}: undo did not give the file back`);
+    }
+    // Georgia: Draw holds no file for it.
+    const G = T2P('<text id="g" x="10" y="50" font-family="Georgia, serif" font-size="12">Hi</text>');
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: the Georgia file did not open');
+    await toPeek(page);
+    await tapShape(page, 'g');
+    await moreCommand(page, 'Text to path');
+    await until('the Georgia text refuses', async () => (await page.locator('.draw-toast').count()) > 0, 5000);
+    const said = await page.locator('.draw-toast').textContent();
+    must(said === 'Draw can outline only its own fonts, yours and this file’s own; Georgia isn’t one of them.', `the Georgia text says ${JSON.stringify(said)}`);
+    must(await source(page) === G, 'the Georgia text was written');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { deviceScaleFactor: 3 });
+}
+
+const EXPORT_TEXT = `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100">
+  <title>Fonts</title>
+  <text id="i" x="10" y="30" font-family="Inter, sans-serif" font-weight="700" font-size="20" text-rendering="geometricPrecision">Inter wordmark</text>
+  <text id="p" x="10" y="70" font-family="IBM Plex Sans, sans-serif" font-size="20" text-rendering="geometricPrecision">Plex</text>
+</svg>
+`;
+
+// Export's text choices: a drawing with a title, an Inter 700 text and an IBM Plex Sans 400 one.
+// Text → As paths: Clean's button reads "Preparing…" and is disabled while the text library loads
+// (its request held), then its file has no <text> and two paths with their aria-labels. With fonts:
+// its file has one <style> right after the <title> holding one @font-face, Inter's (a data:font/woff2
+// source), and none for IBM Plex Sans, whose text is a path; the sheet names "Plex" as the reason.
+// That file, set as a page of its own under the test origin (outside Draw), draws the Inter text at
+// Inter's width (the embedded face works), not sans-serif's, with no request off the page. As-is is
+// still the file byte for byte.
+async function exportWritesTextAsPathsOrWithFonts(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined; // a download, which the check reads
+    });
+    must((await page.evaluate((t) => window.drawTest.render(t), EXPORT_TEXT)).ok, 'test setup: the file did not open');
+    // The text library's chunk is held until the button's state has been read.
+    let release;
+    const held = new Promise((ok) => (release = ok));
+    await page.route(/outline-lib-[^/]*\.js$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const clean = page.locator('.draw-export-go[data-kind="clean"]');
+    const choose = async (label) => {
+      await page.locator('.draw-export').tap();
+      await clean.waitFor();
+      await page.locator('.draw-export-text button', { hasText: label }).tap();
+    };
+    const share = async () => {
+      const [download] = await Promise.all([page.waitForEvent('download'), clean.tap()]);
+      const text = readFileSync(await download.path(), 'utf8');
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      return text;
+    };
+    await choose('As paths');
+    const waiting = { text: await clean.textContent(), disabled: await clean.isDisabled() };
+    must(waiting.text === 'Preparing…' && waiting.disabled, `while As paths prepares, Clean's button reads ${JSON.stringify(waiting.text)}${waiting.disabled ? '' : ' and is enabled'}: a tap would share the file with its <text>`);
+    release();
+    await until('As paths is ready', async () => !(await clean.isDisabled()), 8000);
+    must(await clean.textContent() === 'Clean SVG', `once ready, Clean's button reads ${JSON.stringify(await clean.textContent())}`);
+    const paths = await share();
+    must(!/<text/.test(paths) && /<path id="i" d="M [^"]+" aria-label="Inter wordmark"\/>/.test(paths) && /<path id="p" d="M [^"]+" aria-label="Plex"\/>/.test(paths), `As paths wrote:\n${paths}`);
+    await choose('With fonts');
+    await until('With fonts is ready', async () => !(await clean.isDisabled()), 8000);
+    const notes = (await page.locator('.draw-export-note').allTextContents()).join(' ');
+    must(/IBM Plex Sans reserves the name “Plex”/.test(notes), `the sheet says ${JSON.stringify(notes)}`);
+    const fonts = await share();
+    const style = /<title>Fonts<\/title>\n {2}<style>([^<]*)<\/style>\n {2}<text id="i"/.exec(fonts);
+    must(style, `With fonts: the <style> should be right after the <title>:\n${fonts.replace(/base64,[^)]+/, 'base64,…')}`);
+    must((style[1].match(/@font-face/g) ?? []).length === 1 && /@font-face\{font-family:'Inter';font-weight:700;font-style:normal;src:url\(data:font\/woff2;base64,[A-Za-z0-9+/=]+\) format\('woff2'\)\}/.test(style[1]) && !/Plex/.test(style[1].replace(/\/\*[^*]*\*\//g, '')), `With fonts' faces: ${style[1].replace(/base64,[^)]+/, 'base64,…')}`);
+    must(/<path id="p" d="M [^"]+" aria-label="Plex"\/>/.test(fonts) && /<text id="i"/.test(fonts), 'With fonts: the Inter text stays text and the Plex text is a path');
+    // The file on a page of its own: Inter's width, not sans-serif's.
+    const own = await context.newPage();
+    const asked = [];
+    await own.goto(`${origin}/ds/`);
+    own.on('request', (r) => asked.push(r.url()));
+    await own.setContent(`<!doctype html><html><body style="margin:0">${fonts.replace(/^<\?xml[^>]*>\s*/, '')}<svg xmlns="${SVG_NS}" viewBox="0 0 200 100"><text id="ref" x="10" y="30" font-family="sans-serif" font-weight="700" font-size="20" text-rendering="geometricPrecision">Inter wordmark</text></svg></body></html>`);
+    await own.evaluate(() => document.fonts.ready);
+    const w = await own.evaluate(() => [document.getElementById('i').getComputedTextLength(), document.getElementById('ref').getComputedTextLength()]);
+    const inter = INTER_WORDMARK;
+    must(Math.abs(w[0] - inter) <= 0.01 * inter && Math.abs(w[1] - inter) > 0.02 * inter, `on its own page the Inter text is ${w[0].toFixed(2)} units (Inter's is ${inter.toFixed(2)}), sans-serif's ${w[1].toFixed(2)}`);
+    must(asked.filter((u) => !u.startsWith('data:')).length === 0, `the page asked for ${asked.join(', ')}`);
+    await own.close();
+    // As-is: the file byte for byte.
+    await page.locator('.draw-export').tap();
+    await page.locator('.draw-export-go[data-kind="as-is"]').waitFor();
+    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('.draw-export-go[data-kind="as-is"]').tap()]);
+    must(readFileSync(await download.path(), 'utf8') === EXPORT_TEXT, 'As-is is not the file byte for byte');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+// ── P1-M4 S3: the Access tab ─────────────────────────────────────────────────────────────────
+
+// The Access tab, with the code panel at half.
+async function showAccess(page) {
+  if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+  await page.locator('.draw-tabs button', { hasText: 'Access' }).tap();
+  await page.locator('.draw-access').waitFor();
+}
+// An Access field (data-access) typed into, then Enter (a textarea: Escape): one entry while it had focus.
+async function accessType(page, name, text) {
+  const f = page.locator(`[data-access="${name}"]`);
+  await f.scrollIntoViewIfNeeded();
+  await f.tap();
+  await f.fill(text);
+  await f.press((await f.evaluate((el) => el.tagName)) === 'TEXTAREA' ? 'Escape' : 'Enter');
+  await page.waitForTimeout(50);
+}
+async function accessSwitch(page, name) {
+  const b = page.locator(`[data-access="${name}-switch"]`);
+  await b.scrollIntoViewIfNeeded();
+  await b.tap();
+  await page.waitForTimeout(50);
+}
+const SAID = (page) => page.locator('[data-access="said"]').textContent();
+
+// lab/create.svg with a circle of the check's own (the lab's file is an empty board). The Access tab
+// is at least 44 × 44. Title on writes SVG Lab's Create markup (role="img" aria-labelledby="drawing-
+// title" on the root, <title id="drawing-title">My drawing</title> first), one "Add title"; the field
+// typed "Acme logo" makes it "Acme logo", one "Set title"; Description on and typed, one entry each;
+// Language "en" writes lang="en" on the root, one "Set language"; Metadata with the Date field set to
+// 2026-09-25 (Creator "You", the default) writes SVG Lab's markup, one "Add metadata". The canvas host
+// is still aria-hidden="true", and with the sheet at peek the page's accessibility tree (Playwright's
+// ariaSnapshot of the body) holds no "Acme logo": the drawing's title is never read off the page. The
+// circle, selected, titled "Sun" in its Title field becomes <circle …><title>Sun</title></circle>, one
+// "Set title". A square with tabindex="0", selected, shows its Focusable row: the tabindex, kept, and
+// that the canvas never focuses it. Undo walks back to the file byte for byte.
+async function theAccessPanelNamesTheDrawing(browser, origin) {
+  const SUN = '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"/>';
+  const KEY = '<rect id="key" tabindex="0" x="5" y="80" width="10" height="10" fill="#2a9d8f"/>';
+  const F = LAB('create.svg').replace('\n</svg>', `\n  ${SUN}\n  ${KEY}\n</svg>`);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const entry = async (want) => must(await undo.getAttribute('aria-label') === `Undo ${want}`, `the last entry is "${await undo.getAttribute('aria-label')}", not "Undo ${want}"`);
+    await showAccess(page);
+    const tab = await page.locator('.draw-tabs button', { hasText: 'Access' }).evaluate((el) => el.getBoundingClientRect().toJSON());
+    must(tab.width >= TAP_MIN - 0.5 && tab.height >= TAP_MIN - 0.5, `the Access tab is ${Math.round(tab.width)}×${Math.round(tab.height)}`);
+    await accessSwitch(page, 'title');
+    const titled = F.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">My drawing</title>');
+    must(await source(page) === titled, `Title on wrote:\n${await source(page)}`);
+    await entry('Add title');
+    await accessType(page, 'title', 'Acme logo');
+    const named = titled.replace('>My drawing<', '>Acme logo<');
+    must(await source(page) === named, `the Title field wrote:\n${await source(page)}`);
+    await entry('Set title');
+    must(await SAID(page) === '“Acme logo, image”', `the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'desc');
+    await entry('Add description');
+    await accessType(page, 'desc', 'A sun over the sea');
+    const described = named.replace('aria-labelledby="drawing-title">', 'aria-labelledby="drawing-title" aria-describedby="drawing-desc">').replace('>Acme logo</title>', '>Acme logo</title>\n  <desc id="drawing-desc">A sun over the sea</desc>');
+    must(await source(page) === described, `Description wrote:\n${await source(page)}`);
+    await entry('Set description');
+    await accessType(page, 'lang', 'en');
+    const english = described.replace('aria-describedby="drawing-desc">', 'aria-describedby="drawing-desc" lang="en">');
+    must(await source(page) === english, `Language wrote:\n${await source(page)}`);
+    await entry('Set language');
+    must(await page.locator('[data-access="said-lang"]').textContent() === 'Language: en', 'the preview does not name the language');
+    must(await page.locator('[data-access="creator"]').inputValue() === 'You', 'the Creator field is not SVG Lab’s "You"');
+    await accessType(page, 'date', '2026-09-25');
+    must(await source(page) === english, 'the Date field wrote before Metadata was on');
+    await accessSwitch(page, 'meta');
+    const DC = '\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:creator>You</dc:creator>\n    <dc:date>2026-09-25</dc:date>\n  </metadata>';
+    const meta = english.replace('</desc>', `</desc>${DC}`);
+    must(await source(page) === meta, `Metadata wrote:\n${await source(page)}`);
+    await entry('Add metadata');
+    // The page never reads the drawing: the canvas host is hidden from assistive tech.
+    must(await page.locator('.draw-host').getAttribute('aria-hidden') === 'true', 'the canvas host is not aria-hidden');
+    await toPeek(page);
+    const tree = await page.locator('body').ariaSnapshot();
+    must(tree.includes('Undo'), `test setup: the accessibility tree reads nothing:\n${tree}`);
+    must(!tree.includes('Acme logo') && !tree.includes('A sun over the sea'), `the page's accessibility tree reads the drawing:\n${tree}`);
+    // A shape's own title, its first child.
+    await tapShape(page, 'sun');
+    await showAccess(page);
+    must((await page.locator('.draw-access [aria-label="Selected element"] .draw-subhead').textContent()) === '<circle#sun>', 'the element section is not the circle’s');
+    await accessType(page, 'el-title', 'Sun');
+    must(await source(page) === meta.replace(SUN, '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"><title>Sun</title></circle>'), `the circle's Title wrote:\n${await source(page)}`);
+    await entry('Set title');
+    // A focusable square: its Focusable row shows the tabindex as kept.
+    await toPeek(page);
+    await tapShape(page, 'key');
+    await showAccess(page);
+    const focusable = await page.locator('.draw-access .draw-inspect-row', { hasText: 'Focusable' }).evaluateAll((rows) => rows.map((r) => [...r.children].map((c) => c.textContent)));
+    must(JSON.stringify(focusable) === JSON.stringify([['Focusable', 'tabindex="0"', 'Kept; the canvas never focuses it.']]), `the square's Focusable row reads ${JSON.stringify(focusable)}`);
+    for (let n = 0; n < 7; n++) await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), `undo did not walk back to the file:\n${await source(page)}`);
+    must(await page.locator('[data-access="title-switch"]').getAttribute('aria-checked') === 'false', 'the Title switch did not follow the undo');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/access.svg: the preview reads SVG Lab's sentence; Title off gives its description-only sentence,
+// Description off the no-name one with the month labels; the first bar titled "Jan: 40" adds the
+// titles note (no role="img" is left); three undos give the file and the sentence back. Then the
+// <desc>'s text, edited through P0's text token in the code, reads in the preview, and an Undo tapped
+// while the Access tab is open changes the preview back at once.
+async function theScreenReaderPreviewFollowsTheFile(browser, origin) {
+  const F = LAB('access.svg');
+  const LAB_SAID = '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”';
+  const NO_NAME = 'no name, so it may skip the drawing or read stray labels: “Jan, Feb, Mar, Apr”';
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await showAccess(page);
+    must(await SAID(page) === LAB_SAID, `the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'title');
+    must(await SAID(page) === '“Image. Bar chart. Visitors rose from 40 in January to 88 in April.”', `Title off: the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'desc');
+    must(await SAID(page) === NO_NAME, `Description off: the preview reads ${await SAID(page)}`);
+    await toPeek(page);
+    const bar = await page.evaluate(drawnCentre, 'rect');
+    await page.touchscreen.tap(bar.x, bar.y);
+    await page.waitForTimeout(50);
+    await showAccess(page);
+    await accessType(page, 'el-title', 'Jan: 40');
+    must(await SAID(page) === `${NO_NAME} Titles on shapes show as tooltips on hover.`, `a bar's title: the preview reads ${await SAID(page)}`);
+    for (let n = 0; n < 3; n++) await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), 'undo did not give the file back');
+    must(await SAID(page) === LAB_SAID, `after the undos the preview reads ${await SAID(page)}`);
+    // The <desc>'s text through P0's token in the code, then the Access tab, then an undo there.
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await showCode(page);
+    await tapToken(page.locator('.cv-text', { hasText: /^Bar chart\./ }));
+    const text = page.locator('.draw-modal input').first();
+    await text.fill('Four bars.');
+    await text.press('Enter');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must((await source(page)).includes('<desc id="chart-desc">Four bars.</desc>'), 'test setup: the token edit did not write the description');
+    await page.locator('.draw-tabs button', { hasText: 'Access' }).tap();
+    await page.locator('.draw-access').waitFor();
+    must(await SAID(page) === '“Monthly visitors, image. Four bars.”', `after the code edit the preview reads ${await SAID(page)}`);
+    await undo.tap();
+    await page.waitForTimeout(50);
+    must(await SAID(page) === LAB_SAID, `an undo with the tab open: the preview reads ${await SAID(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The tap floor, 16px fields and no sideways scroll on the Access tab, with the drawing's section
+// and an element's at half and full height: the five tabs and the selection label fit 440 pt (each
+// tab inside the row and the screen, at least 44 × 44), and the preview and every field sit inside
+// the sheet.
+async function phoneRulesOnTheAccessPanel(browser, origin, height) {
+  const F = LAB('access.svg').replace('<rect x="16"', '<rect tabindex="0" aria-roledescription="bar" x="16"');
+  await withPage(browser, origin, height, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const problems = [];
+    const rules = async (state) => {
+      await twoFrames(page);
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      const row = await page.evaluate(() => {
+        const box = (el) => el.getBoundingClientRect().toJSON();
+        const sheet = box(document.querySelector('.draw-sheet'));
+        const body = document.querySelector('.draw-sheet-body');
+        return {
+          row: box(document.querySelector('.draw-sheet-row')),
+          sel: box(document.querySelector('.draw-sel')),
+          tabs: [...document.querySelectorAll('.draw-tabs button')].map((b) => ({ name: b.textContent, ...box(b) })),
+          inside: [...document.querySelectorAll('.draw-access-said, .draw-access input, .draw-access textarea, .draw-access button')].map((el) => ({ name: el.getAttribute('data-access') ?? el.className, ...box(el) })),
+          sheet,
+          body: { scroll: body.scrollHeight > body.clientHeight + 1 },
+        };
+      });
+      if (row.tabs.length !== 5 || row.tabs.map((t) => t.name).join() !== 'Code,Layers,Inspect,Access,Support') problems.push(`${state}: the tabs are ${row.tabs.map((t) => t.name).join()}`);
+      for (const t of row.tabs) {
+        if (t.width < TAP_MIN - 0.5 || t.height < TAP_MIN - 0.5) problems.push(`${state}: the ${t.name} tab is ${Math.round(t.width)}×${Math.round(t.height)}`);
+        if (t.left < -0.5 || t.right > 440.5 || t.right > row.row.right + 0.5) problems.push(`${state}: the ${t.name} tab at ${Math.round(t.left)}–${Math.round(t.right)} is outside the 440 pt row`);
+      }
+      if (row.sel.right > 440.5 || row.sel.left < row.tabs[row.tabs.length - 1].right - 0.5) problems.push(`${state}: the selection label at ${Math.round(row.sel.left)}–${Math.round(row.sel.right)} overlaps the tabs or leaves the row`);
+      // Inside the sheet's width; the body scrolls to reach the rest.
+      for (const x of row.inside) if (x.width && (x.left < row.sheet.left - 0.5 || x.right > row.sheet.right + 0.5)) problems.push(`${state}: ${x.name} at ${Math.round(x.left)}–${Math.round(x.right)} is outside the sheet`);
+      const said = row.inside.find((x) => x.name === 'draw-access-said');
+      if (!said || said.top < row.sheet.top - 0.5 || said.top > row.sheet.bottom) problems.push(`${state}: the preview is not in the sheet`);
+    };
+    await showAccess(page);
+    await rules('the drawing at half');
+    for (let n = 0; n < 3 && (await page.locator('.draw-sheet--full').count()) === 0; n++) await page.locator('.draw-handle').tap();
+    await rules('the drawing at full');
+    await toPeek(page);
+    const bar = await page.evaluate(drawnCentre, 'rect');
+    await page.touchscreen.tap(bar.x, bar.y);
+    await page.waitForTimeout(50);
+    await showAccess(page);
+    if ((await page.locator('.draw-access [aria-label="Selected element"]').count()) !== 1) problems.push('test setup: no element section for the bar');
+    if ((await page.locator('.draw-access [data-access="remove:aria-roledescription"]').count()) !== 1) problems.push('the bar’s other ARIA has no Remove');
+    await rules('an element at half');
+    for (let n = 0; n < 3 && (await page.locator('.draw-sheet--full').count()) === 0; n++) await page.locator('.draw-handle').tap();
+    await rules('an element at full');
+    // Every field the tab shows, scrolled into view inside the sheet's body.
+    for (const name of ['title', 'desc', 'lang', 'creator', 'date', 'el-title', 'label', 'role', 'aria:aria-roledescription']) {
+      const f = page.locator(`[data-access="${name}"]`);
+      if ((await f.count()) !== 1) {
+        problems.push(`no ${name} field`);
+        continue;
+      }
+      await f.scrollIntoViewIfNeeded();
+      const b = await f.evaluate((el) => {
+        const s = document.querySelector('.draw-sheet-body').getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return { inside: r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5, size: parseFloat(getComputedStyle(el).fontSize) };
+      });
+      if (!b.inside) problems.push(`the ${name} field can't be scrolled inside the sheet`);
+      if (b.size < 16) problems.push(`the ${name} field is ${b.size}px`);
+    }
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Inter 700's advance for "Inter wordmark" at font-size 20, from its file (the text library, in node).
+const INTER_WORDMARK = (() => {
+  const shaped = shapeText(new Uint8Array(fontBytes('inter', 'inter-latin-700-normal.woff2')), ['Inter wordmark']);
+  return (shaped.runs[0].glyphs.reduce((t, g) => t + g.xAdvance, 0) * 20) / shaped.unitsPerEm;
+})();
 
 async function withPage(browser, origin, height, fn, options = {}) {
   const context = await browser.newContext({ ...PHONE, viewport: { width: 440, height }, ...options });

@@ -90,14 +90,25 @@ export function cssSets(doc: Doc, id: NodeId, prop: string): CssSource {
 export type SheetSource = 'no' | 'rule' | 'important';
 
 /**
+ * The element a selector is asked about as another (P1-M4 S0): `local` its element type in place of
+ * its own (a shape turned into a <path>), and `bare` true for a new element of that type with no id
+ * and no class (a <path> added beside it).
+ */
+export interface AsElement {
+  local: string;
+  bare?: boolean;
+}
+
+/**
  * Whether a <style> rule may set `prop` on this element, whatever its own style="" says: 'important'
  * when such a rule declares it !important, else 'rule' (a @keyframes animation counts as a rule),
- * else 'no'. Read from the cached sheet, so asking about many elements reads the sheets once.
+ * else 'no'. Read from the cached sheet, so asking about many elements reads the sheets once. `as`
+ * asks about it as another element (AsElement).
  */
-export function sheetSets(doc: Doc, id: NodeId, prop: string): SheetSource {
+export function sheetSets(doc: Doc, id: NodeId, prop: string, as?: AsElement): SheetSource {
   const names = [prop, ...(SHORTHANDS[prop] ?? [])];
   const sheet = sheetOf(doc);
-  const node = el(doc, id);
+  const node = subjectOf(doc, el(doc, id), as);
   let out: SheetSource = 'no';
   for (const r of sheet.rules) {
     let sets = false;
@@ -115,7 +126,7 @@ export function sheetSets(doc: Doc, id: NodeId, prop: string): SheetSource {
   if (out !== 'no') return out;
   // A @keyframes rule sets what it animates on an element that some rule (or its style) animates.
   if (sheet.keyframes.has(prop) || names.some((n) => sheet.keyframes.has(n))) {
-    const style = attrValue(doc, node, null, 'style');
+    const style = as?.bare ? null : attrValue(doc, el(doc, id), null, 'style');
     const animated = (style !== null && declarations(style).some((d) => d.name === 'animation' || d.name === 'animation-name'))
       || sheet.rules.some((r) => r.decls.some((d) => d.name === 'animation' || d.name === 'animation-name') && r.selectors.some((s) => mayMatch(s, doc, node)));
     if (animated) return 'rule';
@@ -176,6 +187,7 @@ const unescapeCss = (s: string) => s.replace(/\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\
 // ── the document's sheets, read again only when what its <style> elements say may have changed ──
 
 interface Rule {
+  prelude: string; // the selector list as written (comments blanked)
   selectors: Compound[]; // each selector's last compound
   decls: { name: string; important: boolean }[]; // what it declares, and which are !important
 }
@@ -223,9 +235,35 @@ function readSheet(css: string, into: Sheet, inKeyframes = false): void {
     else if (prelude.startsWith('@')) {
       // @font-face, @page, @property: nothing that styles an element
     } else if (inKeyframes) for (const d of declarations(body)) into.keyframes.add(d.name);
-    else into.rules.push({ selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => ({ name: d.name, important: d.important })) });
+    else into.rules.push({ prelude, selectors: splitTop(prelude, ',').map(lastCompound), decls: declarations(body).map((d) => ({ name: d.name, important: d.important })) });
     i = close + 1;
   }
+}
+
+/**
+ * The bodies of a sheet's @font-face rules (P1-M4: engine/text/font-faces.ts), at the top level or
+ * inside a grouping rule (@media, @supports…), in order; comments read as readSheet reads them.
+ */
+export function fontFaceBodies(css: string): string[] {
+  const out: string[] = [];
+  const read = (t: string): void => {
+    let i = 0;
+    while (i < t.length) {
+      const open = findTop(t, i, '{', ';');
+      if (open === -1) return;
+      if (t[open] === ';') {
+        i = open + 1;
+        continue;
+      }
+      const close = matching(t, open);
+      const prelude = t.slice(i, open).trim();
+      if (/^@font-face$/i.test(prelude)) out.push(t.slice(open + 1, close));
+      else if (GROUPING.test(prelude)) read(t.slice(open + 1, close));
+      i = close + 1;
+    }
+  };
+  read(stripComments(css));
+  return out;
 }
 
 /** The rule's last compound selector (after the last combinator), read for what it names. */
@@ -266,13 +304,63 @@ function lastCompound(selector: string): Compound {
 
 const unescapeIdent = (s: string) => s.replace(/\\(.)/g, '$1');
 
-function mayMatch(c: Compound, doc: Doc, node: ElementNode): boolean {
+// What a selector's last compound is matched against: the element's type, id and classes (or another's: AsElement).
+interface Subject {
+  local: string;
+  id: string | null;
+  classes: string[];
+}
+
+function subjectOf(doc: Doc, node: ElementNode, as?: AsElement): Subject {
+  if (as?.bare) return { local: as.local, id: null, classes: [] };
+  return { local: as?.local ?? node.local, id: attrValue(doc, node, null, 'id'), classes: (attrValue(doc, node, null, 'class') ?? '').split(/[ \t\n\r\f]+/).filter(Boolean) };
+}
+
+/** The properties any <style> rule declares (lowercase), and `animation` when a @keyframes block animates something. */
+export function sheetProps(doc: Doc): ReadonlySet<string> {
+  const sheet = sheetOf(doc);
+  const out = new Set<string>();
+  for (const r of sheet.rules) for (const d of r.decls) out.add(d.name);
+  if (sheet.keyframes.size) out.add('animation');
+  return out;
+}
+
+// A selector that asks for focus, a tabindex or a link (P1-M4 S3). The canvas never draws tabindex
+// (so nothing on it is focused) nor an <a>'s href (so nothing on it is a link).
+const FOCUS_OR_LINK = /\[\s*(?:[\w-]*\|)?tabindex(?![\w-])|:(?:focus(?:-visible|-within)?|link|any-link|visited)(?![\w-])/i;
+
+/**
+ * How many style rules can't match anything on the canvas (the import report's note, P1-M4 S3): each
+ * of the rule's selectors asks for focus (:focus, :focus-visible, :focus-within), a tabindex
+ * ([tabindex) or a link (:link, :any-link, :visited). Read outside parentheses, so a selector that
+ * names one only inside :not(), :is() or :has() is never counted (rect:not(:focus) matches every rect).
+ */
+export function unmatchableRules(doc: Doc): number {
+  let n = 0;
+  for (const r of sheetOf(doc).rules) {
+    const list = splitTop(r.prelude, ',');
+    if (list.length && list.every((sel) => FOCUS_OR_LINK.test(outsideParens(sel)))) n++;
+  }
+  return n;
+}
+
+// The selector with what is inside its parentheses (pseudo-class arguments) left out.
+function outsideParens(sel: string): string {
+  let out = '';
+  let depth = 0;
+  for (const c of sel) {
+    if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += c;
+  }
+  return out;
+}
+
+function mayMatch(c: Compound, _doc: Doc, node: Subject): boolean {
   if (c.type === null && !c.ids.length && !c.classes.length) return true;
   if (c.type === '*' || c.type === node.local) return true;
-  const id = attrValue(doc, node, null, 'id');
-  if (id !== null && c.ids.includes(id)) return true;
-  const classes = (attrValue(doc, node, null, 'class') ?? '').split(/[ \t\n\r\f]+/).filter(Boolean);
-  return c.classes.some((k) => classes.includes(k));
+  if (node.id !== null && c.ids.includes(node.id)) return true;
+  return c.classes.some((k) => node.classes.includes(k));
 }
 
 // ── scanning ───────────────────────────────────────────────────────────────────────────────────

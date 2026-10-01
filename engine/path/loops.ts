@@ -11,6 +11,9 @@
 //   evenodd.
 // - loopsD: the loops as d, each "M x y", then " L x y" or " C x1 y1 x2 y2 x y", then " Z", joined by
 //   one space, numbers fmt(v, 3); a last line back to the start is left to the Z.
+// - toSubpaths (P1-M4 S0): the same conversion for a stroke (engine/path/offset.ts), each subpath kept
+//   as it is drawn: closed only when it ends in Z (its closing line added when the Z draws one), so a
+//   subpath that returns to its start without a Z still gets its caps.
 
 import type { AbsSeg } from './abs.ts';
 import { arcToCubics } from './arc.ts';
@@ -58,6 +61,54 @@ export function toLoops(abs: readonly AbsSeg[]): Loop[] {
     }
   }
   flush(null);
+  return out;
+}
+
+/** A subpath as a stroke sees it: lines and cubics from its start, closed only by a Z. */
+export interface Subpath {
+  start: Pt;
+  segs: LoopSeg[];
+  closed: boolean;
+}
+
+// One absolute segment as lines and cubics (toLoops' conversion: Q raised exactly, an arc as arcToCubics').
+function pushSeg(segs: LoopSeg[], s: AbsSeg): void {
+  if (s.type === 'L') segs.push({ type: 'L', to: [s.x, s.y] });
+  else if (s.type === 'C') segs.push({ type: 'C', c1: [s.x1, s.y1], c2: [s.x2, s.y2], to: [s.x, s.y] });
+  else if (s.type === 'Q') segs.push({ type: 'C', c1: [s.x0 + (2 / 3) * (s.x1 - s.x0), s.y0 + (2 / 3) * (s.y1 - s.y0)], c2: [s.x + (2 / 3) * (s.x1 - s.x), s.y + (2 / 3) * (s.y1 - s.y)], to: [s.x, s.y] });
+  else if (s.type === 'A') for (const [x1, y1, x2, y2, x, y] of arcToCubics(s.x0, s.y0, s.rx, s.ry, s.rot, s.large, s.sweep, s.x, s.y)) segs.push({ type: 'C', c1: [x1, y1], c2: [x2, y2], to: [x, y] });
+}
+
+/**
+ * Absolute path data as subpaths of lines and cubics, each as it is drawn: `closed` only when it ends
+ * in Z (whose closing line is added when the last point isn't the start). A lone moveto draws nothing
+ * and is left out; "M x y Z" stays (a zero-length subpath, which round and square caps draw).
+ */
+export function toSubpaths(abs: readonly AbsSeg[]): Subpath[] {
+  const out: Subpath[] = [];
+  let cur: Subpath | null = null;
+  const flush = () => {
+    if (cur && (cur.segs.length || cur.closed)) out.push(cur);
+    cur = null;
+  };
+  for (const s of abs) {
+    if (s.type === 'M') {
+      flush();
+      cur = { start: [s.x, s.y], segs: [], closed: false };
+      continue;
+    }
+    if (!cur) cur = { start: [s.x0, s.y0], segs: [], closed: false }; // a command after Z: a new subpath at the start
+    const sub: Subpath = cur;
+    if (s.type === 'Z') {
+      const last = sub.segs.length ? sub.segs[sub.segs.length - 1].to : sub.start;
+      if (!same(last, sub.start)) sub.segs.push({ type: 'L', to: sub.start });
+      sub.closed = true;
+      flush();
+      continue;
+    }
+    pushSeg(sub.segs, s);
+  }
+  flush();
   return out;
 }
 

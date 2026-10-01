@@ -104,12 +104,18 @@ const cssChar = (h: string): string => {
   return cp === 0 || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff ? '\uFFFD' : String.fromCodePoint(cp);
 };
 
+// A url()'s argument is judged by how it starts (its first 15 characters at most decide it), so each is
+// read from at most this many characters after "url(": one whose start doesn't show there is refused
+// (a refusal stays safe). Each was once read to the end of the text, which made a sheet of many
+// url()s cost the square of its length.
+const URL_WINDOW = 512;
+
 /**
  * Every url() in CSS text stays in the document: a fragment, or a data: image or font. Presentation
  * attributes are CSS too (fill="url(…)", mask, filter, markers) and SMIL values feed them, so the
  * canvas checks every value it sets this way, not only style. Comments stay in place (a url()
  * inside one is refused, never hidden), and each url() is judged by how its argument starts, read
- * both ways as in urlAllowed, so an unclosed one is still read.
+ * both ways as in urlAllowed, so an unclosed one is still read (from its first URL_WINDOW characters).
  */
 export function cssUrlsLocal(css: string): boolean {
   const t = css.replace(CSS_ESCAPE, (_, hex?: string, nl?: string, ch?: string) => (hex ? cssChar(hex) : nl ? '' : ch!)).toLowerCase();
@@ -118,7 +124,8 @@ export function cssUrlsLocal(css: string): boolean {
   if (/image-set\s*\(|@import/.test(t)) return false;
   const ok = (u: string) => u.startsWith('#') || CSS_DATA.test(u);
   for (const m of t.matchAll(/url\s*\(\s*['"]?/g)) {
-    const arg = t.slice(m.index + m[0].length);
+    const from = m.index + m[0].length;
+    const arg = t.slice(from, from + URL_WINDOW);
     if (!ok(squash(arg)) || !ok(asParsed(arg))) return false;
   }
   return true;

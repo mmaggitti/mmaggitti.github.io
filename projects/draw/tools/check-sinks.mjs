@@ -40,6 +40,11 @@ const BANS = [
   ['file-api', /\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\b|\.arrayBuffer\s*\(|navigator\.(clipboard|share|canShare|locks)\b|history\.(replaceState|pushState)\s*\(/, ['projects/draw/src/platform/']],
   ['fetch', /\bfetch\s*\(|XMLHttpRequest|navigator\.sendBeacon|\bWebSocket\b|\bEventSource\b/, ['projects/draw/src/platform/', 'projects/draw/src/github/', 'projects/draw/src/export/']],
   ['password-field', /type\s*[=:]\s*["']password["']/, ['projects/draw/src/github/TokenForm.tsx']],
+  // Registering a font face is a page-wide write (P1-M4): document.fonts reaches the app's own UI as
+  // well as the canvas, so it has one home, src/platform/ (fonts.ts). As the storage rule bans its
+  // names, this bans the name FontFace in any spelling (globalThis.FontFace, window['FontFace'], an
+  // alias), and the document's fonts by . or ?., by ['fonts'], or destructured from it.
+  ['font-face', /\bFontFace\b|\bdocument\s*\??\.\s*fonts\b|\[\s*['"`]fonts['"`]\s*\]|\{[^}]*\bfonts\b[^}]*\}\s*=\s*(?:[\w$]+\s*\.\s*)*document\b/, ['projects/draw/src/platform/']],
 ];
 
 // The engine is DOM-free and dependency-free: node --test runs it, and any project may import it.

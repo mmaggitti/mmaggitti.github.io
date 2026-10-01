@@ -26,6 +26,12 @@ export const STYLE_PROPS: Readonly<Record<string, StyleProp>> = {
   color: { initial: 'black', inherited: true },
   'stop-color': { initial: 'black', inherited: false },
   'stop-opacity': { initial: '1', inherited: false },
+  // P1-M4: Inspect's Text section. A family's initial value is the browser's own, shown as "Default".
+  'font-family': { initial: 'Default', inherited: true },
+  'font-size': { initial: 'medium', inherited: true },
+  'font-weight': { initial: 'normal', inherited: true },
+  'font-style': { initial: 'normal', inherited: true },
+  'text-anchor': { initial: 'start', inherited: true },
 };
 
 /** SVG Lab's four dash presets on its 100-unit board; each number × k on another. */

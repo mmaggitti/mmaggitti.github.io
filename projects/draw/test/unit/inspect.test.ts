@@ -794,3 +794,55 @@ test('the donut’s fields (P1-M3): Value 1 typed "64" regenerates the slices af
   assert.equal(e.source(), lab, 'Detach: the file SVG Lab exported');
   assert.equal(e.donut()?.recognized, false, 'Edit as donut is offered again');
 });
+
+test('the Text section (P1-M4): shown when every selected element is a text, tspan or textPath; Font, Size, Weight, Style and Anchor read over the selection and each write is one entry where the value lives (an attribute, a style="" declaration, or a new attribute)', () => {
+  const src = svg('<text id="a" font-family="Inter, sans-serif" font-size="14" font-weight="700" style="text-anchor: middle">A<tspan id="s" font-style="italic">s</tspan></text>\n  <text id="b">B</text>\n  <rect id="r" width="5" height="5"/>');
+  const e = opened(src);
+  select(e, 'a', 'r');
+  assert.equal(e.textSelected(), false, 'a rect too: no Text section');
+  select(e, 'a', 's');
+  assert.equal(e.textSelected(), true);
+  select(e, 'a');
+  assert.deepEqual(e.textFamily(), { family: 'Inter', mixed: false });
+  assert.deepEqual(['font-size', 'font-weight', 'font-style', 'text-anchor'].map((p) => e.styleRow(p)!.value), ['14', '700', 'normal', 'middle']);
+  select(e, 'a', 'b');
+  assert.deepEqual(e.textFamily(), { family: 'Inter', mixed: true }, 'b’s family is the default');
+  select(e, 'b');
+  assert.deepEqual([e.styleRow('font-family')!.value, e.styleRow('font-family')!.from], ['Default', 'default'], 'the browser’s own: "Default"');
+  select(e, 'a');
+  e.setStyle('text-anchor', 'end');
+  e.setStyle('font-weight', '900');
+  e.setStyle('font-style', 'italic');
+  e.fieldStart({ kind: 'style', prop: 'font-size' });
+  e.fieldInput('2');
+  e.fieldInput('20');
+  e.fieldEnd();
+  assert.equal(e.source(), edited(src, ['font-size="14" font-weight="700" style="text-anchor: middle"', 'font-size="20" font-weight="900" style="text-anchor: end" font-style="italic"']));
+  for (const label of ['Set font-size', 'Set font-style', 'Set font-weight', 'Set text-anchor']) {
+    assert.equal(e.history.get().undoLabel, label);
+    e.undo();
+  }
+  assert.equal(e.source(), src, 'one entry each');
+});
+
+test('the weights and styles Inspect offers for a family: its real ones (Bebas Neue’s one as a segment, Archivo’s nine through the Weight sheet), SVG Lab’s 400, 700 and 900 for a generic or a family Draw holds none of; Italic only where it has one; a file’s own faces count', async () => {
+  const { offeredWeights } = await import('../../src/style-edit.ts');
+  const e = opened(svg('<style>@font-face{font-family:Own;font-weight:300 500;src:url(data:font/woff2;base64,d09GMg==)}</style>\n  <text id="t">t</text>'));
+  assert.deepEqual(offeredWeights(e.familyFaces('Bebas Neue'), 'normal'), [400]);
+  assert.deepEqual(e.familyFaces('Bebas Neue')!.italics, [], 'no italic: Inspect offers Normal alone');
+  assert.deepEqual(offeredWeights(e.familyFaces('Archivo'), 'normal'), [100, 200, 300, 400, 500, 600, 700, 800, 900], 'more than three: the Weight sheet');
+  assert.deepEqual(offeredWeights(e.familyFaces('IBM Plex Mono'), 'italic'), [100, 200, 300, 400, 500, 600, 700]);
+  assert.deepEqual(offeredWeights(e.familyFaces('Space Grotesk'), 'italic'), [300, 400, 500, 600, 700], 'no italic: its uprights');
+  assert.equal(e.familyFaces('serif'), null);
+  assert.equal(e.familyFaces('Georgia'), null);
+  assert.deepEqual(offeredWeights(null, 'normal'), [400, 700, 900], 'SVG Lab’s three');
+  assert.deepEqual(e.familyFaces('Own'), { weights: [300, 400, 500], italics: [] }, 'a file’s own face, its weight range');
+  select(e, 't');
+  e.openWeightSheet('Archivo');
+  const s = e.sheet.get();
+  assert.ok(s?.kind === 'weight' && s.family === 'Archivo');
+  e.setStyle('font-weight', '300', s.ids);
+  e.closeSheet();
+  assert.match(e.source(), /<text id="t" font-weight="300">/);
+  assert.equal(e.history.get().undoLabel, 'Set font-weight');
+});

@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1332 rows: 826 planned, 3 partial, 501 done, 2 superseded.
+Current phase: **P1**. 1332 rows: 785 planned, 3 partial, 542 done, 2 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -10,21 +10,21 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| element | 188 | 148 | 1 | 39 | 0 |
-| attribute | 386 | 219 | 0 | 167 | 0 |
-| property | 48 | 33 | 0 | 15 | 0 |
+| element | 188 | 143 | 1 | 44 | 0 |
+| attribute | 386 | 208 | 0 | 178 | 0 |
+| property | 48 | 32 | 0 | 16 | 0 |
 | value | 85 | 25 | 0 | 60 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
-| namespace | 21 | 9 | 2 | 10 | 0 |
-| capability | 480 | 326 | 0 | 152 | 2 |
-| feature | 101 | 66 | 0 | 35 | 0 |
+| namespace | 21 | 3 | 2 | 16 | 0 |
+| capability | 480 | 312 | 0 | 166 | 2 |
+| feature | 101 | 62 | 0 | 39 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 319 | 63 | 0 | 255 | 1 |
+| P1 | 319 | 22 | 0 | 296 | 1 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
@@ -57,7 +57,7 @@ Each lesson's capabilities and the phases that deliver them.
 | 1 | Transform | Groups and transforms | P1 | 11 | 11 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P3, P4, P5 | 50 | 25 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 29 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 26 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |
@@ -74,7 +74,7 @@ Each lesson's capabilities and the phases that deliver them.
 | 4 | Texture | Texture and distortion | P4 | 13 | 0 |
 | 4 | Light | Lighting | P4 | 15 | 0 |
 | 5 | Size | Sizing and views | P2 | 10 | 0 |
-| 5 | Access | Accessibility | P1 | 11 | 1 |
+| 5 | Access | Accessibility | P1 | 11 | 11 |
 | 5 | Images | Images and HTML | P4 | 13 | 0 |
 | 5 | Media | Video, audio and more | P6 | 11 | 0 |
 | 5 | Switch | Switch and unknown tags | P6 | 10 | 0 |

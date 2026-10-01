@@ -19,7 +19,9 @@ import { ACTIVE_ATTRIBUTES, ELEMENTS, METADATA_NS, XHTML_ELEMENTS, SMIL_ELEMENTS
 //    value) must pass the CSS rule too.
 // 4: a url() is read from its start (one never closed is still a url()), CSS is read with its
 //    comments both kept and removed, and XHTML srcset and background are refused.
-export const PROFILE_VERSION = 4;
+// 5: a url() is judged from at most 512 characters after "url(", and one whose start is still
+//    undecided there is refused.
+export const PROFILE_VERSION = 5;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -71,15 +73,33 @@ export function cssAllowed(css) {
   return [t, t.replace(/\/\*[\s\S]*?\*\//g, '')].every(cssReadingAllowed);
 }
 
+// A url()'s argument is judged by how it starts, so each is read from at most this many characters
+// after "url(": a start still undecided there is refused (a refusal stays safe). Each was once read to
+// the end of the text, which made a sheet of many url()s cost the square of its length.
+const URL_WINDOW = 512;
+const DATA_STARTS = ['data:image/png', 'data:image/jpeg', 'data:image/gif', 'data:image/webp', 'data:font/'];
+
+/**
+ * The verdict on a url() argument from its start (squashed): a fragment, a data: image or font, or a
+ * relative URL passes; a scheme or "//" doesn't; null while more of it could change that (`done`:
+ * nothing follows what was read).
+ */
+function urlStart(u, done) {
+  if (u.startsWith('#')) return true;
+  if (/^data:(image\/(png|jpeg|gif|webp)|font\/)/.test(u)) return true;
+  if (!done && DATA_STARTS.some((d) => d.startsWith(u))) return null;
+  const scheme = /^[a-z][a-z0-9+.-]*/.exec(u);
+  if (scheme) return scheme[0].length < u.length ? u[scheme[0].length] !== ':' : done ? true : null;
+  if (u.startsWith('//')) return false;
+  return done || (u !== '' && u !== '/') ? true : null; // relative
+}
+
 function cssReadingAllowed(t) {
   if (/@import|expression\s*\(|behavior\s*:|-moz-binding|javascript:|image-set\s*\(/.test(t)) return false;
   // Each url() is read from its start: a browser reads one with no closing ")" or quote to the end.
   for (const m of t.matchAll(/url\s*\(\s*['"]?/g)) {
-    const u = squash(t.slice(m.index + m[0].length));
-    if (u.startsWith('#')) continue;
-    if (/^data:(image\/(png|jpeg|gif|webp)|font\/)/.test(u)) continue;
-    if (!/^[a-z][a-z0-9+.-]*:/.test(u) && !u.startsWith('//')) continue; // relative
-    return false;
+    const from = m.index + m[0].length;
+    if (urlStart(squash(t.slice(from, from + URL_WINDOW)), from + URL_WINDOW >= t.length) !== true) return false;
   }
   return true;
 }

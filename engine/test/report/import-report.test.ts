@@ -92,7 +92,7 @@ test('external entities a DOCTYPE declares are listed in the notes: never fetche
   assert.ok(!importReport(load('tools/inkscape-plain-svg.svg')).notes.some((n) => /external entit/.test(n)), 'a file without any says nothing');
 });
 
-test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is, never editable', () => {
+test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is; from P1-M4 the Access tab edits its Dublin Core items, and a note says so', () => {
   const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:cc="http://creativecommons.org/ns#" xmlns:ccl="http://web.resource.org/cc/">
   <metadata><rdf:RDF><cc:Work rdf:about=""><dc:format>image/svg+xml</dc:format><dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/><dcterms:created>2026</dcterms:created><cc:license rdf:resource="http://creativecommons.org/licenses/by/4.0/"/></cc:Work>
   <cc:License rdf:about="http://creativecommons.org/licenses/by/4.0/"><cc:permits rdf:resource="http://creativecommons.org/ns#Reproduction"/></cc:License><ccl:Work/></rdf:RDF></metadata>
@@ -104,12 +104,16 @@ test('metadata (RDF, Dublin Core, Creative Commons) is kept as-is, never editabl
   assert.deepEqual([...new Set(metadata.map((i) => i.bucket))], ['kept'], metadata.map((i) => `${i.name} ${i.bucket}`).join(', '));
   assert.equal(metadata.reduce((n, i) => n + i.count, 0), 14, 'every metadata element (9) and attribute (5) is counted');
   assert.deepEqual(report.items.filter((i) => i.bucket === 'editable').map((i) => i.name).sort(), ['height', 'metadata', 'rect', 'svg', 'width']);
+  assert.ok(report.notes.includes('Its Dublin Core item (dcterms:created) is kept as written and edited in the Access tab.'), report.notes.join(' | '));
 
   // A real Inkscape file: its Creative Commons block and its own settings are all kept; nothing is unclassified.
   const ink = importReport(load('tools/inkscape-1x-layers.svg'));
   const editable = ink.items.filter((i) => i.bucket === 'editable').map((i) => i.name);
   assert.deepEqual(editable.filter((n) => /^(rdf|dc|dcterms|cc|inkscape|sodipodi):/.test(n)), [], 'no metadata or editor data under Editable');
   assert.deepEqual(ink.totals, { editable: 93, kept: 72, preview: 0, unclassified: 0 });
+  assert.deepEqual(ink.notes, ['Its Dublin Core item (dc:title) is kept as written and edited in the Access tab.']);
+  assert.ok(importReport(load('tools/matplotlib-line-plot.svg')).notes.includes('Its Dublin Core items (dc:date, dc:creator) are kept as written and edited in the Access tab.'));
+  assert.ok(!importReport(load('lab/access.svg')).notes.some((n) => /Dublin Core/.test(n)), 'a file with none says nothing');
 });
 
 test("a plain attribute on a foreign element takes that element's class, not an SVG attribute's", () => {
@@ -178,4 +182,36 @@ test('rem lengths in attributes and style="" are counted with a note (the canvas
   const ruled = importReport(doc('<svg xmlns="http://www.w3.org/2000/svg"><style>svg { font-size: 10px }</style><rect x="1rem"/></svg>'));
   assert.equal(ruled.rem.convertible, false);
   assert.match(ruled.rem.why!, /^The root’s font size is set by a <style> rule/);
+});
+
+test('the font notes (P1-M4): a file’s own data: faces are counted as drawn on the canvas, a face named like Draw’s interface fonts isn’t loaded, and a face over the limits is named', () => {
+  const face = (family: string, b64: string) => `@font-face{font-family:${family};src:url(data:font/woff2;base64,${b64})}`;
+  const parse = (src: string) => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    return r.doc;
+  };
+  const doc = parse(`<svg xmlns="http://www.w3.org/2000/svg"><style>${face('Own', 'd09GMg==')}${face("'Own Bold'", 'd09GMg==')}${face('Arial', 'd09GMg==')}${face('"Segoe UI"', 'd09GMg==')}${face('Huge', 'A'.repeat(6_800_000))}</style><text font-family="Own">a</text></svg>`);
+  const notes = importReport(doc).notes;
+  assert.deepEqual(notes.filter((n) => /font/i.test(n)), [
+    'This file’s own fonts: 2 drawn on the canvas.',
+    'Not loaded: Arial, which shares a name with Draw’s own interface fonts.',
+    'Not loaded: Segoe UI, which shares a name with Draw’s own interface fonts.',
+    'Not loaded: Huge, over the limits for a file’s own fonts (5 MB a face, 20 MB and 64 faces in all).',
+  ]);
+  const none = parse('<svg xmlns="http://www.w3.org/2000/svg"><text>a</text></svg>');
+  assert.deepEqual(importReport(none).notes.filter((n) => /font/i.test(n)), []);
+});
+
+test('the style-rule note (P1-M4 S3): rules that ask for focus, a tabindex or a link can’t match on the canvas (its shapes are never focused and never links); a selector naming one only inside :not() is never counted', () => {
+  const notes = (css: string) => {
+    const r = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg"><style>${css}</style><rect width="1" height="1" tabindex="0"/></svg>`);
+    assert.ok(r.ok);
+    return importReport(r.doc).notes.filter((n) => /style rule/.test(n));
+  };
+  const NOTE = (n: number) => `${n} style rule${n > 1 ? 's' : ''} can’t match on the canvas: its shapes are never focused and never links.`;
+  assert.deepEqual(notes('rect:focus{fill:red}'), [NOTE(1)]);
+  assert.deepEqual(notes('[tabindex]{stroke:red} [ tabindex="0"]{x:1} a:link{fill:blue} a:any-link{fill:blue} a:visited{fill:blue} g:focus-visible{opacity:.5} g:focus-within{opacity:.5} @media (min-width:1px){circle:focus{fill:red}}'), [NOTE(8)]);
+  assert.deepEqual(notes('rect:not(:focus){fill:red} rect:hover{fill:red} rect, a:link{fill:red} .focused{fill:red} :is(:focus, rect){fill:red} rect[data-tabindexes]{fill:red}'), [], 'none of these needs focus or a link to match');
+  assert.deepEqual(notes('/* rect:focus{} */ rect{fill:red}'), [], 'comments are not rules');
 });

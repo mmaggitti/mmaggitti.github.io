@@ -1,4 +1,5 @@
-// The split sheet under the canvas: its handle, the Code, Inspect and Support tabs, and the code view. Three
+// The split sheet under the canvas: its handle, the Code, Layers, Inspect, Access (P1-M4 S3) and Support
+// tabs, and the code view. Three
 // detents (peek, half, full): drag the handle between them, or tap it to step through them; the
 // canvas takes whatever height the sheet leaves. The code view is framework-free (codeview/): React
 // owns only its container, which stays mounted while hidden so edits keep patching it.
@@ -21,10 +22,11 @@ import { Support } from './Support.tsx';
 import { Guard } from './Guard.tsx';
 import { Layers } from './Layers.tsx';
 import { Inspect } from './Inspect.tsx';
+import { Access } from './Access.tsx';
 import type { Views } from './views.ts';
 
 const HANDLE_LABEL: Record<Detent, string> = { peek: 'Show the code', half: 'Expand the code', full: 'Collapse the code' };
-type Tab = 'code' | 'layers' | 'inspect' | 'support';
+type Tab = 'code' | 'layers' | 'inspect' | 'access' | 'support';
 
 interface Press {
   id: number;
@@ -176,6 +178,9 @@ export function CodePanel({ editor, views, files, copy, source }: Props) {
             <button type="button" aria-pressed={tab === 'inspect'} onClick={() => show('inspect')}>
               Inspect
             </button>
+            <button type="button" aria-pressed={tab === 'access'} onClick={() => show('access')}>
+              Access
+            </button>
             <button type="button" aria-pressed={tab === 'support'} onClick={() => show('support')}>
               Support
             </button>
@@ -199,6 +204,7 @@ export function CodePanel({ editor, views, files, copy, source }: Props) {
         <Guard files={files}>
           {tab === 'layers' && <Layers editor={editor} />}
           {tab === 'inspect' && <Inspect editor={editor} />}
+          {tab === 'access' && <Access editor={editor} />}
           {tab === 'support' && <Support />}
         </Guard>
       </div>

@@ -122,6 +122,17 @@ test('attributes the ledger does not render are refused, patterns (aria-*, data-
   }
 });
 
+test('xml:lang (P1-M4 S3) is refused on every element, by the generated table first: DOMPurify, the sink’s second judge, never kept it, so the ledger no longer says the canvas draws it; lang and xml:space are still drawn', () => {
+  const row = ledger.rows.find((r) => r.id === 'attribute:xml:lang');
+  assert.ok(row && row.render === false, 'the row says the canvas never draws it');
+  assert.ok(!RENDER_SVG_ATTRIBUTES.has('xml:lang') && !RENDER_XHTML_ATTRIBUTES.has('xml:lang'), 'no generated table holds it');
+  for (const e of RENDER_SVG_ELEMENTS) {
+    assert.ok(!attributeRenders(NS.svg, e, NS.xml, 'lang'), `xml:lang on <${e}>`);
+    assert.ok(attributeRenders(NS.svg, e, null, 'lang'), `lang on <${e}>`);
+  }
+  assert.ok(attributeRenders(NS.svg, 'text', NS.xml, 'space'), 'xml:space is drawn');
+});
+
 // A pattern row stands for every name it matches, so the kept-row tests (which look for names) pass
 // it by; this one proves it: drawn with no namespace on every element the canvas draws (so a
 // <style> rule on [data-…] matches, as in the file on its own), its value as written, kept byte for

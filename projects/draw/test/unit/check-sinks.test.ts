@@ -102,3 +102,33 @@ test('check-sinks allows DOM writes in the overlay folder only: a file beside it
   assert.equal(r.code, 1, r.out);
   assert.deepEqual(r.findings, ['projects/draw/src/canvas/overlayish.ts:1 dom-write', 'projects/draw/src/interact/overlay-model.ts:1 dom-write']);
 });
+
+test('check-sinks keeps registering a font face to src/platform/ (P1-M4): new FontFace and document.fonts anywhere else are flagged; in platform/ they pass', () => {
+  const r = sinks({
+    'projects/draw/src/panels/Fonts.tsx': "export const a = (b: ArrayBuffer) => new FontFace('X', b);\nexport const c = () => document.fonts.ready;\n",
+    'projects/draw/src/editor-fonts.ts': 'export const d = () => document.fonts.size;\n',
+    'projects/draw/src/platform/fonts.ts': "export const e = (b: ArrayBuffer) => document.fonts.add(new FontFace('X', b));\n",
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, ['projects/draw/src/editor-fonts.ts:1 font-face', 'projects/draw/src/panels/Fonts.tsx:1 font-face', 'projects/draw/src/panels/Fonts.tsx:2 font-face']);
+});
+
+test('check-sinks bans the name FontFace in any spelling outside src/platform/, and the document’s fonts by a dot, by [\'fonts\'] or destructured: one finding per spelling; in platform/ they pass', () => {
+  const spellings = [
+    "export const a = (b: ArrayBuffer) => new globalThis.FontFace('X', b);",
+    "export const b = (b: ArrayBuffer) => new window.FontFace('X', b);",
+    "export const c = (b: ArrayBuffer) => new (window as any)['FontFace']('X', b);",
+    "export const d = (f: unknown) => (document as any)['fonts'].add(f);",
+    'const { fonts } = document;',
+    "const FF = FontFace;",
+    'export const g = (f: unknown) => self.document.fonts.add(f as never);',
+    'export const h = () => document?.fonts.size;',
+    'const { fonts: set } = window.document;',
+  ];
+  const text = spellings.join('\n') + '\n';
+  const r = sinks({ 'projects/draw/src/panels/Sneaky.tsx': text, 'projects/draw/src/platform/fonts-too.ts': text });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, spellings.map((_, i) => `projects/draw/src/panels/Sneaky.tsx:${i + 1} font-face`).sort());
+  const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export type Choice = 'text' | 'paths' | 'fonts';\nexport const isSet = (font: object) => 'fonts' in font;\nexport const n = (f: { fonts: number }) => f.fonts;\n" });
+  assert.equal(fine.code, 0, fine.out);
+});

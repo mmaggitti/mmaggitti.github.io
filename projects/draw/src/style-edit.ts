@@ -23,6 +23,7 @@ export const STYLE_NUMBERS: Readonly<Record<string, { min: number; max?: number 
   'fill-opacity': { min: 0, max: 1 },
   'stroke-opacity': { min: 0, max: 1 },
   'stop-opacity': { min: 0, max: 1 },
+  'font-size': { min: 0 }, // P1-M4: Inspect's Text section
 };
 
 /** The keyword properties' segments (a value outside them is shown as written, and kept). */
@@ -43,6 +44,10 @@ const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   'stroke-linejoin': ['miter', 'miter-clip', 'round', 'bevel', 'arcs'],
   'vector-effect': ['none', 'non-scaling-stroke', 'non-scaling-size', 'non-rotation', 'fixed-position'],
   'shape-rendering': ['auto', 'optimizeSpeed', 'crispEdges', 'geometricPrecision'],
+  // P1-M4: Inspect's Text section.
+  'font-weight': ['normal', 'bold', 'bolder', 'lighter', '100', '200', '300', '400', '500', '600', '700', '800', '900'],
+  'font-style': ['normal', 'italic', 'oblique'],
+  'text-anchor': ['start', 'middle', 'end'],
 };
 // paint-order: normal, or one to three of these, each once.
 const PAINT_ORDER = ['fill', 'stroke', 'markers'];
@@ -126,4 +131,19 @@ export function dashPresets(k: number): string[] {
 /** The stroke-width slider: 0 to 20k, by the snap step. */
 export function widthRange(ctx: StyleCtx): { min: number; max: number; step: number } {
   return { min: 0, max: Number(fmt(20 * ctx.k, 2)), step: ctx.step };
+}
+
+/** A weight's name (P1-M4: Inspect's Weight and the Weight sheet, "Bold 700"). */
+export const WEIGHT_NAMES: Readonly<Record<number, string>> = { 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' };
+/** SVG Lab's three weights (KITS.text L1258), for a generic or unknown family. */
+export const LAB_WEIGHTS: readonly number[] = [400, 700, 900];
+
+/**
+ * The weights Inspect offers for a family's faces in a style (P1-M4): its real ones in that style
+ * (its uprights when it has no italic), or SVG Lab's three for a generic or unknown family (null).
+ */
+export function offeredWeights(faces: { weights: readonly number[]; italics: readonly number[] } | null, style: 'normal' | 'italic'): number[] {
+  if (!faces) return [...LAB_WEIGHTS];
+  const list = style === 'italic' && faces.italics.length ? faces.italics : faces.weights.length ? faces.weights : faces.italics;
+  return [...list];
 }

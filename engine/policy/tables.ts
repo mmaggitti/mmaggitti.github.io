@@ -360,7 +360,6 @@ export const RENDER_SVG_ATTRIBUTES: ReadonlyMap<string, AttrScope> = new Map<str
   ['x2', { on: ['line', 'linearGradient'] }],
   ['xChannelSelector', { on: ['feDisplacementMap'] }],
   ['xlink:href', { on: '*', except: ['a'] }],
-  ['xml:lang', { on: '*' }],
   ['xml:space', { on: '*' }],
   ['y', {
     on: [

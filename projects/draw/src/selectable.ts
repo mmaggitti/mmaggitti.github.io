@@ -2,7 +2,9 @@
 // climbs the model to the nearest element that draws on its own: an SVG graphics element, never
 // the root <svg>, and never anything inside a container that only draws when referenced (defs,
 // symbol, clipPath, mask, pattern, marker, gradients, filters). Text selects its element, and
-// XHTML inside a foreignObject selects the foreignObject. Pure, so it is unit-tested in node.
+// XHTML inside a foreignObject selects the foreignObject. A text run (a tspan or a textPath: a line
+// Draw writes is one) selects its <text>; once that text, or a run of it, is selected, a tap selects
+// the run under the finger (the way a group is entered). Pure, so it is unit-tested in node.
 
 import { NS, type Doc, type NodeId } from '../../../engine/model/doc.ts';
 
@@ -33,11 +35,29 @@ export function outlineable(doc: Doc, id: NodeId): boolean {
   return n?.kind === 'element' && n.ns === NS.svg && GRAPHICS.has(n.local) && !referencedOnly(doc, id);
 }
 
-/** The element a canvas tap on `hit` selects, or null (the root, empty canvas, defs content). */
-export function selectionTarget(doc: Doc, hit: NodeId | null): NodeId | null {
+/** The <text> a text run (a tspan or a textPath) belongs to; any other element is its own. */
+export function textOf(doc: Doc, id: NodeId): NodeId {
+  const n = doc.nodes.get(id);
+  if (n?.kind !== 'element' || n.ns !== NS.svg || (n.local !== 'tspan' && n.local !== 'textPath')) return id;
+  for (let p = n.parent; p !== null; p = parentOf(doc, p)) {
+    const q = doc.nodes.get(p);
+    if (q?.kind === 'element' && q.ns === NS.svg && q.local === 'text') return p;
+  }
+  return id;
+}
+
+const NONE: ReadonlySet<NodeId> = new Set();
+
+/**
+ * The element a canvas tap on `hit` selects, or null (the root, empty canvas, defs content): a text
+ * run's <text>, or the run itself while that text or a run of it is in `selected`.
+ */
+export function selectionTarget(doc: Doc, hit: NodeId | null, selected: ReadonlySet<NodeId> = NONE): NodeId | null {
   if (hit === null || !doc.nodes.has(hit) || referencedOnly(doc, hit)) return null;
   for (let p: NodeId | null = hit; p !== null && p !== doc.root; p = parentOf(doc, p)) {
-    if (outlineable(doc, p)) return p;
+    if (!outlineable(doc, p)) continue;
+    const text = textOf(doc, p);
+    return text === p || [...selected].some((s) => textOf(doc, s) === text) ? p : text;
   }
   return null;
 }
