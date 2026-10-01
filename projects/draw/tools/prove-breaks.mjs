@@ -3452,6 +3452,21 @@ const BREAKS = [
     file: 'engine/text/font-faces.ts', from: ' || read.faces.length >= count) {', to: ') {',
     run: engineTests('text/font-faces.test.ts'), expect: /✖ the count limit, 64 faces in all/,
   },
+  {
+    id: 'B653', what: 'Text to path reads the file’s own faces again for every selected text (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: '      const r = outlineText(doc, id, fonts);\n', to: '      for (let i = 0; i < 4; i++) fontFaces(doc, { face: 1, total: 1 });\n      const r = outlineText(doc, id, fonts);\n',
+    run: drawTests('large-selection.test.ts'), expect: /✖ Text to path over a large selection takes linear time/,
+  },
+  {
+    id: 'B654', what: 'Set font reads every selected text’s weight again for each one (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: '        const w = computedWeight(doc, id);\n', to: '        for (const x of ids) computedWeight(doc, x);\n        const w = computedWeight(doc, id);\n',
+    run: drawTests('large-selection.test.ts'), expect: /✖ Set font and Inspect’s Text section over a large selection take linear time[\s\S]*Set font, then its undo/,
+  },
+  {
+    id: 'B655', what: 'Inspect’s Text section reads the selection’s font-family once per fifty selected texts (its cost the square of the selection)',
+    file: 'projects/draw/src/editor.ts', from: "    const row = this.styleRow('font-family', this.#textIds());\n", to: "    for (let i = 0; i < this.#textIds().length / 50; i++) this.styleRow('font-family', this.#textIds());\n    const row = this.styleRow('font-family', this.#textIds());\n",
+    run: drawTests('large-selection.test.ts'), expect: /✖ Set font and Inspect’s Text section over a large selection take linear time[\s\S]*Inspect’s Text section, over/,
+  },
 ];
 
 const args = process.argv.slice(2);

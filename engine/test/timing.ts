@@ -43,3 +43,29 @@ export function linear(what: string, small: () => void, big: () => void, opts: L
   assert.ok(b < most * s, `${what}: ${s.toFixed(0)} ms, then ${b.toFixed(0)} ms for 4× the work (×${(b / s).toFixed(1)}; linear is ×4, the most ×${most})`);
   assert.ok(b < limit, `${what}: ${b.toFixed(0)} ms for the larger (the limit is ${limit})`);
 }
+
+/** How long `reps` calls of an async act take (ms), as time() measures a sync one. */
+async function timeAsync(act: () => Promise<void>, reps: number, cap: number): Promise<number> {
+  const t = performance.now();
+  for (let i = 1; i <= reps; i++) {
+    await act();
+    const ms = performance.now() - t;
+    if (ms > cap && i < reps) return (ms * reps) / i;
+  }
+  return performance.now() - t;
+}
+
+/** linear() for a command that is async (Text to path, a boolean): the same runs, bound and limit. */
+export async function linearAsync(what: string, small: () => Promise<void>, big: () => Promise<void>, opts: LinearOpts): Promise<void> {
+  const { limit, runs = 3, reps = 1, most = 6 } = opts;
+  const cap = 4 * limit;
+  await small(); // warm the engine up
+  let s = await timeAsync(small, reps, cap);
+  let b = await timeAsync(big, reps, cap);
+  for (let again = 1; again < runs && (b >= most * s || b >= limit) && b < cap; again++) {
+    s = Math.min(s, await timeAsync(small, reps, cap));
+    b = Math.min(b, await timeAsync(big, reps, cap));
+  }
+  assert.ok(b < most * s, `${what}: ${s.toFixed(0)} ms, then ${b.toFixed(0)} ms for 4× the work (×${(b / s).toFixed(1)}; linear is ×4, the most ×${most})`);
+  assert.ok(b < limit, `${what}: ${b.toFixed(0)} ms for the larger (the limit is ${limit})`);
+}
