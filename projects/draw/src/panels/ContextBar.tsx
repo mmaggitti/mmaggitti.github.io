@@ -8,8 +8,9 @@
 // (from the code), Forward, Back and Delete are disabled. Edit source doesn't fit beside them, so
 // it lives in the More sheet, with Fill… and Stroke… (the Colour sheet over the selection, P1-M2),
 // Gloss (SVG Lab's, on or off, P1-M2), Duplicate, Group, Ungroup, Select group, Select all, Align
-// (six ways) and Distribute (two); for one shape, Convert: Stroke to path (P1-M4); and, for two or
-// more selected, Combine: Union, Subtract, Intersect and Exclude (P1-M3).
+// (six ways) and Distribute (two); for one shape, Convert: Stroke to path (P1-M4), and for a text,
+// Text to path (P1-M4 S2); and, for two or more selected, Combine: Union, Subtract, Intersect and
+// Exclude (P1-M3).
 //
 // While the Shapes tool is on (P1-M2), the bar is its kind picker instead: seven 44 pt icon buttons
 // (Rectangle, Circle, Ellipse, Line, Polygon, Star, Spiral), the chosen one pressed, then Cancel,
@@ -288,10 +289,13 @@ function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
           {row('Distribute horizontally', () => editor.distribute('h'))}
           {row('Distribute vertically', () => editor.distribute('v'))}
         </div>
-        {editor.canStrokeToPath() && (
+        {(editor.canStrokeToPath() || editor.canTextToPath()) && (
           <>
             <p className="draw-subhead">Convert</p>
-            <div className="draw-more-grid">{row('Stroke to path', () => void editor.strokeToPath())}</div>
+            <div className="draw-more-grid">
+              {editor.canStrokeToPath() && row('Stroke to path', () => void editor.strokeToPath())}
+              {editor.canTextToPath() && row('Text to path', () => void editor.textToPath())}
+            </div>
           </>
         )}
         {selected >= 2 && (

@@ -6682,7 +6682,7 @@ async function booleansCombineWhatIsDrawn(browser, origin) {
     await openMore(page);
     await page.locator('.draw-more-row', { hasText: /^Union$/ }).tap();
     await page.locator('.draw-toast').waitFor();
-    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first (P1-M4).', `with the text: ${await page.locator('.draw-toast').textContent()}`);
+    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first: More → Text to path.', `with the text: ${await page.locator('.draw-toast').textContent()}`);
     must(await source(page) === BOOL_E2E, 'the refused Union wrote something');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });

@@ -4,7 +4,7 @@
 // S2, Text to path) fetches. Font bytes in, names and outlines out.
 
 import { create } from 'fontkit';
-import type { FontInfo } from './load.ts';
+import type { FontInfo, ShapedFace } from './load.ts';
 
 /** A font file's family, subfamily, weight class, italic flag, embedding bits and its copyright and licence strings. */
 export function openFont(bytes: Uint8Array): FontInfo {
@@ -22,5 +22,28 @@ export function openFont(bytes: Uint8Array): FontInfo {
     fsType,
     copyright: font.copyright ?? '',
     licence: font.getName?.('license') ?? '',
+  };
+}
+
+/**
+ * Text to path (S2): each run laid out by fontkit with its default features (kerning and ligatures,
+ * as browsers apply them), each glyph's outline in font units (y up), its advance and offsets, and the
+ * characters whose glyph is .notdef (id 0). One parse of the file for all its runs.
+ */
+export function shape(bytes: Uint8Array, runs: readonly string[]): ShapedFace {
+  const font = create(bytes);
+  if ('fonts' in font) throw new Error('a font collection');
+  return {
+    unitsPerEm: font.unitsPerEm,
+    runs: runs.map((text) => {
+      const laid = font.layout(text);
+      const missing: string[] = [];
+      const glyphs = laid.glyphs.map((g, i) => {
+        if (g.id === 0) missing.push(String.fromCodePoint(...g.codePoints));
+        const p = laid.positions[i];
+        return { commands: g.path.commands.map((c) => ({ command: c.command, args: c.args.slice() })), xAdvance: p.xAdvance, xOffset: p.xOffset, yOffset: p.yOffset };
+      });
+      return { glyphs, missing };
+    }),
   };
 }

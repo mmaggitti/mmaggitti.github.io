@@ -9,9 +9,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
 import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
-import { catalogueFamily } from '../../src/platform/font-catalogue.ts';
+import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
+import { openFont, shape } from '../../src/text/outline-lib.ts';
+import { OFFLINE as TEXT_OFFLINE } from '../../src/text/pipeline.ts';
+import { NOT_HELD } from '../../../../engine/text/outline.ts';
 import type { Fonts } from '../../src/platform/fonts.ts';
 import type { FaceRequest, OwnFace } from '../../../../engine/text/font-faces.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
@@ -2516,7 +2519,7 @@ test('booleans refuse, saying why and writing nothing: one shape, a line, text, 
   const cases: [file: string, op: BoolOp, notice: string, libs?: Libraries, over?: (r: () => Rig) => Partial<CanvasPort>][] = [
     [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Select two shapes or more to combine them.'],
     [W('<line id="b" x1="0" y1="0" x2="50" y2="50" stroke="#000"/>'), 'union', 'A line has no area.'],
-    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', 'Convert text to paths first (P1-M4).'],
+    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', TEXT_FIRST],
     [W('<g id="b"><rect x="0" y="0" width="5" height="5"/></g>'), 'union', 'Only shapes combine.'],
     [W('<use id="b" href="#a" x="5"/>'), 'union', 'Only shapes combine.'],
     [W('<circle id="b" cx="50" cy="50" r="10" style="r: 20px"/>'), 'union', 'Its r is set by CSS (its style attribute), which wins over the attribute.'],
@@ -2975,4 +2978,89 @@ test('a text’s pos handle (P1-M4) sits at its (x, y) beside its corners; its d
   assert.equal(r.editor.history.get().undoLabel, 'Move text');
   r.editor.undo();
   assert.equal(r.editor.source(), src);
+});
+
+// ── P1-M4 S2: Text to path ─────────────────────────────────────────────────────────────────────
+
+/** The catalogue's file for a face, from node_modules (what the app fetches by its URL). */
+const fontFile = (f: FaceRequest): Uint8Array | null => {
+  const c = catalogueFamily(f.family);
+  return c ? new Uint8Array(readFileSync(new URL(`../../node_modules/@fontsource/${c.slug}/files/${faceFile(c.slug, f.weight, f.style)}`, import.meta.url))) : null;
+};
+/** A fonts port with the catalogue's files, and the real text library. */
+const textPorts = (lib: EditorPorts['text'] = async () => ({ openFont, shape })): Partial<EditorPorts> => {
+  const fonts = fakeFonts();
+  fonts.bytes = async (f) => fontFile(f);
+  return { fonts, text: lib, prefs: fakePrefs() };
+};
+
+test('Text to path: two texts become two <path>s in their places in one "Text to path" entry (a rect selected with them is left alone), each keeping its id, the text-only attributes gone, aria-label its characters (the lines joined by a space); the paths are selected; one undo gives the file back byte for byte', async () => {
+  const A = '<text id="a" x="10" y="20" font-family="Inter, sans-serif" font-size="10" fill="#264653">Hi</text>';
+  const B = '<text id="b" x="50" y="40" font-family="Archivo, sans-serif" font-size="10" font-weight="700" text-anchor="middle"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>';
+  const R = '<rect id="r" x="1" y="1" width="5" height="5"/>';
+  const F = BOARD(`  ${A}\n  ${R}\n  ${B}\n`);
+  const r = rig(HOST, {}, undefined, textPorts());
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'r'), idOf(r, 'b')]);
+  assert.equal(r.editor.canTextToPath(), true);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), null);
+  const src = r.editor.source();
+  const da = /<path id="a" fill="#264653" d="([^"]+)" aria-label="Hi"\/>/.exec(src)?.[1];
+  const db = /<path id="b" d="([^"]+)" aria-label="Big Idea"\/>/.exec(src)?.[1];
+  assert.ok(da && db, src);
+  assert.equal(src, F.replace(A, `<path id="a" fill="#264653" d="${da}" aria-label="Hi"/>`).replace(B, `<path id="b" d="${db}" aria-label="Big Idea"/>`));
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path');
+  assert.deepEqual(sel(r).sort(), [idOf(r, 'a'), idOf(r, 'b')].sort());
+  // Inter's H starts at x 10 plus its side bearing; Archivo's "Big" is centred on 50, its baseline at 40.
+  const first = /^M (-?[\d.]+) (-?[\d.]+)/.exec(da)!;
+  assert.ok(Number(first[1]) > 10 && Number(first[1]) < 11.5 && Number(first[2]) <= 20.001, `Hi starts at ${first[0]}`);
+  const xs = [...db.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  const line1 = xs.filter(([, y]) => y <= 40.5);
+  assert.ok(Math.abs((Math.min(...line1.map((p) => p[0])) + Math.max(...line1.map((p) => p[0]))) / 2 - 50) < 1, 'Big is centred on 50');
+  assert.ok(xs.some(([, y]) => y > 40 + 13 - 8), 'Idea sits a line below');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+test('Text to path refuses, saying why and writing nothing: a font Draw holds no file for (Georgia), any one refusing text in the selection, no text selected; a boolean names Text to path', async () => {
+  const r = rig(HOST, {}, undefined, textPorts());
+  const F = BOARD('  <text id="g" x="1" y="9" font-family="Georgia, serif">Hi</text>\n  <text id="i" x="1" y="19" font-family="Inter">Hi</text>\n  <rect id="r" width="5" height="5"/>\n');
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'g'), idOf(r, 'i')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), NOT_HELD('Georgia'));
+  assert.equal(r.editor.notice.get(), 'Draw can outline only its own fonts, yours and this file’s own; Georgia isn’t one of them.');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.select([idOf(r, 'r')]);
+  assert.equal(r.editor.canTextToPath(), false);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'Select a text to turn it into a path.');
+  assert.equal(TEXT_FIRST, 'Convert text to paths first: More → Text to path.');
+});
+
+test('a Text to path the drawing changes under while its chunk loads refuses, and writes nothing over the change; a chunk that won’t load says so', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, undefined, textPorts(async () => (await gate, { openFont, shape })));
+  r.editor.open(BOARD('  <text id="t" x="1" y="9" font-family="Inter">Hi</text>\n  <rect id="b" width="5" height="5"/>\n'));
+  r.editor.select([idOf(r, 't')]);
+  const pending = r.editor.textToPath();
+  r.editor.select([idOf(r, 'b')]);
+  r.editor.delete();
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after);
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+  const off = rig(HOST, {}, undefined, textPorts(() => Promise.reject(new Error('offline'))));
+  const G = BOARD('  <text id="t" x="1" y="9" font-family="Inter">Hi</text>\n');
+  off.editor.open(G);
+  off.editor.select([idOf(off, 't')]);
+  await off.editor.textToPath();
+  assert.equal(off.editor.notice.get(), TEXT_OFFLINE);
+  assert.equal(TEXT_OFFLINE, 'Draw couldn’t load the text tools. Try again when you’re online.');
+  assert.equal(off.editor.source(), G);
 });

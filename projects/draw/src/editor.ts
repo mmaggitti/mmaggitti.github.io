@@ -107,9 +107,13 @@ import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
 import { cssWhy } from '../../../engine/geometry/write.ts';
 import { appendSegment, closingText, penColour, penPathMarkup, segmentInto, type PenAnchor } from './interact/pen.ts';
 import { readLines, planLines } from '../../../engine/text/lines.ts';
-import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest } from '../../../engine/text/font-faces.ts';
+import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest, type OwnFace } from '../../../engine/text/font-faces.ts';
+import { outlineText, type OutlineText } from '../../../engine/text/outline.ts';
+import { textPathMarkup, writeTextToPath } from '../../../engine/text/to-path.ts';
+import { outlineTexts, type TextDeps } from './text/pipeline.ts';
+import { loadTextLib, type TextLib } from './text/load.ts';
 import { appFonts, couldNotLoad, SHEET_FACES, type FontEvent, type Fonts } from './platform/fonts.ts';
-import { TEXT_DEFAULTS, catalogueFamily } from './platform/font-catalogue.ts';
+import { LATIN_RANGE, TEXT_DEFAULTS, catalogueFamily } from './platform/font-catalogue.ts';
 import { readPref, writePref, type Pref } from './platform/prefs.ts';
 import { TEXT_LABEL, TEXT_NOTICE, fontValue, textMarkup } from './interact/text-tool.ts';
 import { NO_PATH_MARKS, arcGhosts, directionArrows, donutLabels, ghostAt, pathMarks, penArms, type ArcParams, type PathMarks } from './interact/path-marks.ts';
@@ -173,6 +177,8 @@ export interface EditorPorts {
   booleans?: Libraries;
   /** The fonts (P1-M4): platform/fonts.ts's (FontFace, document.fonts, your fonts) unless a test hands its own. */
   fonts?: Fonts;
+  /** The text library (P1-M4 S2: Text to path): text/load.ts's lazy chunk unless a test hands its own. */
+  text?: () => Promise<TextLib>;
   /** The viewer's device preferences (P1-M4: the Text tool's font): platform/prefs.ts unless a test hands its own. */
   prefs?: { read(name: Pref): string | null; write(name: Pref, value: string | null): void };
 }
@@ -922,7 +928,7 @@ export class Editor {
     for (const id of ids) {
       const n = el(doc, id);
       if (n.ns === NS.svg && n.local === 'line') return { refused: 'A line has no area.' };
-      if (n.ns === NS.svg && (n.local === 'text' || TEXT_PARTS.has(n.local))) return { refused: 'Convert text to paths first (P1-M4).' };
+      if (n.ns === NS.svg && (n.local === 'text' || TEXT_PARTS.has(n.local))) return { refused: TEXT_FIRST };
       if (n.ns !== NS.svg || !COMBINES.has(n.local)) return { refused: 'Only shapes combine.' };
     }
     const bottom = el(doc, ids[0]);
@@ -1005,6 +1011,66 @@ export class Editor {
     const outline = loopsD(out.loops);
     let result: NodeId | null = null;
     if (this.#dispatch('Stroke to path', (apply) => void (result = writeStrokeOutline(doc, id, outline, s, this.styleCtx, apply)))) this.select([result!]);
+  }
+
+  /** Whether More offers Text to path: the selection holds a <text>. */
+  canTextToPath(): boolean {
+    const doc = this.#doc;
+    if (!doc) return false;
+    for (const id of this.selection.get()) {
+      const n = doc.nodes.get(id);
+      if (n?.kind === 'element' && n.ns === NS.svg && n.local === 'text') return true;
+    }
+    return false;
+  }
+
+  /**
+   * Text to path (P1-M4 S2): each selected <text> (other shapes are left alone) becomes one <path> in
+   * its place, outlined from the face the canvas draws (engine/text/outline.ts reads it and says what
+   * refuses; text/pipeline.ts shapes it with fontkit from its lazy chunk). Nothing is written while any
+   * selected text refuses, and the drawing changing meanwhile refuses (combine's rule). Then one entry,
+   * "Text to path" (engine/text/to-path.ts: one fragment parse per parent), and the paths are selected.
+   */
+  async textToPath(): Promise<void> {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (!ids) return;
+    const texts = ids.filter((id) => {
+      const n = el(doc, id);
+      return n.ns === NS.svg && n.local === 'text';
+    });
+    if (!texts.length) return void this.notice.set('Select a text to turn it into a path.');
+    const fonts = this.#fonts();
+    const reads: OutlineText[] = [];
+    for (const id of texts) {
+      const r = outlineText(doc, id, fonts);
+      if ('refused' in r) return void this.notice.set(r.refused);
+      reads.push(r);
+    }
+    const version = doc.version;
+    const out = await outlineTexts(reads, this.textDeps(fontFaces(doc).faces));
+    if (this.#movedOn(doc, version)) return void this.notice.set(DRAWING_CHANGED);
+    if ('refused' in out) return void this.notice.set(out.refused);
+    const ds: string[] = [];
+    for (const o of out) {
+      if ('refused' in o) return void this.notice.set(o.refused);
+      ds.push(o.d);
+    }
+    let made: NodeId[] = [];
+    const items = texts.map((id, i) => ({ id, markup: textPathMarkup(doc, id, ds[i], reads[i].label) }));
+    if (this.#dispatch('Text to path', (apply) => void (made = writeTextToPath(doc, items, apply)))) this.select(made);
+  }
+
+  /** What Text to path and Export's text choices outline with: the text library, and each face's file and range (`own`: the open file's own faces). */
+  textDeps(own: readonly OwnFace[]): TextDeps {
+    const fonts = this.#fonts();
+    const yours = (f: FaceRequest) => fonts.mine().some((m) => m.family.toLowerCase() === f.family.toLowerCase() && m.weight === f.weight && m.style === f.style);
+    return {
+      lib: this.#ports.text ?? loadTextLib,
+      bytes: async (f) => (f.own !== null ? (own[f.own]?.bytes ?? null) : fonts.bytes(f)),
+      range: (f) => (f.own !== null ? (own[f.own]?.unicodeRange ?? null) : yours(f) ? null : LATIN_RANGE),
+    };
   }
 
   /** Duplicate the selection: each copy just after its original, 5 units right and down, selected. */
@@ -3926,6 +3992,8 @@ const TEXT_PARTS = new Set(['tspan', 'textPath']);
 export const BOOLEAN_OPS: readonly BoolOp[] = ['union', 'difference', 'intersection', 'exclusion'];
 export const BOOLEAN_LABELS: Readonly<Record<BoolOp, string>> = { union: 'Union', difference: 'Subtract', intersection: 'Intersect', exclusion: 'Exclude' };
 export const DRAWING_CHANGED = 'The drawing changed; try again.';
+/** Why a boolean refuses a text (P1-M4 S2: More has Text to path). */
+export const TEXT_FIRST = 'Convert text to paths first: More → Text to path.';
 /** A boolean's refusal when a <style> rule may style its bottom shape (M2's P2 wording). */
 export const STYLE_PAINT = 'A <style> rule may paint it, which Draw can’t read yet (P2).';
 const COMBINES = new Set(['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline']);

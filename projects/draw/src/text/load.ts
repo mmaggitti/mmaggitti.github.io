@@ -4,6 +4,8 @@
 // Export's text choices (S2) load it on first use. A load that fails is forgotten, so the next use
 // tries again (src/paths/load.ts is the pattern).
 
+import type { ShapedGlyph } from '../../../../engine/text/outline.ts';
+
 /** What the text library reads from a font file. */
 export interface FontInfo {
   family: string;
@@ -15,10 +17,18 @@ export interface FontInfo {
   licence: string;
 }
 
+/** One face's runs as the text library shapes them (engine/text/outline.ts ShapedGlyph: font units, y up). */
+export interface ShapedFace {
+  unitsPerEm: number;
+  runs: { glyphs: ShapedGlyph[]; missing: string[] }[]; // missing: the characters left on .notdef (glyph 0)
+}
+
 /** The text library, as the chunk gives it. */
 export interface TextLib {
   /** A font file's names and OS/2 bits; throws when the library can't read it. */
   openFont(bytes: Uint8Array): FontInfo;
+  /** Each run laid out in the font (S2: its default features, kerning and ligatures, as browsers apply them); throws when it can't read the file. */
+  shape(bytes: Uint8Array, runs: readonly string[]): ShapedFace;
 }
 
 let lib: Promise<TextLib> | null = null;

@@ -8,6 +8,7 @@ declare module 'fontkit' {
     id: number;
     name: string;
     advanceWidth: number;
+    codePoints: number[];
     path: { commands: PathCommand[] };
   }
   export interface GlyphPosition {
