@@ -44,3 +44,10 @@ test('preserve: newlines and tabs as spaces and every space kept, inherited from
   assert.equal(renderedText(doc, b.id), 'x y z', 'a tspan back under default collapses its own spaces');
   assert.equal(renderedText(doc, c.id), 'p  q  r', 'a preserved run between default ones');
 });
+
+test('preserve keeps two spaces and makes a tab a space (S2: Text to path’s A&amp;V  To keeps both spaces, and so does its aria-label)', () => {
+  const doc = load(svg('<text xml:space="preserve">A&amp;V  To\there</text>'));
+  assert.equal(renderedText(doc, texts(doc)[0].id), 'A&V  To here');
+  const def = load(svg('<text>A&amp;V  To\there</text>'));
+  assert.equal(renderedText(def, texts(def)[0].id), 'A&V To here', 'the default collapses them');
+});
