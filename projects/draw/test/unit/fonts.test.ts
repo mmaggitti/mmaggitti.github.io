@@ -132,7 +132,7 @@ test('your fonts: added (format sniffed, family and weight read by openFont, res
   await settle();
   assert.deepEqual(r.faces(), ['My Sans 700 italic'], 'registered from its own bytes');
   assert.deepEqual(r.fetches, [], 'no network for it');
-  await assert.rejects(r.fonts.add(new Blob([new Uint8Array(MAX_FONT_BYTES + 1)]), 'big.woff2'), new FontError(ADD_REFUSED));
+  await assert.rejects(r.fonts.add(new Blob([new TextEncoder().encode('wOF2'), new Uint8Array(MAX_FONT_BYTES)]), 'big.woff2'), new FontError(ADD_REFUSED), 'a WOFF2 over 10 MB');
   await assert.rejects(r.fonts.add(new Blob([new TextEncoder().encode('<svg/>')]), 'x.woff2'), new FontError(ADD_REFUSED));
   await assert.rejects(r.fonts.add(fontFile('nope'), 'nope.ttf'), new FontError(UNREADABLE));
   await assert.rejects(r.fonts.add(fontFile('arial'), 'arial.woff2'), new FontError(namedLikeApp('Arial')));

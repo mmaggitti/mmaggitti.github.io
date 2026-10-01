@@ -3069,6 +3069,113 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    const outline = loopsD(out.loops);\n', to: "    const outline = loopsD(mapLoops(out.loops, parseTransform(attrValueOf(doc, id, 'transform') ?? '')?.matrix ?? IDENTITY));\n",
     run: DRAW_E2E, expect: /strokeToPathCoversTheStroke: the rotated line: \d+ pixels differ/,
   },
+  // P1-M4 S1: text and fonts, quick unless marked.
+  {
+    id: 'B578', what: 'the catalogue leaves a face out (Caveat’s 600)',
+    file: 'projects/draw/src/platform/font-catalogue.ts', from: "generic: 'cursive', weights: [400, 500, 600, 700],", to: "generic: 'cursive', weights: [400, 500, 700],",
+    run: drawTests('font-catalogue.test.ts'), expect: /✖ the catalogue: each family’s every latin \.woff2 face/,
+  },
+  {
+    id: 'B579', what: 'the name guard lets Arial through (a file’s face named Arial would restyle the app)',
+    file: 'engine/text/font-faces.ts', from: '  return UI_NAMES.has(f) || GENERIC_FAMILIES.has(f) || KEYWORDS.has(f);', to: "  return (UI_NAMES.has(f) && f !== 'arial') || GENERIC_FAMILIES.has(f) || KEYWORDS.has(f);",
+    run: drawTests('fonts.test.ts'), expect: /✖ the name guard \(fonts\.ts’s appFontName\)/,
+  },
+  {
+    id: 'B580', what: 'use registers a face twice (every use makes another FontFace for it)',
+    file: 'projects/draw/src/platform/fonts.ts', from: '    if (registered.has(key) || ownFamilies.has(lower(f.family))) return;', to: '    if (ownFamilies.has(lower(f.family))) return;',
+    run: drawTests('fonts.test.ts'), expect: /✖ use registers exactly the faces asked for, each once/,
+  },
+  {
+    id: 'B581', what: 'documentFaces([]) leaves the old drawing’s faces on document.fonts',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      for (const f of own) deps.set.delete(f);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ documentFaces replaces the drawing’s own faces/,
+  },
+  {
+    id: 'B582', what: 'fontFaces takes the first source whatever it is (a local(), which has no data: font)',
+    file: 'engine/text/font-faces.ts', from: "const src = srcItems(desc.get('src') ?? '').map(dataSource).find((s) => s !== null);", to: "const src = srcItems(desc.get('src') ?? '').map(dataSource)[0];",
+    run: engineTests('text/font-faces.test.ts'), expect: /✖ the first usable source is taken/,
+  },
+  {
+    id: 'B583', what: 'readLines accepts a tspan with more attributes than x and dy (SVG Lab’s Typography, its fills)',
+    file: 'engine/text/lines.ts', from: '    if (k.attrs.length !== 2 || ax.ns !== null', to: '    if (k.attrs.length < 2 || ax.ns !== null',
+    run: engineTests('text/lines.test.ts'), expect: /✖ readLines refuses anything else/,
+  },
+  {
+    id: 'B584', what: 'planLines writes a space between the tspans (it lays out, and moves a middle-anchored line)',
+    file: 'engine/text/lines.ts', from: '${escape(l, null)}</${tag}>`).join(\'\');', to: '${escape(l, null)}</${tag}>`).join(\' \');',
+    run: engineTests('text/lines.test.ts'), expect: /✖ planLines: one line is one text node/,
+  },
+  {
+    id: 'B585', what: 'the second line’s dy is 0em (every line drawn over the first)',
+    file: 'engine/text/lines.ts', from: ' dy="${i ? LINE_DY : FIRST_DY}">', to: ' dy="${FIRST_DY}">',
+    run: engineTests('text/lines.test.ts'), expect: /✖ planLines: one line is one text node/,
+  },
+  {
+    id: 'B586', what: 'a text with a position list moves by its numbers (decision 8 says translate)',
+    file: 'engine/geometry/write.ts', from: '      if (k === -1 || k > 1 || (k === 1 &&', to: '      if (k === -1 || (k === 1 &&',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ per element, a move writes exactly the attributes in the table/,
+  },
+  {
+    id: 'B587', what: 'a tspan’s x stays put when its text moves (the lines split apart)',
+    file: 'engine/geometry/write.ts', from: "    if (!own && !(p.ns === NS.svg && p.local === 'tspan')) continue;", to: '    if (!own) continue;',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ per element, a move writes exactly the attributes in the table/,
+  },
+  {
+    id: 'B588', what: 'the font-family token cycles values beyond SVG Lab’s three generics',
+    file: 'engine/code/tokens.ts', from: "  'font-family': ['sans-serif', 'serif', 'monospace'],", to: "  'font-family': ['sans-serif', 'serif', 'monospace', 'cursive', 'Archivo, sans-serif'],",
+    run: engineTests('code/tokens.test.ts'), expect: /✖ font-family \(P1-M4\)/,
+  },
+  {
+    id: 'B589', what: 'Inspect offers a weight the family lacks (Bebas Neue’s 700)',
+    file: 'projects/draw/src/style-edit.ts', from: '  return [...list];\n}', to: '  return [...new Set([...list, 700])].sort((a, b) => a - b);\n}',
+    run: drawTests('inspect.test.ts'), expect: /✖ the weights and styles Inspect offers for a family/,
+  },
+  {
+    id: 'B590', what: 'the Text tool’s y misses the 0.35·S offset (the tap lands on the baseline, not the word’s middle)',
+    file: 'projects/draw/src/interact/text-tool.ts', from: 'y="${w(q(p.y + 0.35 * size))}"', to: 'y="${w(q(p.y))}"',
+    run: drawTests('text-tool.test.ts'), expect: /✖ a tap on a 100-unit board places SVG Lab’s "Hello" exactly/,
+  },
+  {
+    id: 'B591', what: 'check-sinks misses new FontFace outside src/platform/',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bnew\\s+FontFace\\s*\\(|\\bdocument\\.fonts\\b/,", to: "['font-face', /\\bdocument\\.fonts\\b/,",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps registering a font face to src\/platform\//,
+  },
+  {
+    id: 'B592', what: 'a font over 10 MB is stored',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      if (file.size > MAX_FONT_BYTES) throw new FontError(ADD_REFUSED);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ your fonts: added/,
+  },
+  {
+    id: 'B593', what: 'a package with no licence file (dfa) is missing from the notices test’s table',
+    file: 'projects/draw/test/unit/notices.test.ts', from: "  dfa: 'Licence: MIT (its package.json and README; the package and its repository ship no licence text). Author: Devon Govett (package.json).',\n", to: '',
+    run: drawTests('notices.test.ts'), expect: /✖ the notices name every package whose code ships/,
+  },
+  {
+    id: 'B594', what: 'the Text tool’s font toggle is ignored: every new text is Archivo (Mark, 2026-10-01)',
+    file: 'projects/draw/src/editor.ts', from: '    const family = this.textFont.get();\n    const value = fontValue(family,', to: '    const family = TEXT_DEFAULTS[0];\n    const value = fontValue(family,',
+    run: drawTests('editor.test.ts'), expect: /✖ the Text tool’s font \(Mark, 2026-10-01\)/,
+  },
+  // P1-M4 S1, slow (one per new e2e check, naming it).
+  {
+    id: 'B595', what: 'the Text tool places at the host px instead of the root units (the text isn’t under the tap)', slow: true, checks: ['theTextToolPlacesHelloAndWritesLines'],
+    file: 'projects/draw/src/editor.ts', from: '    const p = this.#snapRoot(at, this.#snapTargets([]), step).p;\n', to: '    const p = at;\n',
+    run: DRAW_E2E, expect: /theTextToolPlacesHelloAndWritesLines: the tap wrote/,
+  },
+  {
+    id: 'B596', what: 'fonts.ts registers the whole catalogue at the first use (every face fetched, not only what a drawing uses)', slow: true, checks: ['fontsLoadOnlyWhatTheDrawingUses'],
+    file: 'projects/draw/src/platform/fonts.ts', from: '        for (const f of faces) register(f);\n', to: "        for (const f of [...faces, ...CATALOGUE.flatMap((c) => c.weights.map((weight) => ({ family: c.family, weight, style: 'normal' as const })))]) register(f);\n",
+    run: DRAW_E2E, expect: /fontsLoadOnlyWhatTheDrawingUses: (before any text, |the drawing fetched )/,
+  },
+  {
+    id: 'B597', what: 'the editor never registers a file’s own faces (documentFaces): Chromium draws the text in serif (WebKit draws a shadow tree’s own @font-face anyway, so Chromium is where this shows)', slow: true, checks: ['aFilesOwnFontDrawsInEveryEngine'],
+    file: 'projects/draw/src/editor.ts', from: '      fonts.documentFaces(fontFaces(doc).faces);\n', to: '',
+    run: DRAW_E2E, expect: /aFilesOwnFontDrawsInEveryEngine: iiiiiiii in the file's own face measures/,
+  },
+  {
+    id: 'B598', what: 'Inspect’s Text rows shrink below 44 pt (the Font button 18 pt tall)', slow: true, checks: ['phoneRulesOnTheTextTools'],
+    file: 'projects/draw/src/app.css', from: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); }', to: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); min-height: 1.5rem; height: 1.5rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheTextTools \((956|796)\)[\s\S]*Inspect's Text section at (half|full): tap targets under 44pt/,
+  },
 ];
 
 const args = process.argv.slice(2);
