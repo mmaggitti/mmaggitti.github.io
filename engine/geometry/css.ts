@@ -90,14 +90,25 @@ export function cssSets(doc: Doc, id: NodeId, prop: string): CssSource {
 export type SheetSource = 'no' | 'rule' | 'important';
 
 /**
+ * The element a selector is asked about as another (P1-M4 S0): `local` its element type in place of
+ * its own (a shape turned into a <path>), and `bare` true for a new element of that type with no id
+ * and no class (a <path> added beside it).
+ */
+export interface AsElement {
+  local: string;
+  bare?: boolean;
+}
+
+/**
  * Whether a <style> rule may set `prop` on this element, whatever its own style="" says: 'important'
  * when such a rule declares it !important, else 'rule' (a @keyframes animation counts as a rule),
- * else 'no'. Read from the cached sheet, so asking about many elements reads the sheets once.
+ * else 'no'. Read from the cached sheet, so asking about many elements reads the sheets once. `as`
+ * asks about it as another element (AsElement).
  */
-export function sheetSets(doc: Doc, id: NodeId, prop: string): SheetSource {
+export function sheetSets(doc: Doc, id: NodeId, prop: string, as?: AsElement): SheetSource {
   const names = [prop, ...(SHORTHANDS[prop] ?? [])];
   const sheet = sheetOf(doc);
-  const node = el(doc, id);
+  const node = subjectOf(doc, el(doc, id), as);
   let out: SheetSource = 'no';
   for (const r of sheet.rules) {
     let sets = false;
@@ -115,7 +126,7 @@ export function sheetSets(doc: Doc, id: NodeId, prop: string): SheetSource {
   if (out !== 'no') return out;
   // A @keyframes rule sets what it animates on an element that some rule (or its style) animates.
   if (sheet.keyframes.has(prop) || names.some((n) => sheet.keyframes.has(n))) {
-    const style = attrValue(doc, node, null, 'style');
+    const style = as?.bare ? null : attrValue(doc, el(doc, id), null, 'style');
     const animated = (style !== null && declarations(style).some((d) => d.name === 'animation' || d.name === 'animation-name'))
       || sheet.rules.some((r) => r.decls.some((d) => d.name === 'animation' || d.name === 'animation-name') && r.selectors.some((s) => mayMatch(s, doc, node)));
     if (animated) return 'rule';
@@ -266,13 +277,32 @@ function lastCompound(selector: string): Compound {
 
 const unescapeIdent = (s: string) => s.replace(/\\(.)/g, '$1');
 
-function mayMatch(c: Compound, doc: Doc, node: ElementNode): boolean {
+// What a selector's last compound is matched against: the element's type, id and classes (or another's: AsElement).
+interface Subject {
+  local: string;
+  id: string | null;
+  classes: string[];
+}
+
+function subjectOf(doc: Doc, node: ElementNode, as?: AsElement): Subject {
+  if (as?.bare) return { local: as.local, id: null, classes: [] };
+  return { local: as?.local ?? node.local, id: attrValue(doc, node, null, 'id'), classes: (attrValue(doc, node, null, 'class') ?? '').split(/[ \t\n\r\f]+/).filter(Boolean) };
+}
+
+/** The properties any <style> rule declares (lowercase), and `animation` when a @keyframes block animates something. */
+export function sheetProps(doc: Doc): ReadonlySet<string> {
+  const sheet = sheetOf(doc);
+  const out = new Set<string>();
+  for (const r of sheet.rules) for (const d of r.decls) out.add(d.name);
+  if (sheet.keyframes.size) out.add('animation');
+  return out;
+}
+
+function mayMatch(c: Compound, _doc: Doc, node: Subject): boolean {
   if (c.type === null && !c.ids.length && !c.classes.length) return true;
   if (c.type === '*' || c.type === node.local) return true;
-  const id = attrValue(doc, node, null, 'id');
-  if (id !== null && c.ids.includes(id)) return true;
-  const classes = (attrValue(doc, node, null, 'class') ?? '').split(/[ \t\n\r\f]+/).filter(Boolean);
-  return c.classes.some((k) => classes.includes(k));
+  if (node.id !== null && c.ids.includes(node.id)) return true;
+  return c.classes.some((k) => node.classes.includes(k));
 }
 
 // ── scanning ───────────────────────────────────────────────────────────────────────────────────

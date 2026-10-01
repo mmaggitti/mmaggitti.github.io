@@ -88,12 +88,13 @@ import { nearestViewport, viewportSize } from '../../../engine/geometry/ctm.ts';
 import { parsePaint } from '../../../engine/values/color.ts';
 import { elementLabel } from './panels/label.ts';
 import { pathNodes, planBendTap, planNodeDrag, type NodeKind } from '../../../engine/path/nodes.ts';
-import { shapeOutline } from '../../../engine/path/from-shape.ts';
-import { loopsD, mapLoops, toLoops } from '../../../engine/path/loops.ts';
+import { NOT_OUTLINED, OUTLINED, shapeOutline } from '../../../engine/path/from-shape.ts';
+import { loopsD, mapLoops, toLoops, toSubpaths } from '../../../engine/path/loops.ts';
+import { strokeLoops, strokeOf } from '../../../engine/path/offset.ts';
 import type { BoolOp } from '../../../engine/path/winding.ts';
-import { runPipeline, type BoolInput, type Libraries } from './paths/pipeline.ts';
+import { EMPTY as NOTHING_LEFT, REFUSED, runPipeline, type BoolInput, type Libraries } from './paths/pipeline.ts';
 import { LAZY_LIBRARIES } from './paths/load.ts';
-import { writeBoolean } from './paths/write.ts';
+import { pathRuleRefusal, writeBoolean, writeStrokeOutline } from './paths/write.ts';
 import { closeLast, cycleSegment as cycleSegmentOf, lastClosed, makeCorner, makeSmooth, nodeType, openLast, readsRelative, reverseSubpath, setArcFlags, subpathCount, toggleRelative as toggleRelativeOf } from '../../../engine/path/segments.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
@@ -866,6 +867,9 @@ export class Editor {
     // A bottom shape becomes a <path>: a <style> rule that styles it (by its type, say) may then miss it,
     // and Draw can't read selectors yet. A <path> bottom keeps its element.
     if (bottom.local !== 'path' && Object.keys(STYLE_PROPS).some((p) => sheetSets(doc, bottom.id, p) !== 'no')) return { refused: STYLE_PAINT };
+    // The converse (P1-M4 S0): a rule that styles a <path> (by its type, say) may paint the new one.
+    const asPath = pathRuleRefusal(doc, bottom.id);
+    if (asPath) return { refused: asPath };
     const measured = this.#ports.canvas.measure(ids);
     const base = measured.get(ids[0]);
     const toBottom = base && invert(base.toHost);
@@ -881,6 +885,55 @@ export class Editor {
       inputs.push({ loops: id === ids[0] ? loops : mapLoops(loops, multiply(toBottom, m.toHost)), rule: rule.trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero' });
     }
     return { inputs };
+  }
+
+  /** Whether More offers Stroke to path: one selected shape (not the root) that has an outline. */
+  canStrokeToPath(): boolean {
+    const doc = this.#doc;
+    const ids = [...this.selection.get()];
+    const n = doc && ids.length === 1 && ids[0] !== doc.root ? doc.nodes.get(ids[0]) : undefined;
+    return n?.kind === 'element' && n.ns === NS.svg && OUTLINED.has(n.local);
+  }
+
+  /**
+   * Stroke to path (P1-M4 S0): the one selected shape's stroke as a filled outline, in its own user
+   * units (engine/path/offset.ts: a stroker's outline, its joins and caps), unioned by path-bool from its
+   * lazy chunk as one input under nonzero (each subpath its own input if that is refused), and scored
+   * as a boolean is (paper-core only when path-bool misses). Nothing is
+   * written until it passes, and the drawing changing meanwhile refuses. Then one entry, "Stroke to
+   * path" (paths/write.ts writeStrokeOutline: the shape becomes the outline, or keeps its fill and gains
+   * it right after), and the outline is selected. Refusals say why and write nothing.
+   */
+  async strokeToPath(): Promise<void> {
+    const doc = this.#doc;
+    if (!doc || this.#live || this.#gesture) return;
+    const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
+    if (!ids) return;
+    if (ids.length !== 1) return void this.notice.set('Select one shape to turn its stroke into a path.');
+    const id = ids[0];
+    const n = el(doc, id);
+    if (n.ns !== NS.svg || !OUTLINED.has(n.local)) return void this.notice.set(NOT_OUTLINED);
+    const child = n.children.map((c) => doc.nodes.get(c)!).find((c) => c.kind === 'element' && !(c.ns === NS.svg && (c.local === 'title' || c.local === 'desc')));
+    if (child) return void this.notice.set(`Its <${(child as ElementNode).qname}> would be lost.`);
+    const s = strokeOf(doc, id, this.geo);
+    if ('refused' in s) return void this.notice.set(s.refused);
+    const ruled = pathRuleRefusal(doc, id, s.filled);
+    if (ruled) return void this.notice.set(ruled);
+    if (s.filled && cssSets(doc, id, 'transform') !== 'no') return void this.notice.set(cssWhy('transform', cssSets(doc, id, 'transform') as 'inline' | 'sheet'));
+    const o = shapeOutline(doc, id, this.geo);
+    if ('refused' in o) return void this.notice.set(o.refused);
+    const groups = strokeLoops(toSubpaths(o.abs), s.style);
+    if (!groups.length) return void this.notice.set(NOTHING_LEFT);
+    const version = doc.version;
+    // The outline as one input under nonzero; if both libraries refuse it, each subpath as its own.
+    const libs = this.#ports.booleans ?? LAZY_LIBRARIES;
+    let out = await runPipeline([{ loops: groups.flat(), rule: 'nonzero' }], 'union', libs);
+    if ('refused' in out && out.refused === REFUSED && groups.length > 1) out = await runPipeline(groups.map((loops): BoolInput => ({ loops, rule: 'nonzero' })), 'union', libs);
+    if (this.#doc !== doc || doc.version !== version || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);
+    if ('refused' in out) return void this.notice.set(out.refused);
+    const outline = loopsD(out.loops);
+    let result: NodeId | null = null;
+    if (this.#dispatch('Stroke to path', (apply) => void (result = writeStrokeOutline(doc, id, outline, s, this.styleCtx, apply)))) this.select([result!]);
   }
 
   /** Duplicate the selection: each copy just after its original, 5 units right and down, selected. */
