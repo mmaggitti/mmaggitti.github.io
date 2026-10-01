@@ -97,6 +97,15 @@ test('With fonts names the texts whose font a <style> rule sets (Draw can’t re
   assert.equal(ruledFonts(['A', 'B', 'C', 'D', 'E']), 'A <style> rule sets the font of “A”, “B”, “C” and 2 more, which Draw can’t read yet (P2): their fonts aren’t embedded.');
 });
 
+test('As paths reads text as SVG lays it out under xml:space: a preserve text keeps its two spaces in its aria-label, a default one collapses them', async () => {
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text id="p" x="1" y="15" font-family="Inter" xml:space="preserve">A  B</text><text id="d" x="1" y="35" font-family="Inter">A  B</text></svg>';
+  const out = await prepareExport(load(src), 'space', 'paths', deps);
+  assert.ok(!('refused' in out), 'refused' in out ? out.refused : '');
+  const t = text(out as Prepared);
+  assert.match(t, /<path id="p" [^>]*aria-label="A  B"\/>/);
+  assert.match(t, /<path id="d" [^>]*aria-label="A B"\/>/);
+});
+
 test('As-is and Save to Files are unchanged by the text choices; Clean as text is the clean file', async () => {
   const doc = load(SRC);
   assert.equal(new TextDecoder().decode(exportFile(doc, 'fonts', 'as-is').bytes), SRC);
