@@ -15,6 +15,7 @@ import { exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesNa
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { LATIN_RANGE, catalogueFamily, faceFile, hasFace } from '../../src/platform/font-catalogue.ts';
 import { reservedNames } from '../../src/platform/fonts.ts';
+import { TOO_MUCH_TEXT } from '../../src/text/pipeline.ts';
 import { NOT_HELD } from '../../../../engine/text/outline.ts';
 import { cssAllowed } from '../../../../scripts/lib/svg-profile.mjs';
 
@@ -118,6 +119,19 @@ test('With fonts writes one of your fonts whose copyright reserves a name withou
   assert.match(t, /<path id="o" d="M [^"]+" aria-label="Mine"\/>/);
   assert.doesNotMatch(t, /@font-face/);
   assert.deepEqual((out as Prepared).notes, [reservesName('Oswald', 'Oswald')]);
+});
+
+test('As paths outlines at most 20,000 characters: a text that would take it past that stays text, saying so', async () => {
+  // A library that draws each character as a box (fontkit over 20,000 characters is the pipeline test’s matter).
+  const boxes: ExportDeps = { ...deps, textDeps: (own) => ({ ...deps.textDeps(own), lib: async () => ({ openFont, shape: (_b, runs) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [500, 700] }, { command: 'closePath', args: [] }], xAdvance: 500, xOffset: 0, yOffset: 0 })), missing: [] })) }) }) }) };
+  const src = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text id="a" x="1" y="9" font-family="Inter">${'a'.repeat(15000)}</text><text id="b" x="1" y="19" font-family="Inter">${'b'.repeat(6000)}</text></svg>`;
+  const out = await prepareExport(load(src), 'long', 'paths', boxes);
+  assert.ok(!('refused' in out), 'refused' in out ? out.refused : '');
+  const t = text(out as Prepared);
+  assert.match(t, /<path id="a" d="M /);
+  assert.match(t, /<text id="b" /, 'past the budget: kept as text');
+  assert.deepEqual((out as Prepared).notes, [keptAsText(1, [TOO_MUCH_TEXT])]);
+  assert.equal(keptAsText(1, [TOO_MUCH_TEXT]), 'Kept as text: 1. Draw outlines up to 20,000 characters at once.');
 });
 
 test('a text library that won’t load refuses (the sheet falls back to As text)', async () => {

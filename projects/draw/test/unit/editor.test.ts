@@ -3054,6 +3054,28 @@ test('Text to path refuses, saying why and writing nothing: a font Draw holds no
   assert.equal(TEXT_FIRST, 'Convert text to paths first: More → Text to path.');
 });
 
+test('Text to path refuses a selection whose texts hold more than 20,000 characters, before its library loads, saying so; 20,000 are outlined', async () => {
+  let loads = 0;
+  // A library that draws each character as a box (fontkit over 20,000 characters is the pipeline test’s matter).
+  const boxes = async () => {
+    loads++;
+    return { openFont, shape: (_b: Uint8Array, runs: readonly string[]) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [500, 0] }, { command: 'lineTo', args: [500, 700] }, { command: 'closePath', args: [] }], xAdvance: 500, xOffset: 0, yOffset: 0 })), missing: [] })) }) };
+  };
+  const r = rig(HOST, {}, undefined, textPorts(boxes));
+  const F = BOARD(`  <text id="a" x="1" y="9" font-family="Inter">${'a'.repeat(15000)}</text>\n  <text id="b" x="1" y="19" font-family="Inter">${'b'.repeat(5001)}</text>\n`);
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'The selection holds too much text to turn into paths at once: 20,001 characters, and Draw outlines up to 20,000.');
+  assert.equal(loads, 0, 'refused before the library loads');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+  r.editor.open(F.replace('b'.repeat(5001), 'b'.repeat(5000)));
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path', '20,000 characters are outlined');
+});
+
 test('a Text to path whose text library fails outright (it returns no run for a text) says it can’t outline the text, naming it, and writes nothing', async () => {
   const broken = async () => ({ openFont, shape: () => ({ unitsPerEm: 1000, runs: [] }) });
   const r = rig(HOST, {}, undefined, textPorts(broken));

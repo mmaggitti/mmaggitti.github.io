@@ -2,8 +2,11 @@
 // `deps`, so node's tests run it with fontkit itself over the catalogue's files, and the editor and the
 // Export sheet hand it the lazy chunk (load.ts) and Fonts.bytes (or a file's own face's bytes).
 // 1. The library loads (its chunk, the first time); if it can't, nothing is outlined: OFFLINE.
-// 2. Each face the texts use is read once (its bytes, then one shape call for all its runs).
-// 3. Each text is outlined (engine/text/outline.ts outlineD) unless one of its characters is outside
+// 2. The budget, before anything is shaped: the texts are taken in order while their characters total at
+//    most 20,000 (about 12 MB of path data); one that would take the total past it is refused (and a
+//    later, shorter one may still fit).
+// 3. Each face the texts use is read once (its bytes, then one shape call for all its runs).
+// 4. Each text is outlined (engine/text/outline.ts outlineD) unless one of its characters is outside
 //    its face's unicode-range (the browser draws it from another font) or left on .notdef, its face's
 //    file couldn't be had or read (a unitsPerEm outside 16 to 16384 is unreadable, as the browser's
 //    own sanitizer finds it), its glyphs' numbers can't be drawn, or nothing would be drawn: then it
@@ -27,6 +30,17 @@ export const OFFLINE = 'Draw couldn’t load the text tools. Try again when you�
 export const EMPTY = 'Nothing would be left.';
 export const faceUnloaded = (family: string) => `Draw couldn’t load ${family}. Try again when you’re online.`;
 export const faceUnreadable = (family: string) => `Draw can’t read ${family}’s file.`;
+/** The most characters one Text to path, or one export, outlines. */
+export const MAX_OUTLINE_CHARS = 20000;
+export const TOO_MUCH_TEXT = 'Draw outlines up to 20,000 characters at once.';
+/** Text to path's refusal when the selected texts hold more than MAX_OUTLINE_CHARS characters. */
+export const tooMuchText = (n: number) => `The selection holds too much text to turn into paths at once: ${n.toLocaleString('en-US')} characters, and Draw outlines up to 20,000.`;
+/** The characters a text outlines (code points, every run's). */
+export function outlineChars(t: OutlineText): number {
+  let n = 0;
+  for (const c of t.chunks) for (const r of c.runs) for (const _ of r.text) n++;
+  return n;
+}
 /** Why a text whose glyphs' numbers can't be drawn isn't outlined, naming the text (its first 40 characters). */
 export const cantOutline = (label: string) => `Draw can’t outline “${[...label].length > 40 ? `${[...label].slice(0, 40).join('')}…` : label}”.`;
 
@@ -42,9 +56,17 @@ export async function outlineTexts(texts: readonly OutlineText[], deps: TextDeps
   } catch {
     return { refused: OFFLINE };
   }
-  // Every run, by its face, in the order the texts first use each.
+  const why: (string | null)[] = texts.map(() => null);
+  let left = MAX_OUTLINE_CHARS;
+  texts.forEach((t, i) => {
+    const n = outlineChars(t);
+    if (n > left) why[i] = TOO_MUCH_TEXT;
+    else left -= n;
+  });
+  // Every run of the texts within the budget, by its face, in the order the texts first use each.
   const faces = new Map<string, { face: OutlineFace; runs: { t: number; c: number; r: number; text: string }[] }>();
-  texts.forEach((t, ti) =>
+  texts.forEach((t, ti) => {
+    if (why[ti] !== null) return;
     t.chunks.forEach((chunk, ci) =>
       chunk.runs.forEach((run, ri) => {
         const k = keyOf(run.face);
@@ -52,9 +74,8 @@ export async function outlineTexts(texts: readonly OutlineText[], deps: TextDeps
         if (!f) faces.set(k, (f = { face: run.face, runs: [] }));
         f.runs.push({ t: ti, c: ci, r: ri, text: run.text });
       }),
-    ),
-  );
-  const why: (string | null)[] = texts.map(() => null);
+    );
+  });
   const shaped: (ShapedRun | null)[][][] = texts.map((t) => t.chunks.map((c) => c.runs.map(() => null)));
   for (const { face, runs } of faces.values()) {
     const range = deps.range(face);

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { CATALOGUE, LATIN_RANGE, catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
-import { EMPTY, OFFLINE, cantOutline, faceUnloaded, faceUnreadable, outlineTexts, type Outlined, type TextDeps } from '../../src/text/pipeline.ts';
+import { EMPTY, MAX_OUTLINE_CHARS, OFFLINE, TOO_MUCH_TEXT, cantOutline, faceUnloaded, faceUnreadable, outlineChars, outlineTexts, type Outlined, type TextDeps } from '../../src/text/pipeline.ts';
 import type { TextLib } from '../../src/text/load.ts';
 import { NO_FACE, NO_GLYPH, outlineText, type OutlineText } from '../../../../engine/text/outline.ts';
 import { descendants, parseDoc, type Doc, type ElementNode } from '../../../../engine/model/doc.ts';
@@ -116,4 +116,23 @@ test('a face whose unitsPerEm is outside 16 to 16384 is unreadable (0, 15, 16385
   assert.deepEqual(await outlineTexts(one, deps({ lib: async () => stubLib(1000, NaN) })), [{ refused: cantOutline('Hello') }]);
   assert.equal(cantOutline('Hello'), 'Draw can’t outline “Hello”.');
   assert.equal(cantOutline('x'.repeat(41)), `Draw can’t outline “${'x'.repeat(40)}…”.`, 'its first 40 characters');
+});
+
+test('a budget of 20,000 characters a call, before anything is shaped: 20,000 outline and 20,001 refuse; in order, a text that would take the total past it is refused and a later one that fits is outlined', async () => {
+  assert.equal(MAX_OUTLINE_CHARS, 20000);
+  const shaped: number[] = [];
+  const counting: TextLib = { ...stubLib(1000), shape: (bytes, runs) => (shaped.push(runs.reduce((n, r) => n + r.length, 0)), stubLib(1000).shape(bytes, runs)) };
+  const long = (n: number, y = 9) => `<text x="1" y="${y}" font-family="Inter" font-size="10">${'a'.repeat(n)}</text>`;
+  const at = outlines(long(20000));
+  assert.equal(outlineChars(at[0]), 20000);
+  const [ok] = (await outlineTexts(at, deps({ lib: async () => counting }))) as Outlined[];
+  assert.ok('d' in ok, 'refused' in ok ? ok.refused : '');
+  assert.deepEqual(shaped, [20000]);
+  shaped.length = 0;
+  assert.deepEqual(await outlineTexts(outlines(long(20001)), deps({ lib: async () => counting })), [{ refused: TOO_MUCH_TEXT }]);
+  assert.deepEqual(shaped, [], 'nothing shaped');
+  const three = (await outlineTexts(outlines(long(15000) + long(6000, 19) + long(5000, 29)), deps({ lib: async () => counting }))) as Outlined[];
+  assert.deepEqual(three.map((o) => ('d' in o ? 'd' : o.refused)), ['d', TOO_MUCH_TEXT, 'd']);
+  assert.deepEqual(shaped, [20000], 'the refused text’s runs were never shaped');
+  assert.equal(outlineChars(outlines('<text x="1" y="9" font-family="Inter">a\u{1F600}b</text>')[0]), 3, 'characters, not UTF-16 units');
 });

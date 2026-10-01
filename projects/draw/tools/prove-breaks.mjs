@@ -3397,6 +3397,16 @@ const BREAKS = [
     file: 'engine/text/font-faces.ts', from: '  if (hit && hit.css === css) return hit.ok;', to: '  if (hit) return hit.ok;',
     run: engineTests('text/font-faces.test.ts'), expect: /✖ each <style>’s guard verdict is kept by its text/,
   },
+  {
+    id: 'B642', what: 'Text to path’s pipeline has no budget: 20,001 characters are shaped and outlined (a long text outlines into tens of MB)',
+    file: 'projects/draw/src/text/pipeline.ts', from: '    if (n > left) why[i] = TOO_MUCH_TEXT;\n    else left -= n;', to: '    left -= n;',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a budget of 20,000 characters a call/,
+  },
+  {
+    id: 'B643', what: 'Text to path loads the library for a selection over 20,000 characters (no refusal up front naming the selection)',
+    file: 'projects/draw/src/editor.ts', from: '    if (chars > MAX_OUTLINE_CHARS) return void this.notice.set(tooMuchText(chars)); // before the library loads\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Text to path refuses a selection whose texts hold more than 20,000 characters/,
+  },
 ];
 
 const args = process.argv.slice(2);

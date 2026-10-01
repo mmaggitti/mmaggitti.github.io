@@ -117,7 +117,7 @@ import { readLines, planLines } from '../../../engine/text/lines.ts';
 import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest, type OwnFace } from '../../../engine/text/font-faces.ts';
 import { outlineText, type OutlineText } from '../../../engine/text/outline.ts';
 import { textPathMarkup, writeTextToPath } from '../../../engine/text/to-path.ts';
-import { cantOutline, outlineTexts, type TextDeps } from './text/pipeline.ts';
+import { MAX_OUTLINE_CHARS, cantOutline, outlineChars, outlineTexts, tooMuchText, type TextDeps } from './text/pipeline.ts';
 import { loadTextLib, type TextLib } from './text/load.ts';
 import { appFonts, couldNotLoad, SHEET_FACES, type FontEvent, type Fonts } from './platform/fonts.ts';
 import { LATIN_RANGE, TEXT_DEFAULTS, catalogueFamily, hasFace } from './platform/font-catalogue.ts';
@@ -1049,8 +1049,9 @@ export class Editor {
    * Text to path (P1-M4 S2): each selected <text> (other shapes are left alone) becomes one <path> in
    * its place, outlined from the face the canvas draws (engine/text/outline.ts reads it and says what
    * refuses; text/pipeline.ts shapes it with fontkit from its lazy chunk). Nothing is written while any
-   * selected text refuses, the drawing changing meanwhile refuses (combine's rule), and a pipeline that
-   * fails outright says it can't outline the text, naming it. Then one entry,
+   * selected text refuses, the drawing changing meanwhile refuses (combine's rule), a selection whose
+   * texts hold more than 20,000 characters refuses before anything loads, and a pipeline that fails
+   * outright says it can't outline the text, naming it. Then one entry,
    * "Text to path" (engine/text/to-path.ts: one fragment parse per parent), and the paths are selected.
    */
   async textToPath(): Promise<void> {
@@ -1070,6 +1071,8 @@ export class Editor {
       if ('refused' in r) return void this.notice.set(r.refused);
       reads.push(r);
     }
+    const chars = reads.reduce((n, r) => n + outlineChars(r), 0);
+    if (chars > MAX_OUTLINE_CHARS) return void this.notice.set(tooMuchText(chars)); // before the library loads
     const version = doc.version;
     let out: Awaited<ReturnType<typeof outlineTexts>>;
     try {
