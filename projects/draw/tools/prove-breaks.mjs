@@ -3176,6 +3176,68 @@ const BREAKS = [
     file: 'projects/draw/src/app.css', from: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); }', to: '.draw-font-btn, .draw-weight-btn { flex: 1 1 auto; font-size: var(--text-md); min-height: 1.5rem; height: 1.5rem; }',
     run: DRAW_E2E, expect: /phoneRulesOnTheTextTools \((956|796)\)[\s\S]*Inspect's Text section at (half|full): tap targets under 44pt/,
   },
+  // P1-M4 S2: text to path and export, quick unless marked.
+  {
+    id: 'B599', what: 'outlineD skips the y flip (a glyph is drawn upside down, below its baseline)',
+    file: 'engine/text/outline.ts', from: 'const p = (x: number, y: number) => `${fmt(ox + x * s, 3)} ${fmt(oy - y * s, 3)}`;', to: 'const p = (x: number, y: number) => `${fmt(ox + x * s, 3)} ${fmt(oy + y * s, 3)}`;',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD places a glyph at the pen/,
+  },
+  {
+    id: 'B600', what: 'a middle-anchored line starts at its x (not half its advance to the left)',
+    file: 'engine/text/outline.ts', from: "let pen = chunk.x - w * (chunk.anchor === 'middle' ? 0.5 : chunk.anchor === 'end' ? 1 : 0);", to: "let pen = chunk.x - w * (chunk.anchor === 'middle' ? 0 : chunk.anchor === 'end' ? 1 : 0);",
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD anchors a line at start, middle and end/,
+  },
+  {
+    id: 'B601', what: 'the outline scales by size ÷ 1000, not the font’s unitsPerEm (Inter’s is 2048)',
+    file: 'engine/text/outline.ts', from: /run\.size \/ shaped\[c\]\[r\]\.unitsPerEm/g, to: 'run.size / 1000',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineD places a glyph at the pen, scales it by size ÷ unitsPerEm/,
+  },
+  {
+    id: 'B602', what: 'a text with a position list is outlined at its first position (it must refuse)',
+    file: 'engine/text/outline.ts', from: '.split(/[\\s,]+/).length > 1;', to: '.split(/[\\s,]+/).length > 99;',
+    run: engineTests('text/outline.test.ts'), expect: /✖ outlineText refuses tools\/edge-text-xml-space-tspans\.svg’s position-list/,
+  },
+  {
+    id: 'B603', what: 'the path keeps the text’s font-family',
+    file: 'engine/text/to-path.ts', from: "  'font-family', 'font-size', 'font-size-adjust',", to: "  'font-size', 'font-size-adjust',",
+    run: engineTests('text/to-path.test.ts'), expect: /✖ the path keeps the text’s attributes in their order/,
+  },
+  {
+    id: 'B604', what: 'the path gets no aria-label (its characters are lost to a screen reader)',
+    file: 'engine/text/to-path.ts', from: "if (!moved.some((c) => el(doc, c).local === 'title')) s += ` aria-label=", to: "if (moved.some((c) => el(doc, c).local === 'none')) s += ` aria-label=",
+    run: engineTests('text/to-path.test.ts'), expect: /✖ the aria-label is the characters as laid out/,
+  },
+  {
+    id: 'B605', what: 'a character the face has no glyph for is outlined as .notdef (its box)',
+    file: 'projects/draw/src/text/pipeline.ts', from: '      if (s.missing.length) why[u.t] ??= NO_GLYPH(face.family, s.missing[0]);\n', to: '',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a character a face can’t draw refuses/,
+  },
+  {
+    id: 'B606', what: 'With fonts embeds a font with a Reserved Font Name (IBM Plex Sans’s “Plex”)',
+    file: 'projects/draw/src/export/svg.ts', from: 'const no = held.reserved.length ? reservesName(', to: 'const no = held.reserved.length < 0 ? reservesName(',
+    run: drawTests('export-text.test.ts'), expect: /✖ With fonts: one <style> right after the <title>/,
+  },
+  {
+    id: 'B607', what: 'As paths converts Georgia, a font Draw holds no file for (outlined in another face)',
+    file: 'engine/text/outline.ts', from: '  if (!held) return { refused: NOT_HELD(family) };', to: "  if (!held) return { family: 'Inter', weight, style, own: null };",
+    run: drawTests('export-text.test.ts'), expect: /✖ As paths: the three texts in Draw’s fonts become paths/,
+  },
+  {
+    id: 'B608', what: 'the text library reads the face’s .woff, not the .woff2 the canvas draws (Archivo’s outlines differ)',
+    file: 'projects/draw/src/platform/font-catalogue.ts', from: '`${slug}-latin-${weight}-${style}.woff2`', to: '`${slug}-latin-${weight}-${style}.woff`',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ what is read is the \.woff2 the canvas registers/,
+  },
+  // P1-M4 S2, slow (one per new e2e check, naming it).
+  {
+    id: 'B609', what: 'the editor imports src/text/outline-lib.ts statically, so fontkit rides in the first chunk', slow: true, checks: ['textToPathLooksTheSame'],
+    file: 'projects/draw/src/editor.ts', from: "import { loadTextLib, type TextLib } from './text/load.ts';", to: "import type { TextLib } from './text/load.ts';\nimport * as staticTextLib from './text/outline-lib.ts';\nconst loadTextLib = async (): Promise<TextLib> => staticTextLib;",
+    run: DRAW_E2E, expect: /textToPathLooksTheSame: the first Text to path loaded/,
+  },
+  {
+    id: 'B610', what: 'the Export sheet shares the As text file while As paths is still preparing (Clean’s file would still hold <text>)', slow: true, checks: ['exportWritesTextAsPathsOrWithFonts'],
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: "const ready = choice === 'text' ? clean : prep?.choice === choice ? prep.file : null;", to: "const ready = choice === 'text' ? clean : prep?.choice === choice && prep.file ? prep.file : clean;",
+    run: DRAW_E2E, expect: /exportWritesTextAsPathsOrWithFonts: while As paths prepares, Clean's button reads/,
+  },
 ];
 
 const args = process.argv.slice(2);

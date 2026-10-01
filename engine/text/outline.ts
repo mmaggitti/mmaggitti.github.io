@@ -106,11 +106,13 @@ type Refused = { refused: string };
 
 const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/i;
 
+/** Is a position attribute a list: two or more values, one for each character? */
+const isList = (raw: string): boolean => raw.trim().split(/[\s,]+/).length > 1;
+
 /** One length: a number, px, or (`em` given) em of that font size; a list or another unit refuses. */
 function oneLength(name: string, raw: string, em: number | null): number | Refused {
-  const items = raw.trim().split(/[\s,]+/).filter(Boolean);
-  if (items.length > 1) return { refused: name === 'rotate' ? 'Its rotate turns each character, which Draw can’t outline yet.' : `Its ${name} is a list (a position for each character), which Draw can’t outline yet.` };
-  const t = items[0] ?? '';
+  if (isList(raw)) return { refused: name === 'rotate' ? 'Its rotate turns each character, which Draw can’t outline yet.' : `Its ${name} is a list (a position for each character), which Draw can’t outline yet.` };
+  const t = raw.trim();
   const m = NUMBER.exec(t);
   if (!m) return { refused: `Its ${name} is ${t}, which Draw can’t outline.` };
   const n = Number(m[0]);
@@ -246,7 +248,7 @@ export function outlineText(doc: Doc, id: NodeId, ctx: OutlineCtx): OutlineText 
   for (const n of [text, ...inside]) {
     for (const name of ['x', 'y', 'dx', 'dy']) {
       const raw = attrValue(doc, n, null, name);
-      if (raw !== null && raw.trim().split(/[\s,]+/).length > 1) return { refused: `Its ${name} is a list (a position for each character), which Draw can’t outline yet.` };
+      if (raw !== null && isList(raw)) return { refused: `Its ${name} is a list (a position for each character), which Draw can’t outline yet.` };
     }
     for (const name of ['textLength', 'lengthAdjust']) {
       if (attrValue(doc, n, null, name) !== null) return { refused: `Its ${name} fits it to a length, which Draw can’t outline yet.` };
