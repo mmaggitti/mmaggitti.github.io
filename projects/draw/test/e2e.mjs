@@ -6934,7 +6934,8 @@ async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
   });
 }
 
-// A file with one Inter 700 text. After it opens exactly one font file was fetched, Inter's latin 700,
+// A file with one Inter 700 text (and a Georgia one, a family Draw holds no file for, which Inspect
+// marks in words and a sign). After it opens exactly one font file was fetched, Inter's latin 700,
 // and the text's drawn width equals a reference drawn outside the canvas in Inter 700 at its size
 // (± 0.5 px) and differs from sans-serif's. Inspect → Font opens the Font sheet, which fetches the ten
 // 400 faces and no others; Fraunces writes font-family="Fraunces, serif" (one "Set font") and fetches
@@ -6946,7 +6947,7 @@ async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
 // After a reload in the same context it is still listed and the text still draws in it, with no
 // request for any Archivo file.
 async function fontsLoadOnlyWhatTheDrawingUses(browser, origin) {
-  const F = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <text id="t" x="10" y="50" font-family="Inter, sans-serif" font-weight="700" font-size="12" text-rendering="geometricPrecision">Hamburgefonts</text>\n</svg>`;
+  const F = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <text id="t" x="10" y="50" font-family="Inter, sans-serif" font-weight="700" font-size="12" text-rendering="geometricPrecision">Hamburgefonts</text>\n  <text id="g" x="10" y="80" font-family="Georgia, serif" font-size="8">Gg</text>\n</svg>`;
   const fixture = fontBytes('archivo', 'archivo-latin-400-normal.woff2');
   await withPage(browser, origin, 956, async (page, errors) => {
     const fonts = fontRequests(page);
@@ -6961,9 +6962,17 @@ async function fontsLoadOnlyWhatTheDrawingUses(browser, origin) {
     must(Math.abs(w.refs[1] - w.refs[0]) > 1, `test setup: Inter 700 is as wide as sans-serif (${w.refs.map((x) => x.toFixed(2))})`);
     const undo = page.locator('.draw-tool', { hasText: 'Undo' });
     const since = async (before) => (await fonts()).filter((n) => !before.includes(n)).sort();
+    // A family Draw holds no file for: Inspect says so, in words and a sign, not by colour alone.
+    await tapShape(page, 'g');
+    await showInspect(page);
+    const missing = (await page.locator('.draw-font-missing').count()) ? await page.locator('.draw-font-missing').textContent() : null;
+    must(missing === '⚠ Not one of Draw’s fonts: it draws only where this device has it, else in a fallback.', `Georgia's Font row says ${JSON.stringify(missing)}`);
+    must(await page.locator('.draw-font-btn').getAttribute('aria-label') === 'Font: Georgia, not one of Draw’s fonts', `Georgia's Font button reads ${await page.locator('.draw-font-btn').getAttribute('aria-label')}`);
+    await toPeek(page);
     // The Font sheet: Draw's ten in their own 400 faces.
     await tapShape(page, 't');
     await showInspect(page);
+    must(await page.locator('.draw-font-missing').count() === 0, 'Inter is said to be missing');
     let before = await fonts();
     await page.locator('.draw-font-btn').tap();
     await page.locator('.draw-fonts').waitFor();

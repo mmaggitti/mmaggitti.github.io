@@ -3472,6 +3472,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: "    if (commit && f.field.kind === 'access' && (f.field.name === 'title' || f.field.name === 'el-title')) this.#dropEmptyTitle(f.drag, f.field.name, f.ids[0]);\n", to: '',
     run: drawTests('editor.test.ts'), expect: /✖ a title emptied in its field is taken away as the field closes/,
   },
+  {
+    id: 'B657', what: 'Inspect never says a family is not one of Draw’s fonts (Georgia looks held)',
+    file: 'projects/draw/src/editor.ts', from: '    return !GENERIC_FAMILIES.has(family.trim().toLowerCase()) && this.familyFaces(family) === null;', to: '    return false;',
+    run: drawTests('editor.test.ts'), expect: /✖ Inspect marks a family Draw holds no file for/,
+  },
 ];
 
 const args = process.argv.slice(2);

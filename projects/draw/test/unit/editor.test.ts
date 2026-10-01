@@ -3218,6 +3218,14 @@ test('the Access tab’s switches (P1-M4 S3) are one entry each: Title and Descr
   assert.equal(a().selected, 1);
 });
 
+test('Inspect marks a family Draw holds no file for (Georgia) as not one of Draw’s fonts; never a generic, one of the catalogue’s, or the drawing’s own face', () => {
+  const face = '@font-face{font-family:Own;src:url(data:font/woff2;base64,d09GMg==)}';
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(BOARD(`<style>${face}</style><text id="t">A</text>\n`));
+  assert.equal(r.editor.fontMissing('Georgia'), true);
+  for (const f of ['Inter', 'ibm plex sans', 'serif', 'system-ui', 'Own']) assert.equal(r.editor.fontMissing(f), false, f);
+});
+
 test('a title emptied in its field is taken away as the field closes: typed into a drawing with none and erased leaves the file as it was; the drawing’s own title emptied goes with its aria-labelledby and role="img", one entry; an element’s goes too', () => {
   const create = LAB_FILE('create.svg');
   const r = rig();

@@ -114,7 +114,7 @@ import { toAbsolute, type AbsSeg } from '../../../engine/path/abs.ts';
 import { cssWhy } from '../../../engine/geometry/write.ts';
 import { appendSegment, closingText, penColour, penPathMarkup, segmentInto, type PenAnchor } from './interact/pen.ts';
 import { readLines, planLines } from '../../../engine/text/lines.ts';
-import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest, type OwnFace } from '../../../engine/text/font-faces.ts';
+import { GENERIC_FAMILIES, computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest, type OwnFace } from '../../../engine/text/font-faces.ts';
 import { outlineText, type OutlineText } from '../../../engine/text/outline.ts';
 import { textPathMarkup, writeTextToPath } from '../../../engine/text/to-path.ts';
 import { MAX_OUTLINE_CHARS, cantOutline, outlineChars, outlineTexts, tooMuchText, type TextDeps } from './text/pipeline.ts';
@@ -2019,6 +2019,11 @@ export class Editor {
     }
     if (!held && !own) return null;
     return { weights: [...ws].sort((a, b) => a - b), italics: [...is].sort((a, b) => a - b) };
+  }
+
+  /** Is this a family Draw holds no file for (not generic, not the drawing's own, not yours, not the catalogue's)? Inspect says so. */
+  fontMissing(family: string): boolean {
+    return !GENERIC_FAMILIES.has(family.trim().toLowerCase()) && this.familyFaces(family) === null;
   }
 
   /** The first family of the first selected element's font-family (as written where it comes from), and whether the selection differs. */

@@ -124,6 +124,7 @@ function TextSection({ editor }: { editor: Editor }) {
   const weights = offeredWeights(faces, italic ? 'italic' : 'normal');
   const styles = !faces || faces.italics.length ? STYLES : STYLES.slice(0, 1);
   const shown = fam?.mixed ? 'Mixed' : (fam?.family ?? 'Default');
+  const missing = family !== null && editor.fontMissing(family);
   const n = Number(weight.value);
   return (
     <Section title="Text">
@@ -131,13 +132,18 @@ function TextSection({ editor }: { editor: Editor }) {
         <button
           type="button"
           className="draw-inspect-swatch draw-font-btn"
-          aria-label={`Font: ${shown}`}
+          aria-label={`Font: ${shown}${missing ? ', not one of Draw’s fonts' : ''}`}
           disabled={!!row('font-family').disabled}
           style={family ? { fontFamily: `"${family.replace(/["\\]/g, '\\$&')}", var(--font-ui)`, fontWeight: Number.isFinite(n) ? n : undefined, fontStyle: italic ? 'italic' : undefined } : undefined}
           onClick={() => editor.openFontSheet()}
         >
           <span className="draw-inspect-text">{shown}</span>
         </button>
+        {missing && (
+          <p className="draw-inspect-note draw-font-missing">
+            <span aria-hidden="true">⚠ </span>Not one of Draw’s fonts: it draws only where this device has it, else in a fallback.
+          </p>
+        )}
       </Row>
       <NumberRow editor={editor} prop="font-size" label="Size" row={row('font-size')} slider={{ min: 2 * ctx.k, max: 80 * ctx.k, step: ctx.step }} />
       {weights.length <= 3 ? (
