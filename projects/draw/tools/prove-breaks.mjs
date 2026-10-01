@@ -664,7 +664,7 @@ const BREAKS = [
   },
   {
     id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true, checks: ['editSourceRoundTrip'],
-    file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
+    file: 'projects/draw/src/commands.ts', from: "more: true, shown: (c) => c.editor.canEditSource(),", to: 'more: true, shown: () => true,',
     run: DRAW_E2E, expect: /Edit source is offered for the root <svg>/,
   },
   {
@@ -1795,7 +1795,7 @@ const BREAKS = [
   },
   {
     id: 'B334', what: 'a nudge (or Delete) acts while a field has focus',
-    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = '.draw-code';",
+    file: 'projects/draw/src/keys.ts', from: "const FIELD = 'input, textarea, select';", to: "const FIELD = 'no-field';",
     run: drawTests('keys.test.ts'), expect: /✖ no key acts in a field, in the code view, under a sheet/,
   },
   {
@@ -1831,7 +1831,7 @@ const BREAKS = [
   },
   {
     id: 'B341', what: 'the arrows nudge while a code token has focus', slow: true, checks: ['arrowsNudgeOnlyTheCanvasSelection'],
-    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = 'input, textarea, select';",
+    file: 'projects/draw/src/keys.ts', from: "return t?.closest?.('.draw-code') ? 'code' : 'canvas';", to: "return 'canvas';",
     run: DRAW_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
   },
   {
@@ -2170,7 +2170,7 @@ const BREAKS = [
   },
   {
     id: 'B393', what: 'F13: the Snap sheet is rendered inside the canvas again (clipped by it, under its chrome and marks)', slow: true, checks: ['theSnapSheetIsReachableOnThePhone'],
-    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => setOpen(false)} />}',
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => ui.snapOpen.set(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => ui.snapOpen.set(false)} />}',
     run: DRAW_E2E, expect: /theSnapSheetIsReachableOnThePhone: (Done is at .* outside the|on top of (Done|the Grid step field) is)/,
   },
   {
@@ -2299,7 +2299,7 @@ const BREAKS = [
   // P1-M2 S1 (slow: one per new e2e check, each naming it).
   {
     id: 'B430', what: 'a Shapes tap places at the canvas’s top-left, not under the finger', slow: true, checks: ['aTapPlacesTheLabsDefaultScaledToTheArtboard'],
-    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
+    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(this.#now(g, g.at0), this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
     run: DRAW_E2E, expect: /aTapPlacesTheLabsDefaultScaledToTheArtboard: the rect is not exactly the lab's, centred on \(50, 50\)/,
   },
   {
@@ -3628,6 +3628,92 @@ const BREAKS = [
     id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach): a second slow break for this check, since whether the bar scrolls is layout, which only a browser has', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
     file: 'projects/draw/src/app.css', from: '  overflow-x: auto;\n  overflow-y: hidden;\n  overscroll-behavior-x: contain;\n', to: '',
     run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): the bar doesn't scroll/,
+  },
+  // P1-M5 S2: commands, the wide layout and Apple Pencil.
+  {
+    id: 'B688', what: 'commandForKey maps ⌘Y to Undo (Undo claims Redo’s key first)',
+    file: 'projects/draw/src/commands.ts', from: "{ id: 'undo', name: 'Undo', group: 'Edit', keys: ['Mod+Z'],", to: "{ id: 'undo', name: 'Undo', group: 'Edit', keys: ['Mod+Z', 'Mod+Y'],",
+    run: drawTests('commands.test.ts'), expect: /✖ each key names its one command/,
+  },
+  {
+    id: 'B689', what: 'the palette’s search matches only a name’s start',
+    file: 'projects/draw/src/commands.ts', from: '    return words.every((w) => text.includes(w));', to: '    return words.every((w) => c.name.toLocaleLowerCase().startsWith(w));',
+    run: drawTests('commands.test.ts'), expect: /✖ the palette’s search/,
+  },
+  {
+    id: 'B690', what: 'a canvas command’s key acts in a field',
+    file: 'projects/draw/src/commands.ts', from: '{ field: [], sheet: [],', to: "{ field: ['canvas'], sheet: [],",
+    run: drawTests('commands.test.ts'), expect: /✖ where a key acts/,
+  },
+  {
+    id: 'B691', what: 'Undo’s key doesn’t act in the code view',
+    file: 'projects/draw/src/commands.ts', from: "code: ['code'], canvas:", to: 'code: [], canvas:',
+    run: drawTests('commands.test.ts'), expect: /✖ where a key acts/,
+  },
+  {
+    id: 'B692', what: 'More’s rows come out in another order (Stroke… before Fill…)',
+    file: 'projects/draw/src/commands.ts', from: "ids: ['edit-source', 'fill', 'stroke', 'gloss',", to: "ids: ['edit-source', 'stroke', 'fill', 'gloss',",
+    run: drawTests('commands.test.ts'), expect: /✖ the bar and More, from the registry/,
+  },
+  {
+    id: 'B693', what: 'the gesture machine latches pen mode on a touch',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "      if (e.kind === 'pen') this.latched = true;", to: "      if (e.kind !== 'mouse') this.latched = true;",
+    run: drawTests('viewport.test.ts'), expect: /✖ pen mode latches on a pen press and on a pen hover, never on a touch/,
+  },
+  {
+    id: 'B694', what: 'in pen mode one finger becomes the tool',
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'if (this.latched && fingers.length === 1) {', to: 'if (this.latched && fingers.length === 0) {',
+    run: drawTests('viewport.test.ts'), expect: /✖ in pen mode one finger pans once it moves and never becomes the tool/,
+  },
+  {
+    id: 'B695', what: 'in pen mode a quick two-finger tap undoes',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "const tap = !this.latched && e.type === 'up'", to: "const tap = e.type === 'up'",
+    run: drawTests('viewport.test.ts'), expect: /✖ in pen mode one finger pans once it moves and never becomes the tool/,
+  },
+  {
+    id: 'B696', what: 'a pen move with a button down is taken for hover',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "      if (e.type === 'move' && e.buttons === 0) {", to: "      if (e.type === 'move') {",
+    run: drawTests('viewport.test.ts'), expect: /✖ a hovering Pencil: a pen move with no button/,
+  },
+  {
+    id: 'B697', what: 'the rail’s Pencil button doesn’t leave pen mode (the machine stays latched)',
+    file: 'projects/draw/src/canvas/gestures.ts', from: '  leavePenMode(): void {\n    this.latched = false;\n  }', to: '  leavePenMode(): void {\n  }',
+    run: drawTests('viewport.test.ts'), expect: /✖ the Pencil button: leaving pen mode/,
+  },
+  {
+    id: 'B698', what: 'a hovering Pencil lights a handle 40 px away',
+    file: 'projects/draw/src/editor.ts', from: '(pickHandle(model.handles, at)?.id ?? null)', to: '(pickHandle(model.handles, at, 50)?.id ?? null)',
+    run: drawTests('editor.test.ts'), expect: /✖ a hovering Pencil lights the handle a press would take/,
+  },
+  {
+    id: 'B699', what: 'a pan during a Pencil drag moves the dragged shape off the pen (the press isn’t kept in root units)',
+    file: 'projects/draw/src/editor.ts', from: '    const at = this.#then(g, g.at);\n    const [rx, ry] = applyM(m.rootInv, at.x - g.at0.x, at.y - g.at0.y);', to: '    const at = g.at;\n    const [rx, ry] = applyM(m.rootInv, at.x - g.at0.x, at.y - g.at0.y);',
+    run: drawTests('editor.test.ts'), expect: /✖ a pan during a Pencil drag leaves the dragged shape under the pen/,
+  },
+  {
+    id: 'B700', what: '⌘K is not wired: the keys get no panels, so the palette never opens from the keyboard', slow: true, checks: ['commandsRunFromTheBarMoreKeysAndPalette'],
+    file: 'projects/draw/src/panels/App.tsx', from: "document.querySelector('.draw-modal') !== null, ctx);", to: "document.querySelector('.draw-modal') !== null);",
+    run: DRAW_E2E, expect: /commandsRunFromTheBarMoreKeysAndPalette: timed out waiting until Meta\+K opens Commands/,
+  },
+  {
+    id: 'B701', what: 'the wide layout starts at 64em: the rail stays at the bottom at 956 and 820', slow: true, checks: ['theWideLayoutPutsTheRailOnTheLeft'],
+    file: 'projects/draw/src/app.css', from: '@media (min-width: 46em) {\n  .draw { display: grid;', to: '@media (min-width: 64em) {\n  .draw { display: grid;',
+    run: DRAW_E2E, expect: /theWideLayoutPutsTheRailOnTheLeft: 820×1180: the rail .* is not a column left of the canvas/,
+  },
+  {
+    id: 'B702', what: 'the Stage reads the Pencil as a finger: no pen mode, and a finger moves the circle', slow: true, checks: ['thePencilDrawsWhileFingersNavigate'],
+    file: 'projects/draw/src/canvas/stage.ts', from: "(e.pointerType === 'pen' ? 'pen' :", to: "(e.pointerType === 'pen' ? 'touch' :",
+    run: DRAW_E2E, expect: /thePencilDrawsWhileFingersNavigate: timed out waiting until the notice says pen mode/,
+  },
+  {
+    id: 'B703', what: 'the Stage drops a buttonless pen move (it reads as pressed, never as hover)', slow: true, checks: ['aHoveringPencilShowsHandlesAndSnaps'],
+    file: 'projects/draw/src/canvas/stage.ts', from: 'kind: kindOf(e), buttons: e.buttons });', to: 'kind: kindOf(e), buttons: e.buttons || 1 });',
+    run: DRAW_E2E, expect: /aHoveringPencilShowsHandlesAndSnaps: 20 px from the bottom-right corner the lit handles are/,
+  },
+  {
+    id: 'B704', what: 'the palette’s rows drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheCommandPalette'],
+    file: 'projects/draw/src/app.css', from: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }', to: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }\n.draw-palette-row { min-height: 2rem; height: 2rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheCommandPalette \(956\): 440×956:\n\s+"": tap targets under 44pt/,
   },
 ];
 

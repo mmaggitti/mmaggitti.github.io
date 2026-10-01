@@ -312,6 +312,12 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   for (const dpr of [1, 3]) await check(theFinishSheetPreviewsAndComparesPixels, dpr);
   await check(pngIsPreparedAndSharedInsideTheTap);
   for (const height of [956, 796]) await check(phoneRulesOnTheFinishSheet, height);
+  // P1-M5 S2: commands, the wide layout and Apple Pencil.
+  await check(commandsRunFromTheBarMoreKeysAndPalette);
+  await check(theWideLayoutPutsTheRailOnTheLeft);
+  await check(thePencilDrawsWhileFingersNavigate);
+  await check(aHoveringPencilShowsHandlesAndSnaps);
+  for (const height of [956, 796]) await check(phoneRulesOnTheCommandPalette, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -8013,49 +8019,17 @@ async function pngIsPreparedAndSharedInsideTheTap(browser, origin) {
 }
 
 // The phone rules on the Finish sheet (at 956 and 796 tall), with a drawing whose name is long: the
-// top bar (Files, the name, preview, Fit, Finish, Export) scrolls sideways in its own box, opening at
-// its start, while the page never does; every bar button is at least 44 × 44 and comes fully into the
-// window somewhere in the bar's scroll range; the name shows in full. The bar is measured as the file
-// opens, under its import report and before any tap, so a page that scrolls sideways fails here, by
-// name, rather than on the next tap it would put out of reach. In the sheet: every chip, choice, row
+// top bar (Files, the name, preview, Fit, Commands, Finish, Export) scrolls sideways in its own box,
+// opening at its start, while the page never does; every bar button is at least 44 × 44 and comes fully
+// into the window somewhere in the bar's scroll range; the name shows in full (barScrollsInItsOwnBox).
+// The bar is measured as the file opens, under its import report and before any tap, so a page that
+// scrolls sideways fails here, by name, rather than on the next tap it would put out of reach. In the sheet: every chip, choice, row
 // and button at least 44 × 44, no sideways scroll at its top or bottom, and Share in the bottom
 // quarter of the window, above the home indicator, wherever the sheet is scrolled.
 async function phoneRulesOnTheFinishSheet(browser, origin, height) {
   await withPage(browser, origin, height, async (page, errors) => {
-    const NAME = 'A long drawing name that makes the bar scroll';
-    await pickFile(page, `${NAME}.svg`, Buffer.from(LAB('vector.svg')));
-    const bar = await page.evaluate(() => {
-      const b = document.querySelector('.draw-bar');
-      const de = document.documentElement;
-      const name = document.querySelector('.draw-name');
-      const left = b.scrollLeft;
-      b.scrollLeft = 1e6;
-      const scrolls = b.scrollLeft > 0; // only a scroller scrolls
-      b.scrollLeft = 0;
-      return {
-        sw: b.scrollWidth, cw: b.clientWidth, left, scrolls, height: b.getBoundingClientRect().height,
-        page: de.scrollWidth - de.clientWidth, name: name.textContent, nameCut: name.scrollWidth - name.clientWidth,
-        buttons: [...b.querySelectorAll('button')].map((x) => x.className.split(' ').pop()),
-      };
-    });
-    must(bar.buttons.join() === 'draw-files,draw-fit,draw-finish,draw-export', `the bar's buttons are ${bar.buttons}`);
-    must(bar.sw > bar.cw && bar.scrolls, `the bar doesn't scroll (${bar.sw} against ${bar.cw}${bar.scrolls ? '' : ', and it won’t move'}) with a long name`);
-    must(bar.left === 0, `the bar opens scrolled to ${bar.left}, not its start`);
-    must(bar.page <= 0, `the page scrolls sideways by ${bar.page}`);
-    must(bar.height === 44, `the bar is ${bar.height} tall, not 44`);
-    must(bar.name === NAME && bar.nameCut <= 0, `the name is cut short: ${JSON.stringify(bar.name)} (${bar.nameCut} px hidden)`);
-    for (const cls of bar.buttons) {
-      const r = await page.evaluate((c) => {
-        const el = document.querySelector(`.draw-bar .${c}`);
-        el.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-        const b = el.getBoundingClientRect();
-        return { w: b.width, h: b.height, left: b.left, right: b.right, page: document.documentElement.scrollWidth - document.documentElement.clientWidth, scrollX };
-      }, cls);
-      must(r.w >= TAP_MIN - 0.5 && r.h >= TAP_MIN - 0.5 && r.left >= -0.5 && r.right <= 440.5 && r.scrollX === 0 && r.page <= 0, `${cls} is ${Math.round(r.w)}×${Math.round(r.h)} at ${Math.round(r.left)}–${Math.round(r.right)} in the bar's range (page scrolled to ${r.scrollX})`);
-    }
-    await closeModal(page);
+    await barScrollsInItsOwnBox(page);
     await page.evaluate(() => {
-      document.querySelector('.draw-bar').scrollLeft = 0;
       navigator.canShare = (d) => Array.isArray(d?.files);
       navigator.share = async () => {};
     });
@@ -8080,6 +8054,386 @@ async function phoneRulesOnTheFinishSheet(browser, origin, height) {
       });
       if (s.sideways > 0) problems.push(`${where}: the sheet scrolls sideways by ${s.sideways}`);
       if (!(s.top >= s.h * 0.75 && s.bottom <= s.h + 0.5)) problems.push(`${where} (scrolled to ${s.scrolled}): Share at ${Math.round(s.top)}–${Math.round(s.bottom)} is not in the bottom quarter of the ${s.h} window`);
+    }
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M5 S2: commands, the wide layout and Apple Pencil ────────────────────────────────────────
+
+// The top bar with a long name, measured as the file opens (under its import report, before any tap):
+// it scrolls sideways in its own box and opens at its start, while the page never does; it is 44 tall;
+// its buttons are Files, Fit, Commands, Finish and Export, each at least 44 × 44 and fully in the
+// window somewhere in the bar's scroll range; the name shows in full. The import report closes after.
+async function barScrollsInItsOwnBox(page) {
+  const NAME = 'A long drawing name that makes the bar scroll';
+  await pickFile(page, `${NAME}.svg`, Buffer.from(LAB('vector.svg')));
+  const bar = await page.evaluate(() => {
+    const b = document.querySelector('.draw-bar');
+    const de = document.documentElement;
+    const name = document.querySelector('.draw-name');
+    const left = b.scrollLeft;
+    b.scrollLeft = 1e6;
+    const scrolls = b.scrollLeft > 0; // only a scroller scrolls
+    b.scrollLeft = 0;
+    return {
+      sw: b.scrollWidth, cw: b.clientWidth, left, scrolls, height: b.getBoundingClientRect().height,
+      page: de.scrollWidth - de.clientWidth, name: name.textContent, nameCut: name.scrollWidth - name.clientWidth,
+      buttons: [...b.querySelectorAll('button')].map((x) => x.className.split(' ').pop()),
+    };
+  });
+  must(bar.buttons.join() === 'draw-files,draw-fit,draw-commands,draw-finish,draw-export', `the bar's buttons are ${bar.buttons}`);
+  must(bar.sw > bar.cw && bar.scrolls, `the bar doesn't scroll (${bar.sw} against ${bar.cw}${bar.scrolls ? '' : ', and it won’t move'}) with a long name`);
+  must(bar.left === 0, `the bar opens scrolled to ${bar.left}, not its start`);
+  must(bar.page <= 0, `the page scrolls sideways by ${bar.page}`);
+  must(bar.height === 44, `the bar is ${bar.height} tall, not 44`);
+  must(bar.name === NAME && bar.nameCut <= 0, `the name is cut short: ${JSON.stringify(bar.name)} (${bar.nameCut} px hidden)`);
+  for (const cls of bar.buttons) {
+    const r = await page.evaluate((c) => {
+      const el = document.querySelector(`.draw-bar .${c}`);
+      el.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+      const b = el.getBoundingClientRect();
+      return { w: b.width, h: b.height, left: b.left, right: b.right, page: document.documentElement.scrollWidth - document.documentElement.clientWidth, scrollX };
+    }, cls);
+    must(r.w >= TAP_MIN - 0.5 && r.h >= TAP_MIN - 0.5 && r.left >= -0.5 && r.right <= 440.5 && r.scrollX === 0 && r.page <= 0, `${cls} is ${Math.round(r.w)}×${Math.round(r.h)} at ${Math.round(r.left)}–${Math.round(r.right)} in the bar's range (page scrolled to ${r.scrollX})`);
+  }
+  await closeModal(page);
+  await page.evaluate(() => {
+    document.querySelector('.draw-bar').scrollLeft = 0;
+  });
+}
+
+// The selection bar's buttons and More's rows for the sample's circle, as they were before the
+// registry: in order, by aria-label and by text.
+const CIRCLE_BAR = ['Deselect', 'Select more', 'Bring forward', 'Send back', 'Delete', 'More'];
+const CIRCLE_MORE = ['Edit source', 'Fill…', 'Stroke…', 'Gloss', 'Duplicate', 'Group', 'Ungroup', 'Select group', 'Select all', 'Align left', 'Align centre', 'Align right', 'Align top', 'Align middle', 'Align bottom', 'Distribute horizontally', 'Distribute vertically', 'Stroke to path'];
+const circles = async (page) => ((await source(page)).match(/<circle/g) ?? []).length;
+const undoLabel = (page) => page.locator('.draw-rail .draw-undo').getAttribute('aria-label');
+const paletteOpen = async (page) => (await page.locator('.draw-palette').count()) === 1;
+const paletteFieldFocused = (page) => page.evaluate(() => document.activeElement?.classList.contains('draw-palette-field') ?? false);
+
+// One registry behind the bar, More, the keys and the palette (P1-M5): the sample's circle selected,
+// the bar's buttons and More's rows are those before the registry, in order; ⌘K (Meta, then Control)
+// opens Commands with its field focused, "dup" leaves Duplicate first, and Return runs it (one
+// "Duplicate" entry: two circles) and closes it; the Commands button opens it with the field not
+// focused, and a tap on Bring forward runs it; Escape closes it; ⌘Z undoes on the canvas and with the
+// focus in the code view; ⇧⌘Z and ⌘Y redo; Delete deletes; and with the focus in a field (Files' paste
+// field, or the palette's own) ⌘K, Delete and ⌘Z do nothing to the drawing.
+async function commandsRunFromTheBarMoreKeysAndPalette(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const tapCircle = async () => {
+      const c = await circleCentre(page);
+      await page.touchscreen.tap(c.x, c.y);
+      await until('the circle is selected', async () => (await page.locator('.draw-context .draw-ctx-btn').count()) === CIRCLE_BAR.length);
+    };
+    await tapCircle();
+    const bar = await page.locator('.draw-context .draw-ctx-btn').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+    must(bar.join() === CIRCLE_BAR.join(), `the bar's buttons are ${bar}`);
+    await openMore(page);
+    const more = await page.evaluate(() => ({
+      rows: [...document.querySelectorAll('.draw-more button')].map((b) => b.textContent),
+      heads: [...document.querySelectorAll('.draw-more .draw-subhead')].map((p) => p.textContent),
+      editSource: document.querySelector('.draw-more button')?.className,
+    }));
+    must(more.rows.join() === CIRCLE_MORE.join(), `More's rows are ${more.rows}`);
+    must(more.heads.join() === 'Align,Distribute,Convert' && more.editSource === 'ds-btn draw-action', `More's subheads ${more.heads}, Edit source's class ${more.editSource}`);
+    await closeModal(page);
+    const before = await source(page);
+    for (const mod of ['Meta', 'Control']) {
+      await page.keyboard.press(`${mod}+k`);
+      await until(`${mod}+K opens Commands`, () => paletteOpen(page));
+      must(await paletteFieldFocused(page), `${mod}+K: the palette's field is not focused`);
+      await page.keyboard.type('dup');
+      must(await page.locator('.draw-palette-row .draw-palette-name').first().textContent() === 'Duplicate', `"dup" leaves ${await page.locator('.draw-palette-row .draw-palette-name').first().textContent()} first`);
+      await page.keyboard.press('Enter');
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      must(await circles(page) === 2 && await undoLabel(page) === 'Undo Duplicate', `${mod}+K, "dup", Return: ${await circles(page)} circles, ${await undoLabel(page)}`);
+      await page.keyboard.press('Meta+z');
+      must(await source(page) === before, `⌘Z on the canvas did not undo the Duplicate (${mod} round)`);
+      await tapCircle();
+    }
+    // The Commands button: no focus in the field; a tap on a row runs it.
+    await page.locator('.draw-bar .draw-commands').tap();
+    await page.locator('.draw-palette-field').waitFor();
+    must(!(await paletteFieldFocused(page)), 'the Commands button focused the field (the keyboard would cover the list)');
+    await page.locator('.draw-palette-row', { hasText: 'Bring forward' }).tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await undoLabel(page) === 'Undo Bring forward', `a tap on Bring forward: ${await undoLabel(page)}`);
+    const forward = await source(page);
+    await page.locator('.draw-bar .draw-commands').tap();
+    await page.locator('.draw-palette').waitFor();
+    await page.keyboard.press('Escape');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(!(await paletteOpen(page)), 'Escape did not close the palette');
+    // ⌘Z in the code view, ⇧⌘Z and ⌘Y.
+    await showCode(page);
+    await page.locator('.draw-code .cv-number').first().focus();
+    await page.keyboard.press('Meta+z');
+    must(await source(page) === before, '⌘Z with the focus in the code view did not undo');
+    await page.keyboard.press('Shift+Meta+z');
+    must(await source(page) === forward, '⇧⌘Z did not redo');
+    await page.keyboard.press('Meta+z');
+    await page.keyboard.press('Meta+y');
+    must(await source(page) === forward, '⌘Y did not redo');
+    await page.evaluate(() => document.activeElement?.blur());
+    // Delete.
+    await tapCircle();
+    await page.keyboard.press('Delete');
+    must(await circles(page) === 0 && await undoLabel(page) === 'Undo Delete', 'Delete did not delete the circle');
+    await page.keyboard.press('Meta+z');
+    must(await source(page) === forward, '⌘Z did not bring the circle back');
+    // In a field, no command takes a key: Files' paste field, then the palette's own.
+    await tapCircle();
+    await openFilesMenu(page);
+    await page.locator('.draw-paste').focus();
+    for (const k of ['Meta+k', 'Delete', 'Meta+z']) await page.keyboard.press(k);
+    must(await source(page) === forward && !(await paletteOpen(page)), 'a key in Files’ paste field acted on the drawing');
+    await closeModal(page);
+    await page.keyboard.press('Meta+k');
+    await page.locator('.draw-palette-field').waitFor();
+    for (const k of ['Meta+k', 'Delete', 'Meta+z']) await page.keyboard.press(k);
+    must(await source(page) === forward && await paletteOpen(page), 'a key in the palette’s field acted on the drawing');
+    await page.keyboard.press('Escape');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The wide layout (P1-M5): at 46em and wider (1180 × 820, 820 × 1180, 956 × 440 and 736 × 900) the
+// rail is a column left of the canvas, the window's height; narrower (735 × 900, 440 × 956) it is at the
+// bottom; the code docks beside the canvas only at 1180 × 820 and 956 × 440; every rail and top bar
+// button at least 44 × 44, every rail button inside the window; no sideways scroll; the sample drawn.
+async function theWideLayoutPutsTheRailOnTheLeft(browser, origin) {
+  const problems = [];
+  for (const [width, height, left, docked] of [[1180, 820, true, true], [820, 1180, true, false], [956, 440, true, true], [736, 900, true, false], [735, 900, false, false], [440, 956, false, false]]) {
+    await withPage(browser, origin, height, async (page, errors) => {
+      await twoFrames(page);
+      const at = `${width}×${height}`;
+      const r = await page.evaluate(() => {
+        const b = (sel) => document.querySelector(sel).getBoundingClientRect().toJSON();
+        const tools = [...document.querySelectorAll('.draw-rail button')].map((t) => t.getBoundingClientRect().toJSON());
+        const bar = [...document.querySelectorAll('.draw-bar button')].map((t) => t.getBoundingClientRect().toJSON());
+        const de = document.documentElement;
+        return {
+          rail: b('.draw-rail'), canvas: b('.draw-canvas'), sheet: b('.draw-sheet'), tools, bar, w: innerWidth, h: innerHeight,
+          docked: !!document.querySelector('.draw-sheet--dock'), sideways: de.scrollWidth - de.clientWidth,
+          svg: document.querySelector('.draw-host').shadowRoot.querySelector('svg').getBoundingClientRect().width,
+        };
+      });
+      if (r.w !== width || r.h !== height) problems.push(`${at}: test setup: the window is ${r.w}×${r.h}`);
+      if (left) {
+        if (!(r.rail.right <= r.canvas.left + 0.5 && r.rail.top <= 0.5 && r.rail.bottom >= height - 0.5)) problems.push(`${at}: the rail (${Math.round(r.rail.left)},${Math.round(r.rail.top)}–${Math.round(r.rail.right)},${Math.round(r.rail.bottom)}) is not a column left of the canvas (from ${Math.round(r.canvas.left)}), the window's height`);
+      } else if (!(r.rail.top >= r.canvas.bottom - 0.5 && r.rail.bottom >= height - 0.5)) problems.push(`${at}: the rail is not at the bottom (${Math.round(r.rail.top)}–${Math.round(r.rail.bottom)}, the canvas ends at ${Math.round(r.canvas.bottom)})`);
+      if (r.docked !== docked || (docked && !(r.sheet.left >= r.canvas.right - 1))) problems.push(`${at}: the code ${r.docked ? 'docks' : 'does not dock'}${docked ? ' (it should, beside the canvas)' : ' (it should not)'}`);
+      for (const [i, t] of r.tools.entries()) {
+        if (t.width < TAP_MIN - 0.5 || t.height < TAP_MIN - 0.5) problems.push(`${at}: rail button ${i} is ${Math.round(t.width)}×${Math.round(t.height)}`);
+        if (t.left < -0.5 || t.top < -0.5 || t.right > width + 0.5 || t.bottom > height + 0.5) problems.push(`${at}: rail button ${i} at ${Math.round(t.left)},${Math.round(t.top)} leaves the window`);
+      }
+      for (const [i, t] of r.bar.entries()) if (t.width < TAP_MIN - 0.5 || t.height < TAP_MIN - 0.5) problems.push(`${at}: top bar button ${i} is ${Math.round(t.width)}×${Math.round(t.height)}`);
+      if (r.sideways > 0) problems.push(`${at}: the page scrolls sideways by ${r.sideways}`);
+      if (!(r.svg > 0)) problems.push(`${at}: nothing drawn`);
+      if (errors.length) problems.push(`${at}: errors: ${errors.join('; ')}`);
+    }, { viewport: { width, height } });
+  }
+  must(problems.length === 0, problems.join('\n'));
+}
+
+// Runs in the page: Pointer Events on the canvas as a Pencil ('pen') or a finger ('touch') sends them,
+// synthetic so both engines get the same: each [type, x, y, buttons?] in turn (buttons 1 unless given).
+function pointers({ kind, id, steps }) {
+  const area = document.querySelector('.draw-canvas');
+  for (const [type, x, y, buttons] of steps) area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: kind, isPrimary: true, clientX: x, clientY: y, buttons: buttons ?? (type === 'pointerup' ? 0 : 1), bubbles: true, cancelable: true }));
+}
+const along = (from, to, n) => Array.from({ length: n }, (_, i) => ({ x: from.x + ((to.x - from.x) * (i + 1)) / n, y: from.y + ((to.y - from.y) * (i + 1)) / n }));
+const strokeOf = (kind, id, from, to, n = 6) => ({ kind, id, steps: [['pointerdown', from.x, from.y], ...along(from, to, n).map((p) => ['pointermove', p.x, p.y]), ['pointerup', to.x, to.y]] });
+const circleAt = async (page) => {
+  const m = /<circle cx="([^"]+)" cy="([^"]+)"/.exec(await source(page));
+  return { cx: Number(m[1]), cy: Number(m[2]) };
+};
+
+// Apple Pencil draws while fingers navigate (P1-M5): before any pen event a one-finger drag moves the
+// circle (one entry); a pen tap selects it and the notice says pen mode, and the rail ends with Pencil,
+// pressed; then a one-finger drag, on empty canvas and on the circle, pans the view (the file and the
+// history don't change), and a quick two-finger tap doesn't undo; a pen drag moves the circle by whole
+// units in one entry, and a 40 px finger pan in its middle leaves the circle's centre at the root point
+// under the pen's lift (± 1 unit). The rail's Pencil leaves pen mode (it goes): a finger drags the
+// circle again and a two-finger tap undoes; the Pencil's next hover latches pen mode again.
+async function thePencilDrawsWhileFingersNavigate(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await snapOff(page);
+    const firstPen = 1, finger = 2, second = 3;
+    const sample = await source(page);
+    const start = await circleAt(page);
+    const c0 = await circleCentre(page);
+    await page.evaluate(pointers, strokeOf('touch', finger, c0, { x: c0.x + 30, y: c0.y }));
+    const moved = await circleAt(page);
+    must(moved.cx > start.cx && await undoLabel(page) === 'Undo Move', `before any pen event a finger drag did not move the circle (${JSON.stringify(moved)})`);
+    await page.locator('.draw-rail .draw-undo').tap();
+    must(await source(page) === sample, 'test setup: the undo');
+    must(await page.locator('.draw-pencil').count() === 0, 'the Pencil button shows before any pen event');
+    // A pen tap: it selects, and pen mode is on.
+    await page.evaluate(pointers, { kind: 'pen', id: firstPen, steps: [['pointerdown', c0.x, c0.y], ['pointerup', c0.x, c0.y]] });
+    await until('the circle is selected by the pen', async () => (await page.locator('.draw-context .draw-ctx-btn').count()) > 0);
+    await until('the notice says pen mode', async () => (await page.evaluate(() => document.querySelector('.draw-toast')?.textContent)) === 'Apple Pencil draws; fingers move the view. Tap Pencil in the rail to draw with a finger.');
+    must(await page.locator('.draw-rail .draw-pencil').getAttribute('aria-pressed') === 'true' && (await page.locator('.draw-rail .draw-pencil').textContent()).trim() === 'Pencil', 'the rail does not end with Pencil, pressed');
+    // Fingers only navigate now.
+    const view0 = await page.evaluate(() => window.drawTest.view());
+    // Below the paper, on the canvas: no shape there.
+    const empty = await page.evaluate(() => {
+      const c = document.querySelector('.draw-canvas').getBoundingClientRect();
+      return { x: c.left + 30, y: c.bottom - 40 };
+    });
+    for (const from of [empty, c0]) {
+      const v = await page.evaluate(() => window.drawTest.view());
+      await page.evaluate(pointers, strokeOf('touch', finger, from, { x: from.x + 40, y: from.y + 20 }));
+      const after = await page.evaluate(() => window.drawTest.view());
+      must(after.cx !== v.cx || after.cy !== v.cy, `a finger drag from ${JSON.stringify(from)} did not pan the view`);
+    }
+    must(await source(page) === sample && await undoLabel(page) === 'Undo', 'a finger in pen mode changed the file or the history');
+    must(JSON.stringify(await page.evaluate(() => window.drawTest.view())) !== JSON.stringify(view0), 'the view did not move');
+    // A pen drag with a 40 px finger pan in its middle.
+    const c1 = await circleCentre(page);
+    const lift = { x: c1.x + 37, y: c1.y + 23 };
+    const half = { x: c1.x + 18, y: c1.y + 11 };
+    await page.evaluate(({ c1, half, lift, first, finger }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (kind, id, type, p) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: kind, isPrimary: kind === 'pen', clientX: p.x, clientY: p.y, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
+      fire('pen', first, 'pointerdown', c1);
+      for (let i = 1; i <= 4; i++) fire('pen', first, 'pointermove', { x: c1.x + ((half.x - c1.x) * i) / 4, y: c1.y + ((half.y - c1.y) * i) / 4 });
+      const f0 = { x: 60, y: 520 };
+      fire('touch', finger, 'pointerdown', f0);
+      for (let i = 1; i <= 4; i++) fire('touch', finger, 'pointermove', { x: f0.x + 10 * i, y: f0.y });
+      fire('touch', finger, 'pointerup', { x: f0.x + 40, y: f0.y });
+      for (let i = 1; i <= 4; i++) fire('pen', first, 'pointermove', { x: half.x + ((lift.x - half.x) * i) / 4, y: half.y + ((lift.y - half.y) * i) / 4 });
+      fire('pen', first, 'pointerup', lift);
+    }, { c1, half, lift, first: firstPen, finger });
+    const end = await circleAt(page);
+    const under = await page.evaluate(docPoint, [lift.x, lift.y]);
+    must(Number.isInteger(end.cx) && Number.isInteger(end.cy), `the pen moved the circle off whole units: ${JSON.stringify(end)}`);
+    must(Math.abs(end.cx - under.x) <= 1 && Math.abs(end.cy - under.y) <= 1, `after a 40 px finger pan mid-drag the circle's centre is ${end.cx},${end.cy}, the pen lifted over ${under.x.toFixed(1)},${under.y.toFixed(1)}`);
+    must(await undoLabel(page) === 'Undo Move', `the pen drag is ${await undoLabel(page)}`);
+    const dragged = await source(page);
+    await page.evaluate(({ second }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (id, type, x) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: 520, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
+      fire(2, 'pointerdown', 100);
+      fire(second, 'pointerdown', 160);
+      fire(2, 'pointerup', 100);
+      fire(second, 'pointerup', 160);
+    }, { second });
+    must(await source(page) === dragged, 'a quick two-finger tap undid in pen mode');
+    // The rail's Pencil leaves pen mode.
+    await page.locator('.draw-rail .draw-pencil').tap();
+    must(await page.locator('.draw-pencil').count() === 0, 'the Pencil button stays after its tap');
+    await page.evaluate(({ second }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (id, type, x) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: 520, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
+      fire(2, 'pointerdown', 100);
+      fire(second, 'pointerdown', 160);
+      fire(2, 'pointerup', 100);
+      fire(second, 'pointerup', 160);
+    }, { second });
+    must(await source(page) === sample, 'after Pencil, a two-finger tap did not undo the pen drag');
+    const c2 = await circleCentre(page);
+    await page.evaluate(pointers, strokeOf('touch', finger, c2, { x: c2.x - 30, y: c2.y }));
+    must((await circleAt(page)).cx < start.cx, 'after Pencil, a finger drag did not move the circle');
+    await page.evaluate(pointers, { kind: 'pen', id: firstPen, steps: [['pointermove', 50, 300, 0], ['pointerleave', 50, 300, 0]] });
+    must(await page.locator('.draw-rail .draw-pencil').count() === 1, 'the Pencil’s next hover did not latch pen mode again');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// A hovering Apple Pencil (P1-M5), a rect selected: a pen pointermove with no button 20 px from the
+// rect's bottom-right corner lights that handle (data-hover on its mark), and 40 px away nothing; with
+// a vertical guide (Snap → Add vertical guide), a hover near it rings the point a press would snap to,
+// at the guide's screen x (± 1 px); pointerleave clears both, and so does a pen press; hovering never
+// changes the file or the history.
+const HOVER_BOX = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
+  <rect x="20" y="20" width="60" height="40" fill="#2a9d8f"/>
+</svg>
+`;
+async function aHoveringPencilShowsHandlesAndSnaps(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), HOVER_BOX)).ok, 'test setup: the rect did not open');
+    const rect = await page.evaluate(() => {
+      const b = document.querySelector('.draw-host').shadowRoot.querySelector('rect').getBoundingClientRect();
+      return { x: b.x, y: b.y, w: b.width, h: b.height };
+    });
+    await page.touchscreen.tap(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    await until('the rect is selected', async () => (await page.locator('.draw-overlay .draw-hd.anchor').count()) === 4);
+    const se = await page.evaluate(() => {
+      const hs = [...document.querySelectorAll('.draw-overlay .draw-hd.anchor')].map((h) => {
+        const b = h.getBoundingClientRect();
+        return { id: h.dataset.handle, x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      });
+      return hs.sort((a, b) => b.x + b.y - (a.x + a.y))[0];
+    });
+    const marks = () => page.evaluate(() => {
+      const ring = [...document.querySelectorAll('.draw-overlay .draw-snap-ring')].find((r) => r.style.display !== 'none');
+      const rb = ring?.getBoundingClientRect();
+      return { hovered: [...document.querySelectorAll('.draw-overlay [data-hover]')].map((h) => h.dataset.handle), ring: rb ? rb.x + rb.width / 2 : null };
+    });
+    const hover = (x, y, type = 'pointermove') => page.evaluate(pointers, { kind: 'pen', id: 7, steps: [[type, x, y, 0]] });
+    const before = await source(page);
+    await hover(se.x - 20, se.y);
+    must((await marks()).hovered.join() === se.id, `20 px from the bottom-right corner the lit handles are ${(await marks()).hovered}`);
+    await hover(se.x - 40, se.y);
+    must((await marks()).hovered.length === 0, `40 px away the lit handles are ${(await marks()).hovered}`);
+    must(await source(page) === before, 'hovering changed the file');
+    // A guide, then a hover near it: the ring on the guide's x.
+    await page.locator('.draw-snap-btn').tap();
+    await page.locator('.draw-snap-row', { hasText: 'Add vertical guide' }).tap();
+    await closeModal(page);
+    const withGuide = await source(page);
+    const history = await undoLabel(page);
+    const guideX = await page.evaluate(() => {
+      const g = [...document.querySelectorAll('.draw-overlay .draw-guide')].find((l) => l.style.display !== 'none');
+      return g.getBoundingClientRect().x;
+    });
+    const y = rect.y + rect.h + 60; // below the rect, clear of the artboard's middle
+    await hover(guideX + 4, y);
+    const near = await marks();
+    must(near.ring !== null && Math.abs(near.ring - guideX) <= 1, `a hover 4 px from the guide rings ${near.ring}, the guide at ${guideX}`);
+    await hover(se.x - 20, se.y);
+    must((await marks()).hovered.join() === se.id, 'test setup: the handle lit again');
+    await hover(se.x - 20, se.y, 'pointerleave');
+    const left = await marks();
+    must(left.hovered.length === 0 && left.ring === null, `pointerleave left ${JSON.stringify(left)}`);
+    await hover(guideX + 4, y);
+    must((await marks()).ring !== null, 'test setup: the ring again');
+    await page.evaluate(pointers, { kind: 'pen', id: 7, steps: [['pointerdown', guideX + 4, y], ['pointerup', guideX + 4, y]] });
+    const pressed = await marks();
+    must(pressed.hovered.length === 0 && pressed.ring === null, `a pen press left ${JSON.stringify(pressed)}`);
+    must(await source(page) === withGuide && await undoLabel(page) === history, 'hovering changed the file or the history');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The phone rules with the command palette open (at 956 and 796 tall): the top bar (Files, the name,
+// preview, Fit, Commands, Finish, Export) scrolls in its own box while the page never does; the
+// palette's rows at least 44 × 44, its field 16 px or more, the palette inside the window with its
+// field in view; no sideways scroll, with nothing typed and with a word typed.
+async function phoneRulesOnTheCommandPalette(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    await barScrollsInItsOwnBox(page);
+    await page.locator('.draw-bar .draw-commands').tap();
+    await page.locator('.draw-palette-field').waitFor();
+    const problems = [];
+    for (const typed of ['', 'al']) {
+      if (typed) await page.locator('.draw-palette-field').fill(typed);
+      await twoFrames(page);
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`"${typed}": tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`"${typed}": field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`"${typed}": the page scrolls sideways (${r.sw} > ${r.cw})`);
+      const p = await page.evaluate(() => {
+        const m = document.querySelector('.draw-modal').getBoundingClientRect();
+        const f = document.querySelector('.draw-palette-field').getBoundingClientRect();
+        const rows = document.querySelectorAll('.draw-palette-row').length;
+        return { top: m.top, bottom: m.bottom, ft: f.top, fb: f.bottom, rows, h: innerHeight, size: parseFloat(getComputedStyle(document.querySelector('.draw-palette-field')).fontSize) };
+      });
+      if (!(p.top >= -0.5 && p.bottom <= p.h + 0.5 && p.ft >= p.top && p.fb <= p.h)) problems.push(`"${typed}": the palette (${Math.round(p.top)}–${Math.round(p.bottom)}) or its field (${Math.round(p.ft)}–${Math.round(p.fb)}) leaves the ${p.h} window`);
+      if (!(p.rows > 0) || p.size < 16) problems.push(`"${typed}": ${p.rows} rows, the field at ${p.size} px`);
     }
     must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
