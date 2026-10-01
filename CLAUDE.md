@@ -162,7 +162,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   rule), from Clean's copy with its text as paths and no `<foreignObject>`, prepared before the tap
   and shared inside it, its area clamped to the device's canvas. New… opens a preset
   (`engine/presets/`) as a new drawing, or writes it over the open drawing in one entry
-  (`engine/model/replace.ts`); the top bar scrolls sideways in its own box, never the page.
+  (`engine/model/replace.ts`); the top bar scrolls sideways in its own box, never the page. One
+  command registry (`src/commands.ts`) feeds the ContextBar, More, the keys and the ⌘K palette; at
+  46em and wider the ToolRail is a column on the left; an Apple Pencil latches pen mode, where fingers
+  only navigate and a hovering Pencil previews handles and snapping (the rail's Pencil leaves it).
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

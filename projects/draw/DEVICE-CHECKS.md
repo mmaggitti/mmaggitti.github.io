@@ -79,5 +79,10 @@ To take the house's group: tap the roof, then More → Select group.
 | 57 | Finish's previews | A drawing with a thin line: Finish: the 16 and 32 px previews show its real pixels (blocky, not blurred), the big ones fit the screen, and the light, dark and checkerboard strips read clearly; with a long drawing name, the top bar slides sideways to reach Export while the page itself never moves sideways | ☐ |
 | 58 | PNG through the share sheet | Finish → Share (Icon set): the share sheet offers to save the images, and the saved PNGs open in Photos or Files with a transparent background where the drawing has none | ☐ |
 | 59 | A big PNG | A 2000 × 2000 artboard at 3×: the sheet says it was scaled to fit this device, and the file is that size | ☐ |
+| 60 | iPad layout | Landscape: the tools in a column on the left and the code beside the canvas; portrait: the tools on the left and the code under the canvas; neither cut by the screen's rounded corners or the home indicator. Draw beside another app in Split View at half width: the phone's layout, tools at the bottom | ☐ |
+| 61 | ⌘K | With a keyboard on the iPad, ⌘K opens Commands (if Safari takes ⌘K for itself, note it: the top bar's Commands button is the way in); type "dup", and Return duplicates the selection | ☐ |
+| 62 | Apple Pencil draws, fingers navigate | Draw and drag with the Pencil while panning with a finger: after the Pencil's first touch, a finger only moves the view, and a two-finger tap no longer undoes | ☐ |
+| 63 | Pencil hover | (A hover-capable iPad and Pencil.) Hold the Pencil just above a shape's corner handle: the handle lights up before you touch, and near a guide the snap ring shows where a press would land | ☐ |
+| 64 | The Pencil button | In pen mode the rail ends with Pencil, pressed: tap it, and a finger draws again and a two-finger tap undoes again; the Pencil's next touch brings pen mode, and the button, back | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
