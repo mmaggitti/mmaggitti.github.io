@@ -74,5 +74,6 @@ To take the house's group: tap the roof, then More → Select group.
 | 52 | VoiceOver reads the title | Open a drawing, Access tab: Title on, type a name, then Export → Clean SVG, save to Files, and open it from Files in Safari with VoiceOver on (Settings → Accessibility): it reads the name you typed, then "image", as the tab's preview said | ☐ |
 | 53 | The Access fields and the keyboard | Access tab: tap the Title field, the Description box and the Language field in turn; the page never zooms, each field stays in view above the keyboard (scroll the sheet if it must), and Done or Return keeps what you typed | ☐ |
 | 54 | The five tabs | The code sheet's tab row (Code, Layers, Inspect, Access, Support) fits across the screen with a shape selected, every tab easy to hit with your thumb, and the selection's name still shows (shortened if it must) | ☐ |
+| 55 | A text's two handles | On a text, the position handle and the centre handle sit close together; both move the text. Check that each is easy to hit, and that the pair isn't confusing | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
