@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P1**. 1332 rows: 825 planned, 3 partial, 502 done, 2 superseded.
+Current phase: **P1**. 1332 rows: 814 planned, 3 partial, 513 done, 2 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -10,21 +10,21 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| element | 188 | 148 | 1 | 39 | 0 |
-| attribute | 386 | 219 | 0 | 167 | 0 |
+| element | 188 | 146 | 1 | 41 | 0 |
+| attribute | 386 | 214 | 0 | 172 | 0 |
 | property | 48 | 33 | 0 | 15 | 0 |
 | value | 85 | 25 | 0 | 60 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
 | namespace | 21 | 9 | 2 | 10 | 0 |
-| capability | 480 | 326 | 0 | 152 | 2 |
-| feature | 101 | 65 | 0 | 36 | 0 |
+| capability | 480 | 323 | 0 | 155 | 2 |
+| feature | 101 | 64 | 0 | 37 | 0 |
 
 ## By phase
 
 | Phase | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
-| P1 | 319 | 62 | 0 | 256 | 1 |
+| P1 | 319 | 51 | 0 | 267 | 1 |
 | P2 | 75 | 72 | 3 | 0 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
@@ -57,7 +57,7 @@ Each lesson's capabilities and the phases that deliver them.
 | 1 | Transform | Groups and transforms | P1 | 11 | 11 |
 | 1 | Animate | Animation | P5 | 16 | 0 |
 | 1 | Charts | Charts from data | P3 | 12 | 0 |
-| all | Create | Create | P1, P3, P4, P5 | 50 | 25 |
+| all | Create | Create | P1, P3, P4, P5 | 50 | 28 |
 | 2 | Arcs | Path shorthand | P1 | 26 | 26 |
 | 2 | Reuse | Symbols and use | P2 | 13 | 0 |
 | 2 | Paint | Gradients and patterns | P3 | 17 | 0 |

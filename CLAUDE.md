@@ -150,6 +150,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   numbers rewritten in place (`rewriteNumbers`' glue rule), one segment's text at a time, never the
   whole attribute. Booleans load path-bool (and paper-core only as a fallback) from lazy chunks in
   `src/paths/`; `tools/check-bundle.mjs` fails the build on `eval` or `new Function` in `dist/`.
+- **Text and fonts (P1-M4).** Fonts are registered only by `src/platform/fonts.ts` (check-sinks'
+  `font-face` rule): Draw's ten from `@fontsource` when a drawing uses one, yours from IndexedDB, and
+  a file's own `data:` faces page-wide, never under a name Draw's interface uses. The text library
+  loads from a lazy chunk in `src/text/`.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

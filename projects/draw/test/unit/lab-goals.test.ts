@@ -957,9 +957,18 @@ test('lab/create.svg (add-text): the Text tool’s tap at the middle of the boar
   oneEntry(r, 'Add text');
 });
 
-test('lab/create-logo.svg (text-attrs): SUNWAVE’s font-size token scrubs and its Number sheet sets 12; its font-family token cycles sans-serif → serif → monospace → sans-serif; its font-weight token cycles from 900; its text-anchor token cycles middle → end; each one entry and only its bytes', () => {
+test('lab/create-logo.svg (text-attrs): SUNWAVE’s x, y and font-size tokens scrub and its Number sheet sets 12; its font-family token cycles sans-serif → serif → monospace → sans-serif; its font-weight token cycles from 900; its text-anchor token cycles middle → end; its fill’s Colour sheet and its string’s Text sheet set them; each one entry and only its bytes', () => {
   const r = open('lab/create-logo.svg');
   const text = element(r, 'text');
+  for (const [name, by, was, now] of [['x', 2, '\n    x="50"', '\n    x="52"'], ['y', -4, '\n    y="84"', '\n    y="80"']] as const) {
+    const t = token(r, text.id, 'number', `${name}="`);
+    r.editor.scrubStart(t.block, t.token);
+    r.editor.scrub(by);
+    r.editor.scrubEnd(true);
+    assert.equal(r.editor.source(), edited(r.file, was, now));
+    oneEntry(r, `Scrub ${name}`);
+    r.editor.undo();
+  }
   const size = token(r, text.id, 'number', 'font-size');
   r.editor.scrubStart(size.block, size.token);
   r.editor.scrub(3);
@@ -989,6 +998,22 @@ test('lab/create-logo.svg (text-attrs): SUNWAVE’s font-size token scrubs and i
   r.editor.tapToken(a.block, a.token);
   assert.equal(r.editor.source(), edited(r.file, 'text-anchor="middle"', 'text-anchor="end"'));
   oneEntry(r, 'Set text-anchor');
+  r.editor.undo();
+  const fill = token(r, text.id, 'color', 'fill');
+  r.editor.tapToken(fill.block, fill.token);
+  assert.equal(r.editor.sheet.get()?.kind, 'color');
+  assert.ok('text' in r.editor.sheetInput('#e76f51'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(r.file, 'fill="#264653">', 'fill="#e76f51">'));
+  oneEntry(r, 'Set fill');
+  r.editor.undo();
+  const run = token(r, text.children[0], 'text');
+  r.editor.tapToken(run.block, run.token);
+  assert.equal(r.editor.sheet.get()?.kind, 'text');
+  assert.ok('text' in r.editor.sheetInput('SUN'));
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(r.file, '>SUNWAVE<', '>SUN<'));
+  oneEntry(r, 'Set text');
 });
 
 test('lab/create-logo.svg: SUNWAVE’s size, weight and anchor through Inspect’s Text section (font-size, font-weight, text-anchor; a generic family offers SVG Lab’s 400, 700 and 900): one entry each, only their bytes', () => {

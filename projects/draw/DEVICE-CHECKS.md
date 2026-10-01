@@ -33,7 +33,7 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 Signed: ______  Date: ______  Device / iOS: ______
 
-## P1 — Select, transform, shapes, colour and paths
+## P1 — Select, transform, shapes, colour, paths, text and accessibility
 
 The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
 To take the house's group: tap the roof, then More → Select group.
@@ -65,5 +65,9 @@ To take the house's group: tap the roof, then More → Select group.
 | 43 | Union offline | Open Draw, then turn on Airplane mode without reloading and try Union: it works (Safari kept its code from an earlier Union) or the notice says Draw couldn't load the shape tools and nothing changes; back online, Union works, and from then on it works offline too until Draw is reloaded | ☐ |
 | 44 | More after a marquee | After a one-finger marquee by touch, the first tap on More opens the sheet (CI's touch harness swallowed it in M2 and M3) | ☐ |
 | 45 | Stroke to path | Draw a thick curved line with the Pen (Inspect: a stroke about 8 wide, round ends), then More → Stroke to path: zoomed in to about 4×, it looks the same before and after, now a filled shape; do the same on a filled shape with a stroke: its fill stays, and the outline sits exactly where the stroke was | ☐ |
+| 46 | Typing a text | Text tool, tap the board: the Text sheet opens on "Hello" (tap into it if the keyboard isn't up) and you type over it; the page never zooms, the sheet stays above the keyboard, and Return makes a new line; after Done the canvas draws it below the first | ☐ |
+| 47 | The Font sheet | Select a text, Inspect → Font: each name is drawn in its own face (they may take a moment to arrive), and a tap on one changes the text on the canvas at once | ☐ |
+| 48 | Your own font | In the Font sheet, Add a font… and pick a .ttf or .otf from Files: it is listed under Your fonts by its own name and the text draws in it; reload Draw: it is still listed and still draws (Safari may clear it after seven days without a visit, as it does drafts) | ☐ |
+| 49 | The text's position handle | Select a text: grab its position handle (on the first line's baseline, at the text's x and y) with your thumb, first try, at the fit and zoomed in to about 4×; the whole text moves, every line with it, and Undo puts it back | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
