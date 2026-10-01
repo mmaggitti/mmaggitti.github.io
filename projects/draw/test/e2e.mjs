@@ -6825,7 +6825,9 @@ const pageFaces = () => [...document.fonts].map((f) => f.family.replace(/^["']|[
 // lab/create.svg, with a second text whose x is a list (the check's own: the lab's file has none).
 // The Text button is at least 44 × 44 and pressed once picked, the bar's font toggle has Archivo and
 // Inter, each at least 44 × 44 (Archivo pressed). A tap at the screen point of (50, 50) inserts
-// exactly lab-goals' "Hello" (one "Add text") and the lines sheet opens with "Hello" selected; typing
+// exactly lab-goals' "Hello" (one "Add text") and the lines sheet opens with "Hello" selected in its
+// focused field, which a ghost click at the tap point in the sheet's first 350 ms (a phone's late
+// mouse events) leaves so, the sheet open; typing
 // Big, Return, Idea and Done writes Draw's two line tspans (one "Edit text"). On the canvas each
 // line's middle is at x 50 and its baseline at y 55, then 18.2 units below (getStartPositionOfChar and
 // getEndPositionOfChar through getScreenCTM, ± 1 px). The pos handle sits at the screen point of
@@ -6852,12 +6854,24 @@ async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
     for (const t of toggle) must(t.width >= TAP_MIN - 0.5 && t.height >= TAP_MIN - 0.5 && t.right <= 440.5, `the toggle's ${t.name} is ${Math.round(t.width)}×${Math.round(t.height)} at ${Math.round(t.left)}–${Math.round(t.right)}`);
     const [at] = await page.evaluate(rootToScreen, [[50, 50]]);
     await page.touchscreen.tap(at.x, at.y);
+    const tapped = Date.now();
     await page.locator('.draw-lines').waitFor();
     const placed = F.replace(LIST, `${LIST}\n  ${HELLO}`);
     must(await source(page) === placed, `the tap wrote:\n${await source(page)}`);
     must(await undo.getAttribute('aria-label') === 'Undo Add text', `the tap is ${await undo.getAttribute('aria-label')}`);
     const field = await page.locator('.draw-lines').evaluate((t) => [t.value, t.selectionStart, t.selectionEnd, document.activeElement === t]);
     must(JSON.stringify(field) === JSON.stringify(['Hello', 0, 5, true]), `the lines sheet opened on ${JSON.stringify(field)}, not "Hello" selected in a focused field`);
+    // A ghost click: the mouse events a phone's browser sends after a tap can arrive once the sheet
+    // is open, at the tap point, on the dim. Within the sheet's first 350 ms it takes neither the
+    // field's focus nor the sheet; nor does a press inside the sheet that no pointer began.
+    await page.mouse.click(at.x, at.y);
+    const ghost = await page.evaluate(() => {
+      const t = document.querySelector('.draw-lines');
+      const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      document.querySelector('.draw-modal-title')?.dispatchEvent(press);
+      return t && [t.value, t.selectionStart, t.selectionEnd, document.activeElement === t, press.defaultPrevented];
+    });
+    must(JSON.stringify(ghost) === JSON.stringify(['Hello', 0, 5, true, true]), `a ghost click ${Date.now() - tapped} ms after the tap left the lines sheet on ${JSON.stringify(ghost)}, not "Hello" selected in a focused field with a press in the sheet held off`);
     await page.keyboard.type('Big');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Idea');
@@ -7058,10 +7072,12 @@ async function fontsLoadOnlyWhatTheDrawingUses(browser, origin) {
 // A file whose <style> declares @font-face{font-family:Own;src:url(data:font/woff2;base64,…)}
 // (IBM Plex Mono's latin 400) and whose text iiiiiiii at font-size 10 says font-family="Own, serif":
 // on Draw's canvas its getComputedTextLength is IBM Plex Mono's 48 units (8 × 600/1000 × 10) ± 0.5,
-// not the serif fallback's: in Chromium only Draw's registration (document.fonts) does it, in WebKit
-// the shadow tree's own face too. A second file, opened through the picker, whose face is named
-// Arial: no face of that name is registered, the app's own UI text keeps its width, and the import
-// report says why; and opening it took the first file's faces out of document.fonts.
+// not the serif fallback's, and in both engines only Draw's registration (document.fonts) does it:
+// no <style> in the canvas holds a CSSFontFaceRule (the sink takes @font-face out of its copy), so
+// WebKit can't connect the shadow tree's own face to document.fonts past Draw's name guard and caps.
+// A second file, opened through the picker, whose face is named Arial: no face of that name is
+// registered, the app's own UI text keeps its width, and the import report says why; and opening it
+// took the first file's faces out of document.fonts.
 async function aFilesOwnFontDrawsInEveryEngine(browser, origin) {
   const plex = fontBytes('ibm-plex-mono', 'ibm-plex-mono-latin-400-normal.woff2').toString('base64');
   const file = (family) => `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <style>@font-face{font-family:${family};src:url(data:font/woff2;base64,${plex})}</style>\n  <text id="t" x="10" y="50" font-size="10" font-family="${family}, serif" text-rendering="geometricPrecision">iiiiiiii</text>\n</svg>`;
@@ -7088,6 +7104,12 @@ async function aFilesOwnFontDrawsInEveryEngine(browser, origin) {
     must(Math.abs(serif - 48) > 1, `test setup: serif's iiiiiiii is ${serif}, as wide as IBM Plex Mono's`);
     must(Math.abs(l - 48) <= 0.5, `iiiiiiii in the file's own face measures ${l.toFixed(2)} units on the canvas, not IBM Plex Mono's 48 (serif's is ${serif.toFixed(2)})`);
     must((await page.evaluate(pageFaces)).includes('Own'), 'the file\'s own face is not on document.fonts');
+    // The canvas's own <style>s declare no face: the face above is Draw's registration.
+    const faceRules = () => page.evaluate(() => {
+      const count = (rules) => [...rules].reduce((n, r) => n + (r instanceof CSSFontFaceRule ? 1 : 0) + (r.cssRules ? count(r.cssRules) : 0), 0);
+      return [...document.querySelector('.draw-host').shadowRoot.querySelectorAll('style')].reduce((n, s) => n + (s.sheet ? count(s.sheet.cssRules) : 0), 0);
+    });
+    must(await faceRules() === 0, `the canvas's <style> holds ${await faceRules()} @font-face rule(s)`);
     // A face named like one of Draw's interface fonts.
     const ui = () => page.evaluate(() => {
       const r = document.createRange();
@@ -7101,6 +7123,7 @@ async function aFilesOwnFontDrawsInEveryEngine(browser, origin) {
     await closeModal(page);
     await page.waitForTimeout(300);
     const faces = await page.evaluate(pageFaces);
+    must(await faceRules() === 0, `the canvas's <style> holds ${await faceRules()} @font-face rule(s) for the face named Arial`);
     must(!faces.includes('Arial'), 'a face named Arial was registered on document.fonts');
     must(!faces.includes('Own'), 'opening another drawing left the first file\'s face on document.fonts');
     const ui1 = await ui();

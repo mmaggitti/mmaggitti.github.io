@@ -7,7 +7,8 @@
 // (a scrub frame), and the hit test's way back from a drawn node to its NodeId. The P1-M0 review
 // adds attribute names the DOM refuses (dropped, never thrown on). P1-M1 adds nodes that move alone
 // (within a parent, to another, deleted with their whitespace, a whitespace leaf), routed as the
-// editor routes them. The real Renderer is bundled from source (test/harness/entry.ts) and driven
+// editor routes them. P1-M4 adds a <style> edited to declare a face, patched without it, as the sink
+// draws every <style>. The real Renderer is bundled from source (test/harness/entry.ts) and driven
 // directly.
 //
 // Run by test/e2e.mjs on the /draw/ page (Chromium here, WebKit in CI), or alone, quickly:
@@ -179,6 +180,19 @@ function cases(engine) {
     doc.version++;
     r.patchSubtree(leaf.id);
     check('a text edit', r, root, doc);
+  }
+  {
+    // A <style> edited to declare a face is patched as it is drawn fresh: without the face rule.
+    const { r, root, doc } = setup(TEXT);
+    const leaf = doc.nodes.get(byId(doc, 's').children[0]);
+    leaf.raw = '@font-face { font-family: Own; src: url(data:font/woff2;base64,AAAA) } rect { fill: red }';
+    leaf.dirty = true;
+    doc.version++;
+    r.patchSubtree(leaf.id);
+    check('a <style> edit that declares a face', r, root, doc);
+    const style = root.querySelector('style');
+    const faces = [...(style?.sheet?.cssRules ?? [])].filter((rule) => rule instanceof CSSFontFaceRule).length;
+    if (faces || style?.textContent !== ' rect { fill: red }') results.push({ label: 'a <style> edit that declares a face, patched', problems: [`its <style> holds ${faces} @font-face rule(s) and reads ${JSON.stringify(style?.textContent)}`] });
   }
   {
     const { r, root, doc } = setup(TEXT);
