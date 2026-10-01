@@ -3137,7 +3137,7 @@ const BREAKS = [
   },
   {
     id: 'B591', what: 'check-sinks misses new FontFace outside src/platform/',
-    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bnew\\s+FontFace\\s*\\(|\\bdocument\\.fonts\\b/,", to: "['font-face', /\\bdocument\\.fonts\\b/,",
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bFontFace\\b|", to: "['font-face', /",
     run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps registering a font face to src\/platform\//,
   },
   {
@@ -3361,6 +3361,11 @@ const BREAKS = [
     id: 'B634', what: 'prepareExport rejects when the text library fails outright (the Export sheet would stay on Preparing…)',
     file: 'projects/draw/src/export/svg.ts', from: '  try {\n    return await prepare(doc, name, choice, deps, read);\n  } catch (e) {\n    return { refused: unprepared(e) };\n  }\n', to: '  return prepare(doc, name, choice, deps, read);\n',
     run: drawTests('export-text.test.ts'), expect: /✖ a text library that fails outright/,
+  },
+  {
+    id: 'B635', what: 'check-sinks’ font-face rule goes back to `new FontFace(` and `document.fonts` only (globalThis.FontFace, window[\'FontFace\'], an alias, [\'fonts\'] and a destructured fonts pass)',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['font-face', /\\bFontFace\\b|\\bdocument\\s*\\??\\.\\s*fonts\\b|\\[\\s*['\"`]fonts['\"`]\\s*\\]|\\{[^}]*\\bfonts\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*document\\b/,", to: "['font-face', /\\bnew\\s+FontFace\\s*\\(|\\bdocument\\.fonts\\b/,",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks bans the name FontFace in any spelling/,
   },
 ];
 
