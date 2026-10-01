@@ -80,7 +80,12 @@
 // registered; and the phone rules on the text tools. Then Text to path: four texts (Inter, Fraunces
 // italic lines, IBM Plex Mono with two spaces kept, a file's own face) cover the same pixels as paths
 // (within 1%), the text library loading only then; and Export's text choices: As paths, and With
-// fonts embedding Inter whole while IBM Plex, whose font reserves "Plex", goes as paths.
+// fonts embedding Inter whole while IBM Plex, whose font reserves "Plex", goes as paths. Then the
+// Access tab: on lab/create.svg a Title, its text typed, a Description, a Language and SVG Lab's
+// metadata, each one entry, a shape titled as its first child, the page's accessibility tree never
+// reading the drawing (the canvas host stays aria-hidden); on lab/access.svg the screen-reader
+// preview following each switch, a shape's title, a code edit and an undo at once; and the phone
+// rules on the Access tab and its five-tab row at 440 pt.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -288,6 +293,10 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   for (const height of [956, 796]) await check(phoneRulesOnTheTextTools, height);
   await check(textToPathLooksTheSame);
   await check(exportWritesTextAsPathsOrWithFonts);
+  // P1-M4 S3: the Access tab.
+  await check(theAccessPanelNamesTheDrawing);
+  await check(theScreenReaderPreviewFollowsTheFile);
+  for (const height of [956, 796]) await check(phoneRulesOnTheAccessPanel, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -7367,6 +7376,220 @@ async function exportWritesTextAsPathsOrWithFonts(browser, origin) {
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }
+// ── P1-M4 S3: the Access tab ─────────────────────────────────────────────────────────────────
+
+// The Access tab, with the code panel at half.
+async function showAccess(page) {
+  if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+  await page.locator('.draw-tabs button', { hasText: 'Access' }).tap();
+  await page.locator('.draw-access').waitFor();
+}
+// An Access field (data-access) typed into, then Enter (a textarea: Escape): one entry while it had focus.
+async function accessType(page, name, text) {
+  const f = page.locator(`[data-access="${name}"]`);
+  await f.scrollIntoViewIfNeeded();
+  await f.tap();
+  await f.fill(text);
+  await f.press((await f.evaluate((el) => el.tagName)) === 'TEXTAREA' ? 'Escape' : 'Enter');
+  await page.waitForTimeout(50);
+}
+async function accessSwitch(page, name) {
+  const b = page.locator(`[data-access="${name}-switch"]`);
+  await b.scrollIntoViewIfNeeded();
+  await b.tap();
+  await page.waitForTimeout(50);
+}
+const SAID = (page) => page.locator('[data-access="said"]').textContent();
+
+// lab/create.svg with a circle of the check's own (the lab's file is an empty board). The Access tab
+// is at least 44 × 44. Title on writes SVG Lab's Create markup (role="img" aria-labelledby="drawing-
+// title" on the root, <title id="drawing-title">My drawing</title> first), one "Add title"; the field
+// typed "Acme logo" makes it "Acme logo", one "Set title"; Description on and typed, one entry each;
+// Language "en" writes lang="en" on the root, one "Set language"; Metadata with the Date field set to
+// 2026-09-25 (Creator "You", the default) writes SVG Lab's markup, one "Add metadata". The canvas host
+// is still aria-hidden="true", and with the sheet at peek the page's accessibility tree (Playwright's
+// ariaSnapshot of the body) holds no "Acme logo": the drawing's title is never read off the page. The
+// circle, selected, titled "Sun" in its Title field becomes <circle …><title>Sun</title></circle>, one
+// "Set title". Undo walks back to the file byte for byte.
+async function theAccessPanelNamesTheDrawing(browser, origin) {
+  const SUN = '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"/>';
+  const F = LAB('create.svg').replace('\n</svg>', `\n  ${SUN}\n</svg>`);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const entry = async (want) => must(await undo.getAttribute('aria-label') === `Undo ${want}`, `the last entry is "${await undo.getAttribute('aria-label')}", not "Undo ${want}"`);
+    await showAccess(page);
+    const tab = await page.locator('.draw-tabs button', { hasText: 'Access' }).evaluate((el) => el.getBoundingClientRect().toJSON());
+    must(tab.width >= TAP_MIN - 0.5 && tab.height >= TAP_MIN - 0.5, `the Access tab is ${Math.round(tab.width)}×${Math.round(tab.height)}`);
+    await accessSwitch(page, 'title');
+    const titled = F.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">My drawing</title>');
+    must(await source(page) === titled, `Title on wrote:\n${await source(page)}`);
+    await entry('Add title');
+    await accessType(page, 'title', 'Acme logo');
+    const named = titled.replace('>My drawing<', '>Acme logo<');
+    must(await source(page) === named, `the Title field wrote:\n${await source(page)}`);
+    await entry('Set title');
+    must(await SAID(page) === '“Acme logo, image”', `the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'desc');
+    await entry('Add description');
+    await accessType(page, 'desc', 'A sun over the sea');
+    const described = named.replace('aria-labelledby="drawing-title">', 'aria-labelledby="drawing-title" aria-describedby="drawing-desc">').replace('>Acme logo</title>', '>Acme logo</title>\n  <desc id="drawing-desc">A sun over the sea</desc>');
+    must(await source(page) === described, `Description wrote:\n${await source(page)}`);
+    await entry('Set description');
+    await accessType(page, 'lang', 'en');
+    const english = described.replace('aria-describedby="drawing-desc">', 'aria-describedby="drawing-desc" lang="en">');
+    must(await source(page) === english, `Language wrote:\n${await source(page)}`);
+    await entry('Set language');
+    must(await page.locator('[data-access="said-lang"]').textContent() === 'Language: en', 'the preview does not name the language');
+    must(await page.locator('[data-access="creator"]').inputValue() === 'You', 'the Creator field is not SVG Lab’s "You"');
+    await accessType(page, 'date', '2026-09-25');
+    must(await source(page) === english, 'the Date field wrote before Metadata was on');
+    await accessSwitch(page, 'meta');
+    const DC = '\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:creator>You</dc:creator>\n    <dc:date>2026-09-25</dc:date>\n  </metadata>';
+    const meta = english.replace('</desc>', `</desc>${DC}`);
+    must(await source(page) === meta, `Metadata wrote:\n${await source(page)}`);
+    await entry('Add metadata');
+    // The page never reads the drawing: the canvas host is hidden from assistive tech.
+    must(await page.locator('.draw-host').getAttribute('aria-hidden') === 'true', 'the canvas host is not aria-hidden');
+    await toPeek(page);
+    const tree = await page.locator('body').ariaSnapshot();
+    must(tree.includes('Undo'), `test setup: the accessibility tree reads nothing:\n${tree}`);
+    must(!tree.includes('Acme logo') && !tree.includes('A sun over the sea'), `the page's accessibility tree reads the drawing:\n${tree}`);
+    // A shape's own title, its first child.
+    await tapShape(page, 'sun');
+    await showAccess(page);
+    must((await page.locator('.draw-access [aria-label="Selected element"] .draw-subhead').textContent()) === '<circle#sun>', 'the element section is not the circle’s');
+    await accessType(page, 'el-title', 'Sun');
+    must(await source(page) === meta.replace(SUN, '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"><title>Sun</title></circle>'), `the circle's Title wrote:\n${await source(page)}`);
+    await entry('Set title');
+    for (let n = 0; n < 7; n++) await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), `undo did not walk back to the file:\n${await source(page)}`);
+    must(await page.locator('[data-access="title-switch"]').getAttribute('aria-checked') === 'false', 'the Title switch did not follow the undo');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/access.svg: the preview reads SVG Lab's sentence; Title off gives its description-only sentence,
+// Description off the no-name one with the month labels; the first bar titled "Jan: 40" adds the
+// titles note (no role="img" is left); three undos give the file and the sentence back. Then the
+// <desc>'s text, edited through P0's text token in the code, reads in the preview, and an Undo tapped
+// while the Access tab is open changes the preview back at once.
+async function theScreenReaderPreviewFollowsTheFile(browser, origin) {
+  const F = LAB('access.svg');
+  const LAB_SAID = '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”';
+  const NO_NAME = 'no name, so it may skip the drawing or read stray labels: “Jan, Feb, Mar, Apr”';
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    await showAccess(page);
+    must(await SAID(page) === LAB_SAID, `the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'title');
+    must(await SAID(page) === '“Image. Bar chart. Visitors rose from 40 in January to 88 in April.”', `Title off: the preview reads ${await SAID(page)}`);
+    await accessSwitch(page, 'desc');
+    must(await SAID(page) === NO_NAME, `Description off: the preview reads ${await SAID(page)}`);
+    await toPeek(page);
+    const bar = await page.evaluate(drawnCentre, 'rect');
+    await page.touchscreen.tap(bar.x, bar.y);
+    await page.waitForTimeout(50);
+    await showAccess(page);
+    await accessType(page, 'el-title', 'Jan: 40');
+    must(await SAID(page) === `${NO_NAME} Titles on shapes show as tooltips on hover.`, `a bar's title: the preview reads ${await SAID(page)}`);
+    for (let n = 0; n < 3; n++) await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), 'undo did not give the file back');
+    must(await SAID(page) === LAB_SAID, `after the undos the preview reads ${await SAID(page)}`);
+    // The <desc>'s text through P0's token in the code, then the Access tab, then an undo there.
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await showCode(page);
+    await tapToken(page.locator('.cv-text', { hasText: /^Bar chart\./ }));
+    const text = page.locator('.draw-modal input').first();
+    await text.fill('Four bars.');
+    await text.press('Enter');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must((await source(page)).includes('<desc id="chart-desc">Four bars.</desc>'), 'test setup: the token edit did not write the description');
+    await page.locator('.draw-tabs button', { hasText: 'Access' }).tap();
+    await page.locator('.draw-access').waitFor();
+    must(await SAID(page) === '“Monthly visitors, image. Four bars.”', `after the code edit the preview reads ${await SAID(page)}`);
+    await undo.tap();
+    await page.waitForTimeout(50);
+    must(await SAID(page) === LAB_SAID, `an undo with the tab open: the preview reads ${await SAID(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The tap floor, 16px fields and no sideways scroll on the Access tab, with the drawing's section
+// and an element's at half and full height: the five tabs and the selection label fit 440 pt (each
+// tab inside the row and the screen, at least 44 × 44), and the preview and every field sit inside
+// the sheet.
+async function phoneRulesOnTheAccessPanel(browser, origin, height) {
+  const F = LAB('access.svg').replace('<rect x="16"', '<rect tabindex="0" aria-roledescription="bar" x="16"');
+  await withPage(browser, origin, height, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
+    const problems = [];
+    const rules = async (state) => {
+      await twoFrames(page);
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${state}: scrolls sideways (${r.sw} > ${r.cw})`);
+      const row = await page.evaluate(() => {
+        const box = (el) => el.getBoundingClientRect().toJSON();
+        const sheet = box(document.querySelector('.draw-sheet'));
+        const body = document.querySelector('.draw-sheet-body');
+        return {
+          row: box(document.querySelector('.draw-sheet-row')),
+          sel: box(document.querySelector('.draw-sel')),
+          tabs: [...document.querySelectorAll('.draw-tabs button')].map((b) => ({ name: b.textContent, ...box(b) })),
+          inside: [...document.querySelectorAll('.draw-access-said, .draw-access input, .draw-access textarea, .draw-access button')].map((el) => ({ name: el.getAttribute('data-access') ?? el.className, ...box(el) })),
+          sheet,
+          body: { scroll: body.scrollHeight > body.clientHeight + 1 },
+        };
+      });
+      if (row.tabs.length !== 5 || row.tabs.map((t) => t.name).join() !== 'Code,Layers,Inspect,Access,Support') problems.push(`${state}: the tabs are ${row.tabs.map((t) => t.name).join()}`);
+      for (const t of row.tabs) {
+        if (t.width < TAP_MIN - 0.5 || t.height < TAP_MIN - 0.5) problems.push(`${state}: the ${t.name} tab is ${Math.round(t.width)}×${Math.round(t.height)}`);
+        if (t.left < -0.5 || t.right > 440.5 || t.right > row.row.right + 0.5) problems.push(`${state}: the ${t.name} tab at ${Math.round(t.left)}–${Math.round(t.right)} is outside the 440 pt row`);
+      }
+      if (row.sel.right > 440.5 || row.sel.left < row.tabs[row.tabs.length - 1].right - 0.5) problems.push(`${state}: the selection label at ${Math.round(row.sel.left)}–${Math.round(row.sel.right)} overlaps the tabs or leaves the row`);
+      // Inside the sheet's width; the body scrolls to reach the rest.
+      for (const x of row.inside) if (x.width && (x.left < row.sheet.left - 0.5 || x.right > row.sheet.right + 0.5)) problems.push(`${state}: ${x.name} at ${Math.round(x.left)}–${Math.round(x.right)} is outside the sheet`);
+      const said = row.inside.find((x) => x.name === 'draw-access-said');
+      if (!said || said.top < row.sheet.top - 0.5 || said.top > row.sheet.bottom) problems.push(`${state}: the preview is not in the sheet`);
+    };
+    await showAccess(page);
+    await rules('the drawing at half');
+    for (let n = 0; n < 3 && (await page.locator('.draw-sheet--full').count()) === 0; n++) await page.locator('.draw-handle').tap();
+    await rules('the drawing at full');
+    await toPeek(page);
+    const bar = await page.evaluate(drawnCentre, 'rect');
+    await page.touchscreen.tap(bar.x, bar.y);
+    await page.waitForTimeout(50);
+    await showAccess(page);
+    if ((await page.locator('.draw-access [aria-label="Selected element"]').count()) !== 1) problems.push('test setup: no element section for the bar');
+    if ((await page.locator('.draw-access [data-access="remove:aria-roledescription"]').count()) !== 1) problems.push('the bar’s other ARIA has no Remove');
+    await rules('an element at half');
+    for (let n = 0; n < 3 && (await page.locator('.draw-sheet--full').count()) === 0; n++) await page.locator('.draw-handle').tap();
+    await rules('an element at full');
+    // Every field the tab shows, scrolled into view inside the sheet's body.
+    for (const name of ['title', 'desc', 'lang', 'creator', 'date', 'el-title', 'label', 'role', 'aria:aria-roledescription']) {
+      const f = page.locator(`[data-access="${name}"]`);
+      if ((await f.count()) !== 1) {
+        problems.push(`no ${name} field`);
+        continue;
+      }
+      await f.scrollIntoViewIfNeeded();
+      const b = await f.evaluate((el) => {
+        const s = document.querySelector('.draw-sheet-body').getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return { inside: r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5, size: parseFloat(getComputedStyle(el).fontSize) };
+      });
+      if (!b.inside) problems.push(`the ${name} field can't be scrolled inside the sheet`);
+      if (b.size < 16) problems.push(`the ${name} field is ${b.size}px`);
+    }
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
 // Inter 700's advance for "Inter wordmark" at font-size 20, from its file (the text library, in node).
 const INTER_WORDMARK = (() => {
   const shaped = shapeText(new Uint8Array(fontBytes('inter', 'inter-latin-700-normal.woff2')), ['Inter wordmark']);
