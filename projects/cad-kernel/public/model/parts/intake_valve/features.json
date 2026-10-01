@@ -7,7 +7,7 @@
       "name": "Valve body",
       "angle": 360,
       "axis": "@sk1.l6",
-      "operation": "new",
+      "combine": "new",
       "profile": "@sk1"
     },
     {

@@ -38,11 +38,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Cover",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 80
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -62,7 +62,7 @@
           "ex1.side[l3]/ex1.side[l4]",
           "ex1.side[l1]/ex1.side[l4]"
         ],
-        "query": {
+        "rule": {
           "edgesOf": "@ex1",
           "where": {
             "curve": "line",
@@ -139,10 +139,10 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Camshaft seal bores",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk2"
     },
     {

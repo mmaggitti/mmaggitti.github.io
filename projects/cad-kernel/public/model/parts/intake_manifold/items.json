@@ -28,11 +28,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Plenum",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 340
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -122,7 +122,7 @@
       "id": "sw1",
       "type": "feature.sweep",
       "name": "Runner",
-      "operation": "add",
+      "combine": "add",
       "path": "@sk2",
       "profile": "@sk3"
     },
@@ -190,7 +190,7 @@
       "id": "sw2",
       "type": "feature.sweep",
       "name": "Runner bore",
-      "operation": "cut",
+      "combine": "cut",
       "path": "@sk4",
       "profile": "@sk5"
     },

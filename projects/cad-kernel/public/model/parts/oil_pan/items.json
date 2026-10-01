@@ -38,13 +38,13 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Pan",
+      "combine": "new",
       "draft": 3,
       "extent": {
         "type": "distance",
         "distance": 110,
         "reverse": true
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {

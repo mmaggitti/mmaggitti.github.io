@@ -28,11 +28,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Shaft",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 380
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -91,11 +91,11 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Cam lobe",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk2"
     },
     {
@@ -163,11 +163,11 @@
       "id": "ex3",
       "type": "feature.extrude",
       "name": "Cam lobe",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk3"
     },
     {

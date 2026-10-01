@@ -28,11 +28,11 @@
       "id": "ex1",
       "type": "feature.extrude",
       "name": "Front main journal",
+      "combine": "new",
       "extent": {
         "type": "distance",
         "distance": 30
       },
-      "operation": "new",
       "profile": "@sk1"
     },
     {
@@ -178,11 +178,11 @@
       "id": "ex2",
       "type": "feature.extrude",
       "name": "Web",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk2"
     },
     {
@@ -234,11 +234,11 @@
       "id": "ex3",
       "type": "feature.extrude",
       "name": "Crank pin",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 32
       },
-      "operation": "add",
       "profile": "@sk3"
     },
     {
@@ -360,11 +360,11 @@
       "id": "ex4",
       "type": "feature.extrude",
       "name": "Web",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk4"
     },
     {
@@ -510,11 +510,11 @@
       "id": "ex5",
       "type": "feature.extrude",
       "name": "Web",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk5"
     },
     {
@@ -566,11 +566,11 @@
       "id": "ex6",
       "type": "feature.extrude",
       "name": "Crank pin",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 32
       },
-      "operation": "add",
       "profile": "@sk6"
     },
     {
@@ -692,11 +692,11 @@
       "id": "ex7",
       "type": "feature.extrude",
       "name": "Web",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 14
       },
-      "operation": "add",
       "profile": "@sk7"
     },
     {
@@ -726,11 +726,11 @@
       "id": "ex8",
       "type": "feature.extrude",
       "name": "Main journal",
+      "combine": "add",
       "extent": {
         "type": "distance",
         "distance": 30
       },
-      "operation": "add",
       "profile": "@sk8"
     },
     {
@@ -787,10 +787,10 @@
       "id": "ex9",
       "type": "feature.extrude",
       "name": "Oil drilling",
+      "combine": "cut",
       "extent": {
         "type": "through_all"
       },
-      "operation": "cut",
       "profile": "@sk9"
     },
     {
