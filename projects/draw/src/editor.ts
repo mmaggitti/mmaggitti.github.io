@@ -37,6 +37,10 @@
 //   (platform/fonts.ts): after open and after any change that may need a face, the faces the text asks
 //   for are registered, a file's own data: faces too (page-wide, under the name guard), and a face
 //   arriving measures the overlay again.
+// - Accessibility (P1-M4 S3, engine/access/): the Access tab reads access(), computed from the model
+//   on each version bump (the screen-reader preview too), and writes through one entry per switch
+//   (Title, Description, Metadata, an element's Title and Hidden, Remove) and one field session per
+//   focus (Field kind 'access'); typing a title where there is none makes it, in that one entry.
 
 import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
 import { parseFragment } from '../../../engine/model/fragment.ts';
@@ -77,7 +81,10 @@ import { insertMarkup } from '../../../engine/model/space.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
 import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
-import { idError } from '../../../engine/code/edit.ts';
+import { idError, xmlCharError } from '../../../engine/code/edit.ts';
+import { DEFAULT_TITLE, LANG_TAG, NOT_A_TAG, accessOf, elementAccess, planAria, planDrawingDesc, planDrawingTitle, planElementTitle, planLang, planRole, type DrawingAccess, type ElementAccess } from '../../../engine/access/model.ts';
+import { metaOf, planMetaText, planMetadata, type Meta } from '../../../engine/access/metadata.ts';
+import { speak } from '../../../engine/access/speak.ts';
 import { apply as applyM, invert, multiply, translate as shift } from '../../../engine/values/affine.ts';
 import { itemMatrix, parseTransform } from '../../../engine/values/transform.ts';
 import { fmt } from '../../../engine/values/number-format.ts';
@@ -186,6 +193,19 @@ export interface EditorPorts {
 
 // ── state React reads ──────────────────────────────────────────────────────────────────────────
 
+/** What the Access tab shows (P1-M4 S3): the drawing's, its metadata, the preview, and the one selected element's. */
+export interface AccessView {
+  drawing: DrawingAccess;
+  meta: Meta;
+  /** Roughly what a screen reader says (engine/access/speak.ts). */
+  said: string;
+  /** The id attributes of the drawing's <title> and <desc> (what the root's references name when they are Draw's kind). */
+  ids: { title: string | null; desc: string | null };
+  /** One selected element other than the root, and its tag as the selection label writes it (<rect#a>). */
+  element: (ElementAccess & { id: NodeId; tag: string }) | null;
+  /** How many elements are selected. */
+  selected: number;
+}
 export interface OpenResult extends RenderStats {
   ok: boolean;
   error?: string;
@@ -2805,13 +2825,14 @@ export class Editor {
       : field.kind === 'style' ? (field.ids ?? this.#styleIds())
       : field.kind === 'offset' ? [field.stop].filter((id) => this.#doc && attached(this.#doc, id))
       : field.kind === 'donut' ? [this.donut()].flatMap((d) => (d?.recognized && field.index < d.values.length ? [d.holder] : []))
+      : field.kind === 'access' ? [field.id ?? this.#doc!.root].filter((id) => attached(this.#doc!, id))
       : this.#styleIds().slice(0, 1);
     if (!ids.length || !this.#writable()) return;
     if (field.kind === 'style' && this.styleRow(field.prop, field.ids)?.disabled) return;
     const ruled = field.kind === 'gradient' ? this.#paintRuled(field.prop) : field.kind === 'offset' ? this.#stopRuled(field.stop) : null;
     if (ruled) return void this.notice.set(ruled);
     if (field.kind === 'gradient' && !this.paintInfo(field.prop)?.gradient) return;
-    const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.kind === 'donut' ? `value ${field.index + 1}` : field.name;
+    const label = field.kind === 'input' ? field.name : field.kind === 'style' ? field.prop : field.kind === 'offset' ? 'offset' : field.kind === 'donut' ? `value ${field.index + 1}` : field.kind === 'access' ? (field.name === 'aria' ? field.aria! : ACCESS_LABELS[field.name]) : field.name;
     this.#field = { field, ids, drag: this.#drag(`Set ${label}`), refused: [] };
   }
 
@@ -2838,6 +2859,19 @@ export class Editor {
       if (!/^\d+$/.test(t) || Number(t) < VALUE_MIN || Number(t) > VALUE_MAX) return `${JSON.stringify(text)} is not a whole number from ${VALUE_MIN} to ${VALUE_MAX}`;
       const index = f.field.index;
       f.drag.update((apply) => apply(this.#donutValuesOp(f.ids[0], new Map([[index, Number(t)]]))));
+      this.#show();
+      return null;
+    }
+    if (f.field.kind === 'access') {
+      // Checked before the frame, so a frame never throws: a language must read as a tag, and text
+      // must hold only characters XML can.
+      const a = f.field;
+      const t = text.trim();
+      const why = a.name === 'lang' ? (t && !LANG_TAG.test(t) ? NOT_A_TAG : null) : xmlCharError(text);
+      if (why) return why;
+      const doc = this.#doc!;
+      const id = f.ids[0];
+      f.drag.update((apply) => planAccessText(doc, a, id, text, apply));
       this.#show();
       return null;
     }
@@ -3205,6 +3239,77 @@ export class Editor {
   removeStop(prop: PaintProp, stop: NodeId): void {
     const at = this.#gradientOf(prop);
     if (at) this.#dispatch('Remove stop', (apply) => removeStopOf(at.doc, resolveGradient(at.doc, at.gradient)!, stop, apply));
+  }
+
+  // ── accessibility: the Access tab (P1-M4 S3, engine/access/) ─────────────────────────────────
+
+  /**
+   * What the Access tab shows, from the model (never the page): the drawing's title, description,
+   * role, labels and language (accessOf), its Dublin Core items (metaOf), roughly what a screen
+   * reader says (speak), and one selected element's own (elementAccess). Null with no drawing.
+   */
+  access(): AccessView | null {
+    const doc = this.#doc;
+    if (!doc) return null;
+    const one = this.#accessElement();
+    const drawing = accessOf(doc);
+    const idOf = (item: { id: NodeId } | null) => (item ? attrValue(doc, el(doc, item.id), null, 'id') : null);
+    return {
+      drawing,
+      meta: metaOf(doc),
+      said: speak(doc),
+      ids: { title: idOf(drawing.title), desc: idOf(drawing.desc) },
+      element: one === null ? null : { ...elementAccess(doc, one), id: one, tag: elementLabel(doc, one) ?? '' },
+      selected: this.#styleIds().length,
+    };
+  }
+
+  // The element the Access tab's element section edits: the one selected element, never the root.
+  #accessElement(): NodeId | null {
+    const ids = this.#styleIds();
+    return ids.length === 1 && ids[0] !== this.#doc!.root ? ids[0] : null;
+  }
+
+  /** The drawing's Title switch: on writes SVG Lab's "My drawing" (the root's role and reference only where it has none of its own); off takes it away. One entry. */
+  setDrawingTitle(on: boolean): void {
+    const doc = this.#doc;
+    if (doc) this.#dispatch(on ? 'Add title' : 'Remove title', (apply) => planDrawingTitle(doc, on ? DEFAULT_TITLE : null, apply));
+  }
+
+  /** The Description switch: on writes an empty <desc id="drawing-desc"> after the title, for the field to fill; off takes it away. One entry. */
+  setDrawingDesc(on: boolean): void {
+    const doc = this.#doc;
+    if (doc) this.#dispatch(on ? 'Add description' : 'Remove description', (apply) => planDrawingDesc(doc, on ? '' : null, apply));
+  }
+
+  /** The Metadata switch: on writes dc:creator and dc:date from the Creator and Date fields (engine/access/metadata.ts); off takes away the items the tab shows. One entry. */
+  setMetadata(on: boolean, values: { creator: string; date: string } = { creator: META_CREATOR, date: today() }): void {
+    const doc = this.#doc;
+    if (!doc) return;
+    const why = xmlCharError(values.creator) ?? xmlCharError(values.date);
+    if (why) return void this.notice.set(why);
+    this.#dispatch(on ? 'Add metadata' : 'Remove metadata', (apply) => planMetadata(doc, on, values, apply));
+  }
+
+  /** The selected element's Title switch: on writes an empty <title> as its first child, for the field to fill; off takes it away. One entry. */
+  setElementTitle(on: boolean): void {
+    const doc = this.#doc;
+    const id = doc ? this.#accessElement() : null;
+    if (doc && id !== null) this.#dispatch(on ? 'Add title' : 'Remove title', (apply) => planElementTitle(doc, id, on ? '' : null, apply));
+  }
+
+  /** Hidden from screen readers: the selected element's aria-hidden="true" written, or taken away. One entry. */
+  setAriaHidden(on: boolean): void {
+    const doc = this.#doc;
+    const id = doc ? this.#accessElement() : null;
+    if (doc && id !== null) this.#dispatch(on ? 'Hide from screen readers' : 'Show to screen readers', (apply) => planAria(doc, id, 'aria-hidden', on ? 'true' : null, apply));
+  }
+
+  /** Other ARIA's Remove: that aria-* attribute of the selected element taken away. One entry. */
+  removeAria(name: string): void {
+    const doc = this.#doc;
+    const id = doc ? this.#accessElement() : null;
+    if (doc && id !== null && attrValue(doc, el(doc, id), null, name) !== null) this.#dispatch(`Remove ${name}`, (apply) => planAria(doc, id, name, null, apply));
   }
 
   // ── rem (decision 13) ────────────────────────────────────────────────────────────────────────
@@ -3992,7 +4097,47 @@ export type Field =
   /** A radial gradient's fx, fy or fr (S3), where it lives in the chain. */
   | { kind: 'gradient'; prop: PaintProp; name: 'fx' | 'fy' | 'fr' }
   /** A donut's value (P1-M3): a whole number from 1 to 100, written into its data comment. */
-  | { kind: 'donut'; index: number };
+  | { kind: 'donut'; index: number }
+  /**
+   * An Access field (P1-M4 S3): the drawing's title, description or language; a metadata item's text
+   * (`id` the item's element); the selected element's (`id`) title, label, role, or another aria-*
+   * attribute (`aria` its name).
+   */
+  | { kind: 'access'; name: AccessField; id?: NodeId; aria?: string };
+export type AccessField = 'title' | 'desc' | 'lang' | 'meta' | 'el-title' | 'label' | 'role' | 'aria';
+// What an Access field's history entry says it set ("Set title").
+const ACCESS_LABELS: Readonly<Record<Exclude<AccessField, 'aria'>, string>> = { title: 'title', desc: 'description', lang: 'language', meta: 'metadata', 'el-title': 'title', label: 'label', role: 'role' };
+/** SVG Lab's Creator for new metadata (the Metadata switch's default). */
+export const META_CREATOR = 'You';
+/** Today, as the Date field's default: YYYY-MM-DD in local time. */
+export function today(now = new Date()): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+}
+
+// One frame of an Access field's session: its text written where the field says (engine/access/).
+function planAccessText(doc: Doc, f: { name: AccessField; aria?: string }, id: NodeId, text: string, apply: (op: Op) => void): void {
+  switch (f.name) {
+    case 'title':
+      return planDrawingTitle(doc, text, apply);
+    case 'desc':
+      return planDrawingDesc(doc, text, apply);
+    case 'lang':
+      return planLang(doc, text, apply);
+    case 'meta': {
+      const item = metaOf(doc).items.find((i) => i.id === id);
+      return item ? planMetaText(doc, item, text, apply) : undefined;
+    }
+    case 'el-title':
+      return planElementTitle(doc, id, text, apply);
+    case 'label':
+      return planAria(doc, id, 'aria-label', text.trim() ? text : null, apply);
+    case 'role':
+      return planRole(doc, id, text, apply);
+    case 'aria':
+      return planAria(doc, id, f.aria!, text, apply);
+  }
+}
 interface FieldSession {
   field: Field;
   ids: NodeId[]; // the generated shape, or the selection

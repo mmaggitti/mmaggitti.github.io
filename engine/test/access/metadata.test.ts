@@ -23,7 +23,9 @@ const load = (src: string): Doc => {
   return r.doc;
 };
 const LAB = { creator: 'You', date: '2026-09-25' };
-const DC_MARKUP = '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>You</dc:creator><dc:date>2026-09-25</dc:date></metadata>';
+// SVG Lab's markup as its code writes it (buildCode: a <metadata> isn't inline, so each child is on a
+// line of its own, two spaces deeper).
+const DC_MARKUP = '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:creator>You</dc:creator>\n    <dc:date>2026-09-25</dc:date>\n  </metadata>';
 
 test('Metadata on, on lab/access.svg, writes SVG Lab’s bare markup after the <desc>, before the drawing; off takes it away again; one undo gives the bytes back', () => {
   const src = corpus('lab/access.svg');
@@ -42,7 +44,14 @@ test('Metadata on, on lab/access.svg, writes SVG Lab’s bare markup after the <
   // Before the first element when there's no title or description; in the root's prefix.
   const bare = load('<s:svg xmlns:s="http://www.w3.org/2000/svg">\n  <s:rect/>\n</s:svg>');
   new Session(bare).dispatch('m', (apply) => planMetadata(bare, true, LAB, apply));
-  assert.equal(serialize(bare), `<s:svg xmlns:s="http://www.w3.org/2000/svg">\n  <s:metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>You</dc:creator><dc:date>2026-09-25</dc:date></s:metadata>\n  <s:rect/>\n</s:svg>`);
+  assert.equal(serialize(bare), `<s:svg xmlns:s="http://www.w3.org/2000/svg">\n  <s:metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:creator>You</dc:creator>\n    <dc:date>2026-09-25</dc:date>\n  </s:metadata>\n  <s:rect/>\n</s:svg>`);
+  // A file on one line: all on one line; a tab-indented file: its tabs.
+  const flat = load('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
+  new Session(flat).dispatch('m', (apply) => planMetadata(flat, true, LAB, apply));
+  assert.equal(serialize(flat), '<svg xmlns="http://www.w3.org/2000/svg"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>You</dc:creator><dc:date>2026-09-25</dc:date></metadata><rect/></svg>');
+  const tabs = load('<svg xmlns="http://www.w3.org/2000/svg">\r\n\t<title>T</title>\r\n</svg>');
+  new Session(tabs).dispatch('m', (apply) => planMetadata(tabs, true, LAB, apply));
+  assert.equal(serialize(tabs), '<svg xmlns="http://www.w3.org/2000/svg">\r\n\t<title>T</title>\r\n\t<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\r\n\t\t<dc:creator>You</dc:creator>\r\n\t\t<dc:date>2026-09-25</dc:date>\r\n\t</metadata>\r\n</svg>');
 });
 
 test('an RDF file (tools/inkscape-1x-layers.svg): dc:creator and dc:date go inside its cc:Work, indented as it is, dc declared already; its dc:title is shown and edited in place; off takes away what the tab shows and keeps the rest', () => {

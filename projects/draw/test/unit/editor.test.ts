@@ -3064,3 +3064,114 @@ test('a Text to path the drawing changes under while its chunk loads refuses, an
   assert.equal(TEXT_OFFLINE, 'Draw couldn’t load the text tools. Try again when you’re online.');
   assert.equal(off.editor.source(), G);
 });
+
+// ── P1-M4 S3: the Access tab ──────────────────────────────────────────────────────────────────
+
+const rects = (r: Rig): NodeId[] => [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'rect').map((n) => n.id);
+
+test('the Access tab’s switches (P1-M4 S3) are one entry each: Title and Description, Metadata, a shape’s Title and Hidden, Remove; access() reads the file again after each undo, the preview with it', () => {
+  const src = LAB_FILE('access.svg');
+  const r = rig();
+  r.editor.open(src);
+  const a = () => r.editor.access()!;
+  const entry = () => r.editor.history.get().undoLabel;
+  assert.equal(a().said, '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  assert.deepEqual(a().ids, { title: 'chart-title', desc: 'chart-desc' });
+  r.editor.setDrawingTitle(false);
+  assert.equal(entry(), 'Remove title');
+  assert.equal(a().drawing.title, null);
+  assert.equal(a().said, '“Image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  r.editor.setDrawingDesc(false);
+  assert.equal(entry(), 'Remove description');
+  assert.equal(a().said, 'no name, so it may skip the drawing or read stray labels: “Jan, Feb, Mar, Apr”');
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'two entries');
+  assert.equal(a().drawing.title?.text, 'Monthly visitors', 'after the undo, the tab reads the title again');
+  assert.equal(a().said, '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  r.editor.setMetadata(true, { creator: 'You', date: '2026-09-25' });
+  assert.equal(entry(), 'Add metadata');
+  assert.deepEqual(a().meta.items.map((i) => [i.key, i.text]), [['dc:creator', 'You'], ['dc:date', '2026-09-25']]);
+  r.editor.setMetadata(false);
+  assert.equal(entry(), 'Remove metadata');
+  assert.equal(r.editor.source(), src);
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  // The first bar.
+  const bar = rects(r)[0];
+  r.editor.select([bar]);
+  assert.equal(a().element?.tag, '<rect>');
+  assert.equal(a().element?.title, null);
+  r.editor.setElementTitle(true);
+  assert.equal(entry(), 'Add title');
+  assert.ok(r.editor.source().includes('fill="#2a9d8f"><title></title></rect>'), 'an empty title, its first child, for the field to fill');
+  r.editor.setAriaHidden(true);
+  assert.equal(entry(), 'Hide from screen readers');
+  assert.equal(a().element?.hidden, true);
+  r.editor.undo();
+  assert.equal(a().element?.hidden, false, 'the switch follows the undo');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  // Remove: one entry; the root is never the element section's.
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" aria-describedby="d" aria-live="polite"/></svg>');
+  r.editor.select([idOf(r, 'c')]);
+  assert.deepEqual(a().element?.aria.map((x) => x.name), ['aria-describedby', 'aria-live']);
+  r.editor.removeAria('aria-live');
+  assert.equal(entry(), 'Remove aria-live');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5" aria-describedby="d"/></svg>');
+  r.editor.select([doc(r).root]);
+  assert.equal(a().element, null);
+  assert.equal(a().selected, 1);
+});
+
+test('an Access field is one entry while it has focus (P1-M4 S3): the drawing’s Title typed on lab/create.svg makes SVG Lab’s title in that entry; Language refuses what isn’t a tag and keeps the last good value; a shape’s Title, Label and Role; a metadata item; one undo each', () => {
+  const create = LAB_FILE('create.svg');
+  const r = rig();
+  r.editor.open(create);
+  const entry = () => r.editor.history.get().undoLabel;
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('A'), null);
+  assert.equal(r.editor.fieldInput('Acme logo'), null);
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set title');
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">Acme logo</title>\n</svg>\n');
+  r.editor.undo();
+  assert.equal(r.editor.source(), create, 'one entry');
+  r.editor.fieldStart({ kind: 'access', name: 'lang' });
+  assert.equal(r.editor.fieldInput('f'), 'That isn’t a language tag, like en or fr-CA.');
+  assert.equal(r.editor.source(), create, 'nothing written');
+  assert.equal(r.editor.fieldInput('fr'), null);
+  assert.equal(r.editor.fieldInput('fr_'), 'That isn’t a language tag, like en or fr-CA.');
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set language');
+  assert.equal(r.editor.source(), create.replace('viewBox="0 0 100 100"', 'viewBox="0 0 100 100" lang="fr"'), 'the last good value');
+  assert.equal(r.editor.access()!.said, 'no name, so it may skip the drawing.');
+  r.editor.undo();
+  // A shape: its Title, Label and Role, each one entry; a character XML can't hold is refused.
+  r.editor.open('<svg xmlns="http://www.w3.org/2000/svg"><circle id="c" r="5"/></svg>');
+  const c = idOf(r, 'c');
+  r.editor.select([c]);
+  for (const [name, typed, want, label] of [
+    ['el-title', 'Sun', '<circle id="c" r="5"><title>Sun</title></circle>', 'Set title'],
+    ['label', 'Sun', '<circle id="c" r="5" aria-label="Sun"/>', 'Set label'],
+    ['role', 'button', '<circle id="c" r="5" role="button"/>', 'Set role'],
+  ] as const) {
+    r.editor.fieldStart({ kind: 'access', name, id: c });
+    assert.equal(r.editor.fieldInput('S￾'), "XML can't hold the character U+FFFE");
+    assert.equal(r.editor.fieldInput(typed), null);
+    r.editor.fieldEnd();
+    assert.equal(entry(), label);
+    assert.equal(r.editor.source(), `<svg xmlns="http://www.w3.org/2000/svg">${want}</svg>`, name);
+    r.editor.undo();
+  }
+  // A metadata item's text, where it lives (Matplotlib's creator agent).
+  const plot = readFileSync(`${HERE}../../../../engine/test/fixtures/corpus/tools/matplotlib-line-plot.svg`, 'utf8');
+  r.editor.open(plot);
+  const creator = r.editor.access()!.meta.items.find((i) => i.key === 'dc:creator')!;
+  r.editor.fieldStart({ kind: 'access', name: 'meta', id: creator.id });
+  r.editor.fieldInput('Mark');
+  r.editor.fieldEnd();
+  assert.equal(entry(), 'Set metadata');
+  assert.equal(r.editor.source(), plot.replace('<dc:title>Matplotlib v3.8.2, https://matplotlib.org/</dc:title>', '<dc:title>Mark</dc:title>'));
+});

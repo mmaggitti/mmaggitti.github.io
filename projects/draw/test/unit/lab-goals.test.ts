@@ -26,10 +26,11 @@ interface Rig {
   listing: Map<string, ViewBlock>;
 }
 
-/** The real editor over fake ports that keep the code listing, with a lab corpus file open. */
-function open(name: string): Rig {
+/** The real editor over fake ports that keep the code listing, with a lab corpus file open (`patched`: the elements the canvas patches). */
+function open(name: string, patched?: NodeId[]): Rig {
   const listing = new Map<string, ViewBlock>();
   const ports = fakePorts();
+  if (patched) ports.canvas = { ...ports.canvas, patchAttributes: (id) => void patched.push(id) };
   ports.code = {
     ...ports.code,
     set: (blocks) => {
@@ -1051,4 +1052,93 @@ test('lab/create-logo.svg (edit-text-tool): Edit text writes "SUN" and "WAVE" as
   r.editor.closeSheet();
   assert.equal(r.editor.source(), edited(r.file, '>SUNWAVE<', '><tspan x="50" dy="0em">SUN</tspan><tspan x="50" dy="1.3em">WAVE</tspan><'));
   oneEntry(r, 'Edit text');
+});
+
+// ── P1-M4 S3: the Access lesson's goals, through the Access tab (engine/access/) ──────────────────
+
+const ACCESS_SAID = '“Monthly visitors, image. Bar chart. Visitors rose from 40 in January to 88 in April.”';
+const rectsOf = (r: Rig): ElementNode[] => [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'rect');
+
+test('lab/access.svg, goal "Hear it without a title" (goal-no-title): the Access tab’s Title off, and the preview reads SVG Lab’s description-only sentence; Description off, and it reads the stray month labels; one entry each', () => {
+  const r = open('lab/access.svg');
+  const said = () => r.editor.access()!.said;
+  assert.equal(said(), ACCESS_SAID);
+  r.editor.setDrawingTitle(false);
+  assert.equal(said(), '“Image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  assert.equal(r.editor.source(), edited(edited(r.file, ' aria-labelledby="chart-title"', ''), '\n  <title id="chart-title">Monthly visitors</title>', ''), 'the goal: the title is off, and its reference with it');
+  oneEntry(r, 'Remove title');
+  const noTitle = r.editor.source();
+  r.editor.setDrawingDesc(false);
+  assert.equal(said(), 'no name, so it may skip the drawing or read stray labels: “Jan, Feb, Mar, Apr”');
+  assert.equal(r.editor.history.get().undoLabel, 'Remove description');
+  r.editor.undo();
+  assert.equal(r.editor.source(), noTitle, 'one entry');
+});
+
+test('lab/access.svg, goal "Give each bar a title" (goal-bar-titles, bar-titles): each bar selected and titled in the Access tab’s Title field, Jan: 40, Feb: 55, Mar: 70, Apr: 88 (SVG Lab’s text), four entries, each bar <rect …><title>…</title></rect>; the preview adds the titles note', () => {
+  const r = open('lab/access.svg');
+  const bars = rectsOf(r);
+  assert.equal(bars.length, 4);
+  const titles = ['Jan: 40', 'Feb: 55', 'Mar: 70', 'Apr: 88'];
+  bars.forEach((bar, i) => {
+    r.editor.select([bar.id]);
+    r.editor.fieldStart({ kind: 'access', name: 'el-title', id: bar.id });
+    assert.equal(r.editor.fieldInput(titles[i]), null);
+    r.editor.fieldEnd();
+    assert.equal(r.editor.history.get().undoLabel, 'Set title');
+  });
+  let want = r.file;
+  for (const t of titles) want = want.replace(/(<rect [^>]*?)\/>/, `$1><title>${t}</title></rect>`);
+  assert.equal(r.editor.source(), want, 'the goal: every bar has its title, SVG Lab’s spelling');
+  assert.equal(r.editor.access()!.said, `${ACCESS_SAID} Titles on shapes show as tooltips on hover, but role="img" hides them from screen readers.`);
+  for (let i = 0; i < 4; i++) r.editor.undo();
+  assert.equal(r.editor.source(), r.file, 'four entries');
+});
+
+test('lab/access.svg, goal "Add metadata" (goal-metadata, metadata): the Metadata switch with Creator You and Date 2026-09-25 writes SVG Lab’s markup exactly, after the <desc>, as its code spells it; one entry', () => {
+  const r = open('lab/access.svg');
+  r.editor.setMetadata(true, { creator: 'You', date: '2026-09-25' });
+  const desc = '<desc id="chart-desc">Bar chart. Visitors rose from 40 in January to 88 in April.</desc>';
+  assert.equal(r.editor.source(), edited(r.file, desc, `${desc}\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:creator>You</dc:creator>\n    <dc:date>2026-09-25</dc:date>\n  </metadata>`));
+  assert.equal(r.editor.access()!.meta.items.length, 2, 'the goal: metadata on');
+  oneEntry(r, 'Add metadata');
+});
+
+test('lab/access.svg, goal "Write your own title" (goal-own-title): through the Access tab’s Title field, one entry while it has focus, escaped where it lands', () => {
+  const r = open('lab/access.svg');
+  r.editor.fieldStart({ kind: 'access', name: 'title' });
+  assert.equal(r.editor.fieldInput('Visitors'), null);
+  assert.equal(r.editor.fieldInput('Visitors & more'), null);
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), edited(r.file, '>Monthly visitors<', '>Visitors &amp; more<'), 'the goal: the title text changed');
+  assert.equal(r.editor.access()!.said, '“Visitors & more, image. Bar chart. Visitors rose from 40 in January to 88 in April.”');
+  oneEntry(r, 'Set title');
+});
+
+test('lab/access.svg (chart): the chart is drawn and edited as any drawing: the first bar’s height token scrubs and its fill is set through Inspect, each only its bytes, one entry, and the canvas patches that bar', () => {
+  const patched: NodeId[] = [];
+  const r = open('lab/access.svg', patched);
+  const bar = rectsOf(r)[0];
+  const h = token(r, bar.id, 'number', 'height');
+  r.editor.scrubStart(h.block, h.token);
+  r.editor.scrub(4);
+  r.editor.scrubEnd(true);
+  assert.equal(r.editor.source(), edited(r.file, 'width="12" height="32"', 'width="12" height="36"'));
+  assert.ok(patched.includes(bar.id), 'the canvas patched the bar');
+  oneEntry(r, 'Scrub height');
+  r.editor.undo();
+  patched.length = 0;
+  r.editor.select([bar.id]);
+  r.editor.setStyle('fill', '#e76f51');
+  assert.equal(r.editor.source(), edited(r.file, 'height="32" fill="#2a9d8f"', 'height="32" fill="#e76f51"'));
+  assert.ok(patched.includes(bar.id), 'the canvas patched the bar');
+  oneEntry(r, 'Set fill');
+});
+
+test('lab/create.svg (name-drawing): the Access tab’s Title on writes SVG Lab’s Create markup exactly, role="img" aria-labelledby="drawing-title" on the root and <title id="drawing-title">My drawing</title> as its first child; one entry', () => {
+  const r = open('lab/create.svg');
+  r.editor.setDrawingTitle(true);
+  assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">My drawing</title>\n</svg>\n');
+  assert.equal(r.editor.access()!.said, '“My drawing, image”');
+  oneEntry(r, 'Add title');
 });

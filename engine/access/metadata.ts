@@ -1,9 +1,9 @@
 // Dublin Core metadata (P1-M4 S3): what the Access tab's Metadata shows and writes.
 //
 // - The file's single <metadata> (the root's first SVG <metadata> child) holds Dublin Core items bare
-//   (SVG Lab's: <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>You</dc:creator>
-//   <dc:date>2026-09-25</dc:date></metadata>) or inside RDF (rdf:RDF/cc:Work, as Inkscape writes it,
-//   cc being Creative Commons' namespace or its legacy one, web.resource.org/cc/).
+//   (SVG Lab's: <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"> holding <dc:creator>You
+//   </dc:creator> and <dc:date>2026-09-25</dc:date>) or inside RDF (rdf:RDF/cc:Work, as Inkscape
+//   writes it, cc being Creative Commons' namespace or its legacy one, web.resource.org/cc/).
 // - metaOf(doc) reads the items the tab shows: dc:creator, dc:date, dc:title and dc:description, and
 //   every dcterms: item, each with where its text lives: the element itself, or a dc:creator's
 //   cc:Agent/dc:title (Matplotlib and Inkscape write the creator so). An item inside another item (an
@@ -12,7 +12,9 @@
 // - planMetadata(doc, on, { creator, date }): on adds dc:creator and dc:date where the file has none:
 //   inside its cc:Work where its metadata is RDF, else bare in its <metadata> (xmlns:dc on the
 //   <metadata> where dc isn't declared in scope); with no <metadata>, SVG Lab's markup goes after the
-//   root's leading <title> and <desc>, before the drawing. Off takes away every item the tab shows, and
+//   root's leading <title> and <desc>, before the drawing, spelt as SVG Lab's code writes it: in a
+//   file laid out on lines, each item on a line of its own one indent deeper than the <metadata> (the
+//   <metadata>'s own indent again: two spaces in SVG Lab's files), else all on one line. Off takes away every item the tab shows, and
 //   the <metadata> when nothing is left in it and it carries nothing but namespace declarations. A
 //   <metadata> Draw's own state shares (draw:state, P1-M1) stays while that does.
 // - planMetaText(doc, item, text): an item's text in place.
@@ -20,7 +22,7 @@
 import { NS, el, textContent, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { DRAW_NS } from '../model/draw-ns.ts';
 import { opSetAttr, type Op } from '../commands/ops.ts';
-import { insertMarkup, insertMarkups, removeWithSpace, type Where } from '../model/space.ts';
+import { insertMarkup, insertMarkups, insertion, removeWithSpace, type Where } from '../model/space.ts';
 import { decodeAttr, escape } from '../xml/entities.ts';
 import { TokenEditError, xmlCharError } from '../code/edit.ts';
 import { setText } from './model.ts';
@@ -138,7 +140,13 @@ export function planMetadata(doc: Doc, on: boolean, values: { creator: string; d
     const p = prefixFor(doc, doc.root, DC);
     const decl = p === null ? ` xmlns:${freePrefix(doc, doc.root)}="${DC}"` : '';
     const dc = p ?? freePrefix(doc, doc.root);
-    insertMarkup(doc, metadataPlace(doc), `<${tag}${decl}>${wanted.map(([l, v]) => `<${dc}:${l}>${text(v)}</${dc}:${l}>`).join('')}</${tag}>`, apply);
+    const where = metadataPlace(doc);
+    const at = insertion(doc, where);
+    // The line break and indent the <metadata> gets, from the whitespace the insertion rule puts before it.
+    const ws = /(\r\n|\r|\n)([ \t]*)$/.exec(at.lead || at.trail);
+    const inner = ws ? `${ws[1]}${ws[2]}${ws[2]}` : '';
+    const items = wanted.map(([l, v]) => `${inner}<${dc}:${l}>${text(v)}</${dc}:${l}>`).join('');
+    insertMarkup(doc, where, `<${tag}${decl}>${items}${ws ? `${ws[1]}${ws[2]}` : ''}</${tag}>`, apply);
     return;
   }
   const into = m.work ?? m.metadata;

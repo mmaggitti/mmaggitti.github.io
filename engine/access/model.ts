@@ -229,9 +229,9 @@ export function planElementTitle(doc: Doc, id: NodeId, text: string | null, appl
   insertMarkup(doc, firstPlace(doc, id), `<${tagOf(doc, 'title')}>${escaped(text)}</${tagOf(doc, 'title')}>`, apply);
 }
 
-/** An aria-* attribute written, or taken away (null). */
+/** An aria-* attribute written, or taken away (null): a new one named aria- and lowercase letters, or one the element has. */
 export function planAria(doc: Doc, id: NodeId, name: string, value: string | null, apply: Apply): void {
-  if (!/^aria-[a-z]+$/.test(name)) throw new TokenEditError(`${name} isn’t an aria- attribute`);
+  if (!/^aria-[a-z]+$/.test(name) && !(name.startsWith('aria-') && findAttr(el(doc, id), null, name) !== undefined)) throw new TokenEditError(`${name} isn’t an aria- attribute`);
   if (value !== null) escaped(value);
   if (attrValue(doc, el(doc, id), null, name) !== value) apply(opSetAttr(doc, id, null, name, value));
   if (id === doc.root && name === 'aria-label' && value === null) dropImgRole(doc, apply);
