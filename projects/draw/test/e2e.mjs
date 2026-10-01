@@ -7428,10 +7428,12 @@ const SAID = (page) => page.locator('[data-access="said"]').textContent();
 // is still aria-hidden="true", and with the sheet at peek the page's accessibility tree (Playwright's
 // ariaSnapshot of the body) holds no "Acme logo": the drawing's title is never read off the page. The
 // circle, selected, titled "Sun" in its Title field becomes <circle …><title>Sun</title></circle>, one
-// "Set title". Undo walks back to the file byte for byte.
+// "Set title". A square with tabindex="0", selected, shows its Focusable row: the tabindex, kept, and
+// that the canvas never focuses it. Undo walks back to the file byte for byte.
 async function theAccessPanelNamesTheDrawing(browser, origin) {
   const SUN = '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"/>';
-  const F = LAB('create.svg').replace('\n</svg>', `\n  ${SUN}\n</svg>`);
+  const KEY = '<rect id="key" tabindex="0" x="5" y="80" width="10" height="10" fill="#2a9d8f"/>';
+  const F = LAB('create.svg').replace('\n</svg>', `\n  ${SUN}\n  ${KEY}\n</svg>`);
   await withPage(browser, origin, 956, async (page, errors) => {
     must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: the file did not open');
     const undo = page.locator('.draw-tool', { hasText: 'Undo' });
@@ -7480,6 +7482,12 @@ async function theAccessPanelNamesTheDrawing(browser, origin) {
     await accessType(page, 'el-title', 'Sun');
     must(await source(page) === meta.replace(SUN, '<circle id="sun" cx="50" cy="30" r="10" fill="#f4a261"><title>Sun</title></circle>'), `the circle's Title wrote:\n${await source(page)}`);
     await entry('Set title');
+    // A focusable square: its Focusable row shows the tabindex as kept.
+    await toPeek(page);
+    await tapShape(page, 'key');
+    await showAccess(page);
+    const focusable = await page.locator('.draw-access .draw-inspect-row', { hasText: 'Focusable' }).evaluateAll((rows) => rows.map((r) => [...r.children].map((c) => c.textContent)));
+    must(JSON.stringify(focusable) === JSON.stringify([['Focusable', 'tabindex="0"', 'Kept; the canvas never focuses it.']]), `the square's Focusable row reads ${JSON.stringify(focusable)}`);
     for (let n = 0; n < 7; n++) await undo.tap();
     must(await source(page) === F && await undo.isDisabled(), `undo did not walk back to the file:\n${await source(page)}`);
     must(await page.locator('[data-access="title-switch"]').getAttribute('aria-checked') === 'false', 'the Title switch did not follow the undo');
