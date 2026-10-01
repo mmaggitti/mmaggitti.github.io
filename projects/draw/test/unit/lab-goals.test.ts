@@ -941,3 +941,89 @@ test('lab/arcs--donut.svg: a slice’s colour by its stroke token and by Inspect
   r.editor.undo();
   assert.equal(r.editor.source(), adopted);
 });
+
+// ── P1-M4 S1: text (lab/create.svg, lab/create-logo.svg) ──────────────────────────────────────
+
+test('lab/create.svg (add-text): the Text tool’s tap at the middle of the board places exactly SVG Lab’s "Hello" in the Text tool’s font (Archivo), one "Add text" entry, and the lines sheet opens on "Hello"', () => {
+  const r = open('lab/create.svg');
+  r.editor.pickTool('text');
+  r.editor.pointerDown(hostOf(r, 50, 50), [], { add: false });
+  r.editor.pointerUp(hostOf(r, 50, 50));
+  const hello = '<text x="50" y="55" font-size="14" font-family="Archivo, sans-serif" font-weight="700" text-anchor="middle" fill="#264653">Hello</text>';
+  assert.equal(r.editor.source(), edited(r.file, '\n</svg>', `\n  ${hello}\n</svg>`));
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'lines' && sheet.text === 'Hello' && sheet.select, JSON.stringify(sheet));
+  r.editor.closeSheet();
+  oneEntry(r, 'Add text');
+});
+
+test('lab/create-logo.svg (text-attrs): SUNWAVE’s font-size token scrubs and its Number sheet sets 12; its font-family token cycles sans-serif → serif → monospace → sans-serif; its font-weight token cycles from 900; its text-anchor token cycles middle → end; each one entry and only its bytes', () => {
+  const r = open('lab/create-logo.svg');
+  const text = element(r, 'text');
+  const size = token(r, text.id, 'number', 'font-size');
+  r.editor.scrubStart(size.block, size.token);
+  r.editor.scrub(3);
+  r.editor.scrubEnd(true);
+  assert.equal(r.editor.source(), edited(r.file, 'font-size="11"', 'font-size="14"'));
+  oneEntry(r, 'Scrub font-size');
+  r.editor.undo();
+  setNumber(r, text.id, 'font-size', '12');
+  assert.equal(r.editor.source(), edited(r.file, 'font-size="11"', 'font-size="12"'));
+  oneEntry(r, 'Set font-size');
+  r.editor.undo();
+  for (const [was, now] of [['sans-serif', 'serif'], ['serif', 'monospace'], ['monospace', 'sans-serif']]) {
+    const f = token(r, text.id, 'enum', 'font-family');
+    assert.equal(f.block.text.slice(f.token.start, f.token.end), was);
+    r.editor.tapToken(f.block, f.token);
+    assert.equal(attrValue(doc(r), text, null, 'font-family'), now);
+    assert.equal(r.editor.history.get().undoLabel, 'Set font-family', 'one entry a tap');
+  }
+  assert.equal(r.editor.source(), r.file, 'round to the start');
+  for (let i = 0; i < 3; i++) r.editor.undo();
+  const w = token(r, text.id, 'enum', 'font-weight');
+  r.editor.tapToken(w.block, w.token);
+  assert.equal(r.editor.source(), edited(r.file, 'font-weight="900"', 'font-weight="normal"'), 'P0’s keyword token: 900, then the first of its options');
+  oneEntry(r, 'Set font-weight');
+  r.editor.undo();
+  const a = token(r, text.id, 'enum', 'text-anchor');
+  r.editor.tapToken(a.block, a.token);
+  assert.equal(r.editor.source(), edited(r.file, 'text-anchor="middle"', 'text-anchor="end"'));
+  oneEntry(r, 'Set text-anchor');
+});
+
+test('lab/create-logo.svg: SUNWAVE’s size, weight and anchor through Inspect’s Text section (font-size, font-weight, text-anchor; a generic family offers SVG Lab’s 400, 700 and 900): one entry each, only their bytes', () => {
+  const r = open('lab/create-logo.svg');
+  const text = element(r, 'text');
+  r.editor.select([text.id]);
+  assert.equal(r.editor.textSelected(), true);
+  assert.equal(r.editor.familyFaces('sans-serif'), null, 'a generic: the lab’s three weights');
+  r.editor.fieldStart({ kind: 'style', prop: 'font-size' });
+  r.editor.fieldInput('1');
+  r.editor.fieldInput('16');
+  r.editor.fieldEnd();
+  assert.equal(r.editor.source(), edited(r.file, 'font-size="11"', 'font-size="16"'));
+  oneEntry(r, 'Set font-size');
+  r.editor.undo();
+  r.editor.setStyle('font-weight', '400');
+  assert.equal(r.editor.source(), edited(r.file, 'font-weight="900"', 'font-weight="400"'));
+  oneEntry(r, 'Set font-weight');
+  r.editor.undo();
+  r.editor.setStyle('text-anchor', 'start');
+  assert.equal(r.editor.source(), edited(r.file, 'text-anchor="middle"', 'text-anchor="start"'));
+  oneEntry(r, 'Set text-anchor');
+});
+
+test('lab/create-logo.svg (edit-text-tool): Edit text writes "SUN" and "WAVE" as two line tspans at the text’s own x, one "Edit text" entry, and one undo gives the file back', () => {
+  const r = open('lab/create-logo.svg');
+  const text = element(r, 'text');
+  r.editor.select([text.id]);
+  assert.equal(r.editor.canEditText(), true);
+  r.editor.editText();
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'lines' && sheet.text === 'SUNWAVE');
+  r.editor.linesInput('SUN');
+  r.editor.linesInput('SUN\nWAVE');
+  r.editor.closeSheet();
+  assert.equal(r.editor.source(), edited(r.file, '>SUNWAVE<', '><tspan x="50" dy="0em">SUN</tspan><tspan x="50" dy="1.3em">WAVE</tspan><'));
+  oneEntry(r, 'Edit text');
+});
