@@ -157,6 +157,7 @@ export function writeGeometry(t: PathText, rewrites: readonly Rewrite[]): string
   // A letter-less segment keeps meaning what it meant: when the letter before it changed, its own is
   // written (inPlace, below).
   let out = '';
+  let lastChar = ''; // out's last character, kept as it grows: reading it from out would flatten the whole string per segment
   const expected: { cmd: string; args: number[] }[] = [];
   let cx = 0, cy = 0, sx = 0, sy = 0; // the current point and the subpath's start, as the new path draws them
   segs.forEach((seg, i) => {
@@ -191,13 +192,14 @@ export function writeGeometry(t: PathText, rewrites: readonly Rewrite[]): string
     const prevLetter = i > 0 ? letters[i - 1] : '';
     let text: string;
     if (U !== seg.cmd.toUpperCase()) text = respelled(seg, spans, cmd, texts); // another kind: written anew, with its letter
-    else if (seg.implicit && cmd === impliedAfter(prevLetter)) text = inPlace(seg, spans, texts, null, out.slice(-1));
-    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));
+    else if (seg.implicit && cmd === impliedAfter(prevLetter)) text = inPlace(seg, spans, texts, null, lastChar);
+    else text = inPlace(seg, spans, texts, cmd, lastChar);
     // A new last number mustn't glue to what follows it ("1" before ".5" reads as 1.5).
     const next = i + 1 < segs.length ? segs[i + 1].raw : p.tail;
     const oldLast = spans.length ? seg.raw.slice(spans[spans.length - 1].start, spans[spans.length - 1].end) : null;
     if (texts.length && texts[texts.length - 1] !== oldLast && GLUE_BEFORE.test(text) && /^[\d.eE]/.test(next)) text += ' ';
     out += text;
+    if (text) lastChar = text[text.length - 1];
     expected.push({ cmd, args: texts.map(Number) });
     if (U === 'M') [sx, sy] = [g.x, g.y];
     [cx, cy] = U === 'Z' ? [sx, sy] : [g.x, g.y];

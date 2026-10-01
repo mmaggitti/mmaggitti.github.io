@@ -2658,7 +2658,7 @@ const BREAKS = [
   },
   {
     id: 'B500', what: 'a letter-less segment after a cycled one never gets its letter written (it would read as the new command)',
-    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));', to: '    else text = inPlace(seg, spans, texts, seg.implicit ? null : cmd, out.slice(-1));',
+    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, lastChar);', to: '    else text = inPlace(seg, spans, texts, seg.implicit ? null : cmd, lastChar);',
     run: engineTests('path/segments.test.ts'), expect: /✖ an implicit segment that followed the cycled one gets its old letter written/,
   },
   {
@@ -2902,6 +2902,12 @@ const BREAKS = [
     id: 'B546', what: 'the editor imports booleans.ts statically, so path-bool rides in the first chunk', slow: true, checks: ['booleansCombineWhatIsDrawn'],
     file: 'projects/draw/src/editor.ts', from: "import { LAZY_LIBRARIES } from './paths/load.ts';\n", to: "import { LAZY_LIBRARIES } from './paths/load.ts';\nimport { combine as eagerBooleans } from './paths/booleans.ts';\nvoid eagerBooleans;\n",
     run: DRAW_E2E, expect: /booleansCombineWhatIsDrawn: the first Union loaded no boolean chunk/,
+  },
+  // P1-M3 fix (the review's findings), quick unless marked.
+  {
+    id: 'B547', what: 'R3: writeGeometry reads the last character written from the growing string for every segment (it flattens it each time: quadratic)',
+    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, lastChar);', to: '    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));',
+    run: engineTests('path/costs.test.ts'), expect: /✖ a segment rewrite and a node drag frame take linear time/,
   },
 ];
 
