@@ -289,8 +289,9 @@
 .draw-over-title { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 .draw-over-text { margin: var(--space-1) 0 var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .draw-broken .draw-over-title { color: var(--draw-danger); }
-/* The empty state (P1-M5): a hint in the middle of the canvas that every tap passes through. */
-.draw-over.draw-empty { pointer-events: none; border: 0; background: none; box-shadow: none; text-align: center; color: var(--text-muted); font-size: var(--text-md); }
+/* The empty state (P1-M5): a hint in the middle of the canvas that every tap passes through. The
+   panels' own .draw-empty (below) sets margin and padding, so they are restated here. */
+.draw-over.draw-empty { margin: auto; padding: var(--space-3) var(--space-4); pointer-events: none; border: 0; background: none; box-shadow: none; text-align: center; color: var(--text-muted); font-size: var(--text-md); }
 /* Edit the drawing's source (P1-M5): the root's start and end tags around the field, read-only. */
 .draw-source-tag { margin: 0 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--text-sm); }
 .draw-source-end { margin: var(--space-2) 0 0; }

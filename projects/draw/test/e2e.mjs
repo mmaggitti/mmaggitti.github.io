@@ -318,6 +318,11 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(thePencilDrawsWhileFingersNavigate);
   await check(aHoveringPencilShowsHandlesAndSnaps);
   for (const height of [956, 796]) await check(phoneRulesOnTheCommandPalette, height);
+  // P1-M5 S3: Open in Draw, Insert and the rest of Create.
+  await check(svgLabOpensInDraw);
+  await check(theInsertToolPutsSvgInAsAGroup);
+  await check(editTheWholeDrawingsSource);
+  await check(anEmptyDrawingSaysAddAShape);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -8116,7 +8121,8 @@ const paletteFieldFocused = (page) => page.evaluate(() => document.activeElement
 // One registry behind the bar, More, the keys and the palette (P1-M5): the sample's circle selected,
 // the bar's buttons and More's rows are those before the registry, in order; ⌘K (Meta, then Control)
 // opens Commands with its field focused, "dup" leaves Duplicate first, and Return runs it (one
-// "Duplicate" entry: two circles) and closes it; the Commands button opens it with the field not
+// "Duplicate" entry: two circles) and closes it; with "arrange" typed, ↓ and ↑ move the active row
+// (↑ stops at the first) and Return runs the active one (Group); the Commands button opens it with the field not
 // focused, and a tap on Bring forward runs it; Escape closes it; ⌘Z undoes on the canvas and with the
 // focus in the code view; ⇧⌘Z and ⌘Y redo; Delete deletes; and with the focus in a field (Files' paste
 // field, or the palette's own) ⌘K, Delete and ⌘Z do nothing to the drawing.
@@ -8153,6 +8159,31 @@ async function commandsRunFromTheBarMoreKeysAndPalette(browser, origin) {
       must(await source(page) === before, `⌘Z on the canvas did not undo the Duplicate (${mod} round)`);
       await tapCircle();
     }
+    // ↓ and ↑ move the active row (aria-selected, and the field's aria-activedescendant names it), ↑
+    // stops at the first, and Return runs the active row, not the first.
+    await page.keyboard.press('Meta+k');
+    await until('⌘K opens Commands', () => paletteOpen(page));
+    await page.keyboard.type('arrange');
+    const active = () => page.evaluate(() => {
+      const on = [...document.querySelectorAll('.draw-palette-row[aria-selected="true"]')];
+      const named = on.length === 1 && document.querySelector('.draw-palette-field').getAttribute('aria-activedescendant') === on[0].id;
+      return `${on.map((b) => b.querySelector('.draw-palette-name').textContent).join(' + ')}${named ? '' : ' (not the field’s active descendant)'}`;
+    });
+    let keys = '"arrange"';
+    for (const [key, want] of [['', 'Bring forward'], ['ArrowDown', 'Send back'], ['ArrowDown', 'Group'], ['ArrowUp', 'Send back'], ['ArrowUp', 'Bring forward'], ['ArrowUp', 'Bring forward'], ['ArrowDown', 'Send back'], ['ArrowDown', 'Group']]) {
+      if (key) {
+        await page.keyboard.press(key);
+        keys += key === 'ArrowDown' ? ' ↓' : ' ↑';
+      }
+      await until(`${keys} leaves ${want} active`, async () => (await active()) === want).catch(() => {});
+      must(await active() === want, `${keys}: the active row is ${await active()}, not ${want}`);
+    }
+    await page.keyboard.press('Enter');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await undoLabel(page) === 'Undo Group', `${keys}, Return: ${await undoLabel(page)}, not Undo Group`);
+    await page.keyboard.press('Meta+z');
+    must(await source(page) === before, '⌘Z did not undo the Group');
+    await tapCircle();
     // The Commands button: no focus in the field; a tap on a row runs it.
     await page.locator('.draw-bar .draw-commands').tap();
     await page.locator('.draw-palette-field').waitFor();
@@ -8438,6 +8469,320 @@ async function phoneRulesOnTheCommandPalette(browser, origin, height) {
     must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
+}
+
+// ── P1-M5 S3: Open in Draw, Insert and the rest of Create ──────────────────────────────────────
+
+// SVG Lab's set and tab, as its own e2e opens them: the set menu, the tab, until the tab is current.
+async function labTab(page, set, tab) {
+  await page.locator('#setBtn').tap();
+  await page.locator('.setrow').nth(set).tap();
+  await page.locator('#tabs .tab', { hasText: tab }).first().tap();
+  await until(`SVG Lab's ${tab} (set ${set + 1}) is open`, () => page.evaluate((t) => (document.querySelector('#tabs .tab[aria-current="true"]')?.textContent ?? '').trim().endsWith(t), tab));
+  await page.waitForTimeout(350); // the lab renders on the next frame
+}
+
+// SVG Lab's Open in Draw (P1-M5), /svg-lab/ in the same context. On Vector, once the code head's link
+// has an href it is ../draw/#import=…, an <a> with target _blank and rel noopener; a tap on it opens
+// Draw in a new page holding exactly the lab's file (lab/vector.svg, the lab's export as the corpus
+// captured it, which Copy also gives) with its import report, the fragment gone from the address bar,
+// and a reload doesn't open the link again (the sample, no report). On Create, after the lab's Rect,
+// the link changes, and it opens exactly the lab's export (Copy's text).
+async function svgLabOpensInDraw(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    const HEAD = '../draw/#import=';
+    await page.goto(`${origin}/svg-lab/`, { waitUntil: 'networkidle' });
+    // The lab's Copy hands its export to the clipboard: kept here instead.
+    await page.evaluate(() => {
+      window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void (window.__copied = t) } });
+    });
+    const exported = async () => {
+      await page.evaluate(() => void (window.__copied = null));
+      await page.locator('#btnCopy').tap();
+      await until('the lab’s Copy copies', () => page.evaluate(() => window.__copied !== null));
+      return page.evaluate(() => window.__copied);
+    };
+    // The link, once it has an href (other than `not`): the lab makes it again a moment after each change.
+    const linkReady = async (what, not = null) => {
+      let got = null;
+      await until(`${what}: the Open in Draw link is made`, async () => {
+        got = await page.evaluate(() => {
+          const a = document.getElementById('btnDraw');
+          return a && { href: a.getAttribute('href'), hidden: a.hidden, tag: a.tagName, target: a.target, rel: a.rel };
+        });
+        return !!got?.href && !got.hidden && got.href !== not;
+      }, 5000).catch(() => {});
+      must(!!got?.href && !got.hidden && got.href !== not, `${what}: the Open in Draw link is ${!got ? 'missing' : got.hidden ? 'hidden' : !got.href ? 'without an href' : 'unchanged'}`);
+      must(got.href.startsWith(HEAD) && got.tag === 'A' && got.target === '_blank' && got.rel === 'noopener', `${what}: the link is <${got.tag} href="${got.href.slice(0, 24)}…" target="${got.target}" rel="${got.rel}">`);
+      return got.href;
+    };
+    // A tap on the link: Draw in a new page, holding `want` with its import report; the fragment cleared.
+    const opensInDraw = async (what, want) => {
+      const [draw] = await Promise.all([context.waitForEvent('page'), page.locator('#btnDraw').tap()]);
+      const errs = [];
+      draw.on('pageerror', (e) => errs.push(`uncaught: ${e.message}`));
+      draw.on('console', (m) => m.type() === 'error' && errs.push(`console error: ${m.text()}`));
+      await draw.waitForLoadState('networkidle');
+      await draw.locator('.draw-bucket').first().waitFor({ timeout: 5000 }).catch(() => {});
+      const got = await draw.evaluate(() => window.drawTest.source());
+      must(got === want, `${what}: Draw opened ${got.length} characters, not the lab's file (${want.length}): ${got.slice(0, 80)}…`);
+      must(await draw.locator('.draw-bucket').count() > 0, `${what}: Draw showed no import report`);
+      must(await draw.evaluate(() => location.hash) === '' && draw.url() === `${origin}/draw/`, `${what}: the fragment is still in Draw's address bar: ${draw.url().slice(0, 80)}`);
+      return { draw, errs };
+    };
+
+    await labTab(page, 0, 'Vector');
+    const vector = LAB('vector.svg');
+    must(await exported() === vector, 'test setup: the lab’s Vector export is not lab/vector.svg');
+    await linkReady('Vector');
+    const { draw, errs } = await opensInDraw('Vector', vector);
+    await draw.reload({ waitUntil: 'networkidle' });
+    await draw.waitForTimeout(300);
+    must(await draw.evaluate(() => window.drawTest.source()) === SAMPLE && await draw.locator('.draw-modal').count() === 0, 'a reload opened the link again (or kept it): not the sample without a report');
+    await draw.close();
+
+    await labTab(page, 0, 'Create');
+    const before = await linkReady('Create');
+    await page.locator('#ctx [data-a="add:rect"]').tap();
+    const made = await exported();
+    must(made.includes('<rect'), 'test setup: the lab’s Rect added no <rect>');
+    await linkReady('Create with a rect', before);
+    const second = await opensInDraw('Create with a rect', made);
+    await second.draw.close();
+    must(errors.length + errs.length + second.errs.length === 0, `errors:\n${[...errors, ...errs, ...second.errs].join('\n')}`);
+  });
+}
+
+const LOGO = () => LAB('create-logo.svg');
+// What lies between an SVG file's root tags.
+const innerOf = (svg) => svg.slice(svg.indexOf('>', svg.indexOf('<svg')) + 1, svg.lastIndexOf('</svg>'));
+// A gradient and a rect that uses it by id: a fragment with no <svg>, so no placement.
+const FADE = '<defs><linearGradient id="fade"><stop offset="0" stop-color="#264653"/><stop offset="1" stop-color="#e9c46a"/></linearGradient></defs><rect x="10" y="60" width="30" height="20" fill="url(#fade)"/>';
+
+// The rail's Insert, `text` in its sheet's field, and the sheet's Insert: the sheet closes.
+async function insertThroughTheSheet(page, text) {
+  await page.locator('.draw-rail .draw-insert-tool').tap();
+  await page.locator('.draw-insert-field').fill(text);
+  await page.locator('.draw-insert-go').tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+
+// The Insert tool (P1-M5) on lab/create.svg: the rail's Insert is at least 44 × 44 and enabled; its
+// sheet's field is 16 px or more, and its Insert is disabled while the field is empty. The lab's logo
+// pasted in and Insert: the file is lab/create.svg with exactly one <g> holding the logo's circle, path
+// and text as written, last in the root, with no transform (both boards are 100 units); the <g> is
+// selected, its outline around all three; the notice says "Inserted."; one "Insert" entry; the canvas
+// draws the circle where the file says (#e9c46a at its centre); undo gives the file back byte for byte.
+// A Lucide icon's <g> keeps its class, fill="none", stroke="currentColor", width, caps and joins and
+// leaves off its width, height and viewBox, with a translate and no scale that centres its 24-unit box
+// on the canvas's centre. A second insert of a fragment whose gradient id the first one took gets a
+// fresh id, and its rect's url() follows. Choose a file… inserts the logo the same way. P0's ACTIVE
+// inserted: the notice points at the import report, the canvas holds no script, iframe, handler or
+// javascript: link, nothing runs on a tap, nothing loads from elsewhere and nothing violates the CSP.
+async function theInsertToolPutsSvgInAsAGroup(browser, origin) {
+  const F = LAB_CREATE();
+  const logo = LOGO();
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await pickFile(page, 'create.svg', Buffer.from(F));
+    await closeModal(page);
+    const undo = page.locator('.draw-rail .draw-undo');
+    const tool = await page.evaluate(() => {
+      const b = document.querySelector('.draw-rail .draw-insert-tool');
+      return { ...b.getBoundingClientRect().toJSON(), disabled: b.disabled };
+    });
+    must(!tool.disabled && tool.width >= TAP_MIN - 0.5 && tool.height >= TAP_MIN - 0.5, `the rail's Insert is ${Math.round(tool.width)}×${Math.round(tool.height)}${tool.disabled ? ', disabled' : ''}`);
+    await page.locator('.draw-rail .draw-insert-tool').tap();
+    const field = page.locator('.draw-insert-field');
+    const size = await field.evaluate((f) => parseFloat(getComputedStyle(f).fontSize));
+    must(size >= 16, `the Insert field's text is ${size} px (iOS zooms into a field under 16)`);
+    must(await page.locator('.draw-insert-go').isDisabled(), 'Insert is enabled with the field empty');
+    await field.fill(logo);
+    await page.locator('.draw-insert-go').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const withLogo = F.replace('\n</svg>', `\n  <g>${innerOf(logo)}</g>\n</svg>`);
+    must(await source(page) === withLogo, `the file is not lab/create.svg with the logo's content in one <g>, last, untransformed:\n${await source(page)}`);
+    must(await label(page) === '<g>', `the <g> is not selected: ${await label(page)}`);
+    await until('the notice says Inserted.', async () => (await toast(page)) === 'Inserted.').catch(() => {});
+    must(await toast(page) === 'Inserted.', `the notice says ${JSON.stringify(await toast(page))}`);
+    must(await undoLabel(page) === 'Undo Insert', `the entry is ${await undoLabel(page)}`);
+    const ring = await page.evaluate(() => {
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      const pts = document.querySelector('.draw-outline').getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+      const xs = pts.map(([x]) => x + o.left);
+      const ys = pts.map(([, y]) => y + o.top);
+      const g = [...document.querySelector('.draw-host').shadowRoot.querySelector('svg').children].filter((c) => c.localName === 'g').pop();
+      const kids = [...g.children].map((k) => {
+        const b = k.getBBox();
+        const m = k.getScreenCTM();
+        const [p, q] = [[b.x, b.y], [b.x + b.width, b.y + b.height]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+        return { name: k.localName, left: Math.min(p.x, q.x), top: Math.min(p.y, q.y), right: Math.max(p.x, q.x), bottom: Math.max(p.y, q.y) };
+      });
+      return { box: { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }, kids };
+    });
+    const union = { left: Math.min(...ring.kids.map((k) => k.left)), top: Math.min(...ring.kids.map((k) => k.top)), right: Math.max(...ring.kids.map((k) => k.right)), bottom: Math.max(...ring.kids.map((k) => k.bottom)) };
+    must(ring.kids.map((k) => k.name).join() === 'circle,path,text', `the drawn <g> holds ${ring.kids.map((k) => k.name)}`);
+    must(['left', 'top', 'right', 'bottom'].every((s) => Math.abs(ring.box[s] - union[s]) <= 1), `the outline (${JSON.stringify(ring.box)}) is not around the circle, path and text (${JSON.stringify(union)})`);
+    const centre = await pixelAt(page, await page.evaluate(screenPoint, { x: 50, y: 40 }));
+    must(near3(centre, [0xe9, 0xc4, 0x6a], 2), `the circle's centre is drawn ${centre}, not #e9c46a`);
+    await undo.tap();
+    must(await source(page) === F && await undo.isDisabled(), 'one undo did not give lab/create.svg back byte for byte');
+
+    // A Lucide icon: its root's attributes on the <g>, at its own size, centred.
+    await insertThroughTheSheet(page, corpusText(firstIcon()));
+    const tag = /<g\b[^>]*>/.exec(await source(page))?.[0] ?? '';
+    const kept = ['class="lucide ', 'fill="none"', 'stroke="currentColor"', 'stroke-width="2"', 'stroke-linecap="round"', 'stroke-linejoin="round"'];
+    must(kept.every((a) => tag.includes(` ${a}`)) && !/ (width|height|viewBox|xmlns)=/.test(tag), `the icon's <g> is ${tag}`);
+    const tr = / transform="translate\(([-\d.]+) ([-\d.]+)\)"/.exec(tag);
+    const mid = await page.evaluate(() => {
+      const c = document.querySelector('.draw-canvas').getBoundingClientRect();
+      const p = new DOMPoint(c.left + c.width / 2, c.top + c.height / 2).matrixTransform(document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM().inverse());
+      return { x: p.x, y: p.y };
+    });
+    must(!!tr && !tag.includes('scale(') && Math.abs(Number(tr[1]) + 12 - mid.x) <= 0.5 && Math.abs(Number(tr[2]) + 12 - mid.y) <= 0.5, `the icon's transform (${tag.match(/transform="[^"]*"/)?.[0]}) doesn't keep it 24 units wide, centred on (${mid.x.toFixed(2)}, ${mid.y.toFixed(2)})`);
+    await undo.tap();
+    must(await source(page) === F, 'undo did not take the icon out');
+
+    // An id the drawing already uses: a fresh one, and the reference follows it.
+    await insertThroughTheSheet(page, FADE);
+    await insertThroughTheSheet(page, FADE);
+    const gs = (await source(page)).match(/<g>[\s\S]*?<\/g>/g) ?? [];
+    const fresh = /id="([^"]+)"/.exec(gs[1] ?? '')?.[1];
+    must(gs.length === 2 && gs[0] === `<g>${FADE}</g>` && !!fresh && fresh !== 'fade' && gs[1] === `<g>${FADE.replace('id="fade"', `id="${fresh}"`).replace('url(#fade)', `url(#${fresh})`)}</g>`, `the second insert's id and reference: ${gs[1]}`);
+    await undo.tap();
+    await undo.tap();
+    must(await source(page) === F, 'two undos did not take the two inserts out');
+
+    // Choose a file…: the same insert.
+    await page.locator('.draw-rail .draw-insert-tool').tap();
+    await page.locator('.draw-modal input[type="file"]').setInputFiles({ name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(logo) });
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === withLogo && await undoLabel(page) === 'Undo Insert', 'Choose a file… did not insert the logo as the field did');
+    await undo.tap();
+
+    // ACTIVE: kept in the file, never run, never loaded.
+    const quiet = watch(page, context, origin);
+    await insertThroughTheSheet(page, ACTIVE);
+    must((await source(page)).includes(innerOf(ACTIVE)), 'ACTIVE was not inserted as written');
+    await until('the notice points at the import report', async () => (await toast(page)) === 'Inserted. Files → Import report lists what isn’t drawn.').catch(() => {});
+    must(await toast(page) === 'Inserted. Files → Import report lists what isn’t drawn.', `ACTIVE's notice says ${JSON.stringify(await toast(page))}`);
+    const at = await page.evaluate(screenPoint, { x: 50, y: 50 });
+    await page.touchscreen.tap(at.x, at.y); // its handlers and its link, were they live
+    const r = await page.evaluate(() => {
+      const root = document.querySelector('.draw-host').shadowRoot;
+      const bad = [...root.querySelectorAll('*')].filter((el) => /^(script|iframe)$/i.test(el.localName) || [...el.attributes].some((a) => /^on/i.test(a.name) || /javascript:/i.test(a.value)));
+      return { pwned: window.__pwned ?? null, bad: bad.map((el) => el.localName) };
+    });
+    must(r.pwned === null, `inserted ACTIVE ran script (${r.pwned})`);
+    must(r.bad.length === 0, `the canvas holds ${r.bad.join(', ')}`);
+    await quiet('ACTIVE inserted');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Edit the drawing's source (P1-M5) on the sample: the code panel's Edit is at least 44 × 44; its sheet
+// shows the root's start tag above the field and its end tag below, the field 16 px or more and
+// holding exactly what lies between them. "<rect" alone says its line and column and changes nothing.
+// With r changed and a <rect> added, Apply makes the file exactly the start tag, the text and the end
+// tag, in one "Edit source" entry, and the canvas draws both (the new rect's colour at its centre);
+// undo gives the sample back byte for byte. A file with an XML declaration and comments around the
+// root keeps all three.
+async function editTheWholeDrawingsSource(browser, origin) {
+  const parts = (file) => {
+    const s = file.indexOf('<svg');
+    const a = file.indexOf('>', s) + 1;
+    const b = file.lastIndexOf('</svg>');
+    return { start: file.slice(s, a), inner: file.slice(a, b), head: file.slice(0, a), tail: file.slice(b) };
+  };
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    const edit = page.locator('.draw-code-edit');
+    const box = await edit.boundingBox();
+    must(!!box && box.width >= TAP_MIN - 0.5 && box.height >= TAP_MIN - 0.5, `the code panel's Edit is ${box ? `${Math.round(box.width)}×${Math.round(box.height)}` : 'missing'}`);
+    await edit.tap();
+    const p = parts(SAMPLE);
+    const area = page.locator('.draw-source');
+    const shown = { start: await page.locator('.draw-source-start').textContent(), end: await page.locator('.draw-source-end').textContent(), text: await area.inputValue() };
+    must(shown.start === p.start && shown.end === '</svg>' && shown.text === p.inner, `the sheet shows ${JSON.stringify(shown).slice(0, 160)}…`);
+    const size = await area.evaluate((f) => parseFloat(getComputedStyle(f).fontSize));
+    must(size >= 16, `the field's text is ${size} px (iOS zooms into a field under 16)`);
+    const apply = page.locator('.draw-modal .ds-btn', { hasText: 'Apply' });
+    await area.fill('<rect');
+    await apply.tap();
+    const problem = await page.locator('.draw-problem').textContent();
+    must(/^Line 1, column \d+: /.test(problem), `"<rect" says ${JSON.stringify(problem)}`);
+    must(await source(page) === SAMPLE, 'text that doesn’t parse changed the file');
+    const text = p.inner.replace(' r="42"', ' r="30"').replace(/\n$/, '\n  <rect x="40" y="120" width="60" height="40" fill="#118ab2"/>\n');
+    await area.fill(text);
+    await apply.tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === `${p.head}${text}${p.tail}`, `Apply did not make the file the start tag, the text and the end tag:\n${await source(page)}`);
+    must(await undoLabel(page) === 'Undo Edit source', `the entry is ${await undoLabel(page)}`);
+    const drawn = await page.evaluate(() => {
+      const svg = document.querySelector('.draw-host').shadowRoot.querySelector('svg');
+      return { r: svg.querySelector('circle')?.getAttribute('r'), rect: !!svg.querySelector('rect[fill="#118ab2"]') };
+    });
+    must(drawn.r === '30' && drawn.rect, `the canvas draws ${JSON.stringify(drawn)}`);
+    const blue = await pixelAt(page, await page.evaluate(screenPoint, { x: 70, y: 140 }));
+    must(near3(blue, [0x11, 0x8a, 0xb2], 2), `the new rect's centre is drawn ${blue}, not #118ab2`);
+    await page.locator('.draw-rail .draw-undo').tap();
+    must(await source(page) === SAMPLE, 'one undo did not give the sample back byte for byte');
+
+    // The prolog and the epilog stay.
+    const DECL = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- before -->\n<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <circle cx="50" cy="50" r="20" fill="#2a9d8f"/>\n</svg>\n<!-- after -->\n`;
+    await pickFile(page, 'declared.svg', Buffer.from(DECL));
+    await closeModal(page);
+    await showCode(page);
+    await page.locator('.draw-code-edit').tap();
+    must(await area.inputValue() === parts(DECL).inner, `the field holds ${JSON.stringify(await area.inputValue())}`);
+    await area.fill(parts(DECL).inner.replace('r="20"', 'r="30"'));
+    await apply.tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(await source(page) === DECL.replace('r="20"', 'r="30"'), `the declaration or the comments did not stay:\n${await source(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The empty state (P1-M5) on lab/create.svg: "Add a shape below", a status centred over the canvas
+// (± 1 px) that every tap passes through (pointer-events: none); a Rectangle tap on it reaches the
+// canvas and places the shape, and the hint goes; undo brings it back; it is never in the file. At
+// 1180 × 820 (the rail on the left) it reads "Add a shape with the tools".
+async function anEmptyDrawingSaysAddAShape(browser, origin) {
+  const F = LAB_CREATE();
+  const hint = (page) => page.evaluate(() => {
+    const h = document.querySelector('.draw-over.draw-empty');
+    if (!h) return null;
+    const r = h.getBoundingClientRect();
+    const c = document.querySelector('.draw-canvas').getBoundingClientRect();
+    return { text: h.textContent, role: h.getAttribute('role'), events: getComputedStyle(h).pointerEvents, x: r.left + r.width / 2, y: r.top + r.height / 2, cx: c.left + c.width / 2, cy: c.top + c.height / 2 };
+  });
+  const centred = (h) => Math.abs(h.x - h.cx) <= 1 && Math.abs(h.y - h.cy) <= 1;
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open');
+    await twoFrames(page);
+    const h = await hint(page);
+    must(h?.text === 'Add a shape below' && h.role === 'status', `the empty drawing's hint is ${JSON.stringify(h)}`);
+    must(centred(h), `the hint is centred at (${Math.round(h.x)}, ${Math.round(h.y)}), not over the canvas's centre (${Math.round(h.cx)}, ${Math.round(h.cy)})`);
+    must(h.events === 'none', `the hint takes taps (pointer-events: ${h.events})`);
+    await shapesTool(page, 'Rectangle');
+    await page.touchscreen.tap(h.x, h.y);
+    await until('the tap on the hint places a rect', async () => (await source(page)) !== F).catch(() => {});
+    must(/<rect /.test(await source(page)) && await undoLabel(page) === 'Undo Add rectangle', 'a Rectangle tap on the hint did not reach the canvas');
+    await twoFrames(page);
+    must(await hint(page) === null, 'the hint stayed with a shape on the canvas');
+    await page.locator('.draw-rail .draw-undo').tap();
+    await twoFrames(page);
+    must(await source(page) === F && (await hint(page))?.text === 'Add a shape below', 'undo did not bring the empty drawing and its hint back');
+    must(!(await source(page)).includes('Add a shape'), 'the hint is in the file');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+  await withPage(browser, origin, 820, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open');
+    await twoFrames(page);
+    const h = await hint(page);
+    must(h?.text === 'Add a shape with the tools' && centred(h), `at 1180 × 820 the hint is ${JSON.stringify(h)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { viewport: { width: 1180, height: 820 } });
 }
 
 async function withPage(browser, origin, height, fn, options = {}) {
