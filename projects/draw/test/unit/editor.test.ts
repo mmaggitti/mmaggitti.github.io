@@ -3054,6 +3054,18 @@ test('Text to path refuses, saying why and writing nothing: a font Draw holds no
   assert.equal(TEXT_FIRST, 'Convert text to paths first: More → Text to path.');
 });
 
+test('a Text to path whose text library fails outright (it returns no run for a text) says it can’t outline the text, naming it, and writes nothing', async () => {
+  const broken = async () => ({ openFont, shape: () => ({ unitsPerEm: 1000, runs: [] }) });
+  const r = rig(HOST, {}, undefined, textPorts(broken));
+  const F = BOARD('  <text id="a" x="1" y="9" font-family="Inter">Hi</text>\n  <text id="b" x="1" y="19" font-family="Inter">there</text>\n');
+  r.editor.open(F);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), 'Draw can’t outline “Hi there”.');
+  assert.equal(r.editor.source(), F);
+  assert.equal(r.editor.history.get().canUndo, false);
+});
+
 test('a Text to path the drawing changes under while its chunk loads refuses, and writes nothing over the change; a chunk that won’t load says so', async () => {
   let release!: () => void;
   const gate = new Promise<void>((ok) => (release = ok));

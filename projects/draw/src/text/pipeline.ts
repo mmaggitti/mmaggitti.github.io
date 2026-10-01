@@ -5,7 +5,9 @@
 // 2. Each face the texts use is read once (its bytes, then one shape call for all its runs).
 // 3. Each text is outlined (engine/text/outline.ts outlineD) unless one of its characters is outside
 //    its face's unicode-range (the browser draws it from another font) or left on .notdef, its face's
-//    file couldn't be had, or nothing would be drawn: then it says why.
+//    file couldn't be had or read (a unitsPerEm outside 16 to 16384 is unreadable, as the browser's
+//    own sanitizer finds it), its glyphs' numbers can't be drawn, or nothing would be drawn: then it
+//    says why.
 // The result is per text, so Text to path can refuse when any text does, and Export's "As paths" can
 // keep a text it can't outline as text.
 
@@ -25,6 +27,8 @@ export const OFFLINE = 'Draw couldn’t load the text tools. Try again when you�
 export const EMPTY = 'Nothing would be left.';
 export const faceUnloaded = (family: string) => `Draw couldn’t load ${family}. Try again when you’re online.`;
 export const faceUnreadable = (family: string) => `Draw can’t read ${family}’s file.`;
+/** Why a text whose glyphs' numbers can't be drawn isn't outlined, naming the text (its first 40 characters). */
+export const cantOutline = (label: string) => `Draw can’t outline “${[...label].length > 40 ? `${[...label].slice(0, 40).join('')}…` : label}”.`;
 
 export type Outlined = { d: string } | { refused: string };
 
@@ -76,6 +80,10 @@ export async function outlineTexts(texts: readonly OutlineText[], deps: TextDeps
       for (const u of runs) why[u.t] ??= faceUnreadable(face.family);
       continue;
     }
+    if (!Number.isInteger(out.unitsPerEm) || out.unitsPerEm < 16 || out.unitsPerEm > 16384) {
+      for (const u of runs) why[u.t] ??= faceUnreadable(face.family);
+      continue;
+    }
     runs.forEach((u, i) => {
       const s = out.runs[i];
       if (s.missing.length) why[u.t] ??= NO_GLYPH(face.family, s.missing[0]);
@@ -85,7 +93,12 @@ export async function outlineTexts(texts: readonly OutlineText[], deps: TextDeps
   return texts.map((t, i): Outlined => {
     const no = why[i];
     if (no !== null) return { refused: no };
-    const d = outlineD(t, shaped[i] as ShapedRun[][]);
+    let d: string;
+    try {
+      d = outlineD(t, shaped[i] as ShapedRun[][]);
+    } catch {
+      return { refused: cantOutline(t.label) }; // a number fmt won't write (NaN, Infinity) from the face's data
+    }
     return d ? { d } : { refused: EMPTY };
   });
 }

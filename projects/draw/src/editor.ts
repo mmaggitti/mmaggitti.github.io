@@ -117,7 +117,7 @@ import { readLines, planLines } from '../../../engine/text/lines.ts';
 import { computedStyle, computedWeight, familyList, fontFaces, usedFaces, type FaceRequest, type OwnFace } from '../../../engine/text/font-faces.ts';
 import { outlineText, type OutlineText } from '../../../engine/text/outline.ts';
 import { textPathMarkup, writeTextToPath } from '../../../engine/text/to-path.ts';
-import { outlineTexts, type TextDeps } from './text/pipeline.ts';
+import { cantOutline, outlineTexts, type TextDeps } from './text/pipeline.ts';
 import { loadTextLib, type TextLib } from './text/load.ts';
 import { appFonts, couldNotLoad, SHEET_FACES, type FontEvent, type Fonts } from './platform/fonts.ts';
 import { LATIN_RANGE, TEXT_DEFAULTS, catalogueFamily, hasFace } from './platform/font-catalogue.ts';
@@ -1049,7 +1049,8 @@ export class Editor {
    * Text to path (P1-M4 S2): each selected <text> (other shapes are left alone) becomes one <path> in
    * its place, outlined from the face the canvas draws (engine/text/outline.ts reads it and says what
    * refuses; text/pipeline.ts shapes it with fontkit from its lazy chunk). Nothing is written while any
-   * selected text refuses, and the drawing changing meanwhile refuses (combine's rule). Then one entry,
+   * selected text refuses, the drawing changing meanwhile refuses (combine's rule), and a pipeline that
+   * fails outright says it can't outline the text, naming it. Then one entry,
    * "Text to path" (engine/text/to-path.ts: one fragment parse per parent), and the paths are selected.
    */
   async textToPath(): Promise<void> {
@@ -1070,7 +1071,12 @@ export class Editor {
       reads.push(r);
     }
     const version = doc.version;
-    const out = await outlineTexts(reads, this.textDeps(fontFaces(doc).faces));
+    let out: Awaited<ReturnType<typeof outlineTexts>>;
+    try {
+      out = await outlineTexts(reads, this.textDeps(fontFaces(doc).faces));
+    } catch {
+      return void this.notice.set(cantOutline(reads.map((r) => r.label).join(' '))); // the library misbehaved: nothing is written
+    }
     if (this.#movedOn(doc, version)) return void this.notice.set(DRAWING_CHANGED);
     if ('refused' in out) return void this.notice.set(out.refused);
     const ds: string[] = [];

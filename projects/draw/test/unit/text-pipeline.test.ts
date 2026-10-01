@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { CATALOGUE, LATIN_RANGE, catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
-import { EMPTY, OFFLINE, faceUnloaded, outlineTexts, type Outlined, type TextDeps } from '../../src/text/pipeline.ts';
+import { EMPTY, OFFLINE, cantOutline, faceUnloaded, faceUnreadable, outlineTexts, type Outlined, type TextDeps } from '../../src/text/pipeline.ts';
+import type { TextLib } from '../../src/text/load.ts';
 import { NO_FACE, NO_GLYPH, outlineText, type OutlineText } from '../../../../engine/text/outline.ts';
 import { descendants, parseDoc, type Doc, type ElementNode } from '../../../../engine/model/doc.ts';
 
@@ -94,4 +95,25 @@ test('the library that won’t load refuses everything (OFFLINE); a face whose f
   assert.deepEqual(out[1], { refused: faceUnloaded('Fraunces') });
   const [sp] = await results('<text x="1" y="9" font-family="Inter" font-size="10" xml:space="preserve">   </text>');
   assert.deepEqual(sp, { refused: EMPTY });
+});
+
+// A text library that reads any file as a face of this unitsPerEm: one box per character, `advance` wide.
+const stubLib = (unitsPerEm: number, advance = 500): TextLib => ({
+  openFont,
+  shape: (_bytes, runs) => ({
+    unitsPerEm,
+    runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [advance, 0] }, { command: 'lineTo', args: [advance, 700] }, { command: 'closePath', args: [] }], xAdvance: advance, xOffset: 0, yOffset: 0 })), missing: [] })),
+  }),
+});
+
+test('a face whose unitsPerEm is outside 16 to 16384 is unreadable (0, 15, 16385, 1.5 refuse, saying so); 16 and 16384 outline; glyph numbers that can’t be written (a NaN advance) refuse the text, naming it', async () => {
+  const one = outlines('<text x="1" y="9" font-family="Inter" font-size="10">Hello</text>');
+  for (const u of [0, 15, 16385, 1.5]) assert.deepEqual(await outlineTexts(one, deps({ lib: async () => stubLib(u) })), [{ refused: faceUnreadable('Inter') }], `unitsPerEm ${u}`);
+  for (const u of [16, 16384]) {
+    const [o] = (await outlineTexts(one, deps({ lib: async () => stubLib(u) }))) as Outlined[];
+    assert.ok('d' in o, `unitsPerEm ${u}: ${'refused' in o ? o.refused : ''}`);
+  }
+  assert.deepEqual(await outlineTexts(one, deps({ lib: async () => stubLib(1000, NaN) })), [{ refused: cantOutline('Hello') }]);
+  assert.equal(cantOutline('Hello'), 'Draw can’t outline “Hello”.');
+  assert.equal(cantOutline('x'.repeat(41)), `Draw can’t outline “${'x'.repeat(40)}…”.`, 'its first 40 characters');
 });

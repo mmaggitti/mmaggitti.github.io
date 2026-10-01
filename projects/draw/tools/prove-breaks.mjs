@@ -3342,6 +3342,26 @@ const BREAKS = [
     file: 'engine/access/metadata.ts', from: '    if (meta && empty(meta.id) && meta.attrs', to: '    if (meta && !kids(doc, meta.id).length && meta.attrs',
     run: engineTests('access/metadata.test.ts'), expect: /✖ Metadata on then off keeps a file’s own <metadata>/,
   },
+  {
+    id: 'B631', what: 'Text to path takes a face whose unitsPerEm is 0 (or 15, or 16385): its outline is Infinity, or drawn at a size the browser never draws',
+    file: 'projects/draw/src/text/pipeline.ts', from: '    if (!Number.isInteger(out.unitsPerEm) || out.unitsPerEm < 16 || out.unitsPerEm > 16384) {', to: '    if (!Number.isFinite(out.unitsPerEm)) {',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a face whose unitsPerEm is outside 16 to 16384 is unreadable/,
+  },
+  {
+    id: 'B632', what: 'outlineD runs unguarded: a NaN advance throws out of the pipeline instead of refusing the text',
+    file: 'projects/draw/src/text/pipeline.ts', from: "    try {\n      d = outlineD(t, shaped[i] as ShapedRun[][]);\n    } catch {\n      return { refused: cantOutline(t.label) }; // a number fmt won't write (NaN, Infinity) from the face's data\n    }\n", to: '    d = outlineD(t, shaped[i] as ShapedRun[][]);\n',
+    run: drawTests('text-pipeline.test.ts'), expect: /✖ a face whose unitsPerEm is outside 16 to 16384 is unreadable/,
+  },
+  {
+    id: 'B633', what: 'Text to path lets a failing pipeline reject (no notice, nothing said)',
+    file: 'projects/draw/src/editor.ts', from: "    } catch {\n      return void this.notice.set(cantOutline(reads.map((r) => r.label).join(' '))); // the library misbehaved: nothing is written\n    }\n", to: '    } finally {\n      // nothing said\n    }\n',
+    run: drawTests('editor.test.ts'), expect: /✖ a Text to path whose text library fails outright/,
+  },
+  {
+    id: 'B634', what: 'prepareExport rejects when the text library fails outright (the Export sheet would stay on Preparing…)',
+    file: 'projects/draw/src/export/svg.ts', from: '  try {\n    return await prepare(doc, name, choice, deps, read);\n  } catch (e) {\n    return { refused: unprepared(e) };\n  }\n', to: '  return prepare(doc, name, choice, deps, read);\n',
+    run: drawTests('export-text.test.ts'), expect: /✖ a text library that fails outright/,
+  },
 ];
 
 const args = process.argv.slice(2);

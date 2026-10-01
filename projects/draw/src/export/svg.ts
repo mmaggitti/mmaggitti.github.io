@@ -152,11 +152,23 @@ function facesOf(doc: Doc, id: NodeId, own: ReadonlySet<string>, deps: ExportDep
   return { faces: [...faces.values()], foreign: [...foreign] };
 }
 
+/** Why Clean's text couldn't be prepared when something failed outright (the text library misbehaving). */
+export const unprepared = (e: unknown) => `Draw couldn’t prepare the text: ${e instanceof Error ? e.message : String(e)}.`;
+
 /**
  * Clean's file with its text as paths or with fonts (the module header), or why it can't be made (the
- * text library or a face's file that won't load): the sheet then falls back to As text.
+ * text library or a face's file that won't load, or anything failing outright: never a rejection): the
+ * sheet then falls back to As text, saying why.
  */
 export async function prepareExport(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: ExportDeps, read?: string): Promise<Prepared | { refused: string }> {
+  try {
+    return await prepare(doc, name, choice, deps, read);
+  } catch (e) {
+    return { refused: unprepared(e) };
+  }
+}
+
+async function prepare(doc: Doc, name: string, choice: 'paths' | 'fonts', deps: ExportDeps, read?: string): Promise<Prepared | { refused: string }> {
   const parsed = parseDoc(serialize(doc));
   if (!parsed.ok) return { refused: parsed.error.message };
   const copy = parsed.doc;

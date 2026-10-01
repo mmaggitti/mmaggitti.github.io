@@ -110,6 +110,14 @@ test('a text library that won’t load refuses (the sheet falls back to As text)
   }
 });
 
+test('a text library that fails outright (it returns no run for a text) refuses, saying why, instead of rejecting (the sheet falls back to As text)', async () => {
+  const broken: ExportDeps = { ...deps, textDeps: (own) => ({ ...deps.textDeps(own), lib: async () => ({ openFont, shape: () => ({ unitsPerEm: 1000, runs: [] }) }) }) };
+  for (const choice of ['paths', 'fonts'] as const) {
+    const out = await prepareExport(load(SRC), 'fonts', choice, broken);
+    assert.ok('refused' in out && out.refused.startsWith('Draw couldn’t prepare the text: '), `${choice}: ${JSON.stringify(out).slice(0, 200)}`);
+  }
+});
+
 test('the file’s own @font-face rules are kept as written in As paths and With fonts; its own face’s text is outlined from the file’s own bytes in As paths', async () => {
   const face = Buffer.from(file('space-grotesk', 'space-grotesk-latin-400-normal.woff2')).toString('base64');
   const style = `<style>@font-face{font-family:Own;src:url(data:font/woff2;base64,${face}) format("woff2")}</style>`;
