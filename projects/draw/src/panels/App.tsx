@@ -1,4 +1,5 @@
-// Draw's shell: the top bar (Files, the drawing's name and save state, Fit, Export), the canvas
+// Draw's shell: the top bar (Files, the drawing's name and save state, Fit, Finish, Export: its own
+// sideways scroller, so every button keeps 44 pt and the name shows in full), the canvas
 // (zoom, pan, Select; a dropped file opens), the split code sheet (Code, Inspect and Support), the
 // ContextBar (the Scrub strip, or the selection's actions) and the ToolRail, over the
 // framework-free editor (src/editor.ts) and workspace (src/workspace.ts: opening, drafts, export).
@@ -192,6 +193,9 @@ export function App() {
           <button type="button" className="draw-fit" onClick={() => editor.fitToScreen()}>
             Fit
           </button>
+          <button type="button" className="draw-bar-btn draw-finish" aria-haspopup="dialog" onClick={() => workspace.show('finish')}>
+            Finish
+          </button>
           <button type="button" className="draw-bar-btn draw-export" aria-haspopup="dialog" onClick={() => workspace.show('export')}>
             Export
           </button>
@@ -206,7 +210,7 @@ export function App() {
         <ContextBar editor={editor} unparsed={unparsed} files={files} />
         <ToolRail editor={editor} />
         <Sheets editor={editor} />
-        <FileSheets workspace={workspace} theme={theme} setTheme={chooseTheme} />
+        <FileSheets workspace={workspace} editor={editor} theme={theme} setTheme={chooseTheme} />
       </Guard>
     </div>
   );

@@ -19,6 +19,11 @@
 //   code with the error marked, nothing drawn, nothing to edit, and no draft; Files is the way on.
 // - Copy puts the file (or that source) on the clipboard, through src/platform/ (it never reads the
 //   clipboard); where the clipboard is blocked, a read-only sheet holds the text to select.
+// - New… (P1-M5): a preset (engine/presets/quick-starts.ts: Draw's blank, the quick starts, SVG Lab's
+//   templates) opens as a new drawing named for it, a draft on its first change, while the drawing
+//   that was open stays in Files; or, Replace this one, the open drawing's content becomes the
+//   preset's in one entry that undo takes back, its name and draft kept.
+// - Finish (P1-M5): the PNG source (export/png.ts) for the open drawing, and what left Draw.
 
 import { NS, descendants, serialize, type Doc } from '../../../engine/model/doc.ts';
 import { stripDrawState } from '../../../engine/model/draw-state.ts';
@@ -30,10 +35,12 @@ import { localJournal, type DraftStore, type Journal } from './platform/drafts.t
 import { decodeImport } from './platform/files.ts';
 import type { Outcome } from './platform/share.ts';
 import { exportFile, prepareExport, type ExportFile, type ExportKind, type Prepared } from './export/svg.ts';
+import { pngSource, type PngSource } from './export/png.ts';
+import { BLANK, presetById } from '../../../engine/presets/quick-starts.ts';
 import { draftRows, type DraftRow } from './files-view.ts';
 import { createStore, type Store } from './panels/store.ts';
 
-export type Panel = 'files' | 'report' | 'export' | 'link' | 'copy' | null;
+export type Panel = 'files' | 'report' | 'export' | 'link' | 'copy' | 'new' | 'finish' | null;
 
 /** A file that isn't well-formed, open as read-only source. */
 export type Unparsed = ImportFailure & { source: { text: string; at: number } };
@@ -52,8 +59,14 @@ export interface Current {
   lossy: boolean;
 }
 
-/** New: a blank artboard. */
-export const BLANK = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">\n</svg>\n';
+/** New: a blank artboard (engine/presets/quick-starts.ts, the New sheet's Blank). */
+export { BLANK };
+
+/** What left Draw (exported): a file's name, or a summary of several, and its kind. */
+export interface Exported {
+  fileName: string;
+  kind: ExportKind | 'png';
+}
 
 export interface WorkspaceDeps {
   store: DraftStore;
@@ -217,9 +230,41 @@ export class Workspace {
     return this.#open({ via, name, text }, { show: true, create: true });
   }
 
-  /** A blank artboard (a draft once it changes). */
+  /** A blank artboard (a draft once it changes): the New sheet's Blank. */
   newDrawing(): Promise<boolean> {
-    return this.#open({ via: 'new', name: '', text: BLANK }, {});
+    return this.newFrom('draw-blank');
+  }
+
+  /**
+   * New drawing from a preset (the New sheet): it opens as New does, named for the preset ("Icon",
+   * "SVG Lab logo"), a draft on its first change; the drawing that was open closes as any open closes
+   * it (a change still waiting is saved to its own draft first), so it stays in Files.
+   */
+  newFrom(id: string): Promise<boolean> {
+    const p = presetById(id);
+    return p ? this.#open({ via: 'new', name: p.drawing, text: p.text }, {}) : Promise.resolve(false);
+  }
+
+  /** Whether Replace this one can write over the open drawing: one is open, editable, and not shown as source. */
+  canReplace(): boolean {
+    return !!this.#editor.doc && !this.unparsed.get() && !this.#editor.readOnly.get();
+  }
+
+  /**
+   * Replace this one (the New sheet, SVG Lab's way): the open drawing's content becomes the preset's in
+   * one entry ("Replace with Icon") that undo takes back byte for byte; it keeps its name and its
+   * draft. The import report is read again. False, with the notice, when it can't be (read-only, a file
+   * shown as source).
+   */
+  replaceFrom(id: string): boolean {
+    const p = presetById(id);
+    const doc = this.#editor.doc;
+    if (!p || !doc || this.unparsed.get()) return false;
+    if (!this.#editor.replaceDrawing(p.text, `Replace with ${p.drawing}`)) return false;
+    this.panel.set(null);
+    const current = this.current.get();
+    if (current) this.current.set({ ...current, report: importReport(doc) });
+    return true;
   }
 
   /** Reopen a draft; read-only when another tab has it open (reopening it tries its lock again). */
@@ -397,10 +442,25 @@ export class Workspace {
     return prepareExport(doc, current?.name ?? 'drawing', choice, this.#editor.exportDeps(), current?.encoding ?? undefined);
   }
 
-  /** After the share sheet or the download: say so (the sheet closes), and reset the draft's "not exported" reminder. */
-  async exported(file: ExportFile, outcome: Outcome): Promise<void> {
+  /** The source Finish's PNGs are drawn from (export/png.ts): Clean's file with its text as paths, and its notes. */
+  async pngSource(): Promise<PngSource | null> {
+    const doc = this.#editor.doc;
+    return doc ? pngSource(doc, this.current.get()?.name ?? 'drawing', this.#editor.exportDeps()) : null;
+  }
+
+  /** The open drawing's name, as its files are named. */
+  get fileName(): string {
+    return this.current.get()?.name ?? 'drawing';
+  }
+
+  /**
+   * After the share sheet or the download (an SVG of Export's, or Finish's PNGs): say so (the sheet
+   * closes, unless `close` is false: Finish's downloads go one file per tap), and reset the draft's
+   * "not exported" reminder.
+   */
+  async exported(file: Exported, outcome: Outcome, close = true): Promise<void> {
     if (outcome === 'cancelled') return;
-    this.panel.set(null);
+    if (close) this.panel.set(null);
     this.#editor.notice.set(`${outcome === 'shared' ? 'Shared' : 'Downloaded'} ${file.fileName}`);
     await this.autosave.flush(); // the draft holds exactly what was exported
     await this.autosave.markExported();

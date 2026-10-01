@@ -78,6 +78,7 @@ import { adoptDonut, detachGenerator, finishGenerators, generatorOf, type Genera
 import { donutCandidateFor, donutFor, donutParts, VALUE_MAX, VALUE_MIN, type Donut } from '../../../engine/generators/donut.ts';
 import { planShapeHandle, shapeHandleLabel, shapeHandles, takesShapeHandles } from '../../../engine/geometry/shape-handles.ts';
 import { insertMarkup } from '../../../engine/model/space.ts';
+import { replaceDrawing as replaceDrawingWith } from '../../../engine/model/replace.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
 import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
@@ -3365,6 +3366,29 @@ export class Editor {
       for (const e of edits) apply(opSetAttrRaw(doc, e.id, e.ns, e.local, e.raw));
     });
     return ok ? null : this.notice.get();
+  }
+
+  // ── Replace this one (P1-M5, the New sheet) ──────────────────────────────────────────────────
+
+  /**
+   * The open drawing's content becomes another file's (engine/model/replace.ts: the root's attributes
+   * as it writes them and everything inside it), in one entry named `label` that undo takes back byte
+   * for byte; Select is the tool, the selection empties, and the view fits the new artboard. False,
+   * with the notice saying why, when it can't be.
+   */
+  replaceDrawing(text: string, label: string): boolean {
+    const doc = this.#doc;
+    if (!doc || !this.#writable()) return false;
+    if (this.tool.get() !== 'select') this.pickTool('select');
+    if (!this.#dispatch(label, (apply) => replaceDrawingWith(doc, text, apply))) return false;
+    this.select([]);
+    this.fitToScreen();
+    return true;
+  }
+
+  /** The artboard (the root's viewBox, or its width and height, in user units), or null: what the Finish sheet sizes PNGs from. */
+  board(): Rect | null {
+    return this.#board && { ...this.#board };
   }
 
   // ── Layers: hide, lock, rename ───────────────────────────────────────────────────────────────

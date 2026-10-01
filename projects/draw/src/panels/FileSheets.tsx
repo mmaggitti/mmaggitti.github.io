@@ -1,30 +1,35 @@
-// The file sheets over the canvas: the Files menu (Open…, New, a paste field, the import report
-// again, the drafts to reopen or delete, and the theme), the Import report (after every import, or
-// why an open failed), Export (as-is, clean with its text as it is, as paths or with fonts, Save to
-// Files), Open link (an #import link that
-// arrived while Draw was open opens only on a tap), and Copy's fallback (the text to select, where
-// the clipboard is blocked). They read the workspace's stores; every file, paste and share goes
-// through src/platform/ and every open through the importer.
+// The file sheets over the canvas: the Files menu (Open…, New…, a paste field, the import report
+// again, the drafts to reopen or delete, and the theme), New (P1-M5: Draw's blank, the quick starts and
+// SVG Lab's templates, each asking New drawing or Replace this one), the Import report (after every
+// import, or why an open failed), Export (as-is, clean with its text as it is, as paths or with fonts,
+// Save to Files), Finish (P1-M5, Finish.tsx: the previews, the raster comparison and PNG), Open link
+// (an #import link that arrived while Draw was open opens only on a tap), and Copy's fallback (the
+// text to select, where the clipboard is blocked). They read the workspace's stores; every file,
+// paste and share goes through src/platform/ and every open through the importer.
 
 import { useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import type { Workspace } from '../workspace.ts';
+import type { Editor } from '../editor.ts';
 import type { ImportFailure } from '../import.ts';
 import type { ExportFile, ExportKind, TextChoice } from '../export/svg.ts';
 import { failureText, reportView } from '../files-view.ts';
 import { pasted } from '../platform/files.ts';
 import { shareOrDownload } from '../platform/share.ts';
+import { PRESETS, PRESET_GROUPS, presetById } from '../../../../engine/presets/quick-starts.ts';
 import { Modal } from './Sheets.tsx';
+import { Finish } from './Finish.tsx';
 import { useStore } from './store.ts';
 
 export type Theme = 'system' | 'light' | 'dark';
 
 interface Props {
   workspace: Workspace;
+  editor: Editor;
   theme: Theme;
   setTheme: (t: Theme) => void;
 }
 
-export function FileSheets({ workspace, theme, setTheme }: Props) {
+export function FileSheets({ workspace, editor, theme, setTheme }: Props) {
   const panel = useStore(workspace.panel);
   const close = () => workspace.close();
   switch (panel) {
@@ -43,6 +48,18 @@ export function FileSheets({ workspace, theme, setTheme }: Props) {
       return (
         <Modal key="export" title="Export" onClose={close} done mono={false}>
           <ExportBody workspace={workspace} />
+        </Modal>
+      );
+    case 'new':
+      return (
+        <Modal key="new" title="New" onClose={close} done mono={false}>
+          <NewBody workspace={workspace} />
+        </Modal>
+      );
+    case 'finish':
+      return (
+        <Modal key="finish" title="Finish" onClose={close} done mono={false}>
+          <Finish workspace={workspace} editor={editor} />
         </Modal>
       );
     case 'link':
@@ -84,8 +101,8 @@ function FilesMenu({ workspace }: { workspace: Workspace }) {
         <button type="button" className="ds-btn ds-btn--primary draw-open" onClick={() => input.current?.click()}>
           Open…
         </button>
-        <button type="button" className="ds-btn draw-new" onClick={() => void workspace.newDrawing()}>
-          New
+        <button type="button" className="ds-btn draw-new" aria-haspopup="dialog" onClick={() => workspace.show('new')}>
+          New…
         </button>
       </div>
       {/* iOS offers only the types listed here: .svg must be named, not just image/svg+xml. */}
@@ -144,6 +161,41 @@ function FilesMenu({ workspace }: { workspace: Workspace }) {
             </li>
           ))}
         </ul>
+      )}
+    </>
+  );
+}
+
+/**
+ * New (P1-M5): Draw's blank, the quick starts and SVG Lab's templates, each a row with its size. A tap
+ * picks one; then New drawing opens it as a new drawing (the one open stays in Files), and Replace this
+ * one writes it over the open drawing in one entry Undo takes back. Nothing happens until one is tapped.
+ */
+function NewBody({ workspace }: { workspace: Workspace }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const preset = picked === null ? undefined : presetById(picked);
+  return (
+    <>
+      {PRESET_GROUPS.map((g) => (
+        <section key={g.group} className="draw-presets" data-group={g.group}>
+          <h3 className="draw-subhead">{g.heading}</h3>
+          {PRESETS.filter((p) => p.group === g.group).map((p) => (
+            <button key={p.id} type="button" className="ds-btn draw-preset" data-preset={p.id} aria-pressed={picked === p.id} onClick={() => setPicked(p.id)}>
+              <span className="draw-preset-name">{p.name}</span>
+              <span className="draw-preset-size ds-small ds-muted">{p.size}</span>
+            </button>
+          ))}
+        </section>
+      ))}
+      {preset && (
+        <div className="draw-new-choice" role="group" aria-label={`Open ${preset.name}`}>
+          <button type="button" className="ds-btn ds-btn--primary draw-new-go" onClick={() => void workspace.newFrom(preset.id)}>
+            New drawing
+          </button>
+          <button type="button" className="ds-btn draw-new-replace" disabled={!workspace.canReplace()} onClick={() => workspace.replaceFrom(preset.id)}>
+            Replace this one
+          </button>
+        </div>
       )}
     </>
   );

@@ -1,7 +1,8 @@
 /* Draw: an app shell on the site design system (ds/ds.css). Sizes in rem (ds tokens); px only for
    the 44pt tap floor and hairlines, per the design system.
 
-   The phone layout (440×796 in a Safari tab), top to bottom: the TopBar (44), the canvas and the
+   The phone layout (440×796 in a Safari tab), top to bottom: the TopBar (44; its own sideways scroller
+   when its buttons and the name need more than the width), the canvas and the
    split code sheet sharing what is left (the canvas is 557 / 359 / 98 with the sheet at peek,
    half and full; the sheet's head is 95), the ContextBar (48) and the ToolRail (52, plus the home
    indicator's inset).
@@ -43,10 +44,17 @@
   padding: 0;
   box-shadow: inset 0 -1px 0 var(--line); /* a hairline inside the 44pt, which the bar's buttons fill */
   background: var(--bg);
+  /* P1-M5: the bar scrolls sideways when its buttons and the name need more than the width (the page
+     never does), with no scrollbar showing; it opens at its start. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
-/* The drawing's name and its save state take what the buttons leave, cut short with an ellipsis. */
-.draw-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); overflow: hidden; }
-.draw-name { min-width: 0; font-weight: 700; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draw-bar::-webkit-scrollbar { display: none; }
+/* The drawing's name and its save state, in full: the bar scrolls rather than cutting the name short. */
+.draw-title { flex: 1 0 auto; display: flex; align-items: baseline; gap: var(--space-2); }
+.draw-name { font-weight: 700; font-size: var(--text-md); white-space: nowrap; }
 .draw-save { flex: 0 0 auto; color: var(--text-muted); }
 .draw-save[data-save="failed"] { color: var(--draw-danger); font-weight: 600; }
 .draw-bar-btn {
@@ -99,7 +107,9 @@
    checkerboard the same in both themes (decision 10; both colours are lighter than #e9e9e9).
    overlay/paper.ts places the paper and draws the grid over it (the lab's .g1/.g2 blue). */
 .draw-under { position: absolute; inset: 0; background: var(--surface); pointer-events: none; }
-.draw-paper { position: absolute; background: repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%) 0 0 / 1.25rem 1.25rem; }
+.draw-paper { position: absolute; }
+/* The same checkerboard under the Finish sheet's previews and panes (P1-M5). */
+.draw-paper, .draw-finish-checker { background: repeating-conic-gradient(#eeeeee 0 25%, #ffffff 0 50%) 0 0 / 1.25rem 1.25rem; }
 .draw-grid { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .draw-grid-line { stroke: #a4dded; stroke-width: 1; opacity: 0.6; }
 .draw-grid-line.major { opacity: 1; }
@@ -863,6 +873,63 @@ textarea.draw-access-field { min-height: max(var(--tap-min), 6rem); padding: var
 /* P1-M4 S2: Clean's Text choice, and what it says about the text. */
 .draw-export-text { margin: var(--space-1) 0 var(--space-3); }
 .draw-export-note { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+
+/* ── New (P1-M5): the presets, then New drawing or Replace this one ───────── */
+
+.draw-presets { display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-presets > .draw-subhead { margin: var(--space-3) 0 0; }
+.draw-presets:first-child > .draw-subhead { margin-top: 0; }
+.draw-preset {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(var(--tap-min), var(--control-h-sm));
+  text-align: left;
+}
+.draw-preset[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }
+.draw-preset-size { flex: 0 0 auto; font-weight: 400; }
+/* The choice stays in reach at the sheet's foot (the thumb zone). */
+.draw-new-choice { position: sticky; bottom: 0; display: flex; gap: var(--space-3); margin-top: var(--space-3); padding-top: var(--space-2); background: var(--bg); }
+
+/* ── Finish (P1-M5): previews, Pixels and vector, PNG ───────────────────────── */
+
+/* The body scrolls between the head (Done) and the footer (Share), which stay put. */
+.draw-modal:has(> .draw-finish-body) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-finish-body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.draw-finish-none { margin: 0; }
+.draw-icons { display: flex; flex-direction: column; gap: var(--space-3); }
+.draw-icon { margin: 0; min-width: 0; }
+.draw-icon-label { margin: 0 0 var(--space-1); color: var(--text-muted); }
+/* Side by side while three fit; stacked beyond (Finish.tsx measures, with the padding and gap here). */
+.draw-icon-trio { display: flex; gap: var(--space-1); align-items: flex-start; }
+.draw-icon-trio[data-stacked] { flex-direction: column; }
+.draw-icon-cell { flex: 0 0 auto; padding: var(--space-1); border-radius: var(--radius-sm); line-height: 0; box-shadow: inset 0 0 0 1px var(--line); }
+.draw-icon-light { background: #ffffff; }
+.draw-icon-dark { background: #1c1c1e; }
+.draw-icon-img, .draw-icon-wait { display: block; }
+/* SVG Lab's two panes (its .duo): square, on the checkerboard, side by side. */
+.draw-dots { margin-bottom: var(--space-3); }
+.draw-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
+.draw-compare-fig { margin: 0; min-width: 0; }
+.draw-pane { position: relative; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--line); }
+.draw-pane-img, .draw-pane-grid { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.draw-pane-img { object-fit: contain; }
+.draw-pane-pixels { image-rendering: pixelated; }
+.draw-pane-grid { pointer-events: none; }
+.draw-compare-fig figcaption { margin-top: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); line-height: 1.3; }
+.draw-compare-fig figcaption b { display: block; color: var(--text); font-weight: 700; }
+.draw-png-choice { margin-bottom: var(--space-2); }
+.draw-png-files { margin: 0; padding: 0; list-style: none; }
+.draw-png-file { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding: var(--space-1) 0; border-top: 1px solid var(--line); }
+.draw-png-file:first-child { border-top: 0; }
+.draw-png-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.draw-png-size { flex: 0 0 auto; }
+.draw-png-download { flex: 0 0 auto; min-height: max(var(--tap-min), var(--control-h-sm)); }
+.draw-png-note { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+.draw-png-footer { flex: 0 0 auto; display: flex; padding-top: var(--space-3); background: var(--bg); }
 
 /* ── The Support tab: the ledger in the app ─────────────────────────────────── */
 
