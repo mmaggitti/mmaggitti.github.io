@@ -1,11 +1,14 @@
-// The keyboard on the canvas selection (P1-M1): Delete, Escape, the arrows and ⌘A, handed to the
-// editor; and Enter, the Pen's Done (P1-M3). Installed once on window by panels/App.tsx; P0's ⌘Z, ⇧⌘Z and ⌘Y stay there (M5's command
-// registry takes every key over).
+// The keyboard (P1-M1, routed through the command registry since P1-M5): every key but the arrows is a
+// command (src/commands.ts: Undo ⌘Z, Redo ⇧⌘Z and ⌘Y, Delete and Backspace, Escape, Enter, ⌘A and the
+// palette's ⌘K), run where its `keysIn` allows; the arrows' nudge stays here, a held gesture rather than
+// a command. Installed once on window by panels/App.tsx.
 //
-// A key never acts when something else has it: a field (input, textarea, select, contenteditable),
-// the code view (its tokens take the arrows, Enter and Space themselves), an open sheet
-// (.draw-modal), or a handler that already took it (defaultPrevented). Delete and the arrows act
-// only on a selection.
+// Where a key was pressed decides what it may do: in a field (input, textarea, select, contenteditable)
+// or under an open sheet (.draw-modal) no command takes it; in the code view (its tokens take the
+// arrows, Enter and Space themselves) only a 'code' command (Undo, Redo, the palette); elsewhere, the
+// canvas's. A key another handler already took (defaultPrevented) is left alone, and a key is prevented
+// only when its command ran (Enter only when the Pen took it). Delete and the arrows act only on a
+// selection.
 //
 // The arrows nudge by 1 root user unit, 10 with Shift. Holding them (auto-repeat, or a second
 // arrow) is one nudge: the editor opens one 'Nudge' drag on the first keydown, every keydown moves
@@ -13,19 +16,8 @@
 // one history entry. If the window loses focus with an arrow held, its keyup never comes, so the
 // nudge is kept then.
 
-import type { NodeId } from '../../../engine/model/doc.ts';
-
-/** What the keys drive: the editor. */
-export interface KeyEditor {
-  readonly selection: { get(): ReadonlySet<NodeId> };
-  delete(): void;
-  escape(): void;
-  /** Enter: true when the editor took it (the Pen's Done). */
-  enter(): boolean;
-  selectAll(): void;
-  nudge(dx: number, dy: number): void;
-  nudgeEnd(commit?: boolean): void;
-}
+import type { Editor } from './editor.ts';
+import { commandForKey, type Ctx, type Where } from './commands.ts';
 
 /** The parts of a KeyboardEvent the keys read. */
 export interface KeyInput {
@@ -44,43 +36,38 @@ export const NUDGE_SHIFT = 10;
 
 const ARROWS: Record<string, readonly [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
-// Where a key belongs to something else: a field, or the code view.
-const ELSEWHERE = 'input, textarea, select, .draw-code';
+// A field takes its own keys.
+const FIELD = 'input, textarea, select';
 
 export class Keys {
-  #editor: KeyEditor;
+  #editor: Editor;
   #modal: () => boolean;
+  #ctx: Ctx;
   #held = new Set<string>(); // the arrows down now
 
-  /** `modalOpen`: is a sheet (.draw-modal) open? */
-  constructor(editor: KeyEditor, modalOpen: () => boolean) {
+  /** `modalOpen`: is a sheet (.draw-modal) open? `ctx`: what the commands open (the workspace, the panels); the editor alone if absent. */
+  constructor(editor: Editor, modalOpen: () => boolean, ctx?: Ctx) {
     this.#editor = editor;
     this.#modal = modalOpen;
+    this.#ctx = ctx ?? { editor, workspace: null, ui: null };
   }
 
   down(e: KeyInput): void {
-    if (e.defaultPrevented || this.#elsewhere(e.target)) return;
-    const ed = this.#editor;
+    if (e.defaultPrevented) return;
+    const where = this.#where(e.target);
     const arrow = ARROWS[e.key];
-    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
     if (arrow) {
-      if (!plain || !ed.selection.get().size) return;
+      const ed = this.#editor;
+      if (where !== 'canvas' || e.metaKey || e.ctrlKey || e.altKey || !ed.selection.get().size) return;
       e.preventDefault(); // the page doesn't scroll
       this.#held.add(e.key);
       const n = e.shiftKey ? NUDGE_SHIFT : NUDGE;
       ed.nudge(arrow[0] * n, arrow[1] * n);
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (!plain || !ed.selection.get().size) return;
-      e.preventDefault();
-      ed.delete();
-    } else if (e.key === 'Escape') {
-      ed.escape();
-    } else if (e.key === 'Enter' && plain && !e.shiftKey) {
-      if (ed.enter()) e.preventDefault();
-    } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
-      e.preventDefault();
-      ed.selectAll();
+      return;
     }
+    const c = commandForKey(e, where);
+    if (!c || !c.can(this.#ctx)) return;
+    if (c.run(this.#ctx) !== false) e.preventDefault();
   }
 
   /** An arrow went up: the last one held ends the nudge (wherever the focus went meanwhile). */
@@ -96,15 +83,18 @@ export class Keys {
     this.#editor.nudgeEnd();
   }
 
-  #elsewhere(target: EventTarget | null): boolean {
+  // A field first, then an open sheet, then the code view; else the canvas.
+  #where(target: EventTarget | null): Where {
     const t = target as { closest?(selectors: string): unknown; isContentEditable?: boolean } | null;
-    return !!t?.isContentEditable || !!t?.closest?.(ELSEWHERE) || this.#modal();
+    if (t?.isContentEditable || t?.closest?.(FIELD)) return 'field';
+    if (this.#modal()) return 'sheet';
+    return t?.closest?.('.draw-code') ? 'code' : 'canvas';
   }
 }
 
 /** Put the keys on `win` (keydown, keyup, blur); returns the way to take them off. */
-export function installKeys(editor: KeyEditor, win: Window, modalOpen: () => boolean): () => void {
-  const keys = new Keys(editor, modalOpen);
+export function installKeys(editor: Editor, win: Window, modalOpen: () => boolean, ctx?: Ctx): () => void {
+  const keys = new Keys(editor, modalOpen, ctx);
   const down = (e: KeyboardEvent) => keys.down(e);
   const up = (e: KeyboardEvent) => keys.up(e);
   const blur = () => keys.blur();
