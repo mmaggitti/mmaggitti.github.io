@@ -6888,6 +6888,23 @@ async function theTextToolPlacesHelloAndWritesLines(browser, origin) {
     must(await source(page) === moved, `the pos handle's drag wrote:\n${await source(page)}`);
     must(await undo.getAttribute('aria-label') === 'Undo Move text', `the drag is ${await undo.getAttribute('aria-label')}`);
     must(await page.locator('.draw-context .draw-edit-text').count() === 1, 'Edit text is not on the bar for the text Draw edits as lines');
+    // A canvas tap on the second line selects the <text>, not its line's <tspan>: Edit text is on the
+    // bar, and More offers Text to path.
+    await page.locator('.draw-ctx-btn[aria-label="Deselect"]').tap();
+    const idea = await page.evaluate(() => {
+      const t = [...document.querySelector('.draw-host').shadowRoot.querySelectorAll('text')].find((x) => x.querySelector('tspan'));
+      const m = t.getScreenCTM();
+      const a = new DOMPoint(t.getStartPositionOfChar(3).x, t.getStartPositionOfChar(3).y).matrixTransform(m);
+      const b = new DOMPoint(t.getEndPositionOfChar(6).x, t.getEndPositionOfChar(6).y).matrixTransform(m);
+      return { x: (a.x + b.x) / 2, y: a.y - 3 };
+    });
+    await page.touchscreen.tap(idea.x, idea.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<text>', `a tap on the second line selected ${await label(page)}, not its <text>`);
+    must(await page.locator('.draw-context .draw-edit-text').count() === 1, 'Edit text is not on the bar after a tap on the second line');
+    await openMore(page);
+    must(await page.locator('.draw-more .ds-btn', { hasText: /^Text to path$/ }).count() === 1, `More offers ${JSON.stringify(await page.locator('.draw-more .ds-btn').allTextContents())} for the tapped text, no Text to path`);
+    await closeModal(page);
     // The list text: no pos handle, no Edit text, and M1's centre handle moves it by a translate.
     await tapShape(page, 'list');
     must(await label(page) === '<text#list>', `a tap on the list text selected ${await label(page)}`);
@@ -7260,7 +7277,7 @@ async function textToPathLooksTheSame(browser, origin) {
       const own = before.filter(Boolean).length;
       must(own > 300, `${c.name}: only ${own} ink pixels before`);
       if (first) must((await chunks()).length === 0, `before any Text to path, ${(await chunks()).join(', ')} loaded`);
-      // Selected by its row in Layers (a tap on one of Draw's lines would select that tspan).
+      // Selected by its row in Layers.
       if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
       await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
       await page.locator('.draw-layer-name', { hasText: /^#t$/ }).tap();

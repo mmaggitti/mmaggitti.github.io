@@ -3407,6 +3407,16 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    if (chars > MAX_OUTLINE_CHARS) return void this.notice.set(tooMuchText(chars)); // before the library loads\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ Text to path refuses a selection whose texts hold more than 20,000 characters/,
   },
+  {
+    id: 'B644', what: 'a tap on a line of Draw’s multi-line text selects the line’s <tspan> again (no Edit text, no Text to path, a drag refused)',
+    file: 'projects/draw/src/selectable.ts', from: '    return text === p || [...selected].some((s) => textOf(doc, s) === text) ? p : text;', to: '    return p;',
+    run: drawTests('editor.test.ts'), expect: /✖ a tap on a line of Draw’s multi-line text selects the <text>/,
+  },
+  {
+    id: 'B645', what: 'Text to path takes only a selected <text>, not a selected line of one',
+    file: 'projects/draw/src/editor.ts', from: '    const texts = [...new Set(ids.map((id) => textOf(doc, id)))].filter((id) => {', to: '    const texts = [...new Set(ids)].filter((id) => {',
+    run: drawTests('editor.test.ts'), expect: /✖ a tap on a line of Draw’s multi-line text selects the <text>/,
+  },
 ];
 
 const args = process.argv.slice(2);

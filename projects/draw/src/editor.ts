@@ -54,7 +54,7 @@ import { TokenEditError, rewriteNumbers, type TokenTarget } from '../../../engin
 import type { ColorToken, NumberToken, TextToken, Token } from '../../../engine/code/tokens.ts';
 import { createStore, type Store } from './panels/store.ts';
 import { attached, route, type Route } from './routing.ts';
-import { elementOf, outlineable, selectionTarget } from './selectable.ts';
+import { elementOf, outlineable, selectionTarget, textOf } from './selectable.ts';
 import { blockKey, keyOrder, mixes, subtreeKeys, viewBlock } from './codeview/blocks.ts';
 import type { FocusMark, Placement, TokenKey, ViewBlock, ViewToken } from './codeview/code-view.ts';
 import { artboard, rootViewport } from './canvas/artboard.ts';
@@ -685,7 +685,7 @@ export class Editor {
   /** A tap on the canvas: `hit` is the drawn node under it (null: nothing drawn there). */
   tapCanvas(hit: NodeId | null): void {
     if (!this.#doc || this.#live || this.#gesture) return;
-    const target = selectionTarget(this.#doc, hit);
+    const target = selectionTarget(this.#doc, hit, this.selection.get());
     this.#tap(target !== null && isLocked(this.#doc, target) ? null : target, this.selectMore.get());
   }
 
@@ -793,7 +793,8 @@ export class Editor {
       return;
     }
     const all = this.#withThin(at, hits);
-    const targets = all.map((id) => selectionTarget(doc, id)).filter((t): t is NodeId => t !== null);
+    const sel = this.selection.get();
+    const targets = all.map((id) => selectionTarget(doc, id, sel)).filter((t): t is NodeId => t !== null);
     const target = targets.find((t) => !isLocked(doc, t)) ?? null;
     // A guide's pill, then a handle within 26 px, take the press before any shape does.
     const model = this.overlayModel();
@@ -1034,19 +1035,19 @@ export class Editor {
     if (this.#dispatch('Stroke to path', (apply) => void (result = writeStrokeOutline(doc, id, outline, s, this.styleCtx, apply)))) this.select([result!]);
   }
 
-  /** Whether More offers Text to path: the selection holds a <text>. */
+  /** Whether More offers Text to path: the selection holds a <text>, or a run of one. */
   canTextToPath(): boolean {
     const doc = this.#doc;
     if (!doc) return false;
     for (const id of this.selection.get()) {
-      const n = doc.nodes.get(id);
+      const n = doc.nodes.get(textOf(doc, id));
       if (n?.kind === 'element' && n.ns === NS.svg && n.local === 'text') return true;
     }
     return false;
   }
 
   /**
-   * Text to path (P1-M4 S2): each selected <text> (other shapes are left alone) becomes one <path> in
+   * Text to path (P1-M4 S2): each selected <text>, or the text of a selected run (other shapes are left alone), becomes one <path> in
    * its place, outlined from the face the canvas draws (engine/text/outline.ts reads it and says what
    * refuses; text/pipeline.ts shapes it with fontkit from its lazy chunk). Nothing is written while any
    * selected text refuses, the drawing changing meanwhile refuses (combine's rule), a selection whose
@@ -1059,7 +1060,7 @@ export class Editor {
     if (!doc || this.#live || this.#gesture) return;
     const ids = this.#acted([...this.selection.get()].filter((id) => id !== doc.root));
     if (!ids) return;
-    const texts = ids.filter((id) => {
+    const texts = [...new Set(ids.map((id) => textOf(doc, id)))].filter((id) => {
       const n = el(doc, id);
       return n.ns === NS.svg && n.local === 'text';
     });
@@ -1948,16 +1949,17 @@ export class Editor {
     return ids.length > 0 && this.#textIds().length === ids.length;
   }
 
-  /** Is Edit text offered: one selected <text> Draw edits as lines (engine/text/lines.ts)? */
+  /** Is Edit text offered: one selected <text> Draw edits as lines (engine/text/lines.ts), or one run of it (a line)? */
   canEditText(): boolean {
     const doc = this.#doc;
     const ids = [...this.selection.get()];
-    return !!doc && ids.length === 1 && ids[0] !== doc.root && readLines(doc, ids[0]) !== null && !isLocked(doc, ids[0]);
+    const id = doc && ids.length === 1 ? textOf(doc, ids[0]) : null;
+    return !!doc && id !== null && id !== doc.root && readLines(doc, id) !== null && !isLocked(doc, id);
   }
 
-  /** Edit text (the ContextBar's, Inspect's): the lines sheet on the one selected text. */
+  /** Edit text (the ContextBar's, Inspect's): the lines sheet on the one selected text (a run's text). */
   editText(): void {
-    if (this.canEditText()) this.#openLines([...this.selection.get()][0], false);
+    if (this.canEditText()) this.#openLines(textOf(this.#doc!, [...this.selection.get()][0]), false);
   }
 
   #openLines(id: NodeId, select: boolean): void {

@@ -3077,6 +3077,50 @@ test('Text to path refuses a selection whose texts hold more than 20,000 charact
   assert.equal(r.editor.history.get().undoLabel, 'Text to path', '20,000 characters are outlined');
 });
 
+test('a tap on a line of Draw’s multi-line text selects the <text> (Edit text and Text to path offered); a second tap selects the line under the finger, as a group is entered; Edit text and Text to path on a selected line act on its text; a drag on a line of an unselected text moves the text', async () => {
+  const F = BOARD('  <text id="t" x="50" y="55" font-family="Inter" font-size="14" text-anchor="middle"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>\n  <rect id="r" width="5" height="5"/>\n');
+  const r = rig(HOST, {}, undefined, textPorts());
+  r.editor.open(F);
+  r.editor.snap.set(NO_SNAP);
+  const [t, rect] = ['t', 'r'].map((id) => idOf(r, id));
+  const [l1, l2] = (doc(r).nodes.get(t) as ElementNode).children; // Draw’s two lines
+  const leaf = (id: NodeId) => (doc(r).nodes.get(id) as ElementNode).children[0];
+  r.editor.tapCanvas(leaf(l2));
+  assert.deepEqual(sel(r), [t], 'the first tap: the <text>');
+  assert.equal(r.editor.canEditText(), true);
+  assert.equal(r.editor.canTextToPath(), true);
+  r.editor.tapCanvas(leaf(l2));
+  assert.deepEqual(sel(r), [l2], 'the second tap: the line under the finger');
+  r.editor.tapCanvas(leaf(l1));
+  assert.deepEqual(sel(r), [l1], 'inside the text, a tap takes another line');
+  assert.equal(r.editor.canEditText(), true, 'Edit text on a line: its text');
+  assert.equal(r.editor.canTextToPath(), true);
+  r.editor.editText();
+  assert.equal(r.editor.sheet.get()?.kind, 'lines');
+  assert.equal((r.editor.sheet.get() as { id: NodeId }).id, t, 'the lines sheet is the text’s');
+  r.editor.closeSheet();
+  r.editor.tapCanvas(rect);
+  r.editor.tapCanvas(leaf(l1));
+  assert.deepEqual(sel(r), [t], 'after another shape, a tap on a line is the <text> again');
+  // The same by the pointer: a tap, then a drag on a line of the selected text moves the whole text.
+  r.editor.deselect();
+  tap(r, hostAt(r, 50, 70), [l2]);
+  assert.deepEqual(sel(r), [t]);
+  r.editor.deselect();
+  drag(r, hostAt(r, 50, 70), hostAt(r, 60, 70), [l2]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', 'a drag on a line of an unselected text moves the text');
+  assert.deepEqual(sel(r), [t]);
+  assert.match(r.editor.source(), /<text id="t" x="60" y="55"/);
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+  // Text to path on a selected line converts its text.
+  r.editor.select([l2]);
+  await r.editor.textToPath();
+  assert.equal(r.editor.notice.get(), null);
+  assert.match(r.editor.source(), /<path id="t" [^>]*aria-label="Big Idea"\/>/);
+  assert.equal(r.editor.history.get().undoLabel, 'Text to path');
+});
+
 test('a Text to path whose text library fails outright (it returns no run for a text) says it can’t outline the text, naming it, and writes nothing', async () => {
   const broken = async () => ({ openFont, shape: () => ({ unitsPerEm: 1000, runs: [] }) });
   const r = rig(HOST, {}, undefined, textPorts(broken));
