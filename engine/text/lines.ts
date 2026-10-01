@@ -8,7 +8,9 @@
 //     then dy (x the same text as the <text>'s own x, a single number; dy 0em for the first and
 //     1.3em for the rest), each empty or holding exactly one text node without a line break: one
 //     line per tspan.
-// A text node qualifies when Draw writes it back byte for byte: its only references are the ones
+// Neither may have position lists (two or more numbers in its x, y, dx, dy or rotate): they place
+// each character, so a line written there would draw elsewhere. A text node qualifies when Draw
+// writes it back byte for byte: its only references are the ones
 // P0's Text sheet writes (&amp;, &lt; and &gt; in ]]&gt;), never CDATA or another entity. Anything
 // else (SVG Lab's own Typography file, whose tspans carry fonts and fills; spaces between tspans;
 // a text with position lists) isn't lines: its runs are edited by P0's text tokens.
@@ -20,12 +22,13 @@
 // <text>'s own x text, under the text's own prefix. Each line is escaped as P0's Text sheet escapes
 // it. The <text>'s own attributes and bytes stay; only its content changes.
 
-import { NS, el, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { NS, attrValue, el, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
 import { opInsert, opRemove, opSetLeafRaw, type Op } from '../commands/ops.ts';
 import { parseFragment } from '../model/fragment.ts';
 import { decodeText, escape } from '../xml/entities.ts';
 import { TokenEditError, xmlCharError } from '../code/edit.ts';
 import { tokenizeAttrRaw } from '../code/tokens.ts';
+import { parseNumberList } from '../values/number-format.ts';
 
 /** SVG Lab's line spacing (LabType L2628): each line after the first moves down 1.3em. */
 export const LINE_DY = '1.3em';
@@ -53,10 +56,20 @@ function ownX(doc: Doc, n: ElementNode): string | null {
   return tokens.length === 1 && tokens[0].kind === 'number' && a.raw.trim() === tokens[0].text + (tokens[0].unit ?? '') ? a.raw : null;
 }
 
+// Does the text hold a position list (or a position that doesn't read as numbers)?
+function positionLists(doc: Doc, n: ElementNode): boolean {
+  return ['x', 'y', 'dx', 'dy', 'rotate'].some((local) => {
+    const v = attrValue(doc, n, null, local);
+    if (v === null) return false;
+    const list = parseNumberList(v.replace(/(\d)(px|pt|pc|mm|cm|in|em|ex|rem|%)/gi, '$1'));
+    return list === null || list.length > 1;
+  });
+}
+
 /** The text's lines, when Draw can edit it as lines (see the header); else null. */
 export function readLines(doc: Doc, id: NodeId): string[] | null {
   const n = doc.nodes.get(id);
-  if (n?.kind !== 'element' || !isText(n)) return null;
+  if (n?.kind !== 'element' || !isText(n) || positionLists(doc, n)) return null;
   const kids = n.children.map((c) => doc.nodes.get(c)!);
   if (!kids.length) return [''];
   if (kids.length === 1 && kids[0].kind === 'text') {

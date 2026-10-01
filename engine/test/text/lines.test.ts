@@ -32,7 +32,7 @@ test('readLines accepts an empty text, one text node with no line break, and Dra
   assert.deepEqual(lines('<text x="5mm" y="5"><tspan x="5mm" dy="0em">A</tspan><tspan x="5mm" dy="1.3em">B</tspan></text>'), ['A', 'B'], 'x with a unit, the same text');
 });
 
-test('readLines refuses anything else: a line break, CDATA, another reference, another element, a tspan with other attributes (SVG Lab’s Typography: fonts and fills), whitespace between the tspans, another x or dy, an x list, two text nodes', () => {
+test('readLines refuses anything else: a line break, CDATA, another reference, another element, a tspan with other attributes (SVG Lab’s Typography: fonts and fills), whitespace between the tspans, another x or dy, a position list (x, y, dx, dy or rotate), two text nodes', () => {
   assert.equal(lines('<text>a\nb</text>'), null, 'a line break');
   assert.equal(lines('<text><![CDATA[a]]></text>'), null, 'CDATA');
   assert.equal(lines('<text>a&#38;b</text>'), null, 'a character reference Draw would respell');
@@ -45,6 +45,9 @@ test('readLines refuses anything else: a line break, CDATA, another reference, a
   assert.equal(lines('<text x="50"><tspan x="50" dy="1em">A</tspan></text>'), null, 'another dy');
   assert.equal(lines('<text x="50"><tspan x="50" dy="0em">A</tspan><tspan x="50" dy="0em">B</tspan></text>'), null, 'a second line’s dy 0em');
   assert.equal(lines('<text x="10 20"><tspan x="10 20" dy="0em">A</tspan></text>'), null, 'an x list');
+  assert.equal(lines('<text x="10 20 30" y="9">ABC</text>'), null, 'an x list on one line: it places each character');
+  assert.equal(lines('<text x="1" y="9" rotate="0 10">AB</text>'), null, 'a rotate list');
+  assert.deepEqual(lines('<text x="1" y="9" dx="2">AB</text>'), ['AB'], 'one dx is no list');
   assert.equal(lines('<text><tspan x="50" dy="0em">A</tspan></text>'), null, 'no x of its own');
   assert.equal(lines('<text x="50"><tspan x="50" dy="0em">A<!--c--></tspan></text>'), null, 'two nodes in a line');
   assert.equal(lines('<text x="50"><tspan x="50" dy="0em"><tspan>A</tspan></tspan></text>'), null, 'a nested tspan');
