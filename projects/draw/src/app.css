@@ -197,6 +197,9 @@
 .draw-hd.bend { fill: #fff; stroke: #00a3e0; stroke-width: 1.5; opacity: 0.8; }
 .draw-hd.rot, .draw-hd.scale { stroke: #e6007e; }
 .draw-hd.on { fill: #ffe600; }
+/* A hovering Apple Pencil (P1-M5): the handle a press would take, and where it would snap. */
+.draw-hd.hover { fill: #fff3a0; stroke-width: 3; }
+.draw-snap-ring { fill: none; stroke: #e6007e; stroke-width: 1.5; }
 .draw-hd-dot { fill: #00a3e0; }
 .draw-tip {
   position: absolute;
@@ -638,7 +641,9 @@ textarea.draw-access-field { min-height: max(var(--tap-min), 6rem); padding: var
   font: 500 var(--text-sm) / 1 var(--font-ui);
   touch-action: manipulation;
 }
-.draw-tool svg { width: 1.75rem; height: 1.75rem; }
+.draw-tool svg, .draw-commands svg { width: 1.75rem; height: 1.75rem; }
+/* The top bar's Commands (P1-M5): an icon at the rail's size. */
+.draw-commands { display: inline-flex; align-items: center; justify-content: center; }
 .draw-tool[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .draw-tool:disabled { color: var(--text-muted); opacity: 0.5; }
 
@@ -912,7 +917,7 @@ textarea.draw-access-field { min-height: max(var(--tap-min), 6rem); padding: var
 .draw-icon-img, .draw-icon-wait { display: block; }
 /* SVG Lab's two panes (its .duo): square, on the checkerboard, side by side. */
 .draw-dots { margin-bottom: var(--space-3); }
-.draw-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
+.draw-compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .draw-compare-fig { margin: 0; min-width: 0; }
 .draw-pane { position: relative; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--line); }
 .draw-pane-img, .draw-pane-grid { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -959,6 +964,57 @@ textarea.draw-access-field { min-height: max(var(--tap-min), 6rem); padding: var
   box-shadow: none;
 }
 .draw-sheet--dock .draw-sheet-head { padding-top: var(--space-2); }
+
+/* ── Wide screens: the ToolRail is a column on the left (P1-M5) ─────────────── */
+
+/* The same query as media.ts WIDE: an em in a media query is the initial font size, so 46em is 736
+   CSS px whatever Draw's page scale. The rail spans the whole height, beside the top bar too; the top
+   bar, the canvas and code, and the ContextBar fill the column on its right. ds-app's padding keeps
+   all of it inside the safe area at the top, left and right; the rail and the ContextBar each keep
+   clear of the home indicator. A window too short for the rail scrolls the rail, never the page. */
+@media (min-width: 46em) {
+  .draw { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .draw > .draw-bar { grid-column: 2; grid-row: 1; }
+  .draw > .draw-alert { grid-column: 2; grid-row: 2; }
+  .draw > .draw-split { grid-column: 2; grid-row: 3; }
+  .draw > .draw-context { grid-column: 2; grid-row: 4; padding-bottom: env(safe-area-inset-bottom); }
+  .draw > .draw-rail {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    flex-direction: column;
+    min-width: max(var(--tap-min), 4.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.25rem 0.25rem max(0.25rem, env(safe-area-inset-bottom));
+    border-top: 0;
+    border-right: 1px solid var(--line);
+  }
+  .draw-rail > .draw-tool { flex: 0 0 auto; }
+  .draw-rail > .draw-undo { margin-top: auto; }
+}
+
+/* ── The command palette (P1-M5) ────────────────────────────────────────────── */
+
+/* The head and the search field stay put; the list scrolls under them. */
+.draw-modal:has(> .draw-palette) { display: flex; flex-direction: column; overflow: hidden; }
+.draw-palette { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.draw-palette-field { flex: 0 0 auto; width: 100%; }
+.draw-palette-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: var(--space-1); }
+.draw-palette-list > .draw-subhead { margin: var(--space-3) 0 0; }
+.draw-palette-list > .draw-subhead:first-child { margin-top: 0; }
+.draw-palette-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(var(--tap-min), var(--control-h-sm));
+  text-align: left;
+}
+.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }
+.draw-palette-key { flex: 0 0 auto; color: var(--text-muted); font-weight: 400; }
+.draw-palette-none { margin: var(--space-2) 0; }
 
 /* ── The Layers tab ─────────────────────────────────────────────────────────── */
 

@@ -1,11 +1,12 @@
-// Draw's shell: the top bar (Files, the drawing's name and save state, Fit, Finish, Export: its own
-// sideways scroller, so every button keeps 44 pt and the name shows in full), the canvas
+// Draw's shell: the top bar (Files, the drawing's name and save state, Fit, Commands, Finish, Export:
+// its own sideways scroller, so every button keeps 44 pt and the name shows in full), the canvas
 // (zoom, pan, Select; a dropped file opens), the split code sheet (Code, Inspect and Support), the
 // ContextBar (the Scrub strip, or the selection's actions) and the ToolRail, over the
 // framework-free editor (src/editor.ts) and workspace (src/workspace.ts: opening, drafts, export).
 // Every open goes through the one importer (src/import.ts); files, the clipboard, storage and the
 // share sheet only through src/platform/. The theme follows the system unless a choice in Files
-// says otherwise (data-theme on <html>, kept on this device).
+// says otherwise (data-theme on <html>, kept on this device). Every key but the arrows, the ContextBar's
+// selection buttons, More's rows and the ⌘K palette run the command registry (src/commands.ts).
 
 import { useEffect, useState } from 'react';
 import { Editor, type OpenResult } from '../editor.ts';
@@ -18,8 +19,11 @@ import { readPref, writePref } from '../platform/prefs.ts';
 import { Views } from './views.ts';
 import { hitPath } from '../canvas/stage.ts';
 import { installKeys } from '../keys.ts';
+import type { Ctx } from '../commands.ts';
+import { Palette } from './Palette.tsx';
+import { panelUi } from './ui.ts';
 import type { NodeId } from '../../../../engine/model/doc.ts';
-import { Canvas } from './Canvas.tsx';
+import { Canvas, toggleGrid } from './Canvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { ContextBar } from './ContextBar.tsx';
 import { FileSheets, type Theme } from './FileSheets.tsx';
@@ -81,6 +85,13 @@ function measureAll(editor: Editor, views: Views): { index: number; box: [number
   return out;
 }
 
+// The top bar's Commands: a command key's look, at the rail's icon size.
+const COMMANDS_ICON = (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 6a3 3 0 10-3 3h12a3 3 0 10-3-3v12a3 3 0 103-3H6a3 3 0 103 3z" />
+  </svg>
+);
+
 const SAVE_LABEL: Record<SaveState['kind'], string> = {
   none: '',
   pending: 'Editing',
@@ -94,6 +105,8 @@ export function App() {
   const [views] = useState(() => new Views());
   const [editor] = useState(() => new Editor(views.ports));
   const [workspace] = useState(() => new Workspace(editor, { store: new DraftStore(idbKV()), lock: lockDraft, sample }));
+  const [ui] = useState(() => panelUi(() => void workspace.copy(writeClipboard), () => toggleGrid(editor)));
+  const [ctx] = useState<Ctx>(() => ({ editor, workspace, ui }));
   const current = useStore(workspace.current);
   const unparsed = useStore(workspace.unparsed);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -123,16 +136,6 @@ export function App() {
       hitPath,
       measureAll: () => measureAll(editor, views),
     };
-    const keys = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (!(e.metaKey || e.ctrlKey) || t?.closest?.('input, textarea, select')) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z' || k === 'y') {
-        e.preventDefault();
-        if (k === 'y' || e.shiftKey) editor.redo();
-        else editor.undo();
-      }
-    };
     // A paste anywhere but a field opens SVG (⌘V on the iPad or a Mac); a field keeps its own paste.
     const paste = (e: ClipboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -148,15 +151,13 @@ export function App() {
     // An #import link entered while Draw is open changes only the fragment. It may come from a page
     // that opened this tab, so it opens only when Mark taps Open (the Open link sheet).
     const link = () => void workspace.offerLink(fragment(), clearFragment);
-    window.addEventListener('keydown', keys);
-    // Delete, Escape, the arrows and ⌘A on the canvas selection (src/keys.ts).
-    const offKeys = installKeys(editor, window, () => document.querySelector('.draw-modal') !== null);
+    // The keys: the registry's commands (⌘Z, ⇧⌘Z, ⌘Y, Delete, Escape, Enter, ⌘A, ⌘K) and the arrows' nudge (src/keys.ts).
+    const offKeys = installKeys(editor, window, () => document.querySelector('.draw-modal') !== null, ctx);
     window.addEventListener('paste', paste);
     window.addEventListener('pagehide', flush);
     window.addEventListener('hashchange', link);
     document.addEventListener('visibilitychange', hidden);
     return () => {
-      window.removeEventListener('keydown', keys);
       offKeys();
       window.removeEventListener('paste', paste);
       window.removeEventListener('pagehide', flush);
@@ -164,7 +165,7 @@ export function App() {
       document.removeEventListener('visibilitychange', hidden);
       delete window.drawTest;
     };
-  }, [editor, workspace]);
+  }, [editor, workspace, ctx]);
 
   const drop = (e: DragEvent) => {
     e.preventDefault(); // the browser would open the file itself
@@ -193,6 +194,9 @@ export function App() {
           <button type="button" className="draw-fit" onClick={() => editor.fitToScreen()}>
             Fit
           </button>
+          <button type="button" className="draw-bar-btn draw-commands" aria-label="Commands" aria-haspopup="dialog" onClick={() => ui.palette(false)}>
+            {COMMANDS_ICON}
+          </button>
           <button type="button" className="draw-bar-btn draw-finish" aria-haspopup="dialog" onClick={() => workspace.show('finish')}>
             Finish
           </button>
@@ -203,14 +207,15 @@ export function App() {
         <Alert workspace={workspace} />
       </Guard>
       <div className="draw-split">
-        <Canvas editor={editor} views={views} error={current?.problem ?? null} unparsed={unparsed} files={files} onDrag={acceptDrag} onDrop={drop} />
+        <Canvas editor={editor} views={views} error={current?.problem ?? null} unparsed={unparsed} files={files} onDrag={acceptDrag} onDrop={drop} ui={ui} />
         <CodePanel editor={editor} views={views} files={files} copy={copy} source={!!unparsed} />
       </div>
       <Guard files={files}>
-        <ContextBar editor={editor} unparsed={unparsed} files={files} />
+        <ContextBar ctx={ctx} unparsed={unparsed} files={files} />
         <ToolRail editor={editor} />
         <Sheets editor={editor} />
         <FileSheets workspace={workspace} editor={editor} theme={theme} setTheme={chooseTheme} />
+        <Palette ctx={ctx} ui={ui} />
       </Guard>
     </div>
   );

@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, PEN_MODE_NOTICE, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
 import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
 import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
@@ -3330,4 +3330,105 @@ test('an Access field is one entry while it has focus (P1-M4 S3): the drawing’
   r.editor.fieldEnd();
   assert.equal(entry(), 'Set metadata');
   assert.equal(r.editor.source(), plot.replace('<dc:title>Matplotlib v3.8.2, https://matplotlib.org/</dc:title>', '<dc:title>Mark</dc:title>'));
+});
+
+// ── P1-M5: Apple Pencil (hover, the remap, pen mode) ──────────────────────────────────────────
+
+const PENCIL_BOX = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="30" y="30" width="40" height="40"/>
+</svg>`;
+const rectXY = (r: Rig) => {
+  const n = element(doc(r), (e) => e.local === 'rect');
+  return [Number(attr(n, 'x')), Number(attr(n, 'y'))];
+};
+
+test('a hovering Pencil lights the handle a press would take, within 26 px and not beyond, and marks the point a press would snap to; nothing in the file or the history changes', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  r.editor.snap.set({ grid: false, guides: true, shapes: false, artboard: false });
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const before = r.editor.source();
+  const se = r.editor.overlayModel().handles.filter((h) => h.kind === 'anchor').sort((p, q) => q.at.x + q.at.y - (p.at.x + p.at.y))[0];
+  r.editor.hover({ x: se.at.x - 20, y: se.at.y });
+  assert.equal(r.editor.overlayModel().hover?.handle, se.id, '20 px from the bottom-right corner: that handle');
+  r.editor.hover({ x: se.at.x - 40, y: se.at.y });
+  assert.equal(r.editor.overlayModel().hover?.handle, null, '40 px away: none');
+  r.editor.addGuide('v'); // x = 50
+  const guideX = hostAt(r, 50, 0).x;
+  r.editor.hover({ x: guideX + 3, y: hostAt(r, 0, 90).y });
+  const h = r.editor.overlayModel().hover!;
+  assert.ok(h.ring && Math.abs(h.ring.x - guideX) < 0.5, `the snap ring at ${h.ring?.x}, the guide at ${guideX}`);
+  assert.ok(h.lines.some((l) => Math.abs(l.from.x - guideX) < 0.5 && Math.abs(l.to.x - guideX) < 0.5), 'and the snap line on the guide');
+  r.editor.hover({ x: guideX + 60, y: hostAt(r, 0, 90).y });
+  assert.equal(r.editor.overlayModel().hover?.ring, null, 'far from every target: no ring');
+  r.editor.hover(null);
+  assert.equal(r.editor.overlayModel().hover, undefined, 'gone');
+  r.editor.undo(); // the guide
+  assert.equal(r.editor.source(), before, 'hovering wrote nothing');
+  assert.equal(r.editor.history.get().canUndo, false, 'and made no entry');
+});
+
+test('a hover ends with a press, a tool change and an open', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const se = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  const near = { x: se.at.x + 5, y: se.at.y + 5 };
+  r.editor.hover(near);
+  assert.ok(r.editor.overlayModel().hover);
+  r.editor.pointerDown(near, [a], { add: false });
+  assert.equal(r.editor.overlayModel().hover, undefined, 'a press');
+  r.editor.pointerCancel();
+  r.editor.hover(near);
+  r.editor.pickTool('shapes');
+  assert.equal(r.editor.overlayModel().hover, undefined, 'a tool change');
+  r.editor.pickTool('select');
+  r.editor.hover(near);
+  r.editor.open(PENCIL_BOX);
+  assert.equal(r.editor.overlayModel().hover, undefined, 'an open');
+});
+
+test('a pan during a Pencil drag leaves the dragged shape under the pen: the press keeps its point in root units', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  const at0 = hostAt(r, 50, 50);
+  // A finger pans 40 px while the Pencil holds its press; the pen then goes to the point it pressed.
+  r.editor.pointerDown(at0, [a], { add: false });
+  r.editor.panBy(40, 0);
+  r.editor.pointerDrag({ x: at0.x + 40, y: at0.y });
+  r.editor.pointerUp({ x: at0.x + 40, y: at0.y });
+  assert.deepEqual(rectXY(r), [30, 30], 'the shape has not moved');
+  // A drag of 10 px, a 40 px pan, then the pen 10 px further: the shape is under the pen, 20 px left of where it began in the drawing.
+  const k = pxPerUnit(r);
+  const p0 = hostAt(r, 50, 50);
+  r.editor.pointerDown(p0, [a], { add: false });
+  r.editor.pointerDrag({ x: p0.x + 10, y: p0.y });
+  r.editor.panBy(40, 0);
+  assert.equal(rectXY(r)[0], 30 + Math.round((10 - 40) / k), 'the pan redraws the frame: the shape stays under the pen');
+  r.editor.pointerDrag({ x: p0.x + 20, y: p0.y });
+  r.editor.pointerUp({ x: p0.x + 20, y: p0.y });
+  assert.deepEqual(rectXY(r), [30 + Math.round((20 - 40) / k), 30]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', 'one entry');
+  r.editor.undo();
+  assert.deepEqual(rectXY(r), [30, 30]);
+});
+
+test('pen mode: the Stage’s latch sets penMode and says so once a visit; the Pencil button leaves it', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  assert.equal(r.editor.penMode.get(), false);
+  r.editor.enterPenMode();
+  assert.equal(r.editor.penMode.get(), true);
+  assert.equal(r.editor.notice.get(), PEN_MODE_NOTICE);
+  assert.equal(PEN_MODE_NOTICE, 'Apple Pencil draws; fingers move the view. Tap Pencil in the rail to draw with a finger.');
+  r.editor.notice.set(null);
+  r.editor.leavePenMode();
+  assert.equal(r.editor.penMode.get(), false);
+  r.editor.enterPenMode();
+  assert.equal(r.editor.penMode.get(), true, 'latched again');
+  assert.equal(r.editor.notice.get(), null, 'the notice is said once a visit');
 });

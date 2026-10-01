@@ -74,6 +74,8 @@ export interface OverlayModel {
   /** The Node tool's and the Pen's marks (P1-M3, src/interact/path-marks.ts): arms, mirror guides, host px. */
   paths: PathMarks | null;
   tip: Tip | null;
+  /** A hovering Apple Pencil (P1-M5): the handle a press would take (lit), and where it would snap (a ring, and the snap lines), host px. */
+  hover?: { handle: string | null; ring: Point | null; lines: Line[] } | null;
 }
 
 export interface GradientGuides {
