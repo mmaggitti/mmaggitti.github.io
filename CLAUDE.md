@@ -166,6 +166,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   command registry (`src/commands.ts`) feeds the ContextBar, More, the keys and the ⌘K palette; at
   46em and wider the ToolRail is a column on the left; an Apple Pencil latches pen mode, where fingers
   only navigate and a hovering Pencil previews handles and snapping (the rail's Pencil leaves it).
+  SVG Lab's code head links each lesson to Draw (`#import`); the Insert tool puts SVG into the
+  drawing as one group; the code panel's Edit edits the whole drawing's content.
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import

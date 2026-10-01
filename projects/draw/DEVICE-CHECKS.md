@@ -84,5 +84,9 @@ To take the house's group: tap the roof, then More → Select group.
 | 62 | Apple Pencil draws, fingers navigate | Draw and drag with the Pencil while panning with a finger: after the Pencil's first touch, a finger only moves the view, and a two-finger tap no longer undoes | ☐ |
 | 63 | Pencil hover | (A hover-capable iPad and Pencil.) Hold the Pencil just above a shape's corner handle: the handle lights up before you touch, and near a guide the snap ring shows where a press would land | ☐ |
 | 64 | The Pencil button | In pen mode the rail ends with Pencil, pressed: tap it, and a finger draws again and a two-finger tap undoes again; the Pencil's next touch brings pen mode, and the button, back | ☐ |
+| 65 | Open in Draw from SVG Lab | In SVG Lab on the phone, Open in Draw (under the code) opens the lesson in Draw in a new tab, with its import report; Draw's address bar no longer holds the link | ☐ |
+| 66 | Insert | Copy an icon's SVG from Notes, then the rail's Insert → paste in the field → Insert: it lands in the middle of the drawing as one group you can move, and Undo takes it out | ☐ |
+| 67 | Edit the whole drawing | The code panel's Edit with the iOS keyboard up: the field stays above the keyboard; change a number and Apply; a typo says where it is and changes nothing | ☐ |
+| 68 | The empty state | Files → New… → SVG Lab's Blank: "Add a shape below" sits in the middle of the canvas, and goes when you add a shape | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______
