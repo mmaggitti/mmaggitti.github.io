@@ -11,6 +11,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
+import { CATALOGUE } from '../../src/platform/font-catalogue.ts';
+import { reservedNames } from '../../src/platform/fonts.ts';
 
 const DRAW = new URL('../../', import.meta.url);
 const read = (rel: string): string => readFileSync(new URL(rel, DRAW), 'utf8');
@@ -86,6 +88,20 @@ test('the notices name every package whose code ships, with its exact version, i
   assert.equal(sections.length, found.size, `the notices list ${sections.length} packages; ${found.size} ship`);
   assert.deepEqual(Object.keys(NO_FILE).filter((n) => !found.has(n)), [], 'NO_FILE names only packages that ship');
   assert.match(NOTICES, /^Third-party notices: Draw\n=+\n\nDraw ships code and fonts /);
+});
+
+test('each font’s section states the catalogue’s Reserved Font Names, even where its package’s LICENSE leaves one out (IBM Plex’s “Plex”)', () => {
+  const sections = NOTICES.split(/\n-{78}\n/).slice(1, -1);
+  let n = 0;
+  for (const c of CATALOGUE) {
+    const section = sections.find((s) => s.startsWith(`@fontsource/${c.slug} `));
+    assert.ok(section, c.family);
+    for (const name of c.reserved) {
+      assert.ok(reservedNames(c.family, section).includes(name), `${c.family}: its section doesn’t reserve “${name}”`);
+      n++;
+    }
+  }
+  assert.equal(n, 3, 'Plex twice, and Source');
 });
 
 test('brotli’s section holds the Apache License 2.0 its Google decoder is under (its dec/ files’ headers say so), in full: the text @swc/helpers ships', () => {

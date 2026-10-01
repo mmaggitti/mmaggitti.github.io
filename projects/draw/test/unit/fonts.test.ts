@@ -218,7 +218,8 @@ test('any mention of a Reserved Font Name reserves (strict: a wrong reservation 
   assert.deepEqual(reservedNames('PT Sans', 'Copyright © 2009 ParaType Ltd. with Reserved Names "PT Sans" and "ParaType".'), ['PT Sans', 'ParaType']);
   assert.deepEqual(reservedNames('Gentium Plus', 'with Reserved Font Name: Gentium.'), ['Gentium']);
   assert.deepEqual(reservedNames('Noto Sans', 'Reserved Font Names Noto and Roboto.'), ['Noto', 'Roboto']);
-  assert.deepEqual(reservedNames('Odd Sans', 'This licence defines “Reserved Font Name” as any name given after the copyright.'), ['Odd Sans'], 'no name given: the family itself');
+  assert.deepEqual(reservedNames('Odd Sans', 'Copyright 2020 Odd, with Reserved Font Name.'), ['Odd Sans'], 'no name given: the family itself');
+  assert.deepEqual(reservedNames('Plain', 'SIL OPEN FONT LICENSE Version 1.1 … "Reserved Font Name" refers to any names specified as such after the copyright statement(s).'), [], 'the licence’s own definition of the term reserves nothing');
   assert.deepEqual(reservedNames('Plain', 'Copyright 2020 Someone. All rights reserved.', 'SIL Open Font License 1.1'), [], 'no mention: nothing reserved');
   const r = rig();
   r.info.set('wOF2oswald', INFO('Oswald', 400, false, 'Copyright (c) 2011, Vernon Adams, with Reserved Font Name Oswald.'));

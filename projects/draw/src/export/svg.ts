@@ -275,6 +275,11 @@ function styleWhere(doc: Doc): { before: NodeId } | { last: NodeId } {
   return { last: doc.root };
 }
 
+/** Text for a single-quoted CSS string: \\ and ' escaped, and a line break or other control character as a hex escape (`\\a `). */
+export function cssString(s: string): string {
+  return s.replace(/[\\']/g, (c) => `\\${c}`).replace(/[\u0000-\u001f\u007f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `);
+}
+
 // The <style> holding one @font-face per embedded face, each after its comment.
 function styleMarkup(doc: Doc, faces: readonly { face: FaceRequest; held: HeldFace; bytes: Uint8Array }[]): string {
   const prefix = el(doc, doc.root).prefix;
@@ -283,7 +288,7 @@ function styleMarkup(doc: Doc, faces: readonly { face: FaceRequest; held: HeldFa
     .map(({ face, held, bytes }) => {
       const f = FORMATS[held.format];
       const said = `${held.family}. ${held.copyright}${/[.!]$/.test(held.copyright) ? '' : '.'} ${held.licence ?? OFL}`.replace(/\*\//g, '* /').replace(/\s+/g, ' ');
-      const family = held.family.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const family = cssString(held.family);
       return `/* ${said} */@font-face{font-family:'${family}';font-weight:${face.weight};font-style:${face.style};src:url(data:${f.mime};base64,${base64(bytes)}) format('${f.name}')}`;
     })
     .join('');

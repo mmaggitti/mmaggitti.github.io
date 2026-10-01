@@ -132,12 +132,15 @@ export function sniffFont(b: Uint8Array): FontFormat | null {
  * Name(s)" or "Reserved Name(s)" reserves (strict, as Mark chose: a wrong reservation only writes
  * paths): the quoted names after it ("…with Reserved Font Name 'Source'", "Reserved Names "PT Sans"
  * and "ParaType""), else the name that follows it, up to punctuation ("…with Reserved Font Name
- * Oswald.", "Reserved Font Name: Gentium."), else `family` itself.
+ * Oswald.", "Reserved Font Name: Gentium."), else `family` itself. The term itself in quotes, as the
+ * licence's own text defines it, reserves nothing.
  */
 export function reservedNames(family: string, ...texts: string[]): string[] {
   const out = new Set<string>();
   for (const t of texts) {
     for (const m of t.matchAll(/Reserved\s+(?:Font\s+)?Names?\b/gi)) {
+      // The term itself in quotes (OFL 1.1's own text: “"Reserved Font Name" refers to…”) reserves nothing.
+      if (/["“'‘]$/.test(t.slice(0, m.index)) && /^["”'’]/.test(t.slice(m.index + m[0].length))) continue;
       const after = t.slice(m.index + m[0].length).replace(/^\s*:?\s*/, '');
       const quoted = /^(?:["“'‘][^"”'’]+["”'’]\s*(?:,|and\b|&)?\s*)+/i.exec(after);
       const bare = quoted ? null : /^[\p{L}\p{N}][^.,;:()[\]"“”'‘’\r\n]*/u.exec(after);

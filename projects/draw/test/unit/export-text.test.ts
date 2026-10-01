@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseDoc, serialize, type Doc } from '../../../../engine/model/doc.ts';
-import { exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, ruledFonts, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
+import { cssString, exportFile, embeddable, keptAsText, notDraws, prepareExport, reservesName, ruledFonts, type ExportDeps, type Prepared } from '../../src/export/svg.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
 import { LATIN_RANGE, catalogueFamily, faceFile, hasFace } from '../../src/platform/font-catalogue.ts';
 import { reservedNames } from '../../src/platform/fonts.ts';
@@ -104,6 +104,13 @@ test('As-is and Save to Files are unchanged by the text choices; Clean as text i
   await prepareExport(doc, 'fonts', 'fonts', deps);
   assert.equal(serialize(doc), SRC, 'the drawing itself never changes');
   assert.match(new TextDecoder().decode(exportFile(doc, 'fonts', 'clean').bytes), /<text id="i"/);
+});
+
+test('a family in With fonts’ CSS string: \\ and \' escaped, and a line break or other control character as a hex escape, so the string can’t end early', () => {
+  assert.equal(cssString("Jo's \\Font"), "Jo\\'s \\\\Font");
+  assert.equal(cssString('Evil\n}svg{x}'), 'Evil\\a }svg{x}');
+  assert.equal(cssString('a\r\f\t\u0000\u007fb'), 'a\\d \\c \\9 \\0 \\7f b');
+  assert.equal(cssString('Inter'), 'Inter');
 });
 
 test('embedding by OS/2 fsType: bitmapOnly never; editable always; otherwise only when neither noEmbedding nor viewOnly is set (noSubsetting doesn’t matter)', () => {

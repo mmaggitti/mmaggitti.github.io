@@ -1553,6 +1553,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 @fontsource/ibm-plex-mono 5.3.0
 Ships in: the IBM Plex Mono font files (every latin face), each fetched only when a drawing or the Font sheet uses it
 Licence: OFL-1.1
+Reserved Font Name: "Plex" (IBM/plex LICENSE.txt and Google Fonts' ofl/ibmplexmono/OFL.txt, line 1: "with Reserved Font Name "Plex""; this package's LICENSE, below, leaves it out).
 
 Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ThinItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLight.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Light.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-LightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Regular.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Italic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Medium.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-MediumItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Bold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-BoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved.
 
@@ -1751,6 +1752,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 @fontsource/ibm-plex-sans 5.3.0
 Ships in: the IBM Plex Sans font files (every latin face), each fetched only when a drawing or the Font sheet uses it
 Licence: OFL-1.1
+Reserved Font Name: "Plex" (IBM/plex LICENSE.txt and Google Fonts' ofl/ibmplexsans/OFL.txt, line 1: "with Reserved Font Name "Plex""; this package's LICENSE, below, leaves it out).
 
 Copyright 2019 IBM Corp. All rights reserved. IBMPlexSans-Italic[wdth,wght].ttf: Copyright 2019 IBM Corp. All rights reserved.
 

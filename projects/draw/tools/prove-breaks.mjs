@@ -3427,6 +3427,21 @@ const BREAKS = [
     file: 'engine/report/import-report.ts', from: "  if (dc.length) notes.push(", to: "  if (dc.length < 0) notes.push(",
     run: engineTests('report/import-report.test.ts'), expect: /✖ metadata \(RDF, Dublin Core, Creative Commons\) is kept as-is; from P1-M4 the Access tab edits/,
   },
+  {
+    id: 'B648', what: 'With fonts’ CSS string leaves a line break in a family as it is (the string could end early)',
+    file: 'projects/draw/src/export/svg.ts', from: '.replace(/[\\u0000-\\u001f\\u007f]/g, (c) => `\\\\${c.charCodeAt(0).toString(16)} `)', to: '',
+    run: drawTests('export-text.test.ts'), expect: /✖ a family in With fonts’ CSS string/,
+  },
+  {
+    id: 'B649', what: 'IBM Plex Mono’s notice no longer states its upstream Reserved Font Name “Plex”',
+    file: 'projects/draw/public/THIRD-PARTY-NOTICES.txt', from: "Reserved Font Name: \"Plex\" (IBM/plex LICENSE.txt and Google Fonts' ofl/ibmplexmono/OFL.txt, line 1: \"with Reserved Font Name \"Plex\"\"; this package's LICENSE, below, leaves it out).\n", to: '',
+    run: drawTests('notices.test.ts'), expect: /✖ each font’s section states the catalogue’s Reserved Font Names/,
+  },
+  {
+    id: 'B650', what: 'the licence’s own definition of “Reserved Font Name” reserves (a font whose licence string holds the OFL’s text would name junk)',
+    file: 'projects/draw/src/platform/fonts.ts', from: "      if (/[\"“'‘]$/.test(t.slice(0, m.index)) && /^[\"”'’]/.test(t.slice(m.index + m[0].length))) continue;\n", to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ any mention of a Reserved Font Name reserves/,
+  },
 ];
 
 const args = process.argv.slice(2);
