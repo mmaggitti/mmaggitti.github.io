@@ -132,3 +132,21 @@ test('check-sinks bans the name FontFace in any spelling outside src/platform/, 
   const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export type Choice = 'text' | 'paths' | 'fonts';\nexport const isSet = (font: object) => 'fonts' in font;\nexport const n = (f: { fonts: number }) => f.fonts;\n" });
   assert.equal(fine.code, 0, fine.out);
 });
+
+test('check-sinks keeps rasterizing to src/platform/ (P1-M5): new Image, new OffscreenCanvas, getContext, toBlob, convertToBlob and createImageBitmap anywhere else are flagged; in platform/ they pass', () => {
+  const lines = [
+    "export const a = () => new Image();",
+    'export const b = (w: number, h: number) => new OffscreenCanvas(w, h);',
+    "export const c = (cv: HTMLCanvasElement) => cv.getContext('2d');",
+    'export const d = (cv: HTMLCanvasElement) => cv.toBlob(() => {});',
+    "export const e = (cv: OffscreenCanvas) => cv.convertToBlob({ type: 'image/png' });",
+    'export const f = (b: Blob) => createImageBitmap(b);',
+  ];
+  const text = lines.join('\n') + '\n';
+  const r = sinks({ 'projects/draw/src/panels/Finish.tsx': text, 'projects/draw/src/export/png.ts': text, 'projects/draw/src/platform/raster.ts': text });
+  assert.equal(r.code, 1, r.out);
+  const want = (file: string) => lines.map((_, i) => `projects/draw/src/${file}:${i + 1} raster`);
+  assert.deepEqual(r.findings, [...want('export/png.ts'), ...want('panels/Finish.tsx')].sort());
+  const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export type Kind = 'image' | 'canvas';\nexport const n = (x: { image: number }) => x.image;\nexport const m = (images: string[]) => images.length;\n" });
+  assert.equal(fine.code, 0, fine.out);
+});

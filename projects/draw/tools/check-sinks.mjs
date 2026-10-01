@@ -45,6 +45,10 @@ const BANS = [
   // names, this bans the name FontFace in any spelling (globalThis.FontFace, window['FontFace'], an
   // alias), and the document's fonts by . or ?., by ['fonts'], or destructured from it.
   ['font-face', /\bFontFace\b|\bdocument\s*\??\.\s*fonts\b|\[\s*['"`]fonts['"`]\s*\]|\{[^}]*\bfonts\b[^}]*\}\s*=\s*(?:[\w$]+\s*\.\s*)*document\b/, ['projects/draw/src/platform/']],
+  // Rasterizing (P1-M5) turns a drawing into pixels the page can read back, so it has one home,
+  // src/platform/ (raster.ts), as registering a font does: an image to decode, a canvas to draw it on,
+  // and the PNG read out of it.
+  ['raster', /\bnew\s+(Image|OffscreenCanvas)\s*\(|\b(getContext|toBlob|convertToBlob|createImageBitmap)\s*\(/, ['projects/draw/src/platform/']],
 ];
 
 // The engine is DOM-free and dependency-free: node --test runs it, and any project may import it.

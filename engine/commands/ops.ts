@@ -52,6 +52,13 @@ export function opSetAttr(doc: Doc, id: NodeId, ns: string | null, local: string
   return { kind: 'attr', id, ns, local, before, after: attrSnapshot(doc, id, ns, local) };
 }
 
+/** Put an attribute exactly as a snapshot holds it (its quote, spacing and place), or take it away (null). */
+export function opPutAttr(doc: Doc, id: NodeId, ns: string | null, local: string, snap: AttrSnap | null): Op {
+  const before = attrSnapshot(doc, id, ns, local);
+  restoreAttr(doc, id, ns, local, snap);
+  return { kind: 'attr', id, ns, local, before, after: attrSnapshot(doc, id, ns, local) };
+}
+
 /** Replace an attribute's raw text: the byte-exact edit a code token makes. */
 export function opSetAttrRaw(doc: Doc, id: NodeId, ns: string | null, local: string, raw: string): Op {
   const before = attrSnapshot(doc, id, ns, local);
