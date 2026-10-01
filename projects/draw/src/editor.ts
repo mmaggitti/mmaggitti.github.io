@@ -1934,6 +1934,7 @@ export class Editor {
     this.tool.set('select');
     this.focus.set(null);
     this.select([id!]);
+    if (this.notice.get() === TEXT_NOTICE) this.notice.set(null); // placed: the tool's toast closes, not over the lines sheet
     this.#openLines(id!, true);
   }
 

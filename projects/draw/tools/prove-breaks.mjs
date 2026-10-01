@@ -3482,6 +3482,11 @@ const BREAKS = [
     file: 'projects/draw/src/panels/ContextBar.tsx', from: '    <div className="draw-context">\n      {notice && (', to: '    <div className="draw-context">\n      <span className="ds-small">{editor.access()?.drawing.title?.text}</span>\n      {notice && (',
     run: DRAW_E2E, expect: /theAccessPanelNamesTheDrawing: the page's accessibility tree reads the drawing/,
   },
+  {
+    id: 'B659', what: 'the Text tool’s "Tap to place text." toast stays up over the lines sheet after the text is placed',
+    file: 'projects/draw/src/editor.ts', from: "    if (this.notice.get() === TEXT_NOTICE) this.notice.set(null); // placed: the tool's toast closes, not over the lines sheet\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ the Text tool’s "Tap to place text\." toast closes/,
+  },
 ];
 
 const args = process.argv.slice(2);

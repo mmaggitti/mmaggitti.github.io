@@ -2833,6 +2833,17 @@ const textBoxes = (r: () => Rig): Partial<CanvasPort> => ({
   },
 });
 
+test('the Text tool’s "Tap to place text." toast closes when its tap places the text and the lines sheet opens', () => {
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(BOARD());
+  r.editor.snap.set(NO_SNAP);
+  r.editor.pickTool('text');
+  assert.equal(r.editor.notice.get(), TEXT_NOTICE);
+  tap(r, hostAt(r, 50, 50), []);
+  assert.equal(r.editor.sheet.get()?.kind, 'lines');
+  assert.equal(r.editor.notice.get(), null);
+});
+
 test('the Text tool (P1-M4): a tap places SVG Lab’s "Hello" in the Text tool’s font in one "Add text" entry, then Select, the text selected and the lines sheet open on it with its text selected; a drag places nothing and says so', () => {
   const fonts = fakeFonts();
   const r = rig(HOST, {}, undefined, { fonts, prefs: fakePrefs() });
