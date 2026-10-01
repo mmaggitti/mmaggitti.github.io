@@ -9,7 +9,8 @@ import { opInsert, opRemove, opSetAttr, opSetAttrRaw } from '../../commands/ops.
 import { parseFragment } from '../../model/fragment.ts';
 import { Session } from '../../commands/session.ts';
 import { DRAW_NS } from '../../model/draw-ns.ts';
-import { finishGenerators, generatorOf } from '../../generators/index.ts';
+import { GENERATORS, finishGenerators, generatedFrom, generatorOf } from '../../generators/index.ts';
+import { FLT_MAX } from '../../path/parse.ts';
 import { polygonPoints, starPoints } from '../../generators/radial.ts';
 import { spiralEnd, spiralPath } from '../../generators/spiral.ts';
 import { applyPlan, planMove } from '../../geometry/write.ts';
@@ -184,4 +185,53 @@ test('the finish hook: Group moves a stale generated shape (valid inputs, points
     apply(opInsert(doc, made.nodes[0], doc.root, (doc.nodes.get(doc.root) as ElementNode).children.length));
   });
   assert.equal(detached[detached.length - 1].length, 1, 'the new stale star detaches');
+});
+
+// P1-M3: every node-tool, letter and Relative edit of a generated spiral's d is a hand edit, so the
+// finish hook detaches it in the same transaction (M2's rule), and one undo brings it back.
+test('the finish hook: a node drag, a letter cycle and Make relative on a generated spiral each detach it in one transaction, and one undo restores it', async () => {
+  const { planNodeDrag } = await import('../../path/nodes.ts');
+  const { cycleSegment, toggleRelative } = await import('../../path/segments.ts');
+  const SPIRAL = `<path d="${spiralPath(50, 50, 20, 1)}" fill="none" stroke="#264653" draw:gen="spiral" draw:cx="50" draw:cy="50" draw:r="20" draw:turns="1"/>`;
+  const src = svg(SPIRAL);
+  const edits: [string, (doc: Doc, n: ElementNode) => string][] = [
+    ['a node drag', (doc, n) => {
+      const plan = planNodeDrag(doc, n.id, 'a2', { x: 60, y: 70 }, { step: 1, k: 1 });
+      assert.ok('edits' in plan && plan.edits.length === 1, JSON.stringify(plan));
+      return plan.edits[0].raw;
+    }],
+    ['a letter cycle', (doc, n) => cycleSegment(n.attrs.find((a) => a.local === 'd')!.raw, 1, { step: 1, k: 1 })],
+    ['Make relative', (_doc, n) => toggleRelative(n.attrs.find((a) => a.local === 'd')!.raw)],
+  ];
+  for (const [what, raw] of edits) {
+    const doc = load(src);
+    const n = first(doc, 'path');
+    assert.equal(generatorOf(doc, n.id)?.kind, 'spiral');
+    const { s, detached } = session(doc);
+    const d = raw(doc, n);
+    s.dispatch(what, (apply) => apply(opSetAttrRaw(doc, n.id, null, 'd', d)));
+    assert.deepEqual(detached.at(-1), [n.id], `${what}: detached in the same transaction`);
+    assert.equal(generatorOf(doc, n.id), null);
+    assert.ok(!serialize(doc).includes('draw:'), `${what}: its inputs and the declaration went`);
+    assert.equal(attrValue(doc, n, null, 'd'), d, `${what}: the edit itself stays`);
+    s.undo();
+    assert.equal(serialize(doc), src, `${what}: one undo gives the generated spiral back`);
+    assert.equal(generatorOf(doc, n.id)?.kind, 'spiral');
+  }
+});
+
+// R4 (the P1-M3 review): the generators' inputs take the same plain-decimal rule, so a polygon whose cx
+// and r were 1e308 written out made generatorOf throw (cx + r overflowed, and fmt threw). The inputs are
+// bounded where they are read (|v| ≤ FLT_MAX), and a generator that can't write a coordinate gives null.
+test('hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals, and a centre past FLT_MAX even with its points written out (finite); at FLT_MAX itself it is generated; a generator whose coordinate would overflow gives null', () => {
+  const big = '1' + '0'.repeat(308);
+  const plainly = (v: number) => BigInt(v).toString(); // a whole number written out in digits
+  const polygon = (cx: string, points: string, r = '30') => load(svg(`<polygon points="${points}" draw:gen="polygon" draw:cx="${cx}" draw:cy="0" draw:r="${r}" draw:sides="5"/>`));
+  const hostile = polygon(big, '0,0 1,1 2,0', big);
+  assert.equal(generatorOf(hostile, first(hostile, 'polygon').id), null, 'cx and r 1e308');
+  const past = polygon(plainly(1e39), polygonPoints(1e39, 0, 30, 5));
+  assert.equal(generatorOf(past, first(past, 'polygon').id), null, 'a centre past FLT_MAX');
+  const edge = polygon(plainly(FLT_MAX), polygonPoints(FLT_MAX, 0, 30, 5));
+  assert.ok(generatorOf(edge, first(edge, 'polygon').id), 'a centre at FLT_MAX is generated');
+  for (const g of GENERATORS) assert.equal(generatedFrom(g, { cx: 1e308, cy: 0, r: 1e308, sides: 5, tips: 5, inner: 0.4, turns: 1 }), null, `${g.kind}: a coordinate that overflows`);
 });

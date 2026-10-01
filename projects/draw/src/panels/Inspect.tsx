@@ -12,6 +12,9 @@
 //   Units, a radial gradient's fx, fy and fr, and Edit on canvas.
 // - Generator (S1), for one generated shape (engine/generators/): its kind, a field per input with −
 //   and + (one entry each), and Detach.
+// - P1-M3 S2: the Fill section's Fill rule (Nonzero, Evenodd: the holes); and a Donut section for a
+//   selected slice or its holder (engine/generators/donut.ts): each value a field from 1 to 100 with −
+//   and +, and Detach, or, for SVG Lab's own export, Edit as donut.
 // A field is one history entry while it has focus: each keystroke that reads as a value is written
 // live, and Done, Enter, Escape or a blur keeps it. While it has focus it shows what is typed; else
 // it follows the file (an undo, a handle drag, − or +).
@@ -38,6 +41,7 @@ export function Inspect({ editor }: { editor: Editor }) {
   const one = ids.length === 1 ? (doc.nodes.get(ids[0]) as ElementNode) : null;
   const locals = ids.map((id) => (doc.nodes.get(id) as ElementNode).local);
   const gen = editor.generated();
+  const donut = editor.donut();
   return (
     <div className="draw-inspect">
       {!one && <p className="draw-subhead">{ids.length} selected</p>}
@@ -51,6 +55,25 @@ export function Inspect({ editor }: { editor: Editor }) {
           <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.detach()}>
             Detach
           </button>
+        </section>
+      )}
+      {donut && (
+        <section className="draw-inspect-section" aria-label="Donut">
+          <p className="draw-subhead">Donut</p>
+          {donut.recognized ? (
+            <>
+              {donut.values.map((v, i) => (
+                <DonutRow key={`${donut.holder}:${i}`} editor={editor} index={i} value={v} />
+              ))}
+              <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.detach()}>
+                Detach
+              </button>
+            </>
+          ) : (
+            <button type="button" className="ds-btn draw-inspect-btn" onClick={() => editor.adoptDonut()}>
+              Edit as donut
+            </button>
+          )}
         </section>
       )}
       {one && (
@@ -77,6 +100,7 @@ export function Inspect({ editor }: { editor: Editor }) {
 // ── style ────────────────────────────────────────────────────────────────────────────────────
 
 const CAPS: [string, string][] = [['butt', 'Butt'], ['round', 'Round'], ['square', 'Square']];
+const RULES: [string, string][] = [['nonzero', 'Nonzero'], ['evenodd', 'Evenodd']];
 const RENDERING: [string, string][] = [['auto', 'auto'], ['crispEdges', 'crispEdges'], ['geometricPrecision', 'geometricPrecision'], ['optimizeSpeed', 'optimizeSpeed']];
 const UNIT = { min: 0, max: 1, step: 0.01 };
 
@@ -96,6 +120,7 @@ function StyleSections({ editor, locals }: { editor: Editor; locals: readonly st
         <Section title="Fill">
           <PaintRow editor={editor} prop="fill" label="Paint" row={row('fill')} kinds={fillKinds} info={fill} />
           <GlossRow editor={editor} />
+          <SegRow editor={editor} prop="fill-rule" label="Fill rule" row={row('fill-rule')} options={RULES} />
           {locals.length === 1 && <GradientSection editor={editor} prop="fill" info={fill} />}
         </Section>
       )}
@@ -441,7 +466,7 @@ function Problem({ error }: { error: string | null }) {
  * is typed is written live when it reads as a value, else it says why. While it has focus it shows
  * what is typed; else it follows the file.
  */
-function FocusField({ editor, field, label, text, placeholder, disabled = false, onError }: { editor: Editor; field: Field; label: string; text: string; placeholder?: string; disabled?: boolean; onError: (error: string | null) => void }) {
+function FocusField({ editor, field, label, text, placeholder, disabled = false, inputMode = 'decimal', onError }: { editor: Editor; field: Field; label: string; text: string; placeholder?: string; disabled?: boolean; inputMode?: 'decimal' | 'numeric'; onError: (error: string | null) => void }) {
   const focused = useRef(false);
   const [value, setValue] = useState(text);
   useEffect(() => {
@@ -457,7 +482,7 @@ function FocusField({ editor, field, label, text, placeholder, disabled = false,
   return (
     <input
       className="draw-field ds-mono draw-inspect-field"
-      inputMode="decimal"
+      inputMode={inputMode}
       enterKeyHint="done"
       autoComplete="off"
       aria-label={label}
@@ -501,6 +526,29 @@ function InputRow({ editor, name, text }: { editor: Editor; name: string; text: 
         </button>
         <FocusField editor={editor} field={{ kind: 'input', name }} label={label} text={text} onError={setError} />
         <button type="button" className="draw-key" aria-label={`Increase ${label}`} onClick={() => editor.stepInput(name, 1)}>
+          +
+        </button>
+      </div>
+      <Problem error={error} />
+    </div>
+  );
+}
+
+// ── the donut (P1-M3 S2) ─────────────────────────────────────────────────────────────────────
+
+/** One donut value: −, a field (a whole number from 1 to 100), +. */
+function DonutRow({ editor, index, value }: { editor: Editor; index: number; value: number }) {
+  const label = `Value ${index + 1}`;
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="draw-inspect-row">
+      <span className="draw-inspect-name">{label}</span>
+      <div className="draw-stepper">
+        <button type="button" className="draw-key" aria-label={`Decrease ${label}`} onClick={() => editor.stepDonutValue(index, -1)}>
+          −
+        </button>
+        <FocusField editor={editor} field={{ kind: 'donut', index }} label={label} text={String(value)} inputMode="numeric" onError={setError} />
+        <button type="button" className="draw-key" aria-label={`Increase ${label}`} onClick={() => editor.stepDonutValue(index, 1)}>
           +
         </button>
       </div>

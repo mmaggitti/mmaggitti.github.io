@@ -58,6 +58,18 @@
 // multi-selection edit as one entry, and the phone rules on Inspect and the picker; then gradients:
 // the handles where the gradient draws in both unit systems and under gradientTransform (and
 // Spread beyond the end), new gradients in defs with fresh ids, SVG Lab's gloss and Make unique.
+// P1-M3 adds paths: the Pen (taps make lines, a drag a curve leaving the point along the drag, the
+// start closes, Undo point, Done and Enter, a second finger adding nothing), the Node tool's handles on
+// the anchors and controls through the path's own CTM (their arms, a bend handle through the finger,
+// the S's mirror guide, Make smooth and Make corner), the letter tokens' L → Q → C cycle and
+// Relative/Absolute keeping the rest of the path, and the phone rules on the Pen's and the Node tool's bars.
+// Then arcs, holes and the donut: an arc's ghost arcs drawn where the other flag pairs draw, each
+// labelled, a tap switching to one; the direction arrows, Inspect's Fill rule and Reverse cutting the
+// holes of SVG Lab's keyhole two ways (the paper shows through); and SVG Lab's donut, Edit as donut
+// on its own file, a boundary dragged round the ring redrawing the slices from the data comment, and
+// a hand edit of a slice turning it plain, the comment's tokens going with it. Then booleans: Union,
+// Subtract, Intersect and Exclude from the More sheet, drawn where they cover, path-bool loading only
+// then, in a chunk of its own.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -74,6 +86,8 @@ import { encodeImport } from '../src/platform/files.ts';
 import { attrValue, parseDoc } from '../../../engine/model/doc.ts';
 import { parsePath } from '../../../engine/path/parse.ts';
 import { starPoints } from '../../../engine/generators/radial.ts';
+import { arcCenter, arcPoint } from '../../../engine/path/arc.ts';
+import { donutSlices } from '../../../engine/generators/donut.ts';
 import { clampRgb, parseColor } from '../../../engine/values/color.ts';
 import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
@@ -245,6 +259,15 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(gradientHandlesSitWhereTheGradientDraws);
   await check(gradientsGoInDefsWithFreshIds);
   await check(glossAndMakeUnique);
+  // P1-M3: paths.
+  await check(thePenTapsLinesAndDragsCurves);
+  await check(nodeHandlesSitOnTheAnchorsAndControls);
+  await check(theLetterCycleAndRelativeKeepTheRestOfThePath);
+  for (const height of [956, 796]) await check(phoneRulesOnThePenAndNodeTools, height);
+  await check(ghostArcsSwitchTheFlags);
+  await check(holesCutTwoWays);
+  await check(theDonutRegeneratesFromItsData);
+  await check(booleansCombineWhatIsDrawn);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -2105,7 +2128,7 @@ async function aFullQuotaIsLoud(browser, origin) {
 
 // (j) The ledger (about 400 KB) is not in the initial JS: it loads when the Support tab first
 // opens, which then summarizes it and searches its rows (the search first, each capability and
-// feature row with its name).
+// feature row with its name). Its "Open-source licences" link serves THIRD-PARTY-NOTICES.txt (P1-M3).
 async function theLedgerLoadsOnlyForSupport(browser, origin) {
   const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
   const initial = [...html.matchAll(/<script[^>]*\bsrc="([^"]+\.js)"|<link[^>]*rel="modulepreload"[^>]*href="([^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
@@ -2130,6 +2153,12 @@ async function theLedgerLoadsOnlyForSupport(browser, origin) {
       return { fieldBottom: field.bottom - body.top, bodyHeight: body.height, aboveTally: field.bottom <= tally.top };
     });
     must(at.fieldBottom <= at.bodyHeight && at.aboveTally, `the search is ${Math.round(at.fieldBottom)}pt into a ${Math.round(at.bodyHeight)}pt tab, ${at.aboveTally ? 'above' : 'below'} the summary`);
+    // P1-M3: the link to the open-source licences serves the notices beside the app, and is a 44 pt target.
+    const licences = page.locator('.draw-licences');
+    const box = await licences.boundingBox();
+    must(await licences.textContent() === 'Open-source licences' && box && box.height >= 44, `the licences link is ${JSON.stringify(box)}`);
+    const notices = await page.request.get(new URL(await licences.getAttribute('href'), page.url()).href);
+    must(notices.status() === 200 && (await notices.text()).startsWith('Third-party notices: Draw'), `the licences link serves ${notices.status()}`);
     await page.locator('.draw-ledger-search').fill('feature:support-tab');
     await until('the search narrows the rows', async () => (await page.locator('.draw-ledger-row').count()) === 1);
     const row = await page.locator('.draw-ledger-row').textContent();
@@ -5857,6 +5886,785 @@ async function glossAndMakeUnique(browser, origin) {
     must((await source(page)).includes('<stop offset="1" style="stop-color:#264653;stop-opacity:1"/></linearGradient>\n    <linearGradient id="b"'), `the stop edit did not write #a:\n${await source(page)}`);
     await page.locator('.draw-inspect button', { hasText: /^Make unique$/ }).tap();
     must((await source(page)).includes('gradientUnits="userSpaceOnUse"/>\n    <linearGradient id="linear-1" x1="10" y1="50" x2="90" y2="50" gradientUnits="userSpaceOnUse" draw:made="true"><stop offset="0" style="stop-color:#ff0000;stop-opacity:1"/><stop offset="1" style="stop-color:#264653;stop-opacity:1"/></linearGradient>') && (await source(page)).includes('fill="url(#linear-1)"'), `Make unique of the chain:\n${await source(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M3 S1: the Pen and the Node tool ───────────────────────────────────────────────────────
+
+const LAB = (f) => readFileSync(join(CORPUS, `lab/${f}`), 'utf8');
+// Runs in the page: the distance in client px from each client point to the nearest of 2,000 points
+// sampled along the n-th drawn <path> (getPointAtLength through its getScreenCTM).
+function pathDistances({ n = 0, pts }) {
+  const p = document.querySelector('.draw-host').shadowRoot.querySelectorAll('path')[n];
+  const m = p.getScreenCTM();
+  const L = p.getTotalLength();
+  const s = [];
+  for (let i = 0; i <= 2000; i++) {
+    const q = p.getPointAtLength((L * i) / 2000).matrixTransform(m);
+    s.push([q.x, q.y]);
+  }
+  return pts.map(({ x, y }) => Math.min(...s.map(([a, b]) => Math.hypot(a - x, b - y))));
+}
+// Runs in the page: `n` points evenly along the first drawn <path>, in its own units.
+function pathSamples(n) {
+  const p = document.querySelector('.draw-host').shadowRoot.querySelector('path');
+  const L = p.getTotalLength();
+  return Array.from({ length: n }, (_, i) => {
+    const q = p.getPointAtLength((L * i) / (n - 1));
+    return [q.x, q.y];
+  });
+}
+// Runs in the page: the overlay's shown lines of a class, as client-px segments.
+function overlayLines(cls) {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll(`line.${cls}`)].filter((l) => l.style.display !== 'none').map((l) => [+l.getAttribute('x1') + o.x, +l.getAttribute('y1') + o.y, +l.getAttribute('x2') + o.x, +l.getAttribute('y2') + o.y]);
+}
+const nearPt = (a, b, tol = 1) => Math.hypot(a.x - b.x, a.y - b.y) <= tol;
+// A finger drags on the canvas, then a second finger comes down and both pan before they lift: the
+// drag is cancelled, and the rest is navigation (a quick two-finger tap would be Undo). Chromium: CDP
+// touches; WebKit: synthetic Pointer Events.
+async function dragThenSecondFingerPans(browser, page, a, b) {
+  const mid = (i) => ({ x: a.x + ((b.x - a.x) * i) / 4, y: a.y + ((b.y - a.y) * i) / 4 });
+  const c = { x: b.x - 60, y: b.y + 40 }; // on the canvas, whichever side b is near
+  if (chromium(browser)) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...a, id: 1 }] });
+    for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...mid(i), id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...b, id: 1 }, { ...c, id: 2 }] });
+    for (let i = 1; i <= 3; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b.x - 10 * i, y: b.y, id: 1 }, { x: c.x - 10 * i, y: c.y, id: 2 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.evaluate(({ a, b, c }) => {
+      const area = document.querySelector('.draw-canvas');
+      const fire = (type, id, p) => area.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+      fire('pointerdown', 1, a);
+      for (let i = 1; i <= 4; i++) fire('pointermove', 1, { x: a.x + ((b.x - a.x) * i) / 4, y: a.y + ((b.y - a.y) * i) / 4 });
+      fire('pointerdown', 2, c);
+      for (let i = 1; i <= 3; i++) {
+        fire('pointermove', 1, { x: b.x - 10 * i, y: b.y });
+        fire('pointermove', 2, { x: c.x - 10 * i, y: c.y });
+      }
+      fire('pointerup', 1, { x: b.x - 30, y: b.y });
+      fire('pointerup', 2, { x: c.x - 30, y: c.y });
+    }, { a, b, c });
+  }
+  await page.waitForTimeout(50);
+}
+// The ContextBar's buttons now: name, pressed, client box.
+const barNow = (page) => page.evaluate(() => {
+  const ctx = document.querySelector('.draw-context');
+  return {
+    ctx: ctx.getBoundingClientRect().toJSON(),
+    buttons: [...ctx.querySelectorAll('.draw-ctx-btn')].map((b) => ({ name: b.getAttribute('aria-label'), pressed: b.getAttribute('aria-pressed'), ...b.getBoundingClientRect().toJSON() })),
+    sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    vh: innerHeight,
+  };
+});
+
+// lab/create.svg. The Pen button is at least 44 × 44 and pressed once picked. A tap at the screen
+// point of (20, 80) writes nothing; one at (50, 20) inserts exactly the lab's path before the root's
+// closing line break, one "Draw path"; a tap at (80, 80) appends " L 80 80" and a drag from (80, 50)
+// to (90, 40) " Q 70 60 80 50" (P's in-handle, 2p − f), one "Add point" each; the drawn path passes
+// within 1 px of the four anchors' screen points (getPointAtLength). Undo point twice leaves
+// M 20 80 L 50 20; Done shows the Node tool with the path selected and its anchors drawn. A second
+// path of three taps closed by a tap on its start gets " Z" and the next colour, #1d3557; Enter with
+// one point writes nothing; a second finger mid-drag adds nothing.
+async function thePenTapsLinesAndDragsCurves(browser, origin) {
+  const F = LAB('create.svg');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/create.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const pen = page.locator('.draw-pen-tool');
+    const d = (n = 0) => page.evaluate((n) => {
+      const m = [...window.drawTest.source().matchAll(/<path d="([^"]*)"/g)][n];
+      return m ? m[1] : null;
+    }, n);
+    const tapAt = async (x, y) => {
+      const p = await page.evaluate(screenPoint, { x, y });
+      await page.touchscreen.tap(p.x, p.y);
+      await page.waitForTimeout(50);
+      return p;
+    };
+    await pen.tap();
+    const b = await pen.evaluate((el) => ({ pressed: el.getAttribute('aria-pressed'), ...el.getBoundingClientRect().toJSON() }));
+    must(b.pressed === 'true' && b.width >= 43.5 && b.height >= 43.5, `the Pen button is ${Math.round(b.width)}×${Math.round(b.height)}, pressed ${b.pressed}`);
+    const A = await tapAt(20, 80);
+    must(await source(page) === F, `the first tap wrote:\n${await source(page)}`);
+    const B = await tapAt(50, 20);
+    const LINE = F.replace('\n</svg>', '\n  <path d="M 20 80 L 50 20" fill="none" stroke="#264653" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>\n</svg>');
+    must(await source(page) === LINE, `the second tap did not insert exactly the lab's path:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Draw path', `the entry is ${await undo.getAttribute('aria-label')}`);
+    const C = await tapAt(80, 80);
+    must(await d() === 'M 20 80 L 50 20 L 80 80', `a tap at (80, 80) wrote ${await d()}`);
+    const D = await page.evaluate(screenPoint, { x: 80, y: 50 });
+    const f = await page.evaluate(screenPoint, { x: 90, y: 40 });
+    await dragOnCanvas(page, 'mouse', D, { x: f.x - D.x, y: f.y - D.y }, 8);
+    await page.waitForTimeout(50);
+    must(await d() === 'M 20 80 L 50 20 L 80 80 Q 70 60 80 50', `the drag from (80, 50) to (90, 40) wrote ${await d()}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Add point', `the drag's entry is ${await undo.getAttribute('aria-label')}`);
+    const dist = await page.evaluate(pathDistances, { pts: [A, B, C, D] });
+    must(dist.every((x) => x <= 1), `the drawn path passes ${dist.map((x) => x.toFixed(2)).join(', ')} px from the four anchors' screen points`);
+    for (let i = 0; i < 2; i++) await page.locator('.draw-ctx-btn[aria-label="Undo point"]').tap();
+    must(await source(page) === LINE, `Undo point twice left:\n${await source(page)}`);
+    await page.locator('.draw-ctx-btn[aria-label="Done"]').tap();
+    must(await page.locator('.draw-node-tool').getAttribute('aria-pressed') === 'true', 'Done did not show the Node tool');
+    must(await label(page) === '<path>', `Done selected ${await label(page)}`);
+    const hs = await page.evaluate(handlesNow);
+    const a0 = hs.find((h) => h.id === 'a0');
+    const a1 = hs.find((h) => h.id === 'a1');
+    must(a0 && a1 && a0.kind.includes('start') && nearPt(a0, A) && nearPt(a1, B), `the path's anchors are drawn at ${JSON.stringify([a0, a1])}, not on (20, 80) and (50, 20)`);
+    // A second path, closed by a tap on its start: the next colour.
+    await pen.tap();
+    const S = await tapAt(20, 30);
+    await tapAt(40, 50);
+    await tapAt(30, 70);
+    await page.touchscreen.tap(S.x + 1, S.y + 1);
+    await page.waitForTimeout(50);
+    must(await d(1) === 'M 20 30 L 40 50 L 30 70 Z' && (await source(page)).includes('<path d="M 20 30 L 40 50 L 30 70 Z" fill="none" stroke="#1d3557"'), `the second path, closed on its start:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Close path', `the close is ${await undo.getAttribute('aria-label')}`);
+    // Enter with one point writes nothing.
+    const two = await source(page);
+    await pen.tap();
+    await tapAt(70, 30);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    must(await source(page) === two && await selectTool(page).getAttribute('aria-pressed') === 'true', 'Enter with one point wrote something, or didn’t return to Select');
+    // A second finger mid-drag adds nothing (and its panning is no Undo).
+    await pen.tap();
+    await tapAt(60, 60);
+    await tapAt(70, 60);
+    const three = await source(page);
+    await dragThenSecondFingerPans(browser, page, await page.evaluate(screenPoint, { x: 80, y: 70 }), await page.evaluate(screenPoint, { x: 90, y: 60 }));
+    must(await source(page) === three, `a second finger mid-drag added:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Draw path', `after the second finger the last entry is ${await undo.getAttribute('aria-label')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const WAVE_TURNED = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">\n  <g transform="translate(5 3)"><path d="M 30 44 Q 40 32, 50 44 Q 60 56, 70 44" transform="rotate(20 50 44)" fill="none" stroke="#264653" stroke-width="4"/></g>\n</svg>\n`;
+
+// lab/create-logo.svg's wave in the Node tool: the start handle at the screen point of (30, 44), the
+// anchors at (50, 44) and (70, 44), the controls at (40, 32) and (60, 56), each ± 1 px through the
+// path's own getScreenCTM, the four arms from each control to its anchors, and no corner handles (in
+// Select they are back); the middle anchor dragged 5 units down rewrites only "50 44" (the Q controls
+// stay) and the drawn curve follows. The same wave under a rotate() inside a translated group: every
+// handle where the path's own CTM puts it. lab/paths.svg: the bend handle at (35, 52.5), dragged to
+// (40, 45), writes Q 45 38 50 30 and the drawn curve passes within 2 px of the finger. lab/arcs--
+// smooth.svg: the mirror dot at (60, 90) with its dashed arm from (50, 55); Make corner then Make
+// smooth on the middle node give the file back byte for byte, one entry each.
+async function nodeHandlesSitOnTheAnchorsAndControls(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const nodeTool = page.locator('.draw-node-tool');
+    const openPath = async (text, x, y) => {
+      must((await page.evaluate((t) => window.drawTest.render(t), text)).ok, 'test setup: the file did not open');
+      await twoFrames(page);
+      const p = await page.evaluate(elementPoint, { sel: 'path', x, y });
+      await page.touchscreen.tap(p.x, p.y);
+      await page.waitForTimeout(50);
+      must(await label(page) === '<path>', `test setup: a tap on the path selected ${await label(page)}`);
+      if ((await nodeTool.getAttribute('aria-pressed')) !== 'true') await nodeTool.tap();
+    };
+    const handlesOn = async (want, as) => {
+      const hs = await page.evaluate(handlesNow);
+      for (const [id, kind, x, y] of want) {
+        const at = await page.evaluate(elementPoint, { sel: 'path', x, y });
+        const h = hs.find((q) => q.id === id);
+        must(h && h.kind.includes(kind) && nearPt(h, at), `${as}: the ${id} handle is ${JSON.stringify(h)}, not a ${kind} at (${x}, ${y}) = ${JSON.stringify(at)}`);
+      }
+      return hs;
+    };
+    const LOGO = LAB('create-logo.svg');
+    const WAVE = [['a0', 'start', 30, 44], ['a1', 'anchor', 50, 44], ['a2', 'anchor', 70, 44], ['c1', 'ctrl', 40, 32], ['c2', 'ctrl', 60, 56]];
+    await openPath(LOGO, 50, 44);
+    const hs = await handlesOn(WAVE, 'the wave');
+    must(!hs.some((h) => ['tl', 'tr', 'br', 'bl', 'rot', 'scale'].includes(h.id)), `the Node tool shows M1's handles: ${hs.map((h) => h.id)}`);
+    const arms = await page.evaluate(overlayLines, 'draw-arm:not(.draw-arm--mirror)');
+    const want = [[[30, 44], [40, 32]], [[40, 32], [50, 44]], [[50, 44], [60, 56]], [[60, 56], [70, 44]]];
+    for (const [[x1, y1], [x2, y2]] of want) {
+      const [a, b] = [await page.evaluate(elementPoint, { sel: 'path', x: x1, y: y1 }), await page.evaluate(elementPoint, { sel: 'path', x: x2, y: y2 })];
+      must(arms.some((l) => nearPt({ x: l[0], y: l[1] }, a) && nearPt({ x: l[2], y: l[3] }, b)), `no arm from (${x1}, ${y1}) to (${x2}, ${y2}): ${JSON.stringify(arms.map((l) => l.map(Math.round)))}`);
+    }
+    await selectTool(page).tap();
+    must((await page.evaluate(handlesNow)).some((h) => h.id === 'tl'), 'in Select the corners are not back');
+    await nodeTool.tap();
+    await snapOff(page);
+    const a1 = (await page.evaluate(handlesNow)).find((h) => h.id === 'a1');
+    const k = await page.evaluate(unitPx);
+    await dragOnCanvas(page, 'mouse', a1, { x: 0, y: 5 * k }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === LOGO.replace('Q 40 32, 50 44', 'Q 40 32, 50 49'), `the middle anchor 5 units down:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move point', `the drag is ${await undo.getAttribute('aria-label')}`);
+    const [moved] = await page.evaluate(pathDistances, { pts: [await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 49 })] });
+    must(moved <= 0.5 * k, `the drawn curve passes ${moved.toFixed(2)} px from the moved anchor`);
+    // Under a rotate() in a translated group: through the path's own CTM, not its parent's.
+    await openPath(WAVE_TURNED, 50, 44);
+    await handlesOn(WAVE, 'the turned wave');
+    // lab/paths.svg: the bend handle.
+    const PATHS = LAB('paths.svg');
+    await openPath(PATHS, 35, 52.5);
+    await handlesOn([['b1', 'bend', 35, 52.5]], 'lab/paths.svg');
+    const bh = (await page.evaluate(handlesNow)).find((h) => h.id === 'b1');
+    const fin = await page.evaluate(screenPoint, { x: 40, y: 45 });
+    await dragOnCanvas(page, 'mouse', bh, { x: fin.x - bh.x, y: fin.y - bh.y }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === PATHS.replace('L 50 30', 'Q 45 38 50 30'), `the bend dragged to (40, 45):\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Bend', `the bend is ${await undo.getAttribute('aria-label')}`);
+    const [bent] = await page.evaluate(pathDistances, { pts: [fin] });
+    must(bent <= 2, `the bent curve passes ${bent.toFixed(2)} px from the finger's (40, 45)`);
+    // lab/arcs--smooth.svg: the mirror guide, and the node types.
+    const SMOOTH = LAB('arcs--smooth.svg');
+    await openPath(SMOOTH, 50, 55);
+    const mirror = await page.evaluate(() => {
+      const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+      return [...document.querySelectorAll('circle.draw-mirror')].filter((c) => c.style.display !== 'none').map((c) => ({ x: +c.getAttribute('cx') + o.x, y: +c.getAttribute('cy') + o.y }));
+    });
+    const m60 = await page.evaluate(elementPoint, { sel: 'path', x: 60, y: 90 });
+    const s50 = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 55 });
+    must(mirror.length === 1 && nearPt(mirror[0], m60), `the mirror dot is at ${JSON.stringify(mirror)}, not (60, 90) = ${JSON.stringify(m60)}`);
+    const dashed = await page.evaluate(overlayLines, 'draw-arm--mirror');
+    must(dashed.length === 1 && nearPt({ x: dashed[0][0], y: dashed[0][1] }, s50) && nearPt({ x: dashed[0][2], y: dashed[0][3] }, m60), `the dashed arm is ${JSON.stringify(dashed)}`);
+    const mid = (await page.evaluate(handlesNow)).find((h) => h.id === 'a1');
+    await page.touchscreen.tap(mid.x, mid.y);
+    await page.waitForTimeout(50);
+    const smooth = page.locator('.draw-ctx-btn[aria-label="Smooth"]');
+    must(await smooth.getAttribute('aria-pressed') === 'true', 'the middle node is not shown smooth');
+    await smooth.tap();
+    must(await source(page) === SMOOTH.replace('S 78 90, 90 55', 'C 60 90, 78 90, 90 55'), `Make corner:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Make corner', `Make corner is ${await undo.getAttribute('aria-label')}`);
+    await smooth.tap();
+    must(await source(page) === SMOOTH, `Make smooth did not give the file back:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Make smooth', `Make smooth is ${await undo.getAttribute('aria-label')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// lab/paths.svg: a tap on the code's L letter token writes Q 49 62 50 30 (one "Set segment") and the
+// drawn midpoint leaves the straight line; two more taps (C, then L) give the file back byte for
+// byte. lab/arcs--smooth.svg: Relative writes the lab's relative text and the drawn path is
+// unchanged (20 points within 0.01 units); the Number sheet on the relative c's end x (titled
+// "point 2 x") set to 45 moves the drawn S's end 5 units right; Absolute then writes the absolute
+// text; and a drag of the path by the centre handle still moves it.
+async function theLetterCycleAndRelativeKeepTheRestOfThePath(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const PATHS = LAB('paths.svg');
+    must((await page.evaluate((t) => window.drawTest.render(t), PATHS)).ok, 'test setup: lab/paths.svg did not open');
+    await twoFrames(page);
+    await showCode(page);
+    const letter = page.locator('.cv-block', { hasText: '<path' }).locator('.cv-enum').first();
+    must(await letter.textContent() === 'L', `test setup: the first keyword token is ${await letter.textContent()}`);
+    await tapToken(letter);
+    must(await source(page) === PATHS.replace('L 50 30', 'Q 49 62 50 30'), `the L tap wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set segment', `the tap is ${await undo.getAttribute('aria-label')}`);
+    const [mx, my] = (await page.evaluate(pathSamples, 3))[1];
+    const off = Math.abs(45 * (mx - 20) + 30 * (my - 75)) / Math.hypot(45, 30); // from the line (20, 75)–(50, 30)
+    must(off > 2, `the drawn midpoint (${mx.toFixed(2)}, ${my.toFixed(2)}) is ${off.toFixed(2)} units from the straight line`);
+    await tapToken(letter);
+    await tapToken(letter);
+    must(await source(page) === PATHS, `C, then L, did not give the file back:\n${await source(page)}`);
+    // lab/arcs--smooth.svg: Relative, a relative number, Absolute.
+    const SMOOTH = LAB('arcs--smooth.svg');
+    must((await page.evaluate((t) => window.drawTest.render(t), SMOOTH)).ok, 'test setup: lab/arcs--smooth.svg did not open');
+    await twoFrames(page);
+    const p = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 55 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    await page.locator('.draw-node-tool').tap();
+    const before = await page.evaluate(pathSamples, 20);
+    await page.locator('.draw-ctx-btn[aria-label="Relative"]').tap();
+    const REL = SMOOTH.replace('M 10 55\n   C 22 20, 40 20, 50 55\n   S 78 90, 90 55', 'm 10 55\n   c 12 -35, 30 -35, 40 0\n   s 28 35, 40 0');
+    must(await source(page) === REL, `Relative wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Make relative', `Relative is ${await undo.getAttribute('aria-label')}`);
+    const after = await page.evaluate(pathSamples, 20);
+    must(after.every(([x, y], i) => Math.abs(x - before[i][0]) <= 0.01 && Math.abs(y - before[i][1]) <= 0.01), 'the drawn path changed when it was made relative');
+    await showCode(page);
+    const endX = page.locator('.cv-block', { hasText: '<path' }).locator('.cv-number').nth(6);
+    must(await endX.textContent() === '40', `test setup: the c's end x token reads ${await endX.textContent()}`);
+    await tapToken(endX);
+    await page.locator('.draw-strip-value').tap();
+    await page.locator('.draw-modal .draw-field').waitFor();
+    const title = await page.locator('.draw-modal-title').textContent();
+    must(title === 'point 2 x', `the Number sheet is titled ${JSON.stringify(title)}, not "point 2 x"`);
+    await page.locator('.draw-modal .draw-field').fill('45');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-done').tap();
+    const end = (await page.evaluate(pathSamples, 2))[1];
+    must(Math.abs(end[0] - 95) <= 0.01 && Math.abs(end[1] - 55) <= 0.01, `the drawn S ends at (${end.map((v) => v.toFixed(2))}), not 5 units right, (95, 55)`);
+    await page.locator('.draw-ctx-btn[aria-label="Absolute"]').tap();
+    const ABS = SMOOTH.replace('M 10 55\n   C 22 20, 40 20, 50 55\n   S 78 90, 90 55', 'M 10 55\n   C 22 20, 40 20, 55 55\n   S 83 90, 95 55');
+    must(await source(page) === ABS, `Absolute wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Make absolute', `Absolute is ${await undo.getAttribute('aria-label')}`);
+    // The letters are tokens now; a move by the centre handle still writes the path (planMove).
+    await snapOff(page);
+    const c = (await page.evaluate(handlesNow)).find((h) => h.id === 'center');
+    const k = await page.evaluate(unitPx);
+    await dragOnCanvas(page, 'mouse', c, { x: 10 * k, y: 0 }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === ABS.replace('M 10 55\n   C 22 20, 40 20, 55 55\n   S 83 90, 95 55', 'M 20 55\n   C 32 20, 50 20, 65 55\n   S 93 90, 105 55'), `the centre handle's move wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move', `the move is ${await undo.getAttribute('aria-label')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// At 956 and 796 tall: the ToolRail's Pen and Node at least 44 × 44; the Pen's bar (Undo point,
+// Close, Done, Done with the accent background of the primary look) and the Node tool's bar (Deselect, Smooth, Close, Relative, Reverse, More) each inside the
+// 440 pt bar, every button at least 44 × 44, in order without overlap, in the bottom thumb zone and
+// above the home indicator; no sideways scroll and every tap target and field as the phone rules
+// say; and a press 20 pt from a node handle takes it.
+async function phoneRulesOnThePenAndNodeTools(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const problems = [];
+    const LOGO = LAB('create-logo.svg');
+    must((await page.evaluate((t) => window.drawTest.render(t), LOGO)).ok, 'test setup: lab/create-logo.svg did not open');
+    await twoFrames(page);
+    for (const t of ['.draw-pen-tool', '.draw-node-tool']) {
+      const b = await page.locator(t).evaluate((el) => el.getBoundingClientRect().toJSON());
+      if (b.width < TAP_MIN - 0.5 || b.height < TAP_MIN - 0.5) problems.push(`${t} is ${Math.round(b.width)}×${Math.round(b.height)}`);
+    }
+    const bar = async (state, names) => {
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${state}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${state}: field(s) under 16px: ${r.fields.join(', ')}`);
+      const b = await barNow(page);
+      if (JSON.stringify(b.buttons.map((x) => x.name)) !== JSON.stringify(names)) problems.push(`${state}: the bar holds ${JSON.stringify(b.buttons.map((x) => x.name))}, not ${JSON.stringify(names)}`);
+      for (const x of b.buttons) {
+        if (x.width < TAP_MIN - 0.5 || x.height < TAP_MIN - 0.5) problems.push(`${state}: ${x.name} is ${Math.round(x.width)}×${Math.round(x.height)}`);
+        if (x.left < b.ctx.left - 0.5 || x.right > b.ctx.right + 0.5 || x.left < -0.5 || x.right > 440.5) problems.push(`${state}: ${x.name} at ${Math.round(x.left)}–${Math.round(x.right)} is outside the 440 pt bar`);
+      }
+      if (b.buttons.some((x, i) => i > 0 && x.left < b.buttons[i - 1].right - 0.5)) problems.push(`${state}: the buttons overlap`);
+      if (b.ctx.top < b.vh * 0.6 || b.ctx.bottom > b.vh + 0.5) problems.push(`${state}: the bar is at ${Math.round(b.ctx.top)}–${Math.round(b.ctx.bottom)} of ${b.vh}, not in the bottom thumb zone above the home indicator`);
+      if (b.sideways > 0) problems.push(`${state}: the page scrolls sideways by ${b.sideways}`);
+    };
+    // The Pen's bar, from 3 anchors.
+    await page.locator('.draw-pen-tool').tap();
+    for (const [x, y] of [[20, 80], [40, 90], [60, 85]]) {
+      const q = await page.evaluate(screenPoint, { x, y });
+      await page.touchscreen.tap(q.x, q.y);
+      await page.waitForTimeout(50);
+    }
+    await bar('the Pen', ['Undo point', 'Close', 'Done']);
+    // Done has the primary look (§5.2): the accent background, as ds.css's .ds-btn--primary paints it.
+    const done = await page.locator('.draw-ctx-btn[aria-label="Done"]').evaluate((el) => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--accent)';
+      document.body.append(probe);
+      const accent = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return { background: getComputedStyle(el).backgroundColor, accent };
+    });
+    if (done.background !== done.accent) problems.push(`the Pen: Done's background is ${done.background}, not the accent (${done.accent})`);
+    await page.locator('.draw-ctx-btn[aria-label="Done"]').tap();
+    // The Node tool's bar on the wave, its middle node chosen (Q into Q: Smooth applies).
+    const w = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 44 });
+    await page.touchscreen.tap(w.x, w.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the wave selected ${await label(page)}`);
+    const a1 = (await page.evaluate(handlesNow)).find((h) => h.id === 'a1');
+    must(a1, 'test setup: the wave has no middle anchor handle');
+    await page.touchscreen.tap(a1.x, a1.y);
+    await page.waitForTimeout(50);
+    await bar('the Node tool', ['Deselect', 'Smooth', 'Close', 'Relative', 'Reverse', 'More']);
+    // A press 20 pt from the middle anchor takes it: the drag moves that anchor (the grab kept).
+    await snapOff(page);
+    const k = await page.evaluate(unitPx);
+    const before = await source(page);
+    await dragOnCanvas(page, 'mouse', { x: a1.x + 20, y: a1.y }, { x: 0, y: 5 * k }, 6);
+    await page.waitForTimeout(50);
+    if (await source(page) !== before.replace('Q 40 32, 50 44', 'Q 40 32, 50 49')) problems.push(`a press 20 pt from the middle anchor did not move it:\n${await source(page)}`);
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M3 S2: arcs, holes and the donut ───────────────────────────────────────────────────────
+
+// Runs in the page: root units → client px, through the root's getScreenCTM.
+function rootToScreen(pts) {
+  const m = document.querySelector('.draw-host').shadowRoot.querySelector('svg').getScreenCTM();
+  return pts.map(([x, y]) => {
+    const p = new DOMPoint(x, y).matrixTransform(m);
+    return { x: p.x, y: p.y };
+  });
+}
+// Runs in the page: the overlay's shown ghost arcs, each 400 points along it in client px.
+function ghostsNow() {
+  return [...document.querySelectorAll('path.draw-ghost')].filter((p) => p.style.display !== 'none').map((p) => {
+    const m = p.getScreenCTM();
+    const L = p.getTotalLength();
+    const pts = [];
+    for (let i = 0; i <= 400; i++) {
+      const q = p.getPointAtLength((L * i) / 400).matrixTransform(m);
+      pts.push([q.x, q.y]);
+    }
+    return { flags: p.getAttribute('data-flags'), pts };
+  });
+}
+// Runs in the page: the overlay's shown text marks of a class (their anchor point, client px).
+function overlayTexts(cls) {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll(`text.${cls}`)].filter((t) => t.style.display !== 'none').map((t) => ({ text: t.textContent, on: t.classList.contains('on'), x: +t.getAttribute('x') + o.x, y: +t.getAttribute('y') + o.y }));
+}
+// Runs in the page: the shown direction arrows: centre (s = 4.5 px behind the tip's 1.7s, from the base's
+// middle), direction in degrees, and whether it is an inner one, client px.
+function arrowsNow() {
+  const o = document.querySelector('.draw-overlay').getBoundingClientRect();
+  return [...document.querySelectorAll('polygon.draw-dir')].filter((p) => p.style.display !== 'none').map((p) => {
+    const [tip, b1, b2] = p.getAttribute('points').split(' ').map((q) => q.split(',').map(Number));
+    const base = [(b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2];
+    const len = Math.hypot(tip[0] - base[0], tip[1] - base[1]);
+    const u = [(tip[0] - base[0]) / len, (tip[1] - base[1]) / len];
+    return { x: base[0] + 4.5 * u[0] + o.x, y: base[1] + 4.5 * u[1] + o.y, deg: (Math.atan2(u[1], u[0]) * 180) / Math.PI, inner: p.classList.contains('draw-dir--in') };
+  });
+}
+/** The screen points of the arc from (x0, y0) to (x1, y1) with these flags: `n` along it, in root units → screen. */
+async function arcOnScreen(page, [x0, y0, r, x1, y1], large, sweep, n = 19) {
+  const c = arcCenter(x0, y0, r, r, 0, large, sweep, x1, y1);
+  return page.evaluate(rootToScreen, Array.from({ length: n }, (_, i) => arcPoint(c, c.t1 + (c.dt * i) / (n - 1))));
+}
+const PAIRS = [[false, false], [false, true], [true, false], [true, true]];
+const flagText = (L, S) => `${+L} ${+S}`;
+
+// lab/arcs.svg, its path in the Node tool: three dashed ghost arcs, each within 1 px of the 19 screen
+// points (computed here from arcCenter and arcPoint, through the root's getScreenCTM) of the arc its
+// flags give; the labels "0 0", "1 0" and "1 1" beside the ghosts and "0 1" (.on) beside the arc,
+// each within 2 px of where they go (10 px out from the chord's midpoint, 4 px lower, inside the
+// canvas). A tap on each ghost's own midpoint sets its pair, one "Set arc flags" each, and the arc the
+// canvas draws then passes within 1 px of that midpoint. Then the end anchor dragged from (76, 50) to
+// (70, 40) rewrites only those two numbers, and the ghosts follow it.
+async function ghostArcsSwitchTheFlags(browser, origin) {
+  const F = LAB('arcs.svg');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const p = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 35 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the arc selected ${await label(page)}`);
+    await page.locator('.draw-node-tool').tap();
+    await page.waitForTimeout(50);
+    const ghostsSit = async (arc, now, as) => {
+      const ghosts = await page.evaluate(ghostsNow);
+      const want = PAIRS.filter(([L, S]) => flagText(L, S) !== now).map(([L, S]) => flagText(L, S));
+      must(JSON.stringify(ghosts.map((g) => g.flags).sort()) === JSON.stringify(want), `${as}: the ghosts are ${ghosts.map((g) => g.flags)}, not ${want}`);
+      for (const g of ghosts) {
+        const [L, S] = g.flags.split(' ').map((f) => f === '1');
+        const pts = await arcOnScreen(page, arc, L, S);
+        const far = Math.max(...pts.map(({ x, y }) => Math.min(...g.pts.map(([a, b]) => Math.hypot(a - x, b - y)))));
+        must(far <= 1, `${as}: the ${g.flags} ghost passes ${far.toFixed(2)} px from the arc those flags draw`);
+      }
+    };
+    const ARC = [24, 50, 30, 76, 50];
+    await ghostsSit(ARC, '0 1', 'lab/arcs.svg');
+    // The labels: at each arc's midpoint, 10 px out from the chord's midpoint, 4 px lower, inside the canvas.
+    const host = await page.evaluate(() => document.querySelector('.draw-host').getBoundingClientRect().toJSON());
+    const [chord] = await page.evaluate(rootToScreen, [[50, 50]]);
+    const labels = await page.evaluate(overlayTexts, 'draw-flag-label');
+    must(labels.length === 4, `${labels.length} flag labels`);
+    for (const [L, S] of PAIRS) {
+      const [mid] = await arcOnScreen(page, ARC, L, S, 3).then((m) => [m[1]]);
+      const len = Math.hypot(mid.x - chord.x, mid.y - chord.y);
+      const at = { x: Math.min(Math.max(mid.x + (10 * (mid.x - chord.x)) / len, host.x + 8), host.x + host.width - 8), y: Math.min(Math.max(mid.y + (10 * (mid.y - chord.y)) / len + 4, host.y + 13), host.y + host.height - 4) };
+      const l = labels.find((q) => q.text === flagText(L, S));
+      must(l && nearPt(l, at, 2) && l.on === (flagText(L, S) === '0 1'), `the ${flagText(L, S)} label is ${JSON.stringify(l)}, not at ${JSON.stringify(at)}${flagText(L, S) === '0 1' ? ' (.on)' : ''}`);
+    }
+    // A tap on each ghost's midpoint: its pair, one entry, and the canvas's arc passes through it.
+    for (const [L, S] of [[false, false], [true, false], [true, true]]) {
+      const [, mid] = await arcOnScreen(page, ARC, L, S, 3);
+      await page.touchscreen.tap(mid.x, mid.y);
+      await page.waitForTimeout(50);
+      const want = F.replace('A 30 30 0 0 1 76 50', `A 30 30 0 ${+L} ${+S} 76 50`);
+      must(await source(page) === want, `the tap on the ${flagText(L, S)} ghost wrote:\n${await source(page)}`);
+      must(await undo.getAttribute('aria-label') === 'Undo Set arc flags', `the tap is ${await undo.getAttribute('aria-label')}`);
+      const [d] = await page.evaluate(pathDistances, { pts: [mid] });
+      must(d <= 1, `the drawn ${flagText(L, S)} arc passes ${d.toFixed(2)} px from the ghost's midpoint`);
+    }
+    for (let i = 0; i < 3; i++) await undo.tap();
+    must(await source(page) === F, `three undos left:\n${await source(page)}`);
+    // The end anchor dragged from (76, 50) to (70, 40): only those numbers, and the ghosts follow.
+    await snapOff(page);
+    const end = (await page.evaluate(handlesNow)).find((h) => h.id === 'a1');
+    const [e0, e1] = await page.evaluate(rootToScreen, [[76, 50], [70, 40]]);
+    must(end && nearPt(end, e0), `the end anchor is drawn at ${JSON.stringify(end)}, not (76, 50) = ${JSON.stringify(e0)}`);
+    await dragOnCanvas(page, 'mouse', end, { x: e1.x - end.x, y: e1.y - end.y }, 6);
+    await page.waitForTimeout(50);
+    must(await source(page) === F.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 0 1 70 40'), `the end anchor dragged to (70, 40) wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Move point', `the drag is ${await undo.getAttribute('aria-label')}`);
+    await ghostsSit([24, 50, 30, 70, 40], '0 1', 'the end moved');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
+const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z';
+const PAPER = (px) => px.every((v) => v >= 200); // the light checkerboard, 238 or 255
+
+// lab/arcs--holes.svg, its path in the Node tool: arrowheads at the screen points of (50, 14), pointing
+// right (± 10°), and (50, 86), pointing left. Inspect's Fill rule → Evenodd: the pixel at (50, 55), in
+// the keyhole, is the paper's and (50, 20) is #264653; Nonzero: (50, 55) is #264653 again. An inner
+// anchor tapped, then Reverse: the source holds SVG Lab's HOLE_REV, (50, 55) is the paper's again, and
+// the inner arrow on the bottom line, which sits on it just past its bend handle at (50, 66) towards
+// its end (clear of the handle), now points right; one undo gives the file back.
+async function holesCutTwoWays(browser, origin) {
+  const F = LAB('arcs--holes.svg');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs--holes.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const p = await page.evaluate(elementPoint, { sel: 'path', x: 50, y: 20 });
+    await page.touchscreen.tap(p.x, p.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the ring selected ${await label(page)}`);
+    await page.locator('.draw-node-tool').tap();
+    await page.waitForTimeout(50);
+    const arrowNear = async (x, y) => {
+      const [at] = await page.evaluate(rootToScreen, [[x, y]]);
+      const arrows = await page.evaluate(arrowsNow);
+      return arrows.map((a) => ({ ...a, off: Math.hypot(a.x - at.x, a.y - at.y) })).sort((a, b) => a.off - b.off)[0];
+    };
+    const top = await arrowNear(50, 14);
+    const bottom = await arrowNear(50, 86);
+    must(top && top.off <= 2 && Math.abs(top.deg) <= 10 && !top.inner, `the arrow near (50, 14) is ${JSON.stringify(top)}: not there, pointing right`);
+    must(bottom && bottom.off <= 2 && Math.abs(Math.abs(bottom.deg) - 180) <= 10 && !bottom.inner, `the arrow near (50, 86) is ${JSON.stringify(bottom)}: not there, pointing left`);
+    // The bottom line's inner arrow: on the line, past its bend handle (at the midpoint, radius 4.5) by more
+    // than the handle's radius and its own half-size (4.5), before the line's end, the way the line runs.
+    const lineArrow = async (dir) => {
+      const [mid, end] = await page.evaluate(rootToScreen, [[50, 66], [50 + 11 * dir, 66]]);
+      const arrows = await page.evaluate(arrowsNow);
+      return { mid, a: arrows.find((a) => a.inner && Math.abs(a.y - mid.y) <= 2 && (a.x - mid.x) * dir >= 9 && (end.x - a.x) * dir > 0) ?? null };
+    };
+    const line = await lineArrow(-1);
+    must(line.a && Math.abs(Math.abs(line.a.deg) - 180) <= 10, `the inner bottom line's arrow is not on it past its bend handle (${JSON.stringify(line.mid)}), pointing left: ${JSON.stringify(await page.evaluate(arrowsNow))}`);
+    const pixels = async () => {
+      await toPeek(page);
+      const [hole, ring] = await page.evaluate(rootToScreen, [[50, 55], [50, 20]]);
+      return { hole: await pixelAt(page, hole), ring: await pixelAt(page, ring) };
+    };
+    const INK = hex('#264653');
+    let px = await pixels();
+    must(near3(px.hole, INK, 8) && near3(px.ring, INK, 8), `nonzero, both clockwise: the keyhole is drawn ${px.hole}, the ring ${px.ring}, not both #264653`);
+    await showInspect(page);
+    await inspectSegment(page, 'fill-rule', 'Evenodd');
+    must(await source(page) === F.replace('fill-rule="nonzero"', 'fill-rule="evenodd"'), `Evenodd wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set fill-rule', `Evenodd is ${await undo.getAttribute('aria-label')}`);
+    px = await pixels();
+    must(PAPER(px.hole) && near3(px.ring, INK, 8), `evenodd: the keyhole is drawn ${px.hole} (not the paper), the ring ${px.ring}`);
+    await showInspect(page);
+    await inspectSegment(page, 'fill-rule', 'Nonzero');
+    must(await source(page) === F, `Nonzero did not give the file back:\n${await source(page)}`);
+    px = await pixels();
+    must(near3(px.hole, INK, 8), `nonzero again: the keyhole is drawn ${px.hole}, not #264653`);
+    // An inner anchor, then Reverse.
+    const a6 = (await page.evaluate(handlesNow)).find((h) => h.id === 'a6');
+    const [at6] = await page.evaluate(rootToScreen, [[61, 66]]);
+    must(a6 && nearPt(a6, at6), `the inner anchor a6 is drawn at ${JSON.stringify(a6)}, not (61, 66)`);
+    await page.touchscreen.tap(a6.x, a6.y);
+    await page.waitForTimeout(50);
+    await page.locator('.draw-ctx-btn[aria-label="Reverse"]').tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === F.replace(HOLE_IN, HOLE_REV), `Reverse on the inner subpath wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Reverse', `Reverse is ${await undo.getAttribute('aria-label')}`);
+    px = await pixels();
+    must(PAPER(px.hole) && near3(px.ring, INK, 8), `the inner subpath reversed: the keyhole is drawn ${px.hole} (not the paper), the ring ${px.ring}`);
+    const turned = await lineArrow(1);
+    must(turned.a && Math.abs(turned.a.deg) <= 10, `after Reverse the bottom line's arrow is not on it past its bend handle (${JSON.stringify(turned.mid)}), pointing right: ${JSON.stringify(await page.evaluate(arrowsNow))}`);
+    await undo.tap();
+    must(await source(page) === F, `undo did not give the file back:\n${await source(page)}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+const DONUT_ATTRS = ` xmlns:draw="${DRAW_NS_URI}" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28"`;
+const DETACHED_NOTICE = 'It’s a plain shape now: its generator inputs were dropped.';
+
+// lab/arcs--donut.svg: a tap on the first slice, Inspect → Edit as donut: the source is the file with
+// the four attributes on its root, and the comment's block in the code holds four number tokens.
+// Boundary 0 is drawn at the screen point of (66.5, 72.7) (± 1 px); dragged round the ring to 70% of
+// the turn, the tooltip reads "64 | 1" above the finger, the comment reads data: 64, 1, 20, 15, the
+// first slice's drawn arc ends where the generator says (its getPointAtLength end within 0.5 px) and
+// is drawn the long way round (its middle on the far side of the centre from its chord), and the %
+// labels read 64%, 1%, 20%, 15%; one entry. A scrub of a slice's own d number detaches it: M2's
+// notice, the root's draw: attributes and xmlns:draw gone, and the comment's tokens gone; one undo
+// brings all of it back.
+async function theDonutRegeneratesFromItsData(browser, origin) {
+  const F = LAB('arcs--donut.svg');
+  const ADOPTED = F.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100"${DONUT_ATTRS}>`);
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), F)).ok, 'test setup: lab/arcs--donut.svg did not open');
+    await twoFrames(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const ring = (f) => [50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI)];
+    const [first] = await page.evaluate(rootToScreen, [ring(0.2)]);
+    await page.touchscreen.tap(first.x, first.y);
+    await page.waitForTimeout(50);
+    must(await label(page) === '<path>', `test setup: a tap on the first slice selected ${await label(page)}`);
+    await showInspect(page);
+    await page.locator('.draw-inspect button', { hasText: /^Edit as donut$/ }).tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === ADOPTED, `Edit as donut wrote:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Edit as donut', `Edit as donut is ${await undo.getAttribute('aria-label')}`);
+    await page.locator('.draw-tabs button', { hasText: 'Code' }).tap();
+    await showCode(page);
+    const comment = page.locator('.cv-block', { hasText: '<!-- data:' });
+    const tokens = () => comment.locator('.cv-number').allTextContents();
+    must(JSON.stringify(await tokens()) === '["40","25","20","15"]', `the comment's block holds the number tokens ${JSON.stringify(await tokens())}`);
+    await toPeek(page);
+    // Boundary 0, then round the ring to 70% of the turn.
+    const b0 = (await page.evaluate(handlesNow)).find((h) => h.id === 'donut-b0');
+    const [at0] = await page.evaluate(rootToScreen, [[66.5, 72.7]]);
+    must(b0 && nearPt(b0, at0), `boundary 0 is drawn at ${JSON.stringify(b0)}, not (66.5, 72.7) = ${JSON.stringify(at0)}`);
+    const path = await page.evaluate(rootToScreen, [0.45, 0.5, 0.55, 0.6, 0.65, 0.7].map(ring));
+    await page.mouse.move(b0.x, b0.y);
+    await page.mouse.down();
+    let during = null;
+    for (const [i, q] of path.entries()) {
+      await page.mouse.move(q.x, q.y, { steps: 2 });
+      if (i === path.length - 1) {
+        during = await page.evaluate(() => {
+          const t = document.querySelector('.draw-tip');
+          return { text: t && !t.hidden ? t.textContent : null, bottom: t?.getBoundingClientRect().bottom ?? null };
+        });
+      }
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(50);
+    const finger = path[path.length - 1];
+    must(during?.text === '64 | 1' && during.bottom !== null && during.bottom < finger.y, `during the drag the tooltip read ${JSON.stringify(during)}, not "64 | 1" above the finger at ${finger.y.toFixed(1)}`);
+    must((await source(page)).includes('<!-- data: 64, 1, 20, 15 -->'), `the comment reads:\n${await source(page)}`);
+    must(await undo.getAttribute('aria-label') === 'Undo Set donut values', `the drag is ${await undo.getAttribute('aria-label')}`);
+    const want = donutSlices([64, 1, 20, 15], 50, 50, 28);
+    const [ex, ey] = parsePath(want[0]).segs[1].args.slice(5);
+    const [end] = await page.evaluate(rootToScreen, [[ex, ey]]);
+    const drawn = await page.evaluate(() => {
+      const p = document.querySelector('.draw-host').shadowRoot.querySelectorAll('path')[0];
+      const m = p.getScreenCTM();
+      const L = p.getTotalLength();
+      const at = (t) => {
+        const q = p.getPointAtLength(L * t).matrixTransform(m);
+        return { x: q.x, y: q.y };
+      };
+      return { start: at(0), mid: at(0.5), end: at(1) };
+    });
+    must(nearPt(drawn.end, end, 0.5), `the first slice's drawn arc ends at ${JSON.stringify(drawn.end)}, not where the generator says, ${JSON.stringify(end)}`);
+    const [centre] = await page.evaluate(rootToScreen, [[50, 50]]);
+    const chordMid = { x: (drawn.start.x + drawn.end.x) / 2, y: (drawn.start.y + drawn.end.y) / 2 };
+    must((drawn.mid.x - centre.x) * (chordMid.x - centre.x) + (drawn.mid.y - centre.y) * (chordMid.y - centre.y) < 0, `the first slice is not drawn the long way round: its middle ${JSON.stringify(drawn.mid)} is on its chord's side of the centre`);
+    const pct = (await page.evaluate(overlayTexts, 'draw-donut-label')).map((l) => l.text);
+    must(JSON.stringify(pct) === '["64%","1%","20%","15%"]', `the % labels read ${pct}`);
+    // A scrub of a slice's own d number: a hand edit, so the donut is detached.
+    const dragged = await source(page);
+    await showCode(page);
+    const sliceNumber = page.locator('.cv-block', { hasText: '<path d=' }).nth(2).locator('.cv-number').first();
+    await scrubToken(page, sliceNumber, 3);
+    await page.waitForTimeout(50);
+    must(await toast(page) === DETACHED_NOTICE, `the notice after the scrub is ${JSON.stringify(await toast(page))}`);
+    must(!(await source(page)).includes('draw:'), `the root keeps Draw's attributes:\n${await source(page)}`);
+    must(JSON.stringify(await tokens()) === '[]', `the comment still holds tokens ${JSON.stringify(await tokens())}`);
+    await undo.tap();
+    await page.waitForTimeout(50);
+    must(await source(page) === dragged, `one undo did not bring the donut back:\n${await source(page)}`);
+    must(JSON.stringify(await tokens()) === '["64","1","20","15"]', `after the undo the comment's tokens are ${JSON.stringify(await tokens())}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// ── P1-M3 S3: booleans ──────────────────────────────────────────────────────────────────────────
+
+const BOOL_RECT_E2E = '<rect id="a" x="10" y="10" width="50" height="50" fill="#e76f51"/>';
+const BOOL_CIRCLE_E2E = '<circle cx="0" cy="0" r="25" fill="#2a9d8f" transform="translate(60 60)"/>';
+const BOOL_E2E = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${BOOL_RECT_E2E}\n  ${BOOL_CIRCLE_E2E}\n  <text x="70" y="96" font-size="6">Hi</text>\n</svg>`;
+
+// A rect and a circle placed by its transform, both taken by a marquee. Before any boolean, no
+// booleans- or paper-fallback- script has loaded, and the built index.html names neither. More →
+// Union: a booleans- script loads (and no paper-fallback-); the rect's element becomes <path id="a"
+// fill="#e76f51" d="…"/> in its place, the circle and its leading whitespace gone, one "Union" entry;
+// on a 20 × 20 grid over the two shapes' box (pixels within 2 px of either outline skipped) each
+// pixel is #e76f51 where the union covers and the paper's elsewhere; undo gives the file back byte
+// for byte. Subtract, Intersect and Exclude the same way, each after an undo. A selection with a
+// <text> in it refuses with the notice and writes nothing.
+async function booleansCombineWhatIsDrawn(browser, origin) {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  must(!/booleans-|paper-fallback-/.test(html), 'the built index.html names a boolean chunk');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), BOOL_E2E)).ok, 'test setup: the file did not open');
+    await toPeek(page);
+    // The boolean chunks fetched: the page's resource entries (since it loaded) and the requests seen since, by file name.
+    const requested = [];
+    page.on('request', (r) => requested.push(new URL(r.url()).pathname.split('/').pop()));
+    const chunks = async () => [...new Set([...requested, ...(await page.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname.split('/').pop())))])].filter((n) => /^(booleans|paper-fallback)-.*\.js$/.test(n));
+    must((await chunks()).length === 0, `before any boolean, ${(await chunks()).join(', ')} loaded`);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const marquee = async (from, to) => {
+      const [a, b] = await page.evaluate(rootToScreen, [from, to]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      for (let i = 1; i <= 8; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / 8, a.y + ((b.y - a.y) * i) / 8);
+      await page.mouse.up();
+    };
+    const LABEL = { union: 'Union', difference: 'Subtract', intersection: 'Intersect', exclusion: 'Exclude' };
+    const COVERS = { union: (r, c) => r || c, difference: (r, c) => r && !c, intersection: (r, c) => r && c, exclusion: (r, c) => r !== c };
+    // The grid over the two shapes' box (10 to 85 both ways), in root units, with how far each point is from either outline.
+    const grid = [];
+    for (let j = 0; j < 20; j++) {
+      for (let i = 0; i < 20; i++) {
+        const [x, y] = [10 + (75 * (i + 0.5)) / 20, 10 + (75 * (j + 0.5)) / 20];
+        const inRect = x > 10 && x < 60 && y > 10 && y < 60;
+        const toRect = inRect ? Math.min(x - 10, 60 - x, y - 10, 60 - y) : Math.hypot(Math.max(10 - x, 0, x - 60), Math.max(10 - y, 0, y - 60));
+        const r = Math.hypot(x - 60, y - 60);
+        grid.push({ x, y, inRect, inCircle: r < 25, edge: Math.min(toRect, Math.abs(r - 25)) });
+      }
+    }
+    const INK = hex('#e76f51');
+    for (const op of ['union', 'difference', 'intersection', 'exclusion']) {
+      await marquee([88, 88], [4, 4]);
+      must(await label(page) === '2 selected', `${LABEL[op]}: the marquee selected ${await label(page)}`);
+      await openMore(page);
+      await page.locator('.draw-more-row', { hasText: new RegExp(`^${LABEL[op]}$`) }).tap();
+      await until(`${LABEL[op]} writes`, async () => (await source(page)) !== BOOL_E2E, 5000);
+      const src = await source(page);
+      const d = /<path id="a" fill="#e76f51" d="([^"]+)"\/>/.exec(src)?.[1];
+      must(d && src === BOOL_E2E.replace(BOOL_RECT_E2E, `<path id="a" fill="#e76f51" d="${d}"/>`).replace(`\n  ${BOOL_CIRCLE_E2E}`, ''), `${LABEL[op]} wrote:\n${src}`);
+      must(await undo.getAttribute('aria-label') === `Undo ${LABEL[op]}`, `${LABEL[op]} is ${await undo.getAttribute('aria-label')}`);
+      if (op === 'union') {
+        const loaded = await chunks();
+        must(loaded.some((n) => n.startsWith('booleans-')) && !loaded.some((n) => n.startsWith('paper-fallback-')), `the first Union loaded ${loaded.join(', ') || 'no boolean chunk'}`);
+      }
+      // Where it draws: one screenshot of the box, the overlay's marks hidden.
+      await toPeek(page);
+      const [o, k] = await page.evaluate(rootToScreen, [[0, 0], [1, 0]]);
+      const perUnit = Math.hypot(k.x - o.x, k.y - o.y);
+      const pts = await page.evaluate(rootToScreen, grid.map((g) => [g.x, g.y]));
+      const [tl, br] = await page.evaluate(rootToScreen, [[10, 10], [85, 85]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x) + 1, height: Math.ceil(br.y - tl.y) + 1 };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const wrong = [];
+      grid.forEach((g, n) => {
+        if (g.edge * perUnit < 2) return;
+        const px = shot.rgb(Math.round(pts[n].x - clip.x), Math.round(pts[n].y - clip.y));
+        const covered = COVERS[op](g.inRect, g.inCircle);
+        if (covered ? !near3(px, INK, 6) : !PAPER(px)) wrong.push(`(${g.x.toFixed(1)}, ${g.y.toFixed(1)}) ${covered ? 'covered' : 'uncovered'}: ${px}`);
+      });
+      must(wrong.length === 0, `${LABEL[op]}: ${wrong.length} pixel(s) drawn wrong: ${wrong.slice(0, 6).join('; ')}`);
+      await undo.tap();
+      must(await source(page) === BOOL_E2E, `undo after ${LABEL[op]} did not give the file back:\n${await source(page)}`);
+    }
+    // A selection with a <text> in it refuses, and writes nothing.
+    await marquee([99, 99], [1, 1]);
+    must(await label(page) === '3 selected', `the marquee over everything selected ${await label(page)}`);
+    await openMore(page);
+    await page.locator('.draw-more-row', { hasText: /^Union$/ }).tap();
+    await page.locator('.draw-toast').waitFor();
+    must(await page.locator('.draw-toast').textContent() === 'Convert text to paths first (P1-M4).', `with the text: ${await page.locator('.draw-toast').textContent()}`);
+    must(await source(page) === BOOL_E2E, 'the refused Union wrote something');
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   });
 }

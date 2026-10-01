@@ -1,7 +1,9 @@
 // The overlay's SVG marks, drawn from the model (src/interact/overlay-model.ts): selection outlines,
 // the marquee, coordinate guides, snap lines, the user's guides and their pills, the local grid,
 // the rotation guide, a gradient's guides (Edit on canvas: its unit box, line, circle and focus
-// arm) and the handles, with SVG Lab's look. The model is in host px; every
+// arm), a path's arms and mirror guides (the Node tool and the Pen, P1-M3), an arc's ghost arcs and
+// flag labels, a path's direction arrows and a donut's percentage labels (P1-M3 S2) and the handles,
+// with SVG Lab's look. The model is in host px; every
 // coordinate written here is in the overlay's own px (the host's offset added), so an outline's
 // points read as where it is drawn. Every element is reused between frames (a drag frame changes
 // attributes, never the element list), and only what changed is written.
@@ -23,9 +25,9 @@ class Pool {
   #tag: string;
   #cls: string;
   #els: SVGElement[] = [];
-  constructor(parent: SVGElement, tag: string, cls: string) {
+  constructor(parent: SVGElement, tag: string, cls: string, group = `${cls}-group`) {
     this.#g = document.createElementNS(SVG_NS, 'g');
-    this.#g.setAttribute('class', `${cls}-group`);
+    this.#g.setAttribute('class', group);
     parent.append(this.#g);
     this.#tag = tag;
     this.#cls = cls;
@@ -59,6 +61,8 @@ export const HANDLE = {
 
 /** The centre handle's dot (SVG Lab's). */
 export const CENTRE_DOT_R = 2.2;
+/** A mirror guide's dashed dot (SVG Lab's .refl), px. */
+export const MIRROR_DOT_R = 5.5;
 
 export class Marks {
   #root: SVGGElement;
@@ -74,11 +78,18 @@ export class Marks {
   #gradLine: Pool;
   #gradRing: Pool;
   #gradArm: Pool;
+  #arms: Pool;
+  #mirrorArms: Pool;
+  #mirrorDots: Pool;
+  #ghosts: Pool;
+  #arrows: Pool;
   #pills: Pool;
   #squares: Pool;
   #circles: Pool;
   #dots: Pool;
   #labels: Pool;
+  #flagLabels: Pool;
+  #donutLabels: Pool;
 
   constructor(svg: SVGSVGElement) {
     this.#root = document.createElementNS(SVG_NS, 'g');
@@ -96,11 +107,18 @@ export class Marks {
     this.#gradLine = new Pool(r, 'line', 'draw-grad-guide');
     this.#gradRing = new Pool(r, 'polygon', 'draw-grad-guide');
     this.#gradArm = new Pool(r, 'line', 'draw-grad-arm');
+    this.#arms = new Pool(r, 'line', 'draw-arm');
+    this.#mirrorArms = new Pool(r, 'line', 'draw-arm draw-arm--mirror', 'draw-mirror-arm-group');
+    this.#mirrorDots = new Pool(r, 'circle', 'draw-mirror');
+    this.#ghosts = new Pool(r, 'path', 'draw-ghost');
+    this.#arrows = new Pool(r, 'polygon', 'draw-dir');
     this.#pills = new Pool(r, 'rect', 'draw-pill');
     this.#squares = new Pool(r, 'rect', 'draw-hd');
     this.#circles = new Pool(r, 'circle', 'draw-hd');
     this.#dots = new Pool(r, 'circle', 'draw-hd-dot');
     this.#labels = new Pool(r, 'text', 'draw-mark-label');
+    this.#flagLabels = new Pool(r, 'text', 'draw-flag-label');
+    this.#donutLabels = new Pool(r, 'text', 'draw-donut-label');
   }
 
   #o: Point = { x: 0, y: 0 }; // the host's top-left in the overlay's px
@@ -135,6 +153,27 @@ export class Marks {
     poly(this.#gradRing, grad?.ring ?? null);
     this.#lines(this.#gradLine, grad?.line ? [grad.line] : []);
     this.#lines(this.#gradArm, grad?.arm ? [grad.arm] : []);
+    const paths = model.paths;
+    this.#lines(this.#arms, paths?.arms ?? []);
+    this.#lines(this.#mirrorArms, paths?.mirrors ?? []);
+    const dots = this.#mirrorDots.take(paths?.dots.length ?? 0);
+    paths?.dots.forEach((p, i) => {
+      put(dots[i], 'cx', X(p.x));
+      put(dots[i], 'cy', Y(p.y));
+      put(dots[i], 'r', String(MIRROR_DOT_R));
+    });
+    // An arc's ghosts (P1-M3 S2): each as M … C … in overlay px.
+    const ghosts = this.#ghosts.take(paths?.ghosts.length ?? 0);
+    paths?.ghosts.forEach((g, i) => {
+      const pt = (p: Point) => `${X(p.x)} ${Y(p.y)}`;
+      put(ghosts[i], 'd', `M ${pt(g.start)}${g.cubics.map(([a, b, c]) => ` C ${pt(a)} ${pt(b)} ${pt(c)}`).join('')}`);
+      put(ghosts[i], 'data-flags', g.flags);
+    });
+    const arrows = this.#arrows.take(paths?.arrows.length ?? 0);
+    paths?.arrows.forEach((a, i) => {
+      put(arrows[i], 'points', a.points.map((p) => `${X(p.x)},${Y(p.y)}`).join(' '));
+      put(arrows[i], 'class', a.inner ? 'draw-dir draw-dir--in' : 'draw-dir');
+    });
     const pills = this.#pills.take(model.guides.length);
     model.guides.forEach((g, i) => {
       const [w, h] = g.axis === 'v' ? [20, 44] : [44, 20];
@@ -147,6 +186,21 @@ export class Marks {
     });
     this.#handles(model.handles);
     this.#text([...(model.coords?.labels ?? []), ...(local?.labels ?? []), ...(grad?.labels ?? [])]);
+    const flags = this.#flagLabels.take(paths?.flags.length ?? 0);
+    paths?.flags.forEach((f, i) => {
+      put(flags[i], 'x', X(f.at.x));
+      put(flags[i], 'y', Y(f.at.y));
+      put(flags[i], 'text-anchor', 'middle');
+      put(flags[i], 'class', f.on ? 'draw-flag-label on' : 'draw-flag-label');
+      if (flags[i].textContent !== f.text) flags[i].textContent = f.text;
+    });
+    const donut = this.#donutLabels.take(paths?.donut.length ?? 0);
+    paths?.donut.forEach((l, i) => {
+      put(donut[i], 'x', X(l.at.x));
+      put(donut[i], 'y', Y(l.at.y));
+      put(donut[i], 'text-anchor', 'middle');
+      if (donut[i].textContent !== l.text) donut[i].textContent = l.text;
+    });
   }
 
   #lines(pool: Pool, lines: readonly Line[]): void {

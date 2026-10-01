@@ -4,8 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc, descendants, findAttr, NS, type Doc, type ElementNode, type LeafNode } from '../../model/doc.ts';
-import { ENUMS, decimalsOf, tokenizeAttr, tokenizeText, type AttrRef, type Token } from '../../code/tokens.ts';
+import { ENUMS, decimalsOf, tokenizeAttr, tokenizeText, type AttrRef, type NumberToken, type Token } from '../../code/tokens.ts';
+import { codeBlocks } from '../../code/blocks.ts';
+import { readFileSync } from 'node:fs';
 import { applyTokenEdit } from '../../code/edit.ts';
+import { linear } from '../timing.ts';
 
 const SVG = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
 
@@ -51,11 +54,12 @@ const kinds = (ts: Token[]): string[] => ts.map((t) => t.kind);
 test('path data: every argument, glued numbers apart, arc flags as 0/1 keywords, nothing after an error', () => {
   const doc = load('<path d="M10,20L30-40.5.5 6a5 5 0 0110 10z"/><path d="M1 2 L3 x 5"/><path d="M1e2 3"/>');
   const ts = attr(doc, 'path', 'd');
-  assert.deepEqual(texts(ts), ['10', '20', '30', '-40.5', '.5', '6', '5', '5', '0', '0', '1', '10', '10']);
-  assert.deepEqual(kinds(ts).slice(8), ['number', 'enum', 'enum', 'number', 'number']);
-  const flag = ts[9];
+  // P1-M3: a <path>'s written L (and l, Q, q, C, c) is a token too; the implicit L after it and the a are not.
+  assert.deepEqual(texts(ts), ['10', '20', 'L', '30', '-40.5', '.5', '6', '5', '5', '0', '0', '1', '10', '10']);
+  assert.deepEqual(kinds(ts).slice(9), ['number', 'enum', 'enum', 'number', 'number']);
+  const flag = ts[10];
   assert.ok(flag.kind === 'enum' && flag.options === ENUMS['d.arcFlag']);
-  assert.deepEqual(texts(attr(doc, 'path', 'd', null, 1)), ['1', '2'], 'the failed segment and the tail are not tokens');
+  assert.deepEqual(texts(attr(doc, 'path', 'd', null, 1)), ['1', '2'], 'the failed segment (its letter too) and the tail are not tokens');
   const [e] = attr(doc, 'path', 'd', null, 2);
   assert.ok(e.kind === 'number' && e.value === 100 && e.decimals === 0 && e.prop === 'd');
 });
@@ -316,7 +320,7 @@ test('entity safety: a value written partly or wholly as a reference gets no tok
   assert.deepEqual(texts(attr(doc, 'rect', 'width')), ['2'], 'a reference that is only whitespace separates');
   assert.deepEqual(texts(attr(doc, 'rect', 'style')), ['red']);
   assert.deepEqual(attr(doc, 'rect', 'opacity'), []);
-  assert.deepEqual(texts(attr(doc, 'path', 'd')), ['2', '3', '4']);
+  assert.deepEqual(texts(attr(doc, 'path', 'd')), ['2', 'L', '3', '4'], 'a letter token is a letter, not a reference');
   const pts = attr(doc, 'polygon', 'points');
   assert.deepEqual(
     pts.map((t) => [t.text, t.start]),
@@ -358,4 +362,99 @@ test('a relative URL (value:url/relative): in a gradient’s href and xlink:href
   assert.deepEqual(kinds(attr(doc, 'rect', 'style', null, 1)), ['text:other.svg#g'], 'between the quotes, in style=""');
   assert.deepEqual(kinds(attr(doc, 'rect', 'fill', null, 2)), ['ref:g']);
   assert.deepEqual(kinds(attr(doc, 'rect', 'stroke', null, 3)), ['text:x.svg#y'], 'quoted by references, the URL’s own characters are still its token');
+});
+
+// ── P1-M3: a path's letter tokens and its numbers' labels ──────────────────────────────────────
+
+const LAB = new URL('../fixtures/corpus/lab/', import.meta.url);
+const labDoc = async (f: string) => load((await import('node:fs')).readFileSync(new URL(f, LAB), 'utf8').replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, ''));
+
+test('a <path>’s written L, l, Q, q, C and c letters are enum tokens over that one character, cycling L → Q → C, each with its segment’s index; M, H, V, S, T, A and Z letters and letter-less segments are plain text', async () => {
+  const paths = await labDoc('paths.svg');
+  const d = findAttr(nth(paths, 'path'), null, 'd')!.raw;
+  const ts = attr(paths, 'path', 'd');
+  assert.deepEqual(texts(ts), ['20', '75', 'L', '50', '30']);
+  const [L] = ts.filter((t) => t.kind === 'enum');
+  assert.ok(L.kind === 'enum' && L.segment === 1 && L.options.join() === 'L,Q,C' && L.prop === 'd');
+  assert.equal(d.slice(L.start, L.end), 'L', 'its span is the letter');
+  const logo = await labDoc('create-logo.svg');
+  const lt = attr(logo, 'path', 'd').filter((t) => t.kind === 'enum');
+  assert.deepEqual(lt.map((t) => [t.text, t.kind === 'enum' ? t.segment : -1]), [['Q', 1], ['Q', 2]]);
+  const doc = load('<path d="M0 0l10 10 20 20H5V6c1 1 2 2 3 3s1 1 2 2t4 4a1 1 0 0 1 2 2Z"/><animate attributeName="d" values="M0 0 L1 1;M0 0 L2 2"/><glyph d="M0 0 L1 1"/>');
+  const all = attr(doc, 'path', 'd');
+  assert.deepEqual(all.filter((t) => t.kind === 'enum' && t.segment !== undefined).map((t) => t.text), ['l', 'c'], 'the implicit l after it, H, V, s, t, a and Z are not tokens');
+  const l = all.find((t) => t.text === 'l')!;
+  assert.ok(l.kind === 'enum' && l.options.join() === 'l,q,c' && l.segment === 1, 'a relative letter cycles in lowercase');
+  assert.ok(!attr(doc, 'animate', 'values').some((t) => t.kind === 'enum'), 'an animation’s path values have no letter tokens');
+  assert.ok(!attr(doc, 'glyph', 'd').some((t) => t.kind === 'enum'), 'nor a glyph’s d (Draw edits d on <path> only)');
+});
+
+test('a path’s number tokens are labelled as SVG Lab’s dParts labels them: point N x/y (N counting anchors from 1, the M too), control x/y, control 1 and 2, an S’s control 2, an arc’s rx, ry and rotation', () => {
+  const doc = load('<path d="M 1 2 L 3 4 H 5 V 6 Q 7 8 9 10 C 11 12 13 14 15 16 S 17 18 19 20 T 21 22 A 23 24 25 0 1 26 27 Z"/>');
+  const labels = attr(doc, 'path', 'd').filter((t) => t.kind === 'number').map((t) => (t.kind === 'number' ? `${t.text}:${t.label}` : ''));
+  assert.deepEqual(labels, [
+    '1:point 1 x', '2:point 1 y', '3:point 2 x', '4:point 2 y', '5:point 3 x', '6:point 4 y',
+    '7:control x', '8:control y', '9:point 5 x', '10:point 5 y',
+    '11:control 1 x', '12:control 1 y', '13:control 2 x', '14:control 2 y', '15:point 6 x', '16:point 6 y',
+    '17:control 2 x', '18:control 2 y', '19:point 7 x', '20:point 7 y', '21:point 8 x', '22:point 8 y',
+    '23:rx', '24:ry', '25:rotation', '26:point 9 x', '27:point 9 y',
+  ]);
+});
+
+// ── a donut's data comment (P1-M3, code/comment-tokens) ─────────────────────────────────────────
+
+test('a donut’s data comment (draw:gen="donut") has one number token per value, 1 to 100, labelled "value N", spans in the comment’s raw text; lab/arcs.svg’s and lab/arcs--holes.svg’s comments, the lab’s file before Edit as donut, and a donut whose slices differ have none', () => {
+  const read = (f: string) => readFileSync(new URL(`../fixtures/corpus/lab/${f}`, import.meta.url), 'utf8');
+  const commentTokens = (src: string) => {
+    const r = parseDoc(src);
+    assert.ok(r.ok);
+    const out: Token[] = [];
+    for (const n of descendants(r.doc, r.doc.root)) {
+      if (n.kind !== 'comment') continue;
+      for (const t of tokenizeText(r.doc, n.id)) {
+        assert.equal(n.raw.slice(t.start, t.end), t.text);
+        out.push(t);
+      }
+    }
+    return out;
+  };
+  const lab = read('arcs--donut.svg');
+  const adopted = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  const ts = commentTokens(adopted);
+  assert.deepEqual(texts(ts), ['40', '25', '20', '15']);
+  assert.deepEqual(ts.map((t) => (t as NumberToken).label), ['value 1', 'value 2', 'value 3', 'value 4']);
+  assert.deepEqual(ts.map((t) => [t.kind, t.prop, (t as NumberToken).min, (t as NumberToken).max, t.start]), [
+    ['number', 'data', 1, 100, 11], ['number', 'data', 1, 100, 15], ['number', 'data', 1, 100, 19], ['number', 'data', 1, 100, 23],
+  ], 'the span counts from the comment’s <!--');
+  // The code view's block for the comment holds them (blocks.ts, leafBlock).
+  const r = parseDoc(adopted);
+  assert.ok(r.ok);
+  const block = codeBlocks(r.doc).find((b) => r.doc.nodes.get(b.node)!.kind === 'comment')!;
+  assert.deepEqual(block.tokens.map((t) => block.text.slice(t.start, t.end)), ['40', '25', '20', '15']);
+  // Every other comment stays plain.
+  assert.deepEqual(commentTokens(lab), [], 'SVG Lab’s export before Edit as donut');
+  assert.deepEqual(commentTokens(read('arcs.svg')), [], 'lab/arcs.svg: A rx ry rotation large-arc sweep x y');
+  assert.deepEqual(commentTokens(read('arcs--holes.svg')), []);
+  assert.deepEqual(commentTokens(adopted.replace('66.5 72.7" fill="none" stroke="#e76f51"', '66.5 72.8" fill="none" stroke="#e76f51"')), [], 'a slice that differs: not a donut, so a plain comment');
+  assert.deepEqual(commentTokens(adopted.replace('<!-- data: 40, 25, 20, 15 -->', '<!-- data: 40, 25, 20, 15 -->\n  <!-- data: 1, 2 -->')), [], 'two comments: not a donut');
+});
+
+// R5 (the P1-M3 review): every comment under an element carrying draw:gen="donut" asked whether that
+// element is a donut, which walks its children, so opening 8,000 of them took 10.8 s. Only the holder's
+// data comment (its first child, whitespace aside) asks now. A pass over a thousand comments takes under
+// a ms, so a run is twenty passes. Measured in node: about 11 and 48 ms over 1,000 and 4,000 comments;
+// the quadratic code took 2.6 s and 44 s (engine/test/timing.ts).
+test('the tokens of many comments under a donut holder take linear time: over 4,000 comments they cost under 6× what they cost over 1,000 (only the holder’s data comment asks whether it is a donut)', () => {
+  const file = (n: number) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28" viewBox="0 0 100 100">\n<!-- data: 40, 60 -->\n${'<path d="M 1 1"/>\n'.repeat(n)}${'<!-- a note -->\n'.repeat(n)}</svg>\n`;
+  const pass = (n: number) => {
+    const r = parseDoc(file(n));
+    assert.ok(r.ok);
+    const comments = [...descendants(r.doc, r.doc.root)].filter((c) => c.kind === 'comment').map((c) => c.id);
+    assert.equal(comments.length, n + 1);
+    assert.deepEqual(comments.flatMap((id) => tokenizeText(r.doc, id)), [], 'test setup: n slices for 2 values, then comments: not a donut, so every comment is plain');
+    return () => {
+      for (const id of comments) tokenizeText(r.doc, id);
+    };
+  };
+  linear('the comments’ tokens (tokenizeText)', pass(1000), pass(4000), { limit: 1000, reps: 20 });
 });

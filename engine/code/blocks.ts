@@ -121,7 +121,7 @@ function startBlock(doc: Doc, n: ElementNode): Block {
 function leafBlock(doc: Doc, n: LeafNode): Block {
   const text = n.src && !n.dirty ? doc.source.slice(n.src.start, n.src.end) : n.raw;
   const tokens: BlockToken[] = [];
-  if (text === n.raw && (n.kind === 'text' || n.kind === 'cdata')) {
+  if (text === n.raw && (n.kind === 'text' || n.kind === 'cdata' || n.kind === 'comment')) {
     const target: TokenTarget = { text: true };
     for (const t of tokenizeLeafRaw(doc, n, n.raw)) tokens.push({ start: t.start, end: t.end, token: t, target });
   }

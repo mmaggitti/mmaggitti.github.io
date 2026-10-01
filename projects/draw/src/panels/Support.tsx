@@ -2,7 +2,8 @@
 // status and note) at the top, then a summary by phase and by kind (hidden while searching, so the
 // rows found sit right under the field), then the rows. Capability and feature rows show their
 // name, which is what they are about. The ledger (about 400 KB) is loaded with a dynamic import
-// the first time the tab opens, so it is not in the initial bundle.
+// the first time the tab opens, so it is not in the initial bundle. Under the lead, "Open-source
+// licences" opens THIRD-PARTY-NOTICES.txt, served beside the app (P1-M3).
 
 import { useEffect, useState } from 'react';
 import { search, STATUSES, summary, type Ledger, type Tally } from '../support.ts';
@@ -39,6 +40,9 @@ export function Support() {
       <p className="draw-support-lead">
         What Draw edits, keeps, previews or drops, and when each part lands. Now at <strong>P{s.phase}</strong>: {s.total} rows, {counts({ label: 'all', rows: s.total, counts: s.counts })}.
       </p>
+      <a className="ds-btn draw-licences" href={`${import.meta.env.BASE_URL}THIRD-PARTY-NOTICES.txt`} target="_blank" rel="noopener">
+        Open-source licences
+      </a>
       <input
         type="search"
         className="draw-field draw-wide draw-ledger-search"

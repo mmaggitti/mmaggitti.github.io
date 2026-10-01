@@ -11,6 +11,14 @@
 //                                         check that each chosen break (default: every one) still
 //                                         applies, without running any: a stale anchor otherwise
 //                                         shows only when someone runs that break. Writes nothing.
+//                                         STALE: the anchor is gone; NOOP: replacing it changes
+//                                         nothing; AMBIG: a string anchor, or a RegExp without the
+//                                         g flag, matches more than once (counted with CRLF line
+//                                         ends read as LF, so a copy in the other ending counts),
+//                                         so the break plants only the first match (a g RegExp
+//                                         replaces every match on purpose); BAD: a break that can't
+//                                         run as written (a sticky RegExp plants only at index 0).
+//                                         Any of them fails the run.
 //
 // Add a break whenever a milestone adds a check. The plan's rule: a check nobody has seen fail
 // isn't a check.
@@ -544,7 +552,7 @@ const BREAKS = [
   },
   {
     id: 'B89', what: 'the Number sheet refuses a value without saying why', slow: true,
-    file: 'projects/draw/src/panels/Sheets.tsx', from: "setProblem('error' in r ? r.error : null);", to: 'setProblem(null);',
+    file: 'projects/draw/src/panels/Sheets.tsx', from: "    const r = editor.sheetInput(t);\n    setProblem('error' in r ? r.error : null);", to: '    const r = editor.sheetInput(t);\n    setProblem(null);',
     run: SITE_E2E, expect: /the Number sheet took "4o" without a word/,
   },
   {
@@ -671,7 +679,7 @@ const BREAKS = [
   },
   {
     id: 'B114', what: 'a document lifted above the selection outline paints over it (no z-index on the marks)', slow: true,
-    file: 'projects/draw/src/app.css', from: ' z-index: 2147483647;', to: '',
+    file: 'projects/draw/src/app.css', from: '.draw-marks { position: absolute; inset: 0; z-index: 2147483647;', to: '.draw-marks { position: absolute; inset: 0;',
     run: SITE_E2E, expect: /paints over the selection outline/,
   },
   // The correctness review: breaks that every test used to pass.
@@ -773,7 +781,7 @@ const BREAKS = [
   },
   {
     id: 'B134', what: 'an #import fragment stays in the URL (a reload imports it again)',
-    file: 'projects/draw/src/workspace.ts', from: '    clearFragment();\n', to: '',
+    file: 'projects/draw/src/workspace.ts', from: '    clearFragment();\n    let text: string | null = null;\n', to: '    let text: string | null = null;\n',
     run: drawTests('workspace.test.ts'), expect: /✖ an #import link opens with its report/,
   },
   {
@@ -2051,7 +2059,8 @@ const BREAKS = [
   },
   {
     id: 'B386', what: 'F3: a panel edit during a handle or guide drag throws instead of being refused',
-    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#nudge',
+    // P1-M3: re-planted on the guard that now names the Pen's drag too, the same fault.
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge', to: 'this.#gesture?.move || this.#gesture?.draw?.drag || this.#gesture?.pen?.drag || this.#nudge',
     run: drawTests('editor.test.ts'), expect: /✖ an edit from a panel during a handle or guide drag is refused quietly/,
   },
   {
@@ -2244,7 +2253,7 @@ const BREAKS = [
   },
   {
     id: 'B421', what: 'the colour cycle restarts for every shape',
-    file: 'projects/draw/src/editor.ts', from: '    this.#shapes++;\n', to: '',
+    file: 'projects/draw/src/editor.ts', from: '  #placed(id: NodeId): void {\n    this.#shapes++;\n', to: '  #placed(id: NodeId): void {\n',
     run: drawTests('shapes-tool.test.ts'), expect: /✖ a tap places SVG Lab’s default for each kind on lab\/create\.svg/,
   },
   {
@@ -2619,6 +2628,404 @@ const BREAKS = [
     file: 'engine/paint/gradients.ts', from: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)), apply);\n', to: '  if (defs) return insertMarkups(doc, { last: defs.id }, markups.map((m) => m(draw)).reverse(), apply).reverse();\n',
     run: drawTests('inspect.test.ts'), expect: /✖ Gloss, Gloss off, Linear and None over a selection write exactly what they write one shape at a time/,
   },
+  // P1-M3 S1: the path engine (quick).
+  {
+    id: 'B494', what: 'an anchor drag moves a Q control with it (SVG Lab moves only C controls)',
+    file: 'engine/path/nodes.ts', from: "    if (g.type === 'C') {\n      g.x2 += dx; // the incoming C's or S's second control follows", to: "    if (g.type === 'Q') {\n      g.x1 += dx;\n      g.y1 += dy;\n    }\n    if (g.type === 'C') {\n      g.x2 += dx; // the incoming C's or S's second control follows",
+    run: engineTests('path/nodes.test.ts'), expect: /✖ the lab’s numbers: a bend drag writes Q with control 2·f − mid/,
+  },
+  {
+    id: 'B495', what: 'a closed subpath’s linked last anchor gets a handle of its own (the heart shows five anchors)',
+    file: 'engine/path/nodes.ts', from: '    if (linked.has(k)) return;\n', to: '',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ pathNodes on the lab’s files/,
+  },
+  {
+    id: 'B496', what: 'a relative segment after a moved point isn’t compensated (its numbers stay offsets from the old start, so its end moves)',
+    file: 'engine/path/segments.ts', from: '      if (rel && X_ROLES.has(r)) v -= cx;\n      if (rel && Y_ROLES.has(r)) v -= cy;', to: '      if (rel && X_ROLES.has(r)) v -= t.abs[i].x0;\n      if (rel && Y_ROLES.has(r)) v -= t.abs[i].y0;',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ corpus property: every handle of every corpus path/,
+  },
+  {
+    id: 'B497', what: 'an H keeps its letter when its row changes (and a V its column): the end moves with the new start',
+    file: 'engine/path/segments.ts', from: "    if ((U === 'H' && !same(g.y, cy)) || (U === 'V' && !same(g.x, cx))) {", to: '    if (false) {',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ corpus property: every handle of every corpus path/,
+  },
+  {
+    id: 'B498', what: 'L → Q puts its control on the other side of the normal',
+    file: 'engine/path/segments.ts', from: 'onStep((x0 + x1) / 2 + (-dy / len) * off, opts.step), onStep((y0 + y1) / 2 + (dx / len) * off, opts.step)', to: 'onStep((x0 + x1) / 2 + (dy / len) * off, opts.step), onStep((y0 + y1) / 2 + (-dx / len) * off, opts.step)',
+    run: engineTests('path/segments.test.ts'), expect: /✖ the letter cycle on lab\/paths\.svg at step 1/,
+  },
+  {
+    id: 'B499', what: 'Q → C elevates by ½ instead of ⅔',
+    file: 'engine/path/segments.ts', from: 'x1: onStep(a.x0 + (2 / 3) * (a.x1 - a.x0), opts.step)', to: 'x1: onStep(a.x0 + (1 / 2) * (a.x1 - a.x0), opts.step)',
+    run: engineTests('path/segments.test.ts'), expect: /✖ the letter cycle on lab\/paths\.svg at step 1/,
+  },
+  {
+    id: 'B500', what: 'a letter-less segment after a cycled one never gets its letter written (it would read as the new command)',
+    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, lastChar);', to: '    else text = inPlace(seg, spans, texts, seg.implicit ? null : cmd, lastChar);',
+    run: engineTests('path/segments.test.ts'), expect: /✖ an implicit segment that followed the cycled one gets its old letter written/,
+  },
+  {
+    id: 'B501', what: 'a following S or T isn’t written out when its implied control would change (it changes shape)',
+    file: 'engine/path/segments.ts', from: "    if (U !== 'S' && U !== 'T') continue;", to: '    continue;',
+    run: engineTests('path/segments.test.ts'), expect: /✖ a following S or T whose implied control would change is written out/,
+  },
+  {
+    id: 'B502', what: 'Make relative leaves the first M uppercase (the lab writes m)',
+    file: 'engine/path/segments.ts', from: '    const cmd = s.implicit ? impliedAfter(prev) : toRel ? s.cmd.toLowerCase() : s.cmd.toUpperCase();', to: '    const cmd = s.implicit ? impliedAfter(prev) : toRel && i > 0 ? s.cmd.toLowerCase() : s.cmd.toUpperCase();',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Make relative on lab\/arcs--smooth\.svg writes the lab’s relative spelling exactly/,
+  },
+  {
+    id: 'B503', what: 'relative numbers are always written with 3 decimals (19.75 becomes 19.750)',
+    file: 'engine/path/segments.ts', from: '      return was !== undefined && same(was, v) ? oldText.get(r)! : exactText(v);', to: '      return was !== undefined && same(was, v) ? oldText.get(r)! : rel ? v.toFixed(3) : exactText(v);',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Relative and Absolute on mixed letters, implicit segments, arcs/,
+  },
+  {
+    id: 'B504', what: 'a letter-less segment gets a letter token too (over its first number’s first character)',
+    file: 'engine/code/tokens.ts', from: "    if (letters && !seg.implicit && 'LQC'.includes(U)) {", to: "    if (letters && 'LQC'.includes(U)) {",
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a <path>’s written L, l, Q, q, C and c letters are enum tokens/,
+  },
+  {
+    id: 'B505', what: 'transformPath counts the letter tokens again (every path with an L, Q or C refuses to move)',
+    file: 'engine/geometry/write.ts', from: ".filter((t) => !(t.kind === 'enum' && t.segment !== undefined));", to: ';',
+    run: engineTests('geometry/write.test.ts'), expect: /✖ a path whose letters are tokens still moves, resizes and rotates as before/,
+  },
+  // P1-M3 S1: the Pen, the Node tool and the path marks (quick).
+  {
+    id: 'B506', what: 'the Pen’s first tap inserts a path (a zero-length one), where it should write nothing',
+    file: 'projects/draw/src/editor.ts', from: '    if (!pen.anchors.length) {\n      pen.anchors.push(anchor);\n      return this.#penChanged();\n    }', to: '    if (!pen.anchors.length) {\n      pen.anchors.push(anchor);\n      return this.#addAnchor(anchor);\n    }',
+    run: drawTests('pen.test.ts'), expect: /✖ Pen taps: the first writes nothing/,
+  },
+  {
+    id: 'B507', what: 'a dragged anchor’s in-handle isn’t reflected (it is the out-handle itself)',
+    file: 'projects/draw/src/interact/pen.ts', from: '(a.out ? { x: 2 * a.at.x - a.out.x, y: 2 * a.at.y - a.out.y } : null)', to: '(a.out ? { x: a.out.x, y: a.out.y } : null)',
+    run: drawTests('pen.test.ts'), expect: /✖ Pen drags: a drag makes a Q leaving the point along the drag/,
+  },
+  {
+    id: 'B508', what: 'the Pen doesn’t take the shared colour counter (every path is the first colour)',
+    file: 'projects/draw/src/editor.ts', from: 'colour: penColour(this.#shapes)', to: 'colour: penColour(0)',
+    run: drawTests('pen.test.ts'), expect: /✖ the colour cycle is SVG Lab’s pen colours/,
+  },
+  {
+    id: 'B509', what: 'Undo point undoes two entries',
+    file: 'projects/draw/src/editor.ts', from: '      this.#session.undo();\n      pen.anchors.pop();', to: '      this.#session.undo();\n      this.#session.undo();\n      pen.anchors.pop();',
+    run: drawTests('pen.test.ts'), expect: /✖ Undo point and ⌘Z walk back through the anchors to nothing/,
+  },
+  {
+    id: 'B510', what: 'node handles show in the Select tool too (M1’s corners go from a path)',
+    file: 'projects/draw/src/editor.ts', from: "    if (!doc || this.tool.get() !== 'node' || id === doc.root", to: '    if (!doc || id === doc.root',
+    run: drawTests('editor.test.ts'), expect: /✖ node handles show only in the Node tool/,
+  },
+  {
+    id: 'B511', what: 'a node drag gathers its snap targets on every frame (every shape measured again)',
+    file: 'projects/draw/src/editor.ts', from: "      if (nd.kind === 'anchor' || nd.kind === 'start') to = this.#cornerPoint(g, hd, f);", to: "      if (nd.kind === 'anchor' || nd.kind === 'start') to = this.#cornerPoint(g, { ...hd, targets: this.#snapTargets([hd.id]) }, f);",
+    run: drawTests('editor.test.ts'), expect: /✖ a node drag gathers its snap targets once/,
+  },
+  {
+    id: 'B512', what: 'a panel edit during a node drag is taken (dispatched into the drag: it throws)',
+    file: 'projects/draw/src/editor.ts', from: 'this.#gesture?.move || this.#gesture?.hd || this.#gesture?.gd', to: 'this.#gesture?.move || this.#gesture?.gd',
+    run: drawTests('editor.test.ts'), expect: /✖ a panel edit during a node drag is refused, quietly/,
+  },
+  {
+    id: 'B513', what: 'the S’s mirror is reflected about the segment’s end instead of its start',
+    file: 'engine/path/nodes.ts', from: 'mirrors.push({ from: p0, at: c1, to: null })', to: 'mirrors.push({ from: p0, at: P(2 * s.x - (2 * s.x0 - c1.x), 2 * s.y - (2 * s.y0 - c1.y)), to: null })',
+    run: drawTests('path-marks.test.ts'), expect: /✖ mirror guides: lab\/arcs--smooth\.svg’s S implies \(60, 90\)/,
+  },
+  // P1-M3 S1 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B514', what: 'the Pen’s points skip the camera (host px taken as root units): the path isn’t under the taps', slow: true, checks: ['thePenTapsLinesAndDragsCurves'],
+    file: 'projects/draw/src/editor.ts', from: '    if (m.every((v, i) => Math.abs(v - root[i]) <= 1e-9)) return this.#snapRoot(at, this.#snapTargets(pen.id !== null ? [pen.id] : []), this.#penStep()).p;', to: '    if (m.every((v, i) => Math.abs(v - root[i]) <= 1e-9)) return { x: toStep(at.x, this.#penStep()), y: toStep(at.y, this.#penStep()) };',
+    run: DRAW_E2E, expect: /thePenTapsLinesAndDragsCurves: the second tap did not insert exactly the lab's path/,
+  },
+  {
+    id: 'B515', what: 'node handles are placed through the parent’s matrix, not the path’s own (a rotated path’s handles off it)', slow: true, checks: ['nodeHandlesSitOnTheAnchorsAndControls'],
+    file: 'projects/draw/src/editor.ts', from: '        const [x, y] = applyM(m.toHost, h.at.x, h.at.y);', to: '        const [x, y] = applyM(this.#ports.canvas.measure([n.parent!]).get(n.parent!)?.toHost ?? m.toHost, h.at.x, h.at.y);',
+    run: DRAW_E2E, expect: /nodeHandlesSitOnTheAnchorsAndControls: the turned wave: the a0 handle is/,
+  },
+  {
+    id: 'B516', what: 'a letter token’s tap goes through tokenEdit (refused: a letter change adds arguments), so no Q', slow: true, checks: ['theLetterCycleAndRelativeKeepTheRestOfThePath'],
+    file: 'projects/draw/src/editor.ts', from: '        if (t.segment !== undefined) return void this.cycleSegment(ref.node, t.segment);\n', to: '',
+    run: DRAW_E2E, expect: /theLetterCycleAndRelativeKeepTheRestOfThePath: the L tap wrote/,
+  },
+  {
+    id: 'B517', what: 'the Node tool’s bar has a button under 44 pt (Relative shrinks to 1.5rem)', slow: true, checks: ['phoneRulesOnThePenAndNodeTools'],
+    file: 'projects/draw/src/panels/ContextBar.tsx', from: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} onClick={() => editor.toggleRelative()}>", to: "aria-label={nodes.relative ? 'Absolute' : 'Relative'} style={{ width: '1.5rem', minWidth: 0, height: '1.5rem', minHeight: 0 }} onClick={() => editor.toggleRelative()}>",
+    run: DRAW_E2E, expect: /phoneRulesOnThePenAndNodeTools \(956\): 440×956:[\s\S]*the Node tool: Relative is \d+×\d+/,
+  },
+  // P1-M3 S1 close-out: the dry run's AMBIG rule (an anchor that matches twice plants only the first).
+  {
+    // As B325 proves STALE: a comment holding a second copy of B275's anchor keeps valid TypeScript.
+    id: 'B518', what: "the dry run misses an ambiguous anchor (a second copy of B275's anchor, SLOP, appended in a comment: B275 would plant only the first)",
+    file: 'projects/draw/src/canvas/gestures.ts', append: '// a second copy of the anchor: export const SLOP = 5;\n',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B275 +AMBIG +projects\/draw\/src\/canvas\/gestures\.ts: the anchor matches 2 times/,
+  },
+  // P1-M3 S2: arcs, holes and the donut (quick).
+  {
+    id: 'B519', what: 'evenodd counts signed crossings (it reads the winding number, as nonzero does: two same-way loops fill their overlap)',
+    file: 'engine/path/winding.ts', from: "return rule === 'evenodd' ? crossingsOf(polys, x, y) % 2 === 1 : windingOf(polys, x, y) !== 0;", to: "return rule === 'evenodd' ? windingOf(polys, x, y) !== 0 : windingOf(polys, x, y) !== 0;",
+    run: engineTests('path/winding.test.ts'), expect: /✖ lines: a square is inside under both rules/,
+  },
+  {
+    id: 'B520', what: 'Reverse keeps an arc’s sweep flag (the reversed arc bulges the other way)',
+    file: 'engine/path/segments.ts', from: "['sweep', +!g.sweep, g.sweep ? '0' : '1']", to: "['sweep', +g.sweep, g.sweep ? '1' : '0']",
+    run: engineTests('path/segments.test.ts'), expect: /✖ Reverse on lab\/arcs--holes\.svg’s inner subpath gives SVG Lab’s HOLE_REV exactly/,
+  },
+  {
+    id: 'B521', what: 'Reverse doesn’t write the closing line first (a closed subpath’s Z line is lost from the reversed order)',
+    file: 'engine/path/segments.ts', from: '  if (z && !(same(An[0], S[0]) && same(An[1], S[1]))) {', to: '  if (false) {',
+    run: engineTests('path/segments.test.ts'), expect: /✖ Reverse on lab\/arcs--holes\.svg’s inner subpath gives SVG Lab’s HOLE_REV exactly/,
+  },
+  {
+    // lab/arcs.svg's own comment holds no number, so the plant shows on the lab's donut export before Edit as donut.
+    id: 'B522', what: 'a comment gets number tokens without its holder being a donut (SVG Lab’s donut export, before Edit as donut)',
+    file: 'engine/code/tokens.ts', from: '  const read = d && d.comment === leaf.id ? readData(raw) : null;', to: '  const read = readData(raw);',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ a donut’s data comment \(draw:gen="donut"\) has one number token per value/,
+  },
+  {
+    id: 'B523', what: 'setLeafRaw takes a comment holding -- (the file would not be well-formed)',
+    file: 'engine/model/doc.ts', from: "  return !body.includes('--') && !body.endsWith('-');", to: "  return !body.endsWith('-');",
+    run: engineTests('code/edit.test.ts'), expect: /✖ a donut’s data comment is edited like any token/,
+  },
+  {
+    id: 'B524', what: 'the large-arc flag is 1 at exactly half (SVG Lab’s is 1 only over half)',
+    file: 'engine/generators/donut.ts', from: '${v / S > 0.5 ? 1 : 0}', to: '${v / S >= 0.5 ? 1 : 0}',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ exact halves: 50 and 50 give large-arc 0/,
+  },
+  {
+    id: 'B525', what: 'the slices start at angle 0 (the right), not at the top',
+    file: 'engine/generators/donut.ts', from: /-Math\.PI \/ 2 \+ \(acc \/ S\)/g, to: '(acc / S)',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ the acceptance test: generating from lab\/arcs--donut\.svg’s comment/,
+  },
+  {
+    id: 'B526', what: 'the finish hook regenerates a donut whose slice’s d was edited by hand (it must detach it)',
+    file: 'engine/generators/index.ts', from: '    if (st && expected && (inputsTouched || dataTouched) && !partsTouched) {', to: '    if (st && expected) {',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ the finish hook: a data edit and an input edit regenerate the slices/,
+  },
+  {
+    id: 'B527', what: 'Edit as donut adopts a holder whose slices differ from the generator’s (the hook would then rewrite them)',
+    file: 'engine/generators/donut.ts', from: '  const want = donutSlices(parts.data.values, cx, cy, r);\n  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;', to: '  const want = donutSlices(parts.data.values, cx, cy, r);',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ Edit as donut’s candidate/,
+  },
+  {
+    id: 'B528', what: 'a donut boundary drag lets a value reach 0 (the lab clamps each at 1)',
+    file: 'projects/draw/src/editor.ts', from: '      const c = Math.min(Math.max(Math.round(fr * S) - before, 1), pair - 1);', to: '      const c = Math.min(Math.max(Math.round(fr * S) - before, 0), pair);',
+    run: drawTests('editor.test.ts'), expect: /✖ the donut: Edit as donut changes only the holder’s start tag/,
+  },
+  {
+    id: 'B529', what: 'fill-rule is missing from the style table (Inspect’s Fill rule has nowhere to write)',
+    file: 'engine/style/props.ts', from: "  'fill-rule': { initial: 'nonzero', inherited: true }, // P1-M3: Inspect's Fill rule (holes)\n", to: '',
+    run: engineTests('style/style.test.ts'), expect: /✖ each property is written where it lives/,
+  },
+  {
+    id: 'B530', what: 'the flag labels are pushed towards the chord, not away from it (they sit on the arcs)',
+    file: 'projects/draw/src/interact/path-marks.ts', from: 'x: clamp(mid.x + dx * 10, 8, canvas.width - 8), y: clamp(mid.y + dy * 10 + 4, 13, canvas.height - 4)', to: 'x: clamp(mid.x - dx * 10, 8, canvas.width - 8), y: clamp(mid.y - dy * 10 + 4, 13, canvas.height - 4)',
+    run: drawTests('path-marks.test.ts'), expect: /✖ ghost arcs: lab\/arcs\.svg’s arc \(0 1\)/,
+  },
+  {
+    id: 'B531', what: 'the inner subpaths’ arrows take the outer colour (draw-dir--in is never set)',
+    file: 'projects/draw/src/interact/path-marks.ts', from: 'inner: s.sub > 0', to: 'inner: false',
+    run: drawTests('path-marks.test.ts'), expect: /✖ direction arrows: lab\/arcs--holes\.svg’s outer arrows/,
+  },
+  {
+    id: 'B532', what: 'the route doesn’t re-read a donut’s data comment after its holder’s draw: change (Edit as donut leaves the comment without tokens)',
+    file: 'projects/draw/src/routing.ts', from: 'blocks: [...new Set([...cs.attrs, ...cs.texts, ...comments])]', to: 'blocks: [...new Set([...cs.attrs, ...cs.texts])]',
+    run: drawTests('routing.test.ts'), expect: /✖ a donut’s data comment is re-read with its holder’s attribute changes/,
+  },
+  // P1-M3 S2 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B533', what: 'the ghost arcs skip toHost (drawn in the path’s units, not where the other flag pairs draw)', slow: true, checks: ['ghostArcsSwitchTheFlags'],
+    file: 'projects/draw/src/interact/path-marks.ts', from: '.map(([x1, y1, x2, y2, x, y]): [Point, Point, Point] => [h(x1, y1), h(x2, y2), h(x, y)]);\n      ghosts.push({ flags: text, start: h(a.x0, a.y0), cubics });', to: '.map(([x1, y1, x2, y2, x, y]): [Point, Point, Point] => [{ x: x1, y: y1 }, { x: x2, y: y2 }, { x, y }]);\n      ghosts.push({ flags: text, start: { x: a.x0, y: a.y0 }, cubics });',
+    run: DRAW_E2E, expect: /ghostArcsSwitchTheFlags: lab\/arcs\.svg: the \d \d ghost passes [\d.]+ px from the arc those flags draw/,
+  },
+  {
+    id: 'B534', what: 'the direction arrows skip toHost (drawn at the path’s own numbers, not on it)', slow: true, checks: ['holesCutTwoWays'],
+    file: 'projects/draw/src/interact/path-marks.ts', from: '    const c = host(toHost, { x: m.p[0], y: m.p[1] });', to: '    const c = { x: m.p[0], y: m.p[1] };',
+    run: DRAW_E2E, expect: /holesCutTwoWays: the arrow near \(50, 14\) is/,
+  },
+  {
+    // Planted in the editor's call of route (routing.ts's own rule stays, so its unit test is green): only the browser's code view shows it.
+    id: 'B535', what: 'the editor routes a change without the data comment’s re-read, so after Edit as donut the code shows the comment without tokens', slow: true, checks: ['theDonutRegeneratesFromItsData'],
+    file: 'projects/draw/src/editor.ts', from: '      r = route(session.doc, cs);\n', to: "      r = route(session.doc, cs);\n      if (!r.code.reset) r.code.blocks = r.code.blocks.filter((id) => session.doc.nodes.get(id)?.kind !== 'comment' || cs.texts.has(id));\n",
+    run: DRAW_E2E, expect: /theDonutRegeneratesFromItsData: the comment's block holds the number tokens \[\]/,
+  },
+  // P1-M3 S3: booleans (quick).
+  {
+    id: 'B536', what: 'check-bundle misses new Function (its pattern wants "Functionn")',
+    file: 'projects/draw/tools/check-bundle.mjs', from: "['new-function', /\\bnew\\s+Function\\s", to: "['new-function', /\\bnew\\s+Functionn\\s",
+    run: drawTests('check-bundle.test.ts'), expect: /✖ check-bundle: each pattern planted in a chunk fails the build/,
+  },
+  {
+    id: 'B537', what: 'the notices test walks only Draw’s own dependencies (scheduler, react-dom’s, and gl-matrix, path-bool’s, are never asked for)',
+    file: 'projects/draw/test/unit/notices.test.ts', from: '    for (const d of Object.keys(e.dependencies ?? {})) visit(d, key, false);\n    for (const d of Object.keys(e.optionalDependencies ?? {})) visit(d, key, true);\n', to: '',
+    run: drawTests('notices.test.ts'), expect: /the walk found no scheduler/,
+  },
+  {
+    id: 'B538', what: 'a rect’s outline ignores rx and ry (square corners)',
+    file: 'engine/path/from-shape.ts', from: '      const rx = Math.min(r[0], w / 2);\n', to: '      const rx = Math.min(0, w / 2);\n',
+    run: engineTests('path/from-shape.test.ts'), expect: /✖ a rect: its four sides clockwise/,
+  },
+  {
+    id: 'B539', what: 'arcs and quadratics reach the libraries unconverted (toLoops keeps them as they are)',
+    file: 'engine/path/loops.ts', from: "    else if (s.type === 'Q') {\n", to: "    else if (s.type === 'Q' || s.type === 'A') segs.push({ type: s.type, to: [s.x, s.y] } as unknown as LoopSeg);\n    else if (s.type === ('never' as string)) {\n",
+    run: drawTests('booleans.test.ts'), expect: /✖ the libraries get lines and cubics only/,
+  },
+  {
+    id: 'B540', what: 'a library’s result is written as it comes (its loops not oriented by nesting depth)',
+    file: 'projects/draw/src/paths/pipeline.ts', from: '  return orientLoops(toLoops(toAbsolute(parsePath(d))));\n', to: '  return toLoops(toAbsolute(parsePath(d)));\n',
+    run: drawTests('booleans.test.ts'), expect: /nonzero and evenodd disagree on the ring/,
+  },
+  {
+    id: 'B541', what: 'the fallback never runs (only path-bool is tried)',
+    file: 'projects/draw/src/paths/pipeline.ts', from: "[['path-bool', libs.primary], ['paper', libs.fallback]] as const", to: "[['path-bool', libs.primary]] as const",
+    run: drawTests('booleans.test.ts'), expect: /✖ a path-bool that throws, or misses more than 1% of the self-check’s samples, hands the operation to paper-core/,
+  },
+  {
+    id: 'B542', what: 'Subtract takes the top operand from the rest (path-bool gets the operands top first, so paper-core writes every subtract)',
+    file: 'projects/draw/src/paths/booleans.ts', from: '  new PathBoolean(inputs.map(', to: "  new PathBoolean((op === 'difference' ? [...inputs].reverse() : inputs).map(",
+    run: drawTests('booleans.test.ts'), expect: /each case written as pinned/,
+  },
+  {
+    id: 'B543', what: 'the result drops the bottom’s id (the new <path> takes its attributes less its id)',
+    file: 'projects/draw/src/paths/write.ts', from: '(a.ns === null && GEOMETRY_ATTRS.has(a.local))', to: "(a.ns === null && (GEOMETRY_ATTRS.has(a.local) || a.local === 'id'))",
+    run: drawTests('editor.test.ts'), expect: /union wrote:/,
+  },
+  {
+    id: 'B544', what: 'the other operands are removed without their leading whitespace',
+    file: 'projects/draw/src/paths/write.ts', from: /import \{ remove \} from '\.\.\/interact\/structure\.ts';([\s\S]*)  remove\(doc, others, apply\);/, to: "import { remove } from '../interact/structure.ts';\nimport { opRemove } from '../../../../engine/commands/ops.ts';$1  for (const id of others) apply(opRemove(doc, id));",
+    run: drawTests('editor.test.ts'), expect: /union: the rest of the file as it was/,
+  },
+  {
+    // A Vite build, but no site build: quick, though it takes a minute or two. The minifier writes
+    // paper-full's new Function("str", f) as Function("str", f), so check-bundle names it function-string.
+    id: 'B545', what: 'paper-fallback.ts imports bare paper, which is paper-full (its PaperScript compiles with new Function)',
+    file: 'projects/draw/src/paths/paper-fallback.ts', from: "import paperModule from 'paper/dist/paper-core.js';", to: "import paperModule from 'paper';",
+    run: ['sh', ['-c', 'BASE_PATH=/draw/ npx vite build >/dev/null && node tools/check-bundle.mjs'], DRAW], expect: /paper-fallback-[\w-]+\.js:\d+  (new-function|function-string)/,
+  },
+  // P1-M3 S3 (slow: one per new e2e check, each naming it).
+  {
+    id: 'B546', what: 'the editor imports booleans.ts statically, so path-bool rides in the first chunk', slow: true, checks: ['booleansCombineWhatIsDrawn'],
+    file: 'projects/draw/src/editor.ts', from: "import { LAZY_LIBRARIES } from './paths/load.ts';\n", to: "import { LAZY_LIBRARIES } from './paths/load.ts';\nimport { combine as eagerBooleans } from './paths/booleans.ts';\nvoid eagerBooleans;\n",
+    run: DRAW_E2E, expect: /booleansCombineWhatIsDrawn: the first Union loaded no boolean chunk/,
+  },
+  // P1-M3 fix (the review's findings), quick unless marked.
+  {
+    id: 'B547', what: 'R3: writeGeometry reads the last character written from the growing string for every segment (it flattens it each time: quadratic)',
+    file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, lastChar);', to: '    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));',
+    run: engineTests('path/costs.test.ts'), expect: /✖ a segment rewrite and a node drag frame take linear time/,
+  },
+  {
+    // The same text either way, so only the cost can show it.
+    id: 'B548', what: 'R2: Reverse with no chosen node re-reads and rewrites the whole path once per subpath (quadratic)',
+    file: 'engine/path/segments.ts', from: '  const out = reverseSubpaths(t, sub);\n', to: '  let out: string | null = null;\n  if (sub !== null) out = reverseSubpaths(t, sub);\n  else for (let s = 0; s < subpathCount(t.abs); s++) out = reverseSubpaths(readPathText(out ?? raw), s) ?? out;\n',
+    run: engineTests('path/costs.test.ts'), expect: /✖ Reverse with no chosen node takes linear time/,
+  },
+  {
+    id: 'B549', what: 'R5: every comment under a donut holder asks whether the holder is a donut (each ask walks the holder’s children: quadratic)',
+    file: 'engine/code/tokens.ts', from: '  if (dataCommentOf(doc, leaf.parent) !== leaf.id) return [];\n', to: '',
+    run: engineTests('code/tokens.test.ts'), expect: /✖ the tokens of many comments under a donut holder take linear time/,
+  },
+  {
+    id: 'B550', what: 'R4: the donut takes any finite plain decimal as an input again (no FLT_MAX bound: a centre at 1e39 reads as a donut)',
+    file: 'engine/generators/donut.ts', from: "    if (!(Math.abs(v) <= FLT_MAX) || (name === 'r' && !(v > 0))) return null;", to: "    if (!Number.isFinite(v) || (name === 'r' && !(v > 0))) return null;",
+    run: engineTests('generators/donut.test.ts'), expect: /✖ hostile inputs stay plain and never throw: cx, cy or r written as 309-digit plain decimals/,
+  },
+  {
+    id: 'B551', what: 'R4: the generators take any finite centre again (no FLT_MAX bound: a polygon centred at 1e39 reads as generated)',
+    file: 'engine/generators/index.ts', from: 'const coordinate = (v: number) => Math.abs(v) <= FLT_MAX;', to: 'const coordinate = (v: number) => Number.isFinite(v);',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals/,
+  },
+  {
+    id: 'B552', what: 'R4: donutSlices hands back slices with a coordinate it couldn’t write, rather than null',
+    file: 'engine/generators/donut.ts', from: '  return finite ? out : null;\n', to: '  return out;\n',
+    run: engineTests('generators/donut.test.ts'), expect: /✖ hostile inputs stay plain and never throw: cx, cy or r written as 309-digit plain decimals/,
+  },
+  {
+    id: 'B553', what: 'R4: a generator whose coordinate overflows throws (fmt’s RangeError) rather than reading as plain',
+    file: 'engine/generators/index.ts', from: '    if (e instanceof RangeError) return null;\n    throw e;', to: '    throw e;',
+    run: engineTests('generators/generators.test.ts'), expect: /✖ hostile inputs stay plain and never throw: a polygon whose cx and r are 309-digit plain decimals/,
+  },
+  {
+    id: 'B554', what: 'R4: Open builds the code view after it has swapped in the new document (a throw there leaves the editor half-swapped)',
+    file: 'projects/draw/src/editor.ts', from: /    let code: CodeBlocks;\n    try \{\n      code = this\.#codeOf\(doc\);\n    \} catch \(e\) \{\n      return \{ ok: false, error: String\(e\), \.\.\.NO_STATS \};\n    \}\n([\s\S]*?)    this\.#setCode\(code\);\n/, to: '$1    this.#resetCode();\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Open refuses a document whose code view throws while it is built/,
+  },
+  {
+    id: 'B555', what: 'R8: a selected root that holds a donut shows no handles (SVG Lab’s own file: no boundary handles on its holder)',
+    file: 'projects/draw/src/editor.ts', from: "|| !ids.length || ids.some((id) => isLocked(doc, id))) return none;", to: "|| !ids.length || ids.some((id) => id === doc.root || isLocked(doc, id))) return none;",
+    run: drawTests('editor.test.ts'), expect: /✖ a donut’s holder selected: the root/,
+  },
+  {
+    id: 'B556', what: 'R8: a boundary drag needs the selection and its parent measured first, so a root holder’s never starts',
+    file: 'projects/draw/src/editor.ts', from: '      const d = donutFor(doc, id);\n      const toHost = d && this.#unitsToHost(d.holder);', to: '      const d = this.#ports.canvas.measure([id, el(doc, id).parent!]).size === 2 ? donutFor(doc, id) : null;\n      const toHost = d && this.#unitsToHost(d.holder);',
+    run: drawTests('editor.test.ts'), expect: /✖ a donut’s holder selected: the root/,
+  },
+  {
+    id: 'B557', what: 'R8: a letter-less (implicit) segment gets no handles',
+    file: 'engine/path/nodes.ts', from: '    const U = p.segs[k].cmd.toUpperCase();\n', to: '    if (p.segs[k].implicit) return;\n    const U = p.segs[k].cmd.toUpperCase();\n',
+    run: engineTests('path/nodes.test.ts'), expect: /✖ pathNodes on letter-less \(implicit\) segments/,
+  },
+  {
+    id: 'B558', what: 'R8: dragging a subpath’s start drags an arc’s end with it (as if linked)',
+    file: 'engine/path/nodes.ts', from: '    for (let j = k + 1; j < abs.length && abs[j].sub === abs[k].sub; j++) if (linked.has(j)) move(j);', to: "    for (let j = k + 1; j < abs.length && abs[j].sub === abs[k].sub; j++) if (linked.has(j) || abs[j].type === 'A') move(j);",
+    run: drawTests('editor.test.ts'), expect: /✖ an arc’s start and end anchors drag its ends/,
+  },
+  {
+    id: 'B559', what: 'R8: a boolean maps the operands into root units, not the bottom’s (a bottom with its own transform is written off)',
+    file: 'projects/draw/src/editor.ts', from: '    const toBottom = base && invert(base.toHost);', to: '    const toBottom = base && invert(this.#unitsToHost(doc.root)!);',
+    run: drawTests('editor.test.ts'), expect: /✖ a bottom with its own transform/,
+  },
+  {
+    id: 'B560', what: 'R1: an entry the Pen doesn’t own (an Inspect edit, a Layers Hide, a slider) no longer ends the Pen, so Undo point undoes it',
+    file: 'projects/draw/src/editor.ts', from: '    if (this.#pen && !PEN_LABELS.has(label)) this.#endPen(true);\n', to: '',
+    run: drawTests('pen.test.ts'), expect: /✖ an entry the Pen doesn’t own ends the Pen first/,
+  },
+  {
+    id: 'B561', what: 'R6: a boolean flattens within 0.01 units again (the absolute tolerance back: ×10⁶ flattens to a thousand times the points)',
+    file: 'engine/path/winding.ts', from: '  return diag > 0 && Number.isFinite(diag) ? FLAT_SHARE * diag : FLAT;', to: '  return FLAT;',
+    run: drawTests('booleans.test.ts'), expect: /✖ a boolean’s cost follows what is drawn, not its units/,
+  },
+  {
+    // The points check reads the tolerance helper itself, so only the timing sees the score alone go back to 0.01 units.
+    id: 'B562', what: 'R6: the self-check (booleanScore) flattens within 0.01 units again, so its cost grows with the drawing’s units',
+    file: 'engine/path/winding.ts', from: '  const flat = flatFor(inputs.map((i) => i.abs));', to: '  const flat = FLAT;',
+    run: drawTests('booleans.test.ts'), expect: /✖ a boolean’s cost follows what is drawn, not its units/,
+  },
+  {
+    id: 'B563', what: 'R7: a bottom shape a <style> rule may paint is combined anyway (the <path> that replaces it loses the rule’s paint: black)',
+    file: 'projects/draw/src/editor.ts', from: "    if (bottom.local !== 'path' && Object.keys(STYLE_PROPS).some((p) => sheetSets(doc, bottom.id, p) !== 'no')) return { refused: STYLE_PAINT };\n", to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ booleans refuse, saying why and writing nothing/,
+  },
+  {
+    id: 'B564', what: 'R9: a straight segment’s arrow is drawn at its midpoint again, under its bend handle',
+    file: 'projects/draw/src/interact/path-marks.ts', from: "    const shift = s.type === 'L' && 'LHV'.includes(s.cmd.toUpperCase()) && len / 2 - past >= ANCHOR_REACH + ARROW_REACH ? past : 0;", to: '    const shift = 0;',
+    run: drawTests('editor.test.ts'), expect: /✖ the direction arrows clear the handles/,
+  },
+  {
+    id: 'B565', what: 'N1: the boolean compares the editor’s version again (a tool pick refuses it; a drag’s frames don’t, so a Union resolving mid-drag is dropped without a word)',
+    file: 'projects/draw/src/editor.ts', from: /    const version = doc\.version;\n([\s\S]*?)doc\.version !== version \|\| this\.#live \|\| this\.#gesture \|\| this\.#field \|\| this\.#stepDrag \|\| this\.#nudge\) return/, to: '    const version = this.version.get();\n$1this.version.get() !== version) return',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose chunk resolves during a live move drag/,
+  },
+  {
+    id: 'B566', what: 'N1: the boolean doesn’t refuse while an edit is live (a press held): it writes into the gesture',
+    file: 'projects/draw/src/editor.ts', from: ' || this.#live || this.#gesture || this.#field || this.#stepDrag || this.#nudge) return void this.notice.set(DRAWING_CHANGED);', to: ') return void this.notice.set(DRAWING_CHANGED);',
+    run: drawTests('editor.test.ts'), expect: /✖ a boolean whose chunk resolves during a live move drag/,
+  },
+  {
+    // As B518 proves AMBIG: a block comment holding B527's two-line anchor with a CRLF between its lines.
+    id: 'B567', what: 'N2: the dry run misses a CRLF twin of a multi-line anchor (B527’s, appended in a comment with a CRLF line end: B527 would plant only the first)',
+    file: 'engine/generators/donut.ts', append: '\n/* a CRLF twin of an anchor:\n  const want = donutSlices(parts.data.values, cx, cy, r);\r\n  if (!want || !parts.slices.every((s, i) => dOf(doc, s) === want[i])) return null;\n*/\n',
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B527 +AMBIG +engine\/generators\/donut\.ts: the anchor matches 2 times/,
+  },
+  {
+    // A break of this file's own dry run: with CRLF no longer read as LF, B567's twin goes unseen.
+    id: 'B568', what: 'N2: the dry run counts an anchor’s matches with CRLF as written (a twin in the other line ending is missed)',
+    file: 'projects/draw/tools/prove-breaks.mjs', from: "  const text = original.replace(/\\r\\n/g, '\\n');", to: '  const text = original;',
+    run: ['node', ['tools/prove-breaks.mjs', 'B567'], DRAW], expect: /GREEN ✗  B567/,
+  },
+  {
+    id: 'B569', what: 'N2: the dry run calls a sticky anchor fine (B525’s RegExp made sticky: it would plant only at index 0)',
+    file: 'projects/draw/tools/prove-breaks.mjs', from: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/g,", to: "file: 'engine/generators/donut.ts', from: /-Math\\.PI \\/ 2 \\+ \\(acc \\/ S\\)/y,",
+    run: ['node', ['tools/prove-breaks.mjs', '--dry'], DRAW], expect: /B525 +BAD +a sticky anchor plants only at index 0/,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -2630,6 +3037,25 @@ const chosen = BREAKS.filter((b) => (only.length ? only.includes(b.id) : !(quick
 /** The broken file's text: the original with the break applied (the real run and the dry run share this). */
 function applyBreak(b, original) {
   return b.append != null ? original + b.append : original.replace(b.from, b.to);
+}
+
+/**
+ * How many places a break's anchor matches, for the dry run's AMBIG rule: a string counts every
+ * occurrence (overlapping ones too), a RegExp without g every match. An append, or a g RegExp
+ * (which replaces every match on purpose), counts as one. Counted with CRLF line ends read as LF
+ * (the anchor's too): a copy of a multi-line anchor in the other line ending is a twin.
+ */
+function anchorMatches(b, original) {
+  if (b.append != null || b.from == null) return 1;
+  const text = original.replace(/\r\n/g, '\n');
+  if (b.from instanceof RegExp) {
+    if (b.from.global) return 1;
+    return [...text.matchAll(new RegExp(b.from.source, b.from.flags.replace('y', '') + 'g'))].length;
+  }
+  const from = b.from.replace(/\r\n/g, '\n');
+  let n = 0;
+  for (let i = text.indexOf(from); i !== -1; i = text.indexOf(from, i + 1)) n++;
+  return n;
 }
 
 // ── the dry run: does every chosen break still apply? ─────────────────────────────────────────
@@ -2650,6 +3076,10 @@ if (dry) {
       say('BAD', `no ${missing.join(', no ')}`);
       continue;
     }
+    if (b.from instanceof RegExp && b.from.sticky) {
+      say('BAD', 'a sticky anchor plants only at index 0');
+      continue;
+    }
     if (b.create && existsSync(join(REPO, b.create))) say('TAKEN', `${b.create}: the path already exists`);
     if (!b.file) continue;
     const path = join(REPO, b.file);
@@ -2658,14 +3088,18 @@ if (dry) {
       continue;
     }
     const original = readFileSync(path, 'utf8');
-    if (applyBreak(b, original) !== original) continue;
+    if (applyBreak(b, original) !== original) {
+      const n = anchorMatches(b, original);
+      if (n > 1) say('AMBIG', `${b.file}: the anchor matches ${n} times; the break plants only the first`);
+      continue;
+    }
     const found = b.from instanceof RegExp ? new RegExp(b.from.source, b.from.flags.replace(/[gy]/g, '')).test(original) : original.includes(b.from);
     if (found) say('NOOP', `${b.file}: the anchor is there but replacing it changes nothing`);
     else say('STALE', `${b.file}: the anchor is not in the file`);
   }
   for (const p of problems) console.log(p);
   const bad = new Set(problems.map((p) => p.split(' ')[0])).size;
-  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
+  console.log(bad ? `Dry run: ${chosen.length} break(s) checked; ${bad} would not apply as written.` : `Dry run: ${chosen.length} break(s) checked; all apply.`);
   process.exit(bad ? 1 : 0);
 }
 

@@ -9,17 +9,27 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { Editor, LOCKED, lineColumn, READ_ONLY, type CanvasPort } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, type CanvasPort } from '../../src/editor.ts';
 import type { FocusMark, ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
 import { cameraBox, fit, toDoc, toScreen, MAX_BOX } from '../../src/canvas/viewport.ts';
 import { artboard, rootViewport } from '../../src/canvas/artboard.ts';
 import type { Camera } from '../../src/canvas/renderer.ts';
 import { rootToHostMatrix, type OverlayModel } from '../../src/interact/overlay-model.ts';
 import { measureWith } from './fakes.ts';
+import { HANDLE } from '../../src/canvas/overlay/marks.ts';
 import { layerRows } from '../../src/panels/layer-rows.ts';
 import { rootTransform } from '../../../../engine/geometry/ctm.ts';
 import { mapRect } from '../../../../engine/geometry/bounds.ts';
 import { starPoints as starPointsOf } from '../../../../engine/generators/radial.ts';
+import { arcCenter, arcPoint, type ArcCenter } from '../../../../engine/path/arc.ts';
+import { donutSlices } from '../../../../engine/generators/donut.ts';
+import { parsePath } from '../../../../engine/path/parse.ts';
+import { toAbsolute } from '../../../../engine/path/abs.ts';
+import { insideAt, type BoolOp } from '../../../../engine/path/winding.ts';
+import { DRAW_NS } from '../../../../engine/model/draw-ns.ts';
+import { OFFLINE, type Libraries } from '../../src/paths/pipeline.ts';
+import { combine as pathBoolCombine } from '../../src/paths/booleans.ts';
+import { combine as paperCombine } from '../../src/paths/paper-fallback.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SAMPLE = readFileSync(`${HERE}../../src/canvas/sample.svg`, 'utf8');
@@ -39,7 +49,7 @@ interface Rig {
   focused: (FocusMark | null)[];
 }
 
-function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
+function rig(size = HOST, over: Partial<CanvasPort> = {}, booleans?: Libraries): Rig {
   const log: string[] = [];
   const listing = new Map<string, ViewBlock>();
   let order: string[] = [];
@@ -112,6 +122,7 @@ function rig(size = HOST, over: Partial<CanvasPort> = {}): Rig {
       },
       hostSize: () => size,
       sinkReady: () => true,
+      booleans,
     }),
   };
   r.editor.version.subscribe(() => log.push('stores'));
@@ -167,6 +178,41 @@ test('opening fits the artboard into the host and lists the whole source as code
   const bad = r.editor.open('<svg');
   assert.ok(!bad.ok && bad.error, 'a file that does not parse says so');
   assert.equal(r.editor.source(), SAMPLE, 'and the open document stays');
+});
+
+// R4 (the P1-M3 review): a donut whose draw:cy was written as a 309-digit plain decimal made Open throw
+// while it built the code view, after the new document and Session were swapped in (the canvas showed
+// the new file, the code the old one, and edits went unsaved). The code view's blocks are built first
+// now, and the donut's inputs are bounded (donut.test.ts).
+test('Open refuses a document whose code view throws while it is built, before anything is swapped: the open drawing, its code, history and selection stay; a donut written with 309-digit inputs opens, plain', () => {
+  const r = rig();
+  assert.ok(r.editor.open(SAMPLE).ok);
+  const poly = element(doc(r), (n) => n.local === 'polyline');
+  const { block, token } = tokenIn(r, poly.id, 'enum', 0, 'stroke-linecap');
+  r.editor.tapToken(block, token);
+  r.editor.select([poly.id]);
+  const before = { doc: doc(r), source: r.editor.source(), code: text(r), history: r.editor.history.get(), selection: [...r.editor.selection.get()] };
+  // A document whose code view can't be built: a child the model has no node for, so reading its tokens throws.
+  const broken = parseDoc('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="5" height="5"/></svg>');
+  assert.ok(broken.ok);
+  broken.doc.nodes.delete((broken.doc.nodes.get(broken.doc.root) as ElementNode).children[0]);
+  r.log.length = 0;
+  const res = r.editor.open(broken.doc);
+  assert.ok(!res.ok && /TypeError/.test(res.error ?? ''), JSON.stringify(res));
+  assert.deepEqual(r.log, [], 'nothing drawn, listed or shown');
+  assert.equal(doc(r), before.doc, 'the open document stays');
+  assert.equal(r.editor.source(), before.source);
+  assert.equal(text(r), before.code, 'and its code');
+  assert.deepEqual(r.editor.history.get(), before.history, 'and its history');
+  assert.deepEqual([...r.editor.selection.get()], before.selection, 'and its selection');
+  // The review's file: draw:cy written as −1e308 in 309 digits. It opens, its source kept and listed, its comment plain.
+  const donut = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox="0 0 100 100">\n <g draw:gen="donut" draw:cx="50" draw:cy="-1${'0'.repeat(308)}" draw:r="28">\n  <!-- data: 40, 60 -->\n  <path d="M 0 0"/>\n  <path d="M 0 0"/>\n </g>\n</svg>\n`;
+  const opened = r.editor.open(donut);
+  assert.ok(opened.ok, opened.error);
+  assert.equal(r.editor.source(), donut);
+  assert.equal(text(r), donut, 'the code lists it');
+  const comment = [...descendants(doc(r), doc(r).root)].find((n) => n.kind === 'comment')!;
+  assert.deepEqual(r.listing.get(`${comment.id}:leaf`)!.tokens, [], 'its comment is a plain comment');
 });
 
 // ── canvas and code: two live views of one document ────────────────────────────────────────────
@@ -1965,4 +2011,599 @@ test('generated shapes: the Tips field, typed "12", draws 24 points after each k
   r.editor.pointerUp({ x: c.x + 7 * k, y: c.y - 3 * k });
   assert.equal(r.editor.source(), F.replace(STAR5(), STAR5(57, 47)));
   assert.ok(r.editor.generated(), 'still generated');
+});
+
+// ── P1-M3: the Node tool ───────────────────────────────────────────────────────────────────────
+
+const WAVE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path id="w" d="M 30 44 Q 40 32, 50 44 Q 60 56, 70 44" fill="none" stroke="#264653"/>
+  <path id="s" d="M 20 75 L 50 30" fill="none" stroke="#264653"/>
+  <path id="c" d="M 10 55 C 22 20, 40 20, 50 55 C 60 90, 78 90, 90 55" fill="none" stroke="#264653"/>
+  <rect id="r" x="80" y="80" width="10" height="10"/>
+</svg>`;
+const handleAt = (r: Rig, id: string) => {
+  const h = r.editor.overlayModel().handles.find((x) => x.id === id);
+  assert.ok(h, `no ${id} handle: ${r.editor.overlayModel().handles.map((x) => x.id)}`);
+  return h.at;
+};
+
+test('node handles show only in the Node tool, for one selected path, instead of M1’s corners, ring and diamond (the centre stays); Select keeps the corners on a path; Escape from the Node tool returns to Select', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  r.editor.select([idOf(r, 'w')]);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id).sort();
+  assert.deepEqual(ids(), ['bl', 'br', 'center', 'rot', 'tl', 'tr'].sort().filter((h) => ids().includes(h)), 'Select: M1’s handles');
+  assert.ok(!ids().some((h) => /^[abc]\d/.test(h)), 'no node handles in Select');
+  r.editor.pickTool('node');
+  assert.deepEqual(ids(), ['a0', 'a1', 'a2', 'c1', 'c2', 'center']);
+  assert.ok(r.editor.overlayModel().paths!.arms.length === 4, 'the Q arms');
+  r.editor.select([idOf(r, 'w'), idOf(r, 's')]);
+  assert.deepEqual(ids(), ['center'], 'two selected: M1’s one centre');
+  r.editor.select([idOf(r, 'r')]);
+  assert.ok(ids().includes('tl') && !ids().some((h) => /^a\d/.test(h)), 'a rect in the Node tool: Select’s handles');
+  r.editor.escape();
+  assert.equal(r.editor.tool.get(), 'select', 'Escape leaves the Node tool');
+  assert.deepEqual([...r.editor.selection.get()], [idOf(r, 'r')], 'and keeps the selection');
+});
+
+test('a node drag gathers its snap targets once, when it starts, not on every frame; it is one "Move point" entry and moves only its numbers', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  r.editor.open(WAVE);
+  const [w, rect] = [idOf(r, 'w'), idOf(r, 'r')];
+  r.editor.pickTool('node');
+  r.editor.select([w]);
+  r.editor.snap.set({ ...NO_SNAP, shapes: true }); // the other shapes are targets (and nothing near (50, 49))
+  const a1 = handleAt(r, 'a1');
+  measured.length = 0;
+  r.editor.pointerDown(a1, [w], { add: false });
+  const to = hostAt(r, 50, 49);
+  for (let i = 1; i <= 6; i++) r.editor.pointerDrag({ x: a1.x + ((to.x - a1.x) * i) / 6, y: a1.y + ((to.y - a1.y) * i) / 6 });
+  r.editor.pointerUp(to);
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+  assert.ok(r.editor.source().includes('d="M 30 44 Q 40 32, 50 49 Q 60 56, 70 44"'), 'the Q controls stay (the lab’s rule)');
+  const gathers = measured.filter((ids) => ids.includes(rect)).length;
+  assert.ok(gathers > 0 && gathers <= 2, `the other shapes were measured ${gathers} times in a 6-frame drag`);
+});
+
+test('a bend tap makes a Q ("Curve") off the midpoint by the lab’s rule, and a bend drag a Q through the finger ("Bend"); a control drag is "Move control"', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const s = idOf(r, 's');
+  r.editor.pickTool('node');
+  r.editor.select([s]);
+  const b = handleAt(r, 'b1');
+  r.editor.pointerDown(b, [s], { add: false });
+  r.editor.pointerUp(b);
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 49 62 50 30');
+  assert.equal(r.editor.history.get().undoLabel, 'Curve');
+  r.editor.undo();
+  r.editor.snap.set(NO_SNAP);
+  const b2 = handleAt(r, 'b1');
+  r.editor.pointerDown(b2, [s], { add: false });
+  r.editor.pointerDrag(hostAt(r, 38, 50));
+  r.editor.pointerDrag(hostAt(r, 40, 45));
+  r.editor.pointerUp(hostAt(r, 40, 45));
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 45 38 50 30', '2·(40, 45) − (35, 52.5), the grab kept');
+  assert.equal(r.editor.history.get().undoLabel, 'Bend');
+  const c = handleAt(r, 'c1');
+  r.editor.pointerDown(c, [s], { add: false });
+  r.editor.pointerDrag({ x: c.x + 5, y: c.y });
+  r.editor.pointerUp({ x: c.x + 5, y: c.y });
+  assert.equal(r.editor.history.get().undoLabel, 'Move control');
+});
+
+test('a tap on an anchor chooses it (drawn active) and the Node tool’s bar shows Smooth where it applies; Make smooth and Make corner are one entry each; Close/Open and Relative/Absolute act on the path', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const c = idOf(r, 'c');
+  r.editor.pickTool('node');
+  r.editor.select([c]);
+  assert.deepEqual(r.editor.nodeBar(), { smooth: null, closed: false, relative: false }, 'no node chosen: no Smooth');
+  const a1 = handleAt(r, 'a1');
+  r.editor.pointerDown(a1, [c], { add: false });
+  r.editor.pointerUp(a1);
+  assert.equal(r.editor.chosenNode.get(), 'a1');
+  assert.ok(r.editor.overlayModel().handles.find((h) => h.id === 'a1')!.active, 'the chosen node is drawn active');
+  assert.equal(r.editor.nodeBar()!.smooth, 'corner', 'a C into a C: Make smooth applies');
+  r.editor.toggleSmooth();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'M 10 55 C 22 20, 40 20, 50 55 S 78 90, 90 55');
+  assert.equal(r.editor.history.get().undoLabel, 'Make smooth');
+  assert.equal(r.editor.nodeBar()!.smooth, 'smooth');
+  r.editor.toggleSmooth();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'M 10 55 C 22 20, 40 20, 50 55 C 60 90, 78 90, 90 55', 'Make corner writes the mirror out: the file as it was');
+  assert.equal(r.editor.history.get().undoLabel, 'Make corner');
+  r.editor.toggleClosed();
+  assert.ok(attr(element(doc(r), (n) => n.id === c), 'd')!.endsWith('90 55 Z'));
+  assert.equal(r.editor.history.get().undoLabel, 'Close path');
+  assert.equal(r.editor.nodeBar()!.closed, true);
+  r.editor.toggleClosed();
+  assert.equal(r.editor.history.get().undoLabel, 'Open path');
+  r.editor.toggleRelative();
+  assert.equal(attr(element(doc(r), (n) => n.id === c), 'd'), 'm 10 55 c 12 -35, 30 -35, 40 0 c 10 35, 28 35, 40 0');
+  assert.equal(r.editor.history.get().undoLabel, 'Make relative');
+  assert.equal(r.editor.nodeBar()!.relative, true);
+  r.editor.toggleRelative();
+  assert.equal(r.editor.history.get().undoLabel, 'Make absolute');
+  r.editor.select([idOf(r, 'w')]);
+  assert.equal(r.editor.chosenNode.get(), null, 'another selection: no chosen node');
+});
+
+test('a panel edit during a node drag is refused, quietly (M1 fix F3)', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const w = idOf(r, 'w');
+  r.editor.pickTool('node');
+  r.editor.select([w]);
+  const a1 = handleAt(r, 'a1');
+  r.editor.pointerDown(a1, [w], { add: false });
+  r.editor.pointerDrag({ x: a1.x, y: a1.y + 20 });
+  const mid = r.editor.source();
+  r.editor.toggleRelative(); // a ContextBar button while the finger is down
+  r.editor.setStyle('stroke', '#e76f51');
+  assert.equal(r.editor.source(), mid, 'nothing written into the drag');
+  r.editor.pointerUp({ x: a1.x, y: a1.y + 20 });
+  assert.equal(r.editor.history.get().undoLabel, 'Move point');
+  r.editor.undo();
+  assert.equal(r.editor.source(), WAVE, 'one entry: the drag alone');
+});
+
+test('a letter token’s tap cycles its segment ("Set segment"), and a locked path or a d a <style> rule sets refuses with M1’s words', () => {
+  const r = rig();
+  r.editor.open(WAVE);
+  const s = idOf(r, 's');
+  const L = tokenIn(r, s, 'enum', 0, 'd=');
+  assert.equal(L.block.text.slice(L.token.start, L.token.end), 'L');
+  r.editor.tapToken(L.block, L.token);
+  assert.equal(attr(element(doc(r), (n) => n.id === s), 'd'), 'M 20 75 Q 49 62 50 30');
+  assert.equal(r.editor.history.get().undoLabel, 'Set segment');
+  const LOCK = WAVE.replace('<path id="s"', '<path id="s" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:locked="true"').replace('viewBox', 'xmlns:draw="https://mmaggitti.github.io/draw/ns" viewBox').replace(' xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:locked', ' draw:locked');
+  r.editor.open(LOCK);
+  const L2 = tokenIn(r, idOf(r, 's'), 'enum', 0, 'd=');
+  r.editor.tapToken(L2.block, L2.token);
+  assert.equal(r.editor.notice.get(), LOCKED);
+  assert.equal(r.editor.source(), LOCK);
+  const CSS = WAVE.replace('<path id="w"', '<style>#s { d: path("M 0 0 L 1 1") }</style>\n  <path id="w"');
+  r.editor.open(CSS);
+  const L3 = tokenIn(r, idOf(r, 's'), 'enum', 0, 'd=');
+  r.editor.tapToken(L3.block, L3.token);
+  assert.match(r.editor.notice.get() ?? '', /Its d is set by CSS \(a <style> rule\)/);
+  assert.equal(r.editor.source(), CSS);
+});
+
+// ── P1-M3 S2: arcs, holes and the donut ────────────────────────────────────────────────────────
+
+const LAB_FILE = (f: string) => readFileSync(`${HERE}../../../../engine/test/fixtures/corpus/lab/${f}`, 'utf8');
+const pathsOf = (r: Rig) => [...descendants(doc(r), doc(r).root)].filter((n): n is ElementNode => n.kind === 'element' && n.local === 'path').map((n) => n.id);
+/** Host px of the midpoint of lab/arcs.svg's arc with these flags. */
+const arcMid = (r: Rig, large: boolean, sweep: boolean) => {
+  const c = arcCenter(24, 50, 30, 30, 0, large, sweep, 76, 50) as ArcCenter;
+  const [x, y] = arcPoint(c, c.t1 + c.dt / 2);
+  return hostAt(r, x, y);
+};
+
+test('a tap on a ghost arc is one "Set arc flags" entry that sets exactly its two flags (packed flags too), and the old arc becomes a ghost; a tap far from every ghost selects as ever', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs.svg');
+  r.editor.open(src);
+  const p = pathsOf(r)[0];
+  r.editor.pickTool('node');
+  r.editor.select([p]);
+  const marks = () => r.editor.overlayModel().paths!;
+  assert.deepEqual(marks().ghosts.map((g) => g.flags).sort(), ['0 0', '1 0', '1 1']);
+  assert.deepEqual(marks().flags.map((f) => f.text + (f.on ? ' (the arc)' : '')).sort(), ['0 0', '0 1 (the arc)', '1 0', '1 1']);
+  tap(r, arcMid(r, true, true), []);
+  assert.equal(r.editor.source(), src.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 1 1 76 50'));
+  assert.equal(r.editor.history.get().undoLabel, 'Set arc flags');
+  assert.deepEqual(marks().ghosts.map((g) => g.flags).sort(), ['0 0', '0 1', '1 0'], 'the old arc is a ghost now');
+  tap(r, arcMid(r, false, false), []);
+  assert.equal(r.editor.source(), src.replace('A 30 30 0 0 1 76 50', 'A 30 30 0 0 0 76 50'));
+  r.editor.undo();
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one undo each');
+  tap(r, hostAt(r, 5, 95), []);
+  assert.equal(r.editor.source(), src, 'far from every ghost: nothing written');
+  assert.equal(r.editor.selection.get().size, 0, 'and the tap on empty canvas deselects');
+  const packed = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path id="a" d="M 24 50 A 30 30 0 01 76 50" fill="none" stroke="#000"/></svg>';
+  r.editor.open(packed);
+  r.editor.pickTool('node');
+  r.editor.select([idOf(r, 'a')]);
+  tap(r, arcMid(r, true, false), []);
+  assert.equal(r.editor.source(), packed.replace('0 01 76', '0 10 76'), 'packed flags rewritten in place');
+});
+
+// R8 (the P1-M3 review): arcs/arc-endpoints and arc-editing say the Node tool's start and end anchors drag
+// the arc's ends, its radii, rotation and flags keeping their text, and the ghosts follow; the e2e drags
+// the end alone.
+test('an arc’s start and end anchors drag its ends: on lab/arcs.svg, a0 (the M) and a1 each write only their own numbers, the radii, rotation and flags keeping their text (one "Move point" each), and the ghosts follow, from the start to the end where they are now', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs.svg');
+  const D = 'M 24 50\n   A 30 30 0 0 1 76 50';
+  assert.ok(src.includes(D), 'test setup: lab/arcs.svg’s arc');
+  r.editor.open(src);
+  r.editor.pickTool('node');
+  r.editor.select([pathsOf(r)[0]]);
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-6;
+  const CASES: [string, [number, number], [number, number], [number, number], string][] = [
+    ['a0', [24, 50], [30, 56], [76, 50], 'M 30 56\n   A 30 30 0 0 1 76 50'],
+    ['a1', [76, 50], [70, 40], [24, 50], 'M 24 50\n   A 30 30 0 0 1 70 40'],
+  ];
+  for (const [h, from, to, other, want] of CASES) {
+    const at = handleAt(r, h);
+    assert.ok(near(at, hostAt(r, ...from)), `${h} is drawn at (${from})`);
+    drag(r, at, hostAt(r, ...to), []);
+    assert.equal(r.editor.source(), src.replace(D, want), `${h} dragged to (${to})`);
+    assert.equal(r.editor.history.get().undoLabel, 'Move point');
+    const [start, end] = h === 'a0' ? [to, other] : [other, to];
+    const ghosts = r.editor.overlayModel().paths!.ghosts;
+    assert.deepEqual(ghosts.map((g) => g.flags).sort(), ['0 0', '1 0', '1 1']);
+    for (const g of ghosts) {
+      assert.ok(near(g.start, hostAt(r, ...start)), `${h}: the ${g.flags} ghost starts at (${start})`);
+      assert.ok(near(g.cubics.at(-1)![2], hostAt(r, ...end)), `${h}: the ${g.flags} ghost ends at (${end})`);
+    }
+    r.editor.undo();
+    assert.equal(r.editor.source(), src, 'one undo');
+  }
+});
+
+const HOLE_IN = 'M 43.3 42 A 9 9 0 1 1 56.7 42 L 61 66 L 39 66 Z';
+const HOLE_REV = 'M 43.3 42 L 39 66 L 61 66 L 56.7 42 A 9 9 0 1 0 43.3 42 Z';
+
+test('Reverse: with an inner anchor chosen it turns that subpath alone (SVG Lab’s HOLE_REV), with none every subpath; one "Reverse" entry each; the inner bottom line’s arrow turns with it', () => {
+  const r = rig();
+  const src = LAB_FILE('arcs--holes.svg');
+  r.editor.open(src);
+  const p = pathsOf(r)[0];
+  r.editor.pickTool('node');
+  r.editor.select([p]);
+  const at = hostAt(r, 50, 66);
+  // The arrow nearest (50, 66): its direction, tip minus the middle of its base.
+  const arrowX = () => {
+    const a = r.editor.overlayModel().paths!.arrows
+      .map((x) => ({ x, mid: { x: (x.points[1].x + x.points[2].x) / 2, y: (x.points[1].y + x.points[2].y) / 2 } }))
+      .sort((u, v) => Math.hypot(u.mid.x - at.x, u.mid.y - at.y) - Math.hypot(v.mid.x - at.x, v.mid.y - at.y))[0];
+    assert.ok(a.x.inner, 'an inner arrow');
+    return Math.sign(a.x.points[0].x - a.mid.x);
+  };
+  assert.equal(arrowX(), -1, 'the inner bottom line runs left before');
+  const a6 = handleAt(r, 'a6'); // the end of L 61 66, an inner anchor
+  tap(r, a6, [p]);
+  assert.equal(r.editor.chosenNode.get(), 'a6');
+  r.editor.reverse();
+  assert.equal(r.editor.source(), src.replace(HOLE_IN, HOLE_REV));
+  assert.equal(r.editor.history.get().undoLabel, 'Reverse');
+  assert.equal(arrowX(), 1, 'and right after');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src);
+  r.editor.chosenNode.set(null);
+  r.editor.reverse();
+  assert.equal(r.editor.source(), src.replace('M 14 50 A 36 36 0 1 1 86 50\n   A 36 36 0 1 1 14 50 Z', 'M 14 50 A 36 36 0 1 0 86 50\n   A 36 36 0 1 0 14 50 Z').replace(HOLE_IN, HOLE_REV), 'every subpath, in its order');
+  r.editor.undo();
+  assert.equal(r.editor.source(), src, 'one entry');
+});
+
+// R9 (the P1-M3 review): a straight segment's arrow sat at its midpoint, where its bend handle is drawn
+// on top, so the keyhole's line arrows (the ones Reverse turns) hid under b6 and b7.
+test('the direction arrows clear the handles: on lab/arcs--holes.svg in the Node tool no arrow’s centre is within a handle’s radius plus the arrow’s half-size of any handle; the lines’ arrows sit past their bend handles, on the line and along it; the arcs’ stay at their midpoints; a line too short to clear its handles keeps its arrow at its midpoint', () => {
+  const S = 4.5; // the arrow's half-size (SVG Lab's s)
+  const arrowsOf = (r: Rig) => r.editor.overlayModel().paths!.arrows.map((a) => {
+    const base = { x: (a.points[1].x + a.points[2].x) / 2, y: (a.points[1].y + a.points[2].y) / 2 };
+    const len = Math.hypot(a.points[0].x - base.x, a.points[0].y - base.y);
+    const u = { x: (a.points[0].x - base.x) / len, y: (a.points[0].y - base.y) / len };
+    return { at: { x: base.x + S * u.x, y: base.y + S * u.y }, u, inner: a.inner };
+  });
+  const open = (size = HOST) => {
+    const r = rig(size);
+    r.editor.open(LAB_FILE('arcs--holes.svg'));
+    r.editor.pickTool('node');
+    r.editor.select([pathsOf(r)[0]]);
+    return r;
+  };
+  const r = open();
+  const handles = r.editor.overlayModel().handles;
+  const arrows = arrowsOf(r);
+  assert.equal(arrows.length, 6, 'test setup: two arcs, then the keyhole’s arc, two lines and closing line');
+  for (const a of arrows) {
+    for (const h of handles) {
+      const radius = HANDLE[h.kind][h.active ? 2 : 1];
+      const d = Math.hypot(a.at.x - h.at.x, a.at.y - h.at.y);
+      assert.ok(d >= radius + S, `the arrow at (${a.at.x.toFixed(1)}, ${a.at.y.toFixed(1)}) is ${d.toFixed(1)} px from ${h.id} (radius ${radius} + ${S})`);
+    }
+  }
+  // The keyhole's lines, L 61 66 from (56.7, 42) and L 39 66: each arrow on its line, past its bend handle, pointing along it.
+  for (const [from, to, bend] of [[[56.7, 42], [61, 66], 'b6'], [[61, 66], [39, 66], 'b7']] as const) {
+    const [p, q] = [hostAt(r, from[0], from[1]), hostAt(r, to[0], to[1])];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const u = { x: (q.x - p.x) / len, y: (q.y - p.y) / len };
+    const b = handleAt(r, bend);
+    const a = arrows.find((x) => Math.hypot(x.u.x - u.x, x.u.y - u.y) < 1e-6 && Math.abs((x.at.x - p.x) * u.y - (x.at.y - p.y) * u.x) < 1e-6);
+    assert.ok(a && a.inner, `an inner arrow on the line to (${to})`);
+    const along = (a.at.x - b.x) * u.x + (a.at.y - b.y) * u.y;
+    assert.ok(along > HANDLE.bend[2] && (a.at.x - q.x) * u.x + (a.at.y - q.y) * u.y < 0, `${bend}: the arrow is ${along.toFixed(1)} px past its bend handle, before its end`);
+  }
+  // The arcs keep theirs at their midpoints: SVG Lab's (50, 14) and (50, 86).
+  for (const [x, y] of [[50, 14], [50, 86]] as const) assert.ok(arrows.some((a) => !a.inner && Math.hypot(a.at.x - hostAt(r, x, y).x, a.at.y - hostAt(r, x, y).y) < 1e-6), `the ring’s arrow at (${x}, ${y})`);
+  // A small canvas: the bottom line is too short to clear its bend handle and its end anchor, so its arrow
+  // is drawn at its midpoint (under the bend handle), not moved.
+  const small = open({ width: 120, height: 150 });
+  const mid = hostAt(small, 50, 66);
+  assert.ok(arrowsOf(small).some((a) => a.inner && Math.hypot(a.at.x - mid.x, a.at.y - mid.y) < 1e-6), 'too short: the bottom line’s arrow stays at its midpoint');
+});
+
+test('the donut: Edit as donut changes only the holder’s start tag (one entry); a slice then shows only its donut’s boundary handles, in Select and the Node tool alike, and the % labels; a boundary drag is one "Set donut values" entry whose frames regenerate the slices (SVG Lab’s rule, each value at least 1); a slice moved by M1’s drag detaches the donut with M2’s notice, and one undo restores it', () => {
+  const r = rig();
+  const lab = LAB_FILE('arcs--donut.svg');
+  const adopted = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  r.editor.open(lab);
+  r.editor.select([pathsOf(r)[0]]);
+  assert.deepEqual(r.editor.donut(), { holder: doc(r).root, values: [40, 25, 20, 15], recognized: false }, 'Edit as donut is offered');
+  r.editor.adoptDonut();
+  assert.equal(r.editor.source(), adopted);
+  assert.equal(r.editor.history.get().undoLabel, 'Edit as donut');
+  assert.equal(r.editor.donut()?.recognized, true);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id);
+  assert.deepEqual(ids(), ['donut-b0', 'donut-b1', 'donut-b2'], 'a slice: its donut’s boundaries only (no corners, ring or centre)');
+  assert.deepEqual(r.editor.overlayModel().paths!.donut.map((l) => l.text), ['40%', '25%', '20%', '15%']);
+  r.editor.pickTool('node');
+  assert.deepEqual(ids(), ['donut-b0', 'donut-b1', 'donut-b2'], 'the Node tool: no node handles on a slice either');
+  r.editor.pickTool('select');
+  const ring = (f: number) => hostAt(r, 50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI));
+  const b0 = handleAt(r, 'donut-b0');
+  assert.ok(Math.hypot(b0.x - ring(0.4).x, b0.y - ring(0.4).y) < 1e-6, 'boundary 0 at 40% of the turn');
+  r.editor.pointerDown(b0, [], { add: false });
+  for (const f of [0.45, 0.5, 0.55, 0.6, 0.65, 0.7]) r.editor.pointerDrag(ring(f));
+  assert.equal(r.editor.overlayModel().tip?.text, '64 | 1', 'the tooltip: the two values (64 is capped at the pair − 1)');
+  assert.ok(r.editor.source().includes('<!-- data: 64, 1, 20, 15 -->'), 'the frames write the comment');
+  r.editor.pointerUp(ring(0.7));
+  assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
+  assert.deepEqual(r.editor.donut()?.values, [64, 1, 20, 15]);
+  const want = donutSlices([64, 1, 20, 15], 50, 50, 28)!;
+  assert.deepEqual(pathsOf(r).map((id) => attr(element(doc(r), (n) => n.id === id), 'd')), want, 'the slices regenerated');
+  assert.match(want[0], / 0 1 1 /, 'the first slice the long way round');
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted, 'one entry');
+  // The clamp: boundary 1 dragged back past boundary 0 leaves value 2 at 1.
+  const b1 = handleAt(r, 'donut-b1');
+  r.editor.pointerDown(b1, [], { add: false });
+  for (const f of [0.6, 0.5, 0.4, 0.3]) r.editor.pointerDrag(ring(f));
+  r.editor.pointerUp(ring(0.3));
+  assert.deepEqual(r.editor.donut()?.values, [40, 1, 44, 15], 'each value at least 1');
+  r.editor.undo();
+  // A slice moved by M1's move (a press on it that becomes a drag): a hand edit of its d detaches.
+  const s1 = pathsOf(r)[1];
+  r.editor.select([s1]);
+  drag(r, ring(0.525), { x: ring(0.525).x + 40, y: ring(0.525).y }, [s1]);
+  assert.equal(r.editor.notice.get(), DETACHED);
+  assert.ok(!r.editor.source().includes('draw:'), 'its draw: attributes and xmlns:draw gone');
+  assert.equal(r.editor.donut()?.recognized ?? false, false);
+  r.editor.undo();
+  assert.equal(r.editor.source(), adopted, 'one undo brings the donut back');
+});
+
+// R8 (the P1-M3 review): arcs/donut-boundaries and arcs/donut-percent-labels say a selected slice "or its
+// holder" shows them, but SVG Lab's own file holds its donut in the root, which showed no handles at all.
+test('a donut’s holder selected: the root (SVG Lab’s own file) shows only its boundary handles, and a drag on one is one "Set donut values" entry; a <g> holder shows M1’s handles plus its boundaries; both show the % labels, in Select and the Node tool', () => {
+  const r = rig();
+  const lab = LAB_FILE('arcs--donut.svg');
+  const ns = 'xmlns:draw="https://mmaggitti.github.io/draw/ns"';
+  const inRoot = lab.replace('viewBox="0 0 100 100">', `viewBox="0 0 100 100" ${ns} draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">`);
+  const body = lab.slice(lab.indexOf('>', lab.indexOf('<svg')) + 1, lab.lastIndexOf('</svg>'));
+  const inG = lab.replace(/<svg([^>]*)>[\s\S]*<\/svg>/, `<svg$1 ${ns}>\n<g draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">${body}</g>\n</svg>`);
+  const ids = () => r.editor.overlayModel().handles.map((h) => h.id);
+  const labels = () => r.editor.overlayModel().paths?.donut.map((l) => l.text);
+  const BOUNDS = ['donut-b0', 'donut-b1', 'donut-b2'];
+  const PCT = ['40%', '25%', '20%', '15%'];
+  assert.ok(r.editor.open(inRoot).ok);
+  r.editor.select([doc(r).root]);
+  assert.equal(r.editor.donut()?.recognized, true, 'test setup: the root holds a donut');
+  for (const tool of ['select', 'node'] as const) {
+    r.editor.pickTool(tool);
+    r.editor.select([doc(r).root]);
+    assert.deepEqual(ids(), BOUNDS, `${tool}: the root holder shows its boundaries only (the root has no handles of its own)`);
+    assert.deepEqual(labels(), PCT, `${tool}: the root holder’s % labels`);
+  }
+  r.editor.pickTool('select');
+  r.editor.select([doc(r).root]);
+  const ring = (f: number) => hostAt(r, 50 + 28 * Math.cos(-Math.PI / 2 + f * 2 * Math.PI), 50 + 28 * Math.sin(-Math.PI / 2 + f * 2 * Math.PI));
+  r.editor.pointerDown(handleAt(r, 'donut-b0'), [], { add: false });
+  for (const f of [0.45, 0.5]) r.editor.pointerDrag(ring(f));
+  r.editor.pointerUp(ring(0.5));
+  assert.equal(r.editor.history.get().undoLabel, 'Set donut values');
+  assert.deepEqual(r.editor.donut()?.values, [50, 15, 20, 15], 'the root holder’s boundary 0 dragged to half the turn');
+  r.editor.undo();
+  assert.equal(r.editor.source(), inRoot, 'one entry');
+  assert.ok(r.editor.open(inG).ok);
+  const g = element(doc(r), (n) => n.local === 'g').id;
+  for (const tool of ['select', 'node'] as const) {
+    r.editor.pickTool(tool);
+    r.editor.select([g]);
+    assert.equal(r.editor.donut()?.recognized, true, 'test setup: the <g> holds a donut');
+    assert.deepEqual(ids(), ['tl', 'tr', 'br', 'bl', 'center', 'rot', ...BOUNDS], `${tool}: a <g> holder shows M1’s handles plus its boundaries`);
+    assert.deepEqual(labels(), PCT, `${tool}: the <g> holder’s % labels`);
+  }
+});
+
+// ── P1-M3 S3: booleans ─────────────────────────────────────────────────────────────────────────
+
+// The libraries themselves, as the chunks give them (node imports them directly).
+const LIBS: Libraries = { primary: async () => pathBoolCombine, fallback: async () => paperCombine };
+const BOOL_RECT = '<rect id="a" x="10" y="10" width="50" height="50" rx="4" fill="#e76f51" stroke="#264653" opacity="0.9"/>';
+const BOOL_CIRCLE = '<circle id="b" cx="0" cy="0" r="25" fill="#2a9d8f" transform="translate(60 60)"/>';
+const BOOL_FILE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${BOOL_RECT}\n  ${BOOL_CIRCLE}\n  <text id="t" x="10" y="95">Hi</text>\n</svg>`;
+/** Whether the fill of `d` holds each point. */
+const fills = (d: string, pts: readonly [number, number][]) => pts.map(([x, y]) => insideAt(toAbsolute(parsePath(d)), x, y, 'nonzero'));
+
+test('Union, Subtract, Intersect and Exclude: the result replaces the bottom operand in its place (its attributes in order less its geometry, then d, after its leading whitespace), the others go with theirs, one entry each, the result selected; one undo gives the file back byte for byte', async () => {
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(BOOL_FILE);
+  const [a, b] = [idOf(r, 'a'), idOf(r, 'b')];
+  // In the rect only, in both, in the circle only (centred at (60, 60) by its transform), in neither.
+  const PTS: [number, number][] = [[20, 20], [55, 55], [75, 75], [90, 15]];
+  const WANT: Record<BoolOp, boolean[]> = {
+    union: [true, true, true, false],
+    difference: [true, false, false, false],
+    intersection: [false, true, false, false],
+    exclusion: [true, false, true, false],
+  };
+  for (const op of BOOLEAN_OPS) {
+    r.editor.select([b, a]); // the bottom is the first in the document, whatever the order of the taps
+    await r.editor.combine(op);
+    const src = r.editor.source();
+    const d = /<path id="a" fill="#e76f51" stroke="#264653" opacity="0\.9" d="([^"]+)"\/>/.exec(src)?.[1];
+    assert.ok(d, `${op} wrote:\n${src}`);
+    assert.equal(src, BOOL_FILE.replace(BOOL_RECT, `<path id="a" fill="#e76f51" stroke="#264653" opacity="0.9" d="${d}"/>`).replace(`\n  ${BOOL_CIRCLE}`, ''), `${op}: the rest of the file as it was`);
+    assert.match(d, /^M -?[\d.]+ -?[\d.]+( [LC]( -?[\d.]+)+)* Z( M -?[\d.]+ -?[\d.]+( [LC]( -?[\d.]+)+)* Z)*$/, `${op}: its d is loops of M, L, C and Z`);
+    assert.deepEqual(fills(d, PTS), WANT[op], `${op}: where it fills`);
+    assert.equal(r.editor.history.get().undoLabel, BOOLEAN_LABELS[op]);
+    assert.deepEqual(sel(r), [element(doc(r), (n) => n.local === 'path').id], `${op}: the result is selected`);
+    r.editor.undo();
+    assert.equal(r.editor.source(), BOOL_FILE, `${op}: one undo gives the file back`);
+  }
+});
+
+test('a bottom <path> keeps its own element: only its d changes, in place and in its own quotes, and its generator inputs go (Draw’s declaration with them, nothing of Draw’s being left)', async () => {
+  const P = `<path id="p" d='M 10 10 H 60 V 60 H 10 Z' draw:gen="spiral" draw:cx="35" draw:cy="35" draw:r="20" draw:turns="2" fill="red"/>`;
+  const F = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:draw="${DRAW_NS}" viewBox="0 0 100 100">\n  ${P}\n  <rect x="40" y="40" width="40" height="40"/>\n</svg>`;
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(F);
+  const p = idOf(r, 'p');
+  r.editor.select([p, element(doc(r), (n) => n.local === 'rect').id]);
+  await r.editor.combine('union');
+  const src = r.editor.source();
+  const d = /<path id="p" d='([^']+)' fill="red"\/>/.exec(src)?.[1];
+  assert.ok(d, src);
+  assert.equal(src, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <path id="p" d='${d}' fill="red"/>\n</svg>`);
+  assert.deepEqual(fills(d, [[20, 20], [70, 70], [70, 20]]), [true, true, false]);
+  assert.deepEqual(sel(r), [p], 'the same element, selected');
+  r.editor.undo();
+  assert.equal(r.editor.source(), F);
+});
+
+// R8 (the P1-M3 review): feature:booleans says each operand is mapped into the bottom's units through the
+// measured matrices; every other test's bottom has no transform of its own, so root units would pass them.
+test('a bottom with its own transform: the union is written in its units, so, its transform kept, it fills what the two shapes filled (400 root sample points)', async () => {
+  const r = rig(HOST, {}, LIBS);
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  <rect id="a" x="10" y="10" width="50" height="50" transform="rotate(30 35 35)"/>\n  <circle id="b" cx="65" cy="65" r="20"/>\n</svg>\n';
+  r.editor.open(src);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.notice.get(), null);
+  const path = element(doc(r), (n) => n.local === 'path');
+  assert.equal(attr(path, 'transform'), 'rotate(30 35 35)', 'the result keeps the bottom’s transform');
+  const abs = toAbsolute(parsePath(attr(path, 'd')!));
+  // A root point in the rect's units, and so the result's: rotate(30 35 35) undone.
+  const [c, s30] = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6)];
+  const units = (x: number, y: number): [number, number] => [35 + c * (x - 35) + s30 * (y - 35), 35 - s30 * (x - 35) + c * (y - 35)];
+  const wrong: string[] = [];
+  for (let y = 2.5; y < 100; y += 5) {
+    for (let x = 2.5; x < 100; x += 5) {
+      const [u, v] = units(x, y);
+      const want = (u > 10 && u < 60 && v > 10 && v < 60) || Math.hypot(x - 65, y - 65) < 20;
+      if (insideAt(abs, u, v, 'nonzero') !== want) wrong.push(`(${x}, ${y})`);
+    }
+  }
+  assert.deepEqual(wrong, [], 'root points the result fills differently from the rect and the circle');
+});
+
+test('booleans refuse, saying why and writing nothing: one shape, a line, text, a group, a <use>, CSS geometry, a d with an error, a fill-rule a <style> rule may set, a bottom shape a <style> rule may paint (a <path> bottom combines), a bottom with a <title>, a shape the canvas can’t measure, nothing left, and a chunk that can’t load', async () => {
+  const W = (body: string, first = '<rect id="a" x="10" y="10" width="50" height="50"/>') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n  ${first}\n  ${body}\n</svg>`;
+  const cases: [file: string, op: BoolOp, notice: string, libs?: Libraries, over?: (r: () => Rig) => Partial<CanvasPort>][] = [
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Select two shapes or more to combine them.'],
+    [W('<line id="b" x1="0" y1="0" x2="50" y2="50" stroke="#000"/>'), 'union', 'A line has no area.'],
+    [W('<text id="b" x="10" y="50">Hi</text>'), 'union', 'Convert text to paths first (P1-M4).'],
+    [W('<g id="b"><rect x="0" y="0" width="5" height="5"/></g>'), 'union', 'Only shapes combine.'],
+    [W('<use id="b" href="#a" x="5"/>'), 'union', 'Only shapes combine.'],
+    [W('<circle id="b" cx="50" cy="50" r="10" style="r: 20px"/>'), 'union', 'Its r is set by CSS (its style attribute), which wins over the attribute.'],
+    [W('<path id="b" d="M 0 0 L 10 Q"/>'), 'union', 'Its path data has an error at character 12.'],
+    [W('<style>circle { fill-rule: evenodd }</style>\n  <circle id="b" cx="50" cy="50" r="10"/>'), 'union', 'A <style> rule may set its fill-rule, which Draw can’t read yet (P2).'],
+    // R7 (the P1-M3 review): the rect would become a <path>, which `rect { … }` no longer paints (it turned black).
+    [W('<circle id="b" cx="60" cy="60" r="25"/>', '<style>rect { fill: #e76f51 } circle { fill: #2a9d8f }</style>\n  <rect id="a" x="10" y="10" width="50" height="50"/>'), 'union', STYLE_PAINT],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>', '<rect id="a" x="10" y="10" width="50" height="50"><title>A</title></rect>'), 'union', 'Its <title> would be lost.'],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', 'Draw can’t tell where it is.', LIBS, (r) => ({
+      measure: (ids) => {
+        const m = measureWith(r().editor, ids, true);
+        m.delete(idOf(r(), 'b'));
+        return m;
+      },
+    })],
+    [W('<rect id="b" x="70" y="70" width="20" height="20"/>'), 'intersection', 'Nothing would be left.'],
+    [W('<rect id="b" x="40" y="40" width="40" height="40"/>'), 'union', OFFLINE, { primary: () => Promise.reject(new Error('Failed to fetch')), fallback: LIBS.fallback }],
+  ];
+  for (const [file, op, notice, libs = LIBS, over] of cases) {
+    let r!: Rig;
+    r = rig(HOST, over ? over(() => r) : {}, libs);
+    r.editor.open(file);
+    const ids = notice.startsWith('Select two') ? [idOf(r, 'a')] : [idOf(r, 'a'), idOf(r, 'b')];
+    r.editor.select(ids);
+    await r.editor.combine(op);
+    assert.equal(r.editor.notice.get(), notice, `${file}: ${op}`);
+    assert.equal(r.editor.source(), file, `${notice}: nothing written`);
+    assert.equal(r.editor.history.get().canUndo, false, `${notice}: nothing recorded`);
+  }
+  // A <path> bottom keeps its element, so a rule that paints it still does: it combines.
+  const r = rig(HOST, {}, LIBS);
+  r.editor.open(W('<circle id="b" cx="60" cy="60" r="25"/>', '<style>path { fill: #e76f51 }</style>\n  <path id="a" d="M 10 10 H 60 V 60 H 10 Z"/>'));
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  await r.editor.combine('union');
+  assert.equal(r.editor.history.get().undoLabel, 'Union', `a <path> bottom a rule paints: ${r.editor.notice.get()}`);
+});
+
+test('a boolean the drawing changes under while its chunk loads refuses, and writes nothing over the change', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+  r.editor.open(BOOL_FILE);
+  r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+  const pending = r.editor.combine('union');
+  r.editor.select([idOf(r, 't')]);
+  r.editor.delete(); // meanwhile, the text goes
+  const after = r.editor.source();
+  release();
+  await pending;
+  assert.equal(r.editor.notice.get(), DRAWING_CHANGED);
+  assert.equal(r.editor.source(), after, 'nothing written over the change');
+  assert.equal(r.editor.history.get().undoLabel, 'Delete');
+});
+
+// N1 (the P1-M3 review): the check read the editor's own version, which a tool pick moves and a drag's
+// frames don't: a Union resolving mid-drag was dropped with no notice, and a tool picked and put back
+// while it loaded refused for nothing. It reads the document's version now, and refuses while an edit
+// is live.
+test('a boolean whose chunk resolves during a live move drag, or while a press is held, refuses with the notice and writes nothing; one whose load saw only a tool picked and put back is written', async () => {
+  const pendingUnion = () => {
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    const r = rig(HOST, {}, { primary: async () => (await gate, pathBoolCombine), fallback: LIBS.fallback });
+    r.editor.open(BOOL_FILE);
+    r.editor.select([idOf(r, 'a'), idOf(r, 'b')]);
+    return { r, pending: r.editor.combine('union'), release };
+  };
+  // A move drag of the text, live when the chunk resolves.
+  const d = pendingUnion();
+  const at = hostAt(d.r, 12, 93);
+  d.r.editor.pointerDown(at, [idOf(d.r, 't')], { add: false });
+  d.r.editor.pointerDrag({ x: at.x + 20, y: at.y });
+  d.r.editor.pointerDrag({ x: at.x + 30, y: at.y });
+  d.release();
+  await d.pending;
+  assert.equal(d.r.editor.notice.get(), DRAWING_CHANGED, 'mid-drag: refused, saying so');
+  d.r.editor.pointerUp({ x: at.x + 30, y: at.y });
+  assert.equal(d.r.editor.history.get().undoLabel, 'Move', 'the drag is one entry of its own');
+  assert.ok(!d.r.editor.source().includes('<path'), 'and nothing was combined');
+  // A press held (nothing changed yet): an edit is live, so nothing is written into it.
+  const h = pendingUnion();
+  h.r.editor.pointerDown(hostAt(h.r, 12, 93), [idOf(h.r, 't')], { add: false });
+  h.release();
+  await h.pending;
+  assert.equal(h.r.editor.notice.get(), DRAWING_CHANGED, 'a press held: refused, saying so');
+  h.r.editor.pointerUp(hostAt(h.r, 12, 93));
+  assert.equal(h.r.editor.history.get().canUndo, false, 'nothing written');
+  // A tool picked and put back while it loads: the document never changed, so the Union is written.
+  const p = pendingUnion();
+  p.r.editor.pickTool('node');
+  p.r.editor.pickTool('select');
+  p.release();
+  await p.pending;
+  assert.equal(p.r.editor.notice.get(), null);
+  assert.equal(p.r.editor.history.get().undoLabel, 'Union');
 });

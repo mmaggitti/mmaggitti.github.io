@@ -33,7 +33,7 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 Signed: ______  Date: ______  Device / iOS: ______
 
-## P1 — Select, transform, shapes and colour
+## P1 — Select, transform, shapes, colour and paths
 
 The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
 To take the house's group: tap the roof, then More → Select group.
@@ -55,5 +55,14 @@ To take the house's group: tap the roof, then More → Select group.
 | 33 | Inspect at 440 pt | With one shape and then three selected, open Inspect at half and full: every row can be reached by scrolling, nothing scrolls sideways, and the segments are easy to hit with a thumb | ☐ |
 | 34 | Gradient handles | Give a shape a Linear fill, then Edit on canvas: the handles sit on the gradient and drag it; turn the shape (the ring) and try again: they still sit where the gradient draws | ☐ |
 | 35 | Gloss | More → Gloss on a rounded rect: it looks like SVG Lab's Create gloss on the same shape; More → Gloss again takes it off | ☐ |
+| 36 | The Pen by thumb | Pen tool: tap three points, then drag a fourth: a tap never makes a curve, and even a short drag does, leaving the point along your drag; Undo point takes the last one back, and a tap on the first point (from three) closes the path | ☐ |
+| 37 | Reaching nodes | Node tool on a curvy path: grab an anchor, a control and a line's bend handle with your thumb, each first try, at the fit and zoomed in to about 4×; each moves only what it should, and Undo puts it back | ☐ |
+| 38 | The path's bar | Node tool with a path selected, a node tapped: Smooth, Close and Relative sit in the bottom bar within easy reach of your thumb, above the home indicator, and each does what it says in one tap | ☐ |
+| 39 | Ghost arcs by thumb | Open the file SVG Lab's Arcs lesson exports in arc mode, and select its path in the Node tool: tap each dashed ghost arc with your thumb; the one you meant takes over first try, and its "L S" label turns pink | ☐ |
+| 40 | The donut's ring | Open the file the Arcs lesson exports in donut mode, tap a slice, Inspect → Edit as donut, then drag a boundary between two slices all the way round the ring: the handle stays under your thumb, the "a \| b" tooltip is readable above it, and the % labels follow | ☐ |
+| 41 | Direction arrows | Open the file the Arcs lesson exports in holes mode, and select its path in the Node tool at the fit: every arrowhead is readable, the inner ones pink; tap an inner point, then Reverse: the inner arrows turn, and the hole opens | ☐ |
+| 42 | Union by thumb | Draw a rect and a circle that overlap, select both with a marquee, then More → Union: one shape is left where the two were, drawn in the rect's colour, and Undo brings both back; Subtract, Intersect and Exclude each do what they say the same way | ☐ |
+| 43 | Union offline | Open Draw, then turn on Airplane mode without reloading and try Union: it works (Safari kept its code from an earlier Union) or the notice says Draw couldn't load the shape tools and nothing changes; back online, Union works, and from then on it works offline too until Draw is reloaded | ☐ |
+| 44 | More after a marquee | After a one-finger marquee by touch, the first tap on More opens the sheet (CI's touch harness swallowed it in M2 and M3) | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

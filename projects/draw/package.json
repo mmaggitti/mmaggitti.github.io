@@ -4,13 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node tools/check-sinks.mjs && node tools/ledger-check.mjs && tsc --noEmit && npm run test:unit && node tools/ledger-check.mjs --evidence node_modules/.evidence.jsonl && vite build && node tools/library-index.mjs",
+    "build": "node tools/check-sinks.mjs && node tools/ledger-check.mjs && tsc --noEmit && npm run test:unit && node tools/ledger-check.mjs --evidence node_modules/.evidence.jsonl && vite build && node tools/check-bundle.mjs && node tools/library-index.mjs",
     "test:unit": "node --test --test-reporter=dot --test-reporter-destination=stdout --test-reporter=./tools/evidence-reporter.mjs --test-reporter-destination=node_modules/.evidence.jsonl \"../../engine/test/**/*.test.ts\" \"test/unit/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "dompurify": "3.4.16",
     "idb-keyval": "6.3.0",
+    "paper": "0.12.18",
+    "path-bool": "1.0.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -23,5 +25,8 @@
     "svg-tag-names": "3.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
+  },
+  "overrides": {
+    "gl-matrix": "3.4.4"
   }
 }

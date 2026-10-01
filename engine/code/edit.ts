@@ -12,14 +12,14 @@
 //   outside the token still never change. What no space can keep apart is refused. So a token's
 //   index within its attribute or leaf survives the edit, and a scrub can keep hold of it.
 
-import { el, findAttr, setAttrRaw, setLeafRaw, type Doc, type NodeId } from '../model/doc.ts';
+import { el, findAttr, isOneComment, setAttrRaw, setLeafRaw, type Doc, type NodeId } from '../model/doc.ts';
 import { escape } from '../xml/entities.ts';
 import { NAME_PATTERN } from '../xml/lex.ts';
 import { fmt } from '../values/number-format.ts';
 import { parseColor } from '../values/color.ts';
 import { tokenizeAttrRaw, tokenizeLeafRaw, tokenizeText, type AttrRef, type NumberToken, type Token } from './tokens.ts';
 
-/** Where a token lives: an attribute of an element, or the raw text of a text or CDATA leaf. */
+/** Where a token lives: an attribute of an element, or the raw text of a text, CDATA or comment leaf. */
 export type TokenTarget = { attr: AttrRef } | { text: true };
 
 export class TokenEditError extends Error {}
@@ -94,6 +94,7 @@ interface Located {
   raw: string;
   quote: '"' | "'" | null; // the attribute's quote; null for leaf text
   cdata: boolean;
+  comment: boolean; // a donut's data comment (P1-M3): its text is written as it is, never escaped
   key: string; // which attribute or leaf, for the memo below
   retokenize: (raw: string) => Token[];
 }
@@ -114,11 +115,11 @@ function locate(doc: Doc, nodeId: NodeId, target: TokenTarget): Located {
     const a = findAttr(node, target.attr.ns, target.attr.local);
     if (!a) throw new TokenEditError(`<${node.qname}> has no ${target.attr.local} attribute`);
     const key = `${nodeId} ${target.attr.ns ?? ''} ${target.attr.local}`;
-    return { raw: a.raw, quote: a.quote, cdata: false, key, retokenize: (raw) => tokenizeAttrRaw(doc, node, target.attr, raw) };
+    return { raw: a.raw, quote: a.quote, cdata: false, comment: false, key, retokenize: (raw) => tokenizeAttrRaw(doc, node, target.attr, raw) };
   }
   const n = doc.nodes.get(nodeId);
-  if (!n || (n.kind !== 'text' && n.kind !== 'cdata')) throw new TokenEditError(`node ${nodeId} is not a text or CDATA leaf`);
-  return { raw: n.raw, quote: null, cdata: n.kind === 'cdata', key: `${nodeId}`, retokenize: (raw) => tokenizeLeafRaw(doc, n, raw) };
+  if (!n || (n.kind !== 'text' && n.kind !== 'cdata' && n.kind !== 'comment')) throw new TokenEditError(`node ${nodeId} is not a text or CDATA leaf (or a comment)`);
+  return { raw: n.raw, quote: null, cdata: n.kind === 'cdata', comment: n.kind === 'comment', key: `${nodeId}`, retokenize: (raw) => tokenizeLeafRaw(doc, n, raw) };
 }
 
 const SEPARATORS: readonly [string, string][] = [
@@ -144,9 +145,10 @@ function splice(doc: Doc, nodeId: NodeId, target: TokenTarget, token: Token, new
   const why = tokenTextError(token, newText);
   if (why) throw new TokenEditError(why);
   if (at.cdata && newText.includes(']]>')) throw new TokenEditError("text in a CDATA section can't contain ]]>");
-  const text = at.cdata ? newText : escape(newText, at.quote);
+  const text = at.cdata || at.comment ? newText : escape(newText, at.quote);
   const head = raw.slice(0, token.start);
   const tail = raw.slice(token.end);
+  if (at.comment && !isOneComment(head + text + tail)) throw new TokenEditError("a comment can't hold -- or end with -");
   if (token.kind === 'text') return { raw: head + text + tail, start: token.start, text, tokens: null, key: at.key };
 
   const before = tokensOf(doc, at);
@@ -238,7 +240,7 @@ export function rewriteNumbers(raw: string, edits: readonly NumberEdit[], retoke
 }
 
 /**
- * Apply a token edit to the document (setAttrRaw, or setLeafRaw for text and CDATA), and
+ * Apply a token edit to the document (setAttrRaw, or setLeafRaw for text, CDATA and a comment), and
  * return the token as it now reads (null only for a text run the edit emptied or split).
  */
 export function applyTokenEdit(doc: Doc, nodeId: NodeId, target: TokenTarget, token: Token, newText: string): Token | null {

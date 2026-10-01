@@ -27,6 +27,7 @@ export const STYLE_NUMBERS: Readonly<Record<string, { min: number; max?: number 
 
 /** The keyword properties' segments (a value outside them is shown as written, and kept). */
 export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+  'fill-rule': ['nonzero', 'evenodd'],
   'stroke-linecap': ['butt', 'round', 'square'],
   'stroke-linejoin': ['miter', 'round', 'bevel'],
   'paint-order': ['normal', 'stroke'],
@@ -37,6 +38,7 @@ export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
 // The keyword properties' own keywords (CSS reads them in any case): a value that isn't one is
 // refused, so no text but a keyword is ever written there (SVG 2's full lists, the segments' too).
 const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
+  'fill-rule': ['nonzero', 'evenodd'],
   'stroke-linecap': ['butt', 'round', 'square'],
   'stroke-linejoin': ['miter', 'miter-clip', 'round', 'bevel', 'arcs'],
   'vector-effect': ['none', 'non-scaling-stroke', 'non-scaling-size', 'non-rotation', 'fixed-position'],

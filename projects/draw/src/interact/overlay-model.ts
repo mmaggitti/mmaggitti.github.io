@@ -15,6 +15,7 @@ import type { NodeId } from '../../../../engine/model/doc.ts';
 import { apply, type Affine } from '../../../../engine/values/affine.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
 import type { Point, Rect, Size } from '../canvas/viewport.ts';
+import type { PathMarks } from './path-marks.ts';
 
 export type Quad = [Point, Point, Point, Point];
 
@@ -70,6 +71,8 @@ export interface OverlayModel {
   localGrid: { lines: Line[]; axes: Line[]; labels: Label[] } | null;
   /** Edit on canvas (P1-M2): the gradient's guides, host px: its unit box with "0,0" and "1,1" (objectBoundingBox), a linear gradient's line, a radial one's circle and focus arm. */
   gradient: GradientGuides | null;
+  /** The Node tool's and the Pen's marks (P1-M3, src/interact/path-marks.ts): arms, mirror guides, host px. */
+  paths: PathMarks | null;
   tip: Tip | null;
 }
 
@@ -82,7 +85,7 @@ export interface GradientGuides {
 }
 
 export const EMPTY: OverlayModel = {
-  paper: null, grid: null, outlines: [], marquee: null, coords: null, handles: [], rotGuide: null, guides: [], snapLines: [], localGrid: null, gradient: null, tip: null,
+  paper: null, grid: null, outlines: [], marquee: null, coords: null, handles: [], rotGuide: null, guides: [], snapLines: [], localGrid: null, gradient: null, paths: null, tip: null,
 };
 
 /** The gradient engine's marks (engine/paint/handles.ts) as the overlay draws them. */

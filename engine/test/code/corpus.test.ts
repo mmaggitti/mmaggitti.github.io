@@ -96,6 +96,8 @@ test('P0: editing any token changes only its bytes (every token of every corpus 
       let blockShift = 0;
       const rawShift = new Map<string, number>();
       for (const bt of b.tokens) {
+        // A path's segment letter (P1-M3) changes by a segment rewrite, never a token edit (segments.test.ts sweeps those).
+        if (bt.token.kind === 'enum' && bt.token.segment !== undefined) continue;
         const key = 'attr' in bt.target ? `${bt.target.attr.ns} ${bt.target.attr.local}` : '';
         const s = rawShift.get(key) ?? 0;
         const token = { ...bt.token, start: bt.token.start + s, end: bt.token.end + s } as Token;

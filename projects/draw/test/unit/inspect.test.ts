@@ -16,6 +16,8 @@ import { bind, fakeEditor, fakePorts } from './fakes.ts';
 import { Editor as EditorClass } from '../../src/editor.ts';
 import type { ViewBlock } from '../../src/codeview/code-view.ts';
 import { stripDrawState } from '../../../../engine/model/draw-state.ts';
+import { donutSlices } from '../../../../engine/generators/donut.ts';
+import { readFileSync } from 'node:fs';
 
 const svg = (body: string, viewBox = '0 0 100 100') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">\n  ${body}\n</svg>\n`;
 
@@ -727,4 +729,68 @@ test('what Inspect’s rows show for the finer cases: paint-order="markers strok
   assert.deepEqual([joinSegments(e.styleRow('stroke-linejoin')!).length, showsMiterlimit(e.styleRow('stroke-linejoin')!)], [3, true], 'the default, miter: the miter limit');
   select(e, 'b', 'c');
   assert.equal(showsMiterlimit(e.styleRow('stroke-linejoin')!), true, 'Mixed: shown');
+});
+
+// ── P1-M3 S2: Fill rule, and the donut's fields ────────────────────────────────────────────────
+
+test('Fill rule (P1-M3): Inspect’s Nonzero and Evenodd write fill-rule where it lives (the attribute, a style="" declaration, or a new attribute), one entry each; a value a <style> rule sets is refused with M2’s notice', () => {
+  const F = svg('<path id="p" d="M 0 0 L 10 0 L 10 10 Z" fill="#264653" fill-rule="nonzero"/>\n  <rect id="q" x="1" y="1" width="5" height="5" style="fill-rule: evenodd"/>\n  <circle id="c" cx="50" cy="50" r="5"/>');
+  const e = opened(F);
+  select(e, 'p');
+  assert.equal(e.styleRow('fill-rule')?.value, 'nonzero');
+  e.setStyle('fill-rule', 'evenodd');
+  assert.equal(e.source(), F.replace('fill-rule="nonzero"', 'fill-rule="evenodd"'));
+  assert.equal(e.history.get().undoLabel, 'Set fill-rule');
+  e.undo();
+  assert.equal(e.source(), F);
+  select(e, 'q');
+  assert.equal(e.styleRow('fill-rule')?.value, 'evenodd');
+  e.setStyle('fill-rule', 'nonzero');
+  assert.equal(e.source(), F.replace('style="fill-rule: evenodd"', 'style="fill-rule: nonzero"'), 'the declaration’s value alone');
+  e.undo();
+  select(e, 'c');
+  assert.deepEqual([e.styleRow('fill-rule')?.value, e.styleRow('fill-rule')?.from], ['nonzero', 'default']);
+  e.setStyle('fill-rule', 'evenodd');
+  assert.equal(e.source(), F.replace('r="5"/>', 'r="5" fill-rule="evenodd"/>'), 'a new attribute');
+  assert.ok('error' in checkStyle('fill-rule', 'evenodd; fill: red'), 'only its own keywords');
+  const ruled = opened(svg('<style>path { fill-rule: evenodd }</style>\n  <path id="p" d="M 0 0 L 10 0 L 10 10 Z"/>'));
+  select(ruled, 'p');
+  assert.equal(ruled.styleRow('fill-rule')?.disabled, RULE_SETS('fill-rule'));
+  ruled.setStyle('fill-rule', 'nonzero');
+  assert.equal(ruled.notice.get(), RULE_SETS('fill-rule'));
+  assert.equal(ruled.history.get().canUndo, false);
+});
+
+test('the donut’s fields (P1-M3): Value 1 typed "64" regenerates the slices after each keystroke that reads and is one "Set value 1" entry; a value that isn’t a whole number from 1 to 100 says why; − and + are one entry each; Detach makes it plain', () => {
+  const lab = readFileSync(new URL('../../../../engine/test/fixtures/corpus/lab/arcs--donut.svg', import.meta.url), 'utf8');
+  const adopted = lab.replace('viewBox="0 0 100 100">', 'viewBox="0 0 100 100" xmlns:draw="https://mmaggitti.github.io/draw/ns" draw:gen="donut" draw:cx="50" draw:cy="50" draw:r="28">');
+  const e = opened(adopted);
+  const slices = [...descendants(e.doc!, e.doc!.root)].filter((n) => n.kind === 'element' && n.local === 'path').map((n) => n.id);
+  e.select([slices[2]]);
+  assert.deepEqual(e.donut(), { holder: e.doc!.root, values: [40, 25, 20, 15], recognized: true });
+  const ds = () => slices.map((id) => ([...descendants(e.doc!, e.doc!.root)].find((n) => n.id === id) as ElementNode).attrs.find((a) => a.local === 'd')!.raw);
+  e.fieldStart({ kind: 'donut', index: 0 });
+  assert.equal(e.fieldInput('6'), null);
+  assert.deepEqual(ds(), donutSlices([6, 25, 20, 15], 50, 50, 28), 'each keystroke that reads draws the slices again');
+  assert.equal(e.fieldInput('64'), null);
+  assert.match(e.fieldInput('0') ?? '', /not a whole number from 1 to 100/);
+  assert.match(e.fieldInput('6.5') ?? '', /not a whole number from 1 to 100/);
+  assert.match(e.fieldInput('101') ?? '', /not a whole number from 1 to 100/);
+  e.fieldEnd();
+  assert.equal(e.history.get().undoLabel, 'Set value 1');
+  assert.ok(e.source().includes('<!-- data: 64, 25, 20, 15 -->'));
+  assert.deepEqual(ds(), donutSlices([64, 25, 20, 15], 50, 50, 28));
+  e.undo();
+  assert.equal(e.source(), adopted, 'typing "64" was one entry');
+  e.stepDonutValue(1, 1);
+  assert.ok(e.source().includes('<!-- data: 40, 26, 20, 15 -->'));
+  assert.equal(e.history.get().undoLabel, 'Set value 2');
+  e.stepDonutValue(3, -1);
+  assert.ok(e.source().includes('<!-- data: 40, 26, 20, 14 -->'));
+  e.undo();
+  e.undo();
+  assert.equal(e.source(), adopted, 'one entry each');
+  e.detach();
+  assert.equal(e.source(), lab, 'Detach: the file SVG Lab exported');
+  assert.equal(e.donut()?.recognized, false, 'Edit as donut is offered again');
 });

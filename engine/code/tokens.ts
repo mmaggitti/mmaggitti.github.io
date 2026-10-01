@@ -17,6 +17,7 @@ import { NAME_PATTERN } from '../xml/lex.ts';
 import { parseColor, parsePaint, type Color } from '../values/color.ts';
 import { decodeFragment } from '../values/url.ts';
 import { argSpans, isFlag, parsePath } from '../path/parse.ts';
+import { VALUE_MAX, VALUE_MIN, dataCommentOf, donutOf, readData } from '../generators/donut.ts';
 
 export type TokenKind = 'number' | 'color' | 'enum' | 'text' | 'ref';
 
@@ -35,6 +36,8 @@ export interface NumberToken extends Span {
   min?: number;
   max?: number;
   step?: number; // only where the property has a natural step (opacity 0.01)
+  /** What the number is, where it isn't the property alone: path data's "point 2 x", "control 1 y", "rx" (P1-M3; SVG Lab's dParts). */
+  label?: string;
 }
 
 export interface ColorToken extends Span {
@@ -46,6 +49,11 @@ export interface ColorToken extends Span {
 export interface EnumToken extends Span {
   kind: 'enum';
   options: readonly string[];
+  /**
+   * A <path>'s written L, Q or C letter (P1-M3): the segment's index in parsePath(d).segs. A tap cycles
+   * it L → Q → C as a segment rewrite (engine/path/segments.ts), never as a token edit.
+   */
+  segment?: number;
 }
 
 export interface RefToken extends Span {
@@ -356,23 +364,71 @@ const semi =
     }
   };
 
-/** Path data: every argument of every segment parsePath keeps; arc flags cycle 0/1. */
-const path: Grammar = (v, at, emit, prop) => {
+/** The letters a <path>'s letter token cycles through (P1-M3): absolute, or relative. */
+export const SEGMENT_LETTERS = { abs: ['L', 'Q', 'C'], rel: ['l', 'q', 'c'] } as const;
+
+// Each argument's name, SVG Lab's dParts labels: an end point is "point N x/y", N counting the path's
+// anchors from 1 (the M included); a control is "control" (Q), "control 1"/"control 2" (C), "control 2" (S).
+const POINT = ['x', 'y'];
+function argLabels(U: string, n: number): (string | null)[] {
+  const pt = POINT.map((a) => `point ${n} ${a}`);
+  switch (U) {
+    case 'H':
+      return [pt[0]];
+    case 'V':
+      return [pt[1]];
+    case 'C':
+      return ['control 1 x', 'control 1 y', 'control 2 x', 'control 2 y', ...pt];
+    case 'S':
+      return ['control 2 x', 'control 2 y', ...pt];
+    case 'Q':
+      return ['control x', 'control y', ...pt];
+    case 'A':
+      return ['rx', 'ry', 'rotation', null, null, ...pt];
+    case 'Z':
+      return [];
+    default: // M, L, T
+      return pt;
+  }
+}
+
+/**
+ * Path data: every argument of every segment parsePath keeps, each number labelled; arc flags cycle
+ * 0/1. With `letters` (a <path>'s own d, P1-M3), each written L, l, Q, q, C and c letter is an enum
+ * token too, carrying its segment's index.
+ */
+const pathTokens = (letters: boolean): Grammar => (v, at, emit, prop) => {
   let base = at;
-  for (const seg of parsePath(v).segs) {
+  let anchors = 0;
+  parsePath(v).segs.forEach((seg, index) => {
+    const U = seg.cmd.toUpperCase();
+    if (U !== 'Z') anchors++;
+    const labels = argLabels(U, anchors);
     let spans: { start: number; end: number }[] = [];
     try {
       spans = argSpans(seg);
     } catch {
       spans = [];
     }
+    if (letters && !seg.implicit && 'LQC'.includes(U)) {
+      let i = 0;
+      while (i < seg.raw.length && isWs(seg.raw[i])) i++;
+      emit(base + i, base + i + 1, { kind: 'enum', prop, options: seg.cmd === U ? SEGMENT_LETTERS.abs : SEGMENT_LETTERS.rel, segment: index });
+    }
     spans.forEach((sp, k) => {
-      const d: Data | null = isFlag(seg.cmd, k) ? { kind: 'enum', prop, options: ENUMS['d.arcFlag'] } : numberData(seg.raw.slice(sp.start, sp.end), '', prop, undefined);
+      let d: Data | null;
+      if (isFlag(seg.cmd, k)) d = { kind: 'enum', prop, options: ENUMS['d.arcFlag'] };
+      else {
+        d = numberData(seg.raw.slice(sp.start, sp.end), '', prop, undefined);
+        if (d?.kind === 'number' && labels[k]) d.label = labels[k]!;
+      }
       if (d) emit(base + sp.start, base + sp.end, d);
     });
     base += seg.raw.length;
-  }
+  });
 };
+const path: Grammar = pathTokens(false);
+const pathD: Grammar = pathTokens(true);
 
 const FN = /([A-Za-z][\w-]*)[ \t\n\r\f]*\(/y;
 
@@ -585,6 +641,7 @@ function grammarFor(doc: Doc, node: ElementNode, attr: AttrRef): Grammar | 'text
   if (ns !== null) return null;
   if (local === 'style') return cssDeclarations;
   if (node.ns !== NS.svg) return null;
+  if (local === 'd' && node.local === 'path') return pathD; // its letters too (P1-M3)
   if (TEXT_ATTRS.has(local)) return 'text';
   const scoped = OPTIONS.get(`${node.local}/${local}`);
   if (scoped) return local === 'rotate' || local === 'orient' ? enumOrAngle(scoped) : enumOf(scoped);
@@ -707,17 +764,23 @@ export function tokenizeAttrRaw(doc: Doc, node: ElementNode, attr: AttrRef, raw:
 }
 
 /**
- * The tokens of a text or CDATA leaf, with offsets into its raw text (which, for CDATA, includes
- * the delimiters): CSS values in <style>, and text runs in <text>, <tspan>, <textPath>, <title>
- * and <desc> (and an <a> inside text).
+ * The tokens of a text, CDATA or comment leaf, with offsets into its raw text (which, for CDATA and
+ * a comment, includes the delimiters): CSS values in <style>, text runs in <text>, <tspan>,
+ * <textPath>, <title> and <desc> (and an <a> inside text), and the values of a donut's data comment.
  */
 export function tokenizeText(doc: Doc, leafId: NodeId): Token[] {
   const n = doc.nodes.get(leafId);
-  return n && (n.kind === 'text' || n.kind === 'cdata') ? tokenizeLeafRaw(doc, n, n.raw) : [];
+  return n && (n.kind === 'text' || n.kind === 'cdata' || n.kind === 'comment') ? tokenizeLeafRaw(doc, n, n.raw) : [];
 }
 
-/** The tokens `raw` would have as this leaf's text (edit.ts checks an edit with it). */
+/**
+ * The tokens `raw` would have as this leaf's text (edit.ts checks an edit with it). A comment has
+ * tokens only when it is the data comment of a donut recognized now (engine/generators/donut.ts,
+ * judged on the document as it is): a number token per value (1 to 100, "value N"), read from `raw`
+ * by the data comment's own grammar. Every other comment stays plain text.
+ */
 export function tokenizeLeafRaw(doc: Doc, leaf: LeafNode, raw: string): Token[] {
+  if (leaf.kind === 'comment') return dataTokens(doc, leaf, raw);
   const parent = leaf.parent === null ? undefined : doc.nodes.get(leaf.parent);
   if (!parent || parent.kind !== 'element') return [];
   const mode = leafMode(doc, parent);
@@ -742,6 +805,20 @@ export function tokenizeLeafRaw(doc: Doc, leaf: LeafNode, raw: string): Token[] 
   if (mode === 'css') css(src.s.slice(a, b), a, emit, 0);
   else textRuns(src, a, b, emit, parent.local);
   return inOrder(out);
+}
+
+// A donut's data comment (P1-M3, code/comment-tokens): its values as number tokens, spans in the raw
+// text. Only its holder's data comment asks whether the holder is a donut: any other comment under it
+// stays plain at once (asking for each would walk the holder's children once per comment).
+function dataTokens(doc: Doc, leaf: LeafNode, raw: string): Token[] {
+  if (dataCommentOf(doc, leaf.parent) !== leaf.id) return [];
+  const d = leaf.parent === null ? null : donutOf(doc, leaf.parent);
+  const read = d && d.comment === leaf.id ? readData(raw) : null;
+  if (!read) return [];
+  return read.values.map((value, i): Token => {
+    const { start, end } = read.spans[i];
+    return { kind: 'number', prop: 'data', value, decimals: 0, min: VALUE_MIN, max: VALUE_MAX, label: `value ${i + 1}`, start, end, text: raw.slice(start, end) };
+  });
 }
 
 function leafMode(doc: Doc, parent: ElementNode): 'css' | 'text' | null {

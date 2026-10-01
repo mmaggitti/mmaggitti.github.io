@@ -38,6 +38,7 @@ const VALUES: Record<string, [string, string]> = {
   opacity: ['1', '0.5'],
   'fill-opacity': ['.3', '0.75'],
   'stroke-opacity': ['1', '0'],
+  'fill-rule': ['nonzero', 'evenodd'],
   'stroke-linecap': ['butt', 'round'],
   'stroke-linejoin': ['miter', 'bevel'],
   'stroke-miterlimit': ['4', '10'],
