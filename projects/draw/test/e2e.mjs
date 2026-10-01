@@ -77,7 +77,10 @@
 // that draw where SVG Lab's do, its pos handle, the font toggle; only the font files a drawing uses
 // fetched (the Font sheet's ten, a pick's face), your own font added, applied and kept across a
 // reload; a file's own data: font drawn in both engines, a face named like the app's fonts never
-// registered; and the phone rules on the text tools.
+// registered; and the phone rules on the text tools. Then Text to path: four texts (Inter, Fraunces
+// italic lines, IBM Plex Mono with two spaces kept, a file's own face) cover the same pixels as paths
+// (within 1%), the text library loading only then; and Export's text choices: As paths, and With
+// fonts embedding Inter whole while IBM Plex, whose font reserves "Plex", goes as paths.
 // Every check that passes in every call, having asserted something, is a line of the support
 // ledger's e2e evidence (EVIDENCE, below).
 
@@ -102,6 +105,7 @@ import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
 import { decodePng } from './probe-helpers/png.mjs';
+import { shape as shapeText } from '../src/text/outline-lib.ts';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 import { geometryKnown } from './probe-helpers/geometry-known.mjs';
 
@@ -282,6 +286,8 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(fontsLoadOnlyWhatTheDrawingUses);
   await check(aFilesOwnFontDrawsInEveryEngine);
   for (const height of [956, 796]) await check(phoneRulesOnTheTextTools, height);
+  await check(textToPathLooksTheSame);
+  await check(exportWritesTextAsPathsOrWithFonts);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -7172,6 +7178,200 @@ function watch(page, context, origin) {
     must(seen.length === 0, `${label}: the page did what it shouldn't:\n${seen.join('\n')}`);
   };
 }
+
+// ── P1-M4 S2: text to path and export ──────────────────────────────────────────────────────────
+
+// The file's own face for Text to path: Space Grotesk's latin 400, named Own.
+const T2P_OWN = fontBytes('space-grotesk', 'space-grotesk-latin-400-normal.woff2').toString('base64');
+const T2P = (body, style = '') => `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">${style}\n  ${body}\n</svg>`;
+// Each text drawn alone, its advances unrounded (text-rendering="geometricPrecision": Chromium rounds
+// them to whole pixels otherwise), at the phone's own density (@3x) and at sizes whose glyphs are over
+// 256 device pixels. Below that, or at 1x, Chromium draws text from its glyph cache with each run's
+// origin and baseline on whole pixels, which a path never is: the outline was measured matching the
+// text to 0.18% on a plain page at 10 px a unit, yet Inter's "Draw" at size 20 on this canvas at 1x
+// differed by 3.07%, IBM Plex Mono's by 11.08%, every differing pixel on an edge. So each case's size
+// is raised (Inter 20 → 24, Fraunces 16 → 36, IBM Plex Mono 15 → 22, the own face 16 → 32), never the
+// 1%. `face`: the face the canvas must have loaded before its pixels are taken.
+const T2P_CASES = [
+  { name: 'Inter 700 "Draw", middle-anchored', face: ['Inter', '700', 'normal'], label: 'Draw', text: T2P('<text id="t" x="50" y="58" font-family="Inter, sans-serif" font-weight="700" font-size="24" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision">Draw</text>') },
+  { name: 'Fraunces italic in two of Draw’s lines', face: ['Fraunces', '400', 'italic'], label: 'Big Idea', text: T2P('<text id="t" x="50" y="34" font-family="Fraunces, serif" font-style="italic" font-size="36" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision"><tspan x="50" dy="0em">Big</tspan><tspan x="50" dy="1.3em">Idea</tspan></text>') },
+  { name: 'IBM Plex Mono with two spaces kept', face: ['IBM Plex Mono', '400', 'normal'], label: 'A&amp;V  To', text: T2P('<text id="t" x="4" y="56" font-family="IBM Plex Mono, monospace" font-size="22" xml:space="preserve" fill="#264653" text-rendering="geometricPrecision">A&amp;V  To</text>') },
+  { name: 'the file’s own data: face', face: ['Own', 'normal', 'normal'], label: 'Own', text: T2P('<text id="t" x="50" y="58" font-family="Own, serif" font-size="32" text-anchor="middle" fill="#264653" text-rendering="geometricPrecision">Own</text>', `\n  <style>@font-face{font-family:Own;src:url(data:font/woff2;base64,${T2P_OWN}) format("woff2")}</style>`) },
+];
+// Runs in the page: whether document.fonts holds this face, loaded.
+function faceLoaded([family, weight, style]) {
+  return [...document.fonts].some((f) => f.family.replace(/["']/g, '') === family && f.weight === weight && f.style === style && f.status === 'loaded');
+}
+// The text library's chunk fetched: the page's resource entries and the requests seen since, by name.
+function outlineChunks(page) {
+  const seen = [];
+  page.on('request', (r) => seen.push(new URL(r.url()).pathname.split('/').pop()));
+  return async () => [...new Set([...seen, ...(await page.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname.split('/').pop())))])].filter((n) => /^outline-lib-.*\.js$/.test(n));
+}
+
+// Text to path looks the same: four texts, each drawn alone in a face the canvas registers (Inter 700
+// "Draw" middle-anchored; Fraunces italic in two of Draw's lines; IBM Plex Mono "A&V  To" under
+// xml:space="preserve"; the file's own data: face), at @3x. Before the first conversion no outline-lib-
+// script was requested and the built index.html names none. For each: its ink pixels (a screenshot of
+// the artboard decoded with png.mjs, the overlay hidden), More → Text to path, the pixels again: the
+// pixels in one mask and not the other are at most 1% of the text's own; the source has <path id="t">
+// in its place with aria-label its characters as laid out (the two spaces kept), one "Text to path"
+// entry; after the first conversion exactly one outline-lib- script was requested; undo gives the
+// file back byte for byte. A text in Georgia refuses with its notice and writes nothing.
+async function textToPathLooksTheSame(browser, origin) {
+  const html = readFileSync(join(SITE_DRAW, 'index.html'), 'utf8');
+  must(!/outline-lib-/.test(html), 'the built index.html names the text library’s chunk');
+  await withPage(browser, origin, 956, async (page, errors) => {
+    const chunks = outlineChunks(page);
+    const undo = page.locator('.draw-tool', { hasText: 'Undo' });
+    const INK = hex('#264653');
+    const mask = async () => {
+      const [tl, br] = await page.evaluate(rootToScreen, [[0, 0], [100, 100]]);
+      const clip = { x: Math.floor(tl.x), y: Math.floor(tl.y), width: Math.ceil(br.x - tl.x), height: Math.ceil(br.y - tl.y) };
+      const hide = (on) => {
+        for (const el of [document.querySelector('.draw-marks'), ...document.querySelectorAll('.draw-canvas .draw-chrome')]) if (el) el.style.visibility = on ? 'hidden' : '';
+      };
+      await page.evaluate(hide, true);
+      const shot = decodePng(await page.screenshot({ clip }));
+      await page.evaluate(hide, false);
+      const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+      const out = [];
+      for (let y = 0; y < shot.height; y++) for (let x = 0; x < shot.width; x++) {
+        const px = shot.rgb(x, y);
+        out.push([[238, 238, 238], [255, 255, 255]].every((b) => d2(px, INK) < d2(px, b)));
+      }
+      return out;
+    };
+    let first = true;
+    for (const c of T2P_CASES) {
+      must((await page.evaluate((t) => window.drawTest.render(t), c.text)).ok, `test setup: ${c.name} did not open`);
+      await until(`${c.name}: its face loads`, () => page.evaluate(faceLoaded, c.face), 8000);
+      await toPeek(page);
+      const before = await mask();
+      const own = before.filter(Boolean).length;
+      must(own > 300, `${c.name}: only ${own} ink pixels before`);
+      if (first) must((await chunks()).length === 0, `before any Text to path, ${(await chunks()).join(', ')} loaded`);
+      // Selected by its row in Layers (a tap on one of Draw's lines would select that tspan).
+      if ((await page.locator('.draw-handle').getAttribute('aria-expanded')) !== 'true') await page.locator('.draw-handle').tap();
+      await page.locator('.draw-tabs button', { hasText: 'Layers' }).tap();
+      await page.locator('.draw-layer-name', { hasText: /^#t$/ }).tap();
+      must(await label(page) === '<text#t>', `${c.name}: the row selected ${await label(page)}`);
+      await moreCommand(page, 'Text to path');
+      await until(`${c.name}: Text to path writes`, async () => (await source(page)) !== c.text, 8000);
+      const src = await source(page);
+      const el = /<path id="t" fill="#264653" d="M [^"]+" aria-label="([^"]*)"\/>/.exec(src);
+      must(el && el[1] === c.label && !/<text/.test(src), `${c.name}: a <path id="t"> with aria-label="${c.label}" should take its place:\n${src.replace(/base64,[^)]+/, 'base64,…')}`);
+      must(await undo.getAttribute('aria-label') === 'Undo Text to path', `${c.name}: the entry is ${await undo.getAttribute('aria-label')}`);
+      if (first) {
+        const loaded = await chunks();
+        must(loaded.length === 1, `the first Text to path loaded ${loaded.join(', ') || 'no outline-lib- chunk'}`);
+        first = false;
+      }
+      await toPeek(page);
+      const after = await mask();
+      let differ = 0;
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) differ++;
+      console.log(`     draw e2e: text to path, ${c.name}: ${differ} of the text's ${own} pixels differ (${((100 * differ) / own).toFixed(2)}%)`);
+      must(differ <= 0.01 * own, `${c.name}: ${differ} pixels differ, ${((100 * differ) / own).toFixed(2)}% of the text's ${own}`);
+      await undo.tap();
+      must(await source(page) === c.text, `${c.name}: undo did not give the file back`);
+    }
+    // Georgia: Draw holds no file for it.
+    const G = T2P('<text id="g" x="10" y="50" font-family="Georgia, serif" font-size="12">Hi</text>');
+    must((await page.evaluate((t) => window.drawTest.render(t), G)).ok, 'test setup: the Georgia file did not open');
+    await toPeek(page);
+    await tapShape(page, 'g');
+    await moreCommand(page, 'Text to path');
+    await until('the Georgia text refuses', async () => (await page.locator('.draw-toast').count()) > 0, 5000);
+    const said = await page.locator('.draw-toast').textContent();
+    must(said === 'Draw can outline only its own fonts, yours and this file’s own; Georgia isn’t one of them.', `the Georgia text says ${JSON.stringify(said)}`);
+    must(await source(page) === G, 'the Georgia text was written');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { deviceScaleFactor: 3 });
+}
+
+const EXPORT_TEXT = `<svg xmlns="${SVG_NS}" viewBox="0 0 200 100">
+  <title>Fonts</title>
+  <text id="i" x="10" y="30" font-family="Inter, sans-serif" font-weight="700" font-size="20" text-rendering="geometricPrecision">Inter wordmark</text>
+  <text id="p" x="10" y="70" font-family="IBM Plex Sans, sans-serif" font-size="20" text-rendering="geometricPrecision">Plex</text>
+</svg>
+`;
+
+// Export's text choices: a drawing with a title, an Inter 700 text and an IBM Plex Sans 400 one.
+// Text → As paths: Clean's button reads "Preparing…" and is disabled while the text library loads
+// (its request held), then its file has no <text> and two paths with their aria-labels. With fonts:
+// its file has one <style> right after the <title> holding one @font-face, Inter's (a data:font/woff2
+// source), and none for IBM Plex Sans, whose text is a path; the sheet names "Plex" as the reason.
+// That file, set as a page of its own under the test origin (outside Draw), draws the Inter text at
+// Inter's width (the embedded face works), not sans-serif's, with no request off the page. As-is is
+// still the file byte for byte.
+async function exportWritesTextAsPathsOrWithFonts(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined; // a download, which the check reads
+    });
+    must((await page.evaluate((t) => window.drawTest.render(t), EXPORT_TEXT)).ok, 'test setup: the file did not open');
+    // The text library's chunk is held until the button's state has been read.
+    let release;
+    const held = new Promise((ok) => (release = ok));
+    await page.route(/outline-lib-[^/]*\.js$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const clean = page.locator('.draw-export-go[data-kind="clean"]');
+    const choose = async (label) => {
+      await page.locator('.draw-export').tap();
+      await clean.waitFor();
+      await page.locator('.draw-export-text button', { hasText: label }).tap();
+    };
+    const share = async () => {
+      const [download] = await Promise.all([page.waitForEvent('download'), clean.tap()]);
+      const text = readFileSync(await download.path(), 'utf8');
+      await page.locator('.draw-modal').waitFor({ state: 'detached' });
+      return text;
+    };
+    await choose('As paths');
+    const waiting = { text: await clean.textContent(), disabled: await clean.isDisabled() };
+    must(waiting.text === 'Preparing…' && waiting.disabled, `while As paths prepares, Clean's button reads ${JSON.stringify(waiting.text)}${waiting.disabled ? '' : ' and is enabled'}: a tap would share the file with its <text>`);
+    release();
+    await until('As paths is ready', async () => !(await clean.isDisabled()), 8000);
+    must(await clean.textContent() === 'Clean SVG', `once ready, Clean's button reads ${JSON.stringify(await clean.textContent())}`);
+    const paths = await share();
+    must(!/<text/.test(paths) && /<path id="i" d="M [^"]+" aria-label="Inter wordmark"\/>/.test(paths) && /<path id="p" d="M [^"]+" aria-label="Plex"\/>/.test(paths), `As paths wrote:\n${paths}`);
+    await choose('With fonts');
+    await until('With fonts is ready', async () => !(await clean.isDisabled()), 8000);
+    const notes = (await page.locator('.draw-export-note').allTextContents()).join(' ');
+    must(/IBM Plex Sans reserves the name “Plex”/.test(notes), `the sheet says ${JSON.stringify(notes)}`);
+    const fonts = await share();
+    const style = /<title>Fonts<\/title>\n {2}<style>([^<]*)<\/style>\n {2}<text id="i"/.exec(fonts);
+    must(style, `With fonts: the <style> should be right after the <title>:\n${fonts.replace(/base64,[^)]+/, 'base64,…')}`);
+    must((style[1].match(/@font-face/g) ?? []).length === 1 && /@font-face\{font-family:'Inter';font-weight:700;font-style:normal;src:url\(data:font\/woff2;base64,[A-Za-z0-9+/=]+\) format\('woff2'\)\}/.test(style[1]) && !/Plex/.test(style[1].replace(/\/\*[^*]*\*\//g, '')), `With fonts' faces: ${style[1].replace(/base64,[^)]+/, 'base64,…')}`);
+    must(/<path id="p" d="M [^"]+" aria-label="Plex"\/>/.test(fonts) && /<text id="i"/.test(fonts), 'With fonts: the Inter text stays text and the Plex text is a path');
+    // The file on a page of its own: Inter's width, not sans-serif's.
+    const own = await context.newPage();
+    const asked = [];
+    await own.goto(`${origin}/ds/`);
+    own.on('request', (r) => asked.push(r.url()));
+    await own.setContent(`<!doctype html><html><body style="margin:0">${fonts.replace(/^<\?xml[^>]*>\s*/, '')}<svg xmlns="${SVG_NS}" viewBox="0 0 200 100"><text id="ref" x="10" y="30" font-family="sans-serif" font-weight="700" font-size="20" text-rendering="geometricPrecision">Inter wordmark</text></svg></body></html>`);
+    await own.evaluate(() => document.fonts.ready);
+    const w = await own.evaluate(() => [document.getElementById('i').getComputedTextLength(), document.getElementById('ref').getComputedTextLength()]);
+    const inter = INTER_WORDMARK;
+    must(Math.abs(w[0] - inter) <= 0.01 * inter && Math.abs(w[1] - inter) > 0.02 * inter, `on its own page the Inter text is ${w[0].toFixed(2)} units (Inter's is ${inter.toFixed(2)}), sans-serif's ${w[1].toFixed(2)}`);
+    must(asked.filter((u) => !u.startsWith('data:')).length === 0, `the page asked for ${asked.join(', ')}`);
+    await own.close();
+    // As-is: the file byte for byte.
+    await page.locator('.draw-export').tap();
+    await page.locator('.draw-export-go[data-kind="as-is"]').waitFor();
+    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('.draw-export-go[data-kind="as-is"]').tap()]);
+    must(readFileSync(await download.path(), 'utf8') === EXPORT_TEXT, 'As-is is not the file byte for byte');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+// Inter 700's advance for "Inter wordmark" at font-size 20, from its file (the text library, in node).
+const INTER_WORDMARK = (() => {
+  const shaped = shapeText(new Uint8Array(fontBytes('inter', 'inter-latin-700-normal.woff2')), ['Inter wordmark']);
+  return (shaped.runs[0].glyphs.reduce((t, g) => t + g.xAdvance, 0) * 20) / shaped.unitsPerEm;
+})();
 
 async function withPage(browser, origin, height, fn, options = {}) {
   const context = await browser.newContext({ ...PHONE, viewport: { width: 440, height }, ...options });
