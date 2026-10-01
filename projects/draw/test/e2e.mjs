@@ -661,6 +661,7 @@ const LOOKS_DIFFERENT = new Map([
   ['lab/media.svg', 'its <video> is refused'],
   ['lab/media--audio.svg', 'its <video> is refused'],
   ['lab/texture--tiles.svg', 'its tile is a data: SVG on feImage, which the canvas does not load'],
+  ['tools/affinity-designer-serif.svg', "its text asks for Inter 600, which the canvas draws in Draw's own Inter (P1-M4); an <img> can't use the page's fonts, so the file alone falls back"],
 ]);
 // Differences one engine shows because its <img> reference differs from the file opened on its own;
 // the canvas is right in each. By browser, then file; `scheme` limits one to light or dark.
@@ -1579,6 +1580,9 @@ const LATIN1 = Buffer.concat([
   Buffer.from([0xe9, 0x20, 0x80]),
   Buffer.from('</text></svg>\n'),
 ]);
+// The text it holds. Node's own TextDecoder('windows-1252') (22.22) gives 0x80 as U+0080; the
+// Encoding Standard, and every browser, gives €.
+const LATIN1_TEXT = new TextDecoder('windows-1252').decode(LATIN1).replace('\u0080', '€');
 // UTF-16 bytes, in either byte order.
 const utf16 = (text, le) => {
   const out = Buffer.alloc(text.length * 2);
@@ -1665,7 +1669,7 @@ async function openThroughTheFilePicker(browser, origin) {
     const cases = [
       ['a plain .svg', 'layers.svg', corpusBytes('tools/inkscape-1x-layers.svg'), corpusText('tools/inkscape-1x-layers.svg')],
       ['a gzip .svgz', 'spinner.svgz', gzipSync(corpusBytes('lab/spin--js.svg')), corpusText('lab/spin--js.svg')],
-      ['a Latin-1 file', 'café.svg', LATIN1, new TextDecoder('windows-1252').decode(LATIN1)],
+      ['a Latin-1 file', 'café.svg', LATIN1, LATIN1_TEXT],
     ];
     for (const [what, name, buffer, text] of cases) {
       await pickFile(page, name, buffer);
@@ -5036,7 +5040,8 @@ const HANDLE_SHAPES = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 100">
 // handle is drawn at its own (90, 30) through its transform, and a drag along its own axis changes
 // only rx. A line's end lands on the snapped point (the artboard's centre in x, whole units in y); a
 // polygon's vertex moves only its pair; lab/vector.svg's star (a plain polygon) moves one vertex; a
-// <text>'s centre handle moves it by a translate (SVG Lab's text position handle). One entry each.
+// <text>'s centre handle moves it by its own x and y (P1-M4: they are single numbers; a text with
+// position lists still moves by a translate, theTextToolPlacesHelloAndWritesLines). One entry each.
 async function shapeHandlesEditTheLabsShapes(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     const F = HANDLE_SHAPES;
@@ -5101,7 +5106,7 @@ async function shapeHandlesEditTheLabsShapes(browser, origin) {
     const centre = await handle('center');
     const k = await page.evaluate(unitPx);
     await drag('center', { x: centre.x + 6 * k, y: centre.y + 4 * k });
-    must(/^<text x="12" y="52" font-size="8" transform="translate\((5|6|7) (3|4|5)\)">Hi<\/text>$/m.test((await source(page)).split('\n').find((x) => x.includes('<text')).trim()), `the text's centre handle did not move it by a translate:\n${await source(page)}`);
+    must(/^<text x="(17|18|19)" y="(55|56|57)" font-size="8">Hi<\/text>$/m.test((await source(page)).split('\n').find((x) => x.includes('<text')).trim()), `the text's centre handle did not move it by its own x and y:\n${await source(page)}`);
     await oneEntry('Move', F);
     // lab/vector.svg's star: a plain polygon, one vertex.
     const V = readFileSync(join(CORPUS, 'lab/vector.svg'), 'utf8');
