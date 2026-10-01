@@ -56,6 +56,11 @@ const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .
 // just those checks. It needs a built _site; the run puts Draw's own bundle back afterwards.
 const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && node tools/library-index.mjs >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
 const DRAW_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && E2E=draw node scripts/smoke-test.mjs`], REPO];
+// A break in SVG Lab (P1-M5: its Open in Draw link), whose page build-site copies as it is: the lab is
+// copied over the last built _site's, after Draw's own bundle (so a Draw break earlier in the batch
+// can't leave its plant there), then Draw's e2e runs. The run copies the restored lab back afterwards.
+const LAB_COPY = 'cp projects/svg-lab/index.html _site/svg-lab/index.html';
+const LAB_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && ${LAB_COPY} && E2E=draw node scripts/smoke-test.mjs`], REPO];
 const SITE_E2E_EVIDENCE = ['sh', ['-c', `node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && { E2E=draw node scripts/smoke-test.mjs; ${E2E_EVIDENCE}; }`], REPO];
 
 const BREAKS = [
@@ -2409,8 +2414,8 @@ const BREAKS = [
   {
     id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
     file: 'projects/draw/src/panels/Sheets.tsx',
-    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
-    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} workspace=\{workspace\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} workspace={workspace} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
     run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
   },
   // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).
@@ -3714,6 +3719,56 @@ const BREAKS = [
     id: 'B704', what: 'the palette’s rows drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheCommandPalette'],
     file: 'projects/draw/src/app.css', from: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }', to: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }\n.draw-palette-row { min-height: 2rem; height: 2rem; }',
     run: DRAW_E2E, expect: /phoneRulesOnTheCommandPalette \(956\): 440×956:\n\s+"": tap targets under 44pt/,
+  },  // P1-M5 S3: Open in Draw, Insert and the rest of Create.
+  {
+    id: 'B705', what: 'planInsert keeps an id the drawing already uses (no rename)',
+    file: 'engine/model/insert.ts', from: '  renameIdsIn(src, src.root, map, () => {});\n', to: '',
+    run: engineTests('model/insert.test.ts'), expect: /✖ an id the drawing already uses gets a fresh one/,
+  },
+  {
+    id: 'B706', what: 'planInsert drops the root’s fill from the <g>',
+    file: 'engine/model/insert.ts', from: "'baseProfile', 'transform']);", to: "'baseProfile', 'transform', 'fill']);",
+    run: engineTests('model/insert.test.ts'), expect: /✖ the <g> takes the root’s attributes but/,
+  },
+  {
+    id: 'B707', what: 'planInsert scales a small insert up to 80% of the artboard',
+    file: 'engine/model/insert.ts', from: 'if (board && board.width > 0 && board.height > 0 && (box.width * s > board.width || box.height * s > board.height)) {', to: 'if (board && board.width > 0 && board.height > 0) {',
+    run: engineTests('model/insert.test.ts'), expect: /✖ placement: a 24 × 24 viewBox at its own size/,
+  },
+  {
+    id: 'B708', what: 'the whole-content replace leaves the old first child',
+    file: 'engine/model/fragment.ts', from: 'for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));', to: 'for (const c of [...el(doc, scope).children].slice(1)) apply(opRemove(doc, c));',
+    run: engineTests('fragment.test.ts'), expect: /✖ replaceContent: the root becomes exactly its start tag/,
+  },
+  {
+    id: 'B709', what: 'an Apply that doesn’t parse changes the file (the content is removed before the text is parsed)',
+    file: 'engine/model/fragment.ts', from: '  const made = parseFragment(doc, scope, text);\n  if (!made.ok) return made;\n  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n', to: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n  if (!made.ok) return made;\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Edit the drawing’s source: the sheet holds everything between the root’s tags/,
+  },
+  {
+    id: 'B710', what: 'isEmpty counts any element, so a drawing holding only a <title> is not empty',
+    file: 'projects/draw/src/editor.ts', from: 'return !!this.#doc && shapeCount(this.#doc) === 0;', to: "return !!this.#doc && el(this.#doc, this.#doc.root).children.every((c) => this.#doc!.nodes.get(c)!.kind !== 'element');",
+    run: drawTests('editor.test.ts'), expect: /✖ the empty state: an open drawing with nothing the canvas draws as a shape/,
+  },
+  {
+    id: 'B711', what: 'SVG Lab’s link deflates with "deflate" (a zlib header) instead of "deflate-raw": Draw can’t read it', slow: true, checks: ['svgLabOpensInDraw'],
+    file: 'projects/svg-lab/index.html', from: "new CompressionStream('deflate-raw')", to: "new CompressionStream('deflate')",
+    run: LAB_E2E, expect: /svgLabOpensInDraw: Vector: Draw opened \d+ characters, not the lab's file/,
+  },
+  {
+    id: 'B712', what: 'Insert writes the inserted <svg> instead of a <g>', slow: true, checks: ['theInsertToolPutsSvgInAsAGroup'],
+    file: 'engine/model/insert.ts', from: 'return { markup: `<g${attrs}>${inner}</g>`, renamed: map.size };', to: 'return { markup: `<svg${attrs}>${inner}</svg>`, renamed: map.size };',
+    run: DRAW_E2E, expect: /theInsertToolPutsSvgInAsAGroup: the file is not lab\/create\.svg with the logo's content in one <g>/,
+  },
+  {
+    id: 'B713', what: 'the code panel’s Edit opens the selected element’s source, not the drawing’s', slow: true, checks: ['editTheWholeDrawingsSource'],
+    file: 'projects/draw/src/panels/CodePanel.tsx', from: 'onClick={() => editor.openDrawingSource()}', to: 'onClick={() => editor.openSource()}',
+    run: DRAW_E2E, expect: /editTheWholeDrawingsSource: the code panel’s Edit did not open the drawing’s source/,
+  },
+  {
+    id: 'B714', what: 'the empty hint never hides: it shows over any open drawing', slow: true, checks: ['anEmptyDrawingSaysAddAShape'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "if (tool !== 'pen' && editor.isEmpty()) {", to: "if (tool !== 'pen' && !!editor.doc) {",
+    run: DRAW_E2E, expect: /anEmptyDrawingSaysAddAShape: the hint stayed with a shape on the canvas/,
   },
 ];
 
@@ -3828,6 +3883,7 @@ for (const b of chosen) {
   if (!caught) undetected++;
   console.log(`${caught ? 'red ✓' : 'GREEN ✗'}  ${b.id}  ${b.what}${caught ? '' : `\n        expected ${b.expect} in:\n${out.split('\n').slice(-8).map((l) => '        ' + l).join('\n')}`}`);
 }
-if (chosen.some((b) => b.run === DRAW_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
+if (chosen.some((b) => b.run === DRAW_E2E || b.run === LAB_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
+if (chosen.some((b) => b.run === LAB_E2E)) execFileSync('sh', ['-c', LAB_COPY], { cwd: REPO, stdio: 'ignore' }); // the restored lab back in _site
 console.log(undetected ? `\n${undetected} break(s) went undetected.` : `\nAll ${chosen.length} break(s) went red.`);
 process.exitCode = undetected ? 1 : 0;

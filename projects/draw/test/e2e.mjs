@@ -8700,6 +8700,8 @@ async function editTheWholeDrawingsSource(browser, origin) {
     const box = await edit.boundingBox();
     must(!!box && box.width >= TAP_MIN - 0.5 && box.height >= TAP_MIN - 0.5, `the code panel's Edit is ${box ? `${Math.round(box.width)}×${Math.round(box.height)}` : 'missing'}`);
     await edit.tap();
+    await page.locator('.draw-source-start').waitFor({ timeout: 3000 }).catch(() => {});
+    must(await page.locator('.draw-source-start').count() === 1, 'the code panel’s Edit did not open the drawing’s source (its start tag above the field)');
     const p = parts(SAMPLE);
     const area = page.locator('.draw-source');
     const shown = { start: await page.locator('.draw-source-start').textContent(), end: await page.locator('.draw-source-end').textContent(), text: await area.inputValue() };
