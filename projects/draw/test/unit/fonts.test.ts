@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { CATALOGUE, LATIN_RANGE, faceFile } from '../../src/platform/font-catalogue.ts';
 import { DraftStore, memoryKV, type KV } from '../../src/platform/drafts.ts';
-import { ADD_REFUSED, FONT_PREFIX, FONTS_FULL, FontError, MAX_FONT_BYTES, UNREADABLE, appFontName, couldNotLoad, createFonts, namedLikeApp, reservedNames, sniffFont, type FaceLike, type FontDeps, type FontEvent } from '../../src/platform/fonts.ts';
+import { ADD_REFUSED, FONT_PREFIX, FONTS_FULL, FontError, MAX_FAMILY_CHARS, MAX_FONT_BYTES, UNREADABLE, appFontName, badFamilyName, couldNotLoad, createFonts, isMyFont, namedLikeApp, reservedNames, sniffFont, type FaceLike, type FontDeps, type FontEvent, type MyFont } from '../../src/platform/fonts.ts';
 import { familyList, type OwnFace } from '../../../../engine/text/font-faces.ts';
 import type { FontInfo } from '../../src/text/load.ts';
 
@@ -149,6 +149,41 @@ test('your fonts: added (format sniffed, family and weight read by openFont, res
   await settle();
   assert.deepEqual(later.mine().map((m) => m.family), ['Again']);
   assert.deepEqual(heard, [{ kind: 'mine' }]);
+});
+
+test('a family XML can’t hold, holding a control character (C0 or C1) or longer than 128 characters is refused with a notice naming why, and nothing is stored; a stored record with such a family, or one named like the app’s fonts, is never read back', async () => {
+  const r = rig();
+  const cases: [string, string][] = [
+    ['Bad\u0001Font', "XML can't hold the character U+0001"],
+    ['Bad\uFFFEFont', "XML can't hold the character U+FFFE"],
+    ['Bad\uFFFFFont', "XML can't hold the character U+FFFF"],
+    ['Bad\tFont', 'it holds the control character U+0009'],
+    ['Bad\nFont', 'it holds the control character U+000A'],
+    ['Bad\u0085Font', 'it holds the control character U+0085'],
+    ['A'.repeat(MAX_FAMILY_CHARS + 1), `it is longer than ${MAX_FAMILY_CHARS} characters`],
+  ];
+  for (const [i, [family, why]] of cases.entries()) {
+    r.info.set(`wOF2bad${i}`, INFO(family));
+    await assert.rejects(r.fonts.add(fontFile(`bad${i}`), 'bad.woff2'), new FontError(badFamilyName(why)), JSON.stringify(family));
+  }
+  assert.deepEqual(await r.deps.kv.keys(), [], 'nothing stored');
+  assert.deepEqual(r.fonts.mine(), []);
+  r.info.set('wOF2long', INFO('B'.repeat(MAX_FAMILY_CHARS)));
+  assert.equal((await r.fonts.add(fontFile('long'), 'long.woff2')).family.length, MAX_FAMILY_CHARS, '128 characters are taken');
+  // Records another script on the origin wrote: read back only with a family add() would take.
+  const kv = memoryKV();
+  const good = (await r.deps.kv.get<MyFont>((await r.deps.kv.keys())[0]))!;
+  const put = async (family: string, id: string) => kv.set(FONT_PREFIX + id, { ...good, id, family });
+  await put('Fine', 'a');
+  await put('Bad\u0001Font', 'b');
+  await put('Bad\uFFFEFont', 'c');
+  await put('C'.repeat(MAX_FAMILY_CHARS + 1), 'd');
+  await put('system-ui', 'e');
+  assert.equal(isMyFont({ ...good, id: 'x', family: 'Bad\u0085Font' }, 'x'), false);
+  const later = createFonts({ ...r.deps, kv });
+  later.subscribe(() => {});
+  await settle();
+  assert.deepEqual(later.mine().map((m) => m.family), ['Fine']);
 });
 
 test('a full quota is loud, and the drafts list still skips the fonts’ keys', async () => {

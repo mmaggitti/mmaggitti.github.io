@@ -30,6 +30,7 @@
 import { CATALOGUE, LATIN_RANGE, catalogueFamily, faceFile, hasFace } from './font-catalogue.ts';
 import { idbKV, type KV } from './drafts.ts';
 import { appFontName, type FaceRequest, type FontFormat, type OwnFace } from '../../../../engine/text/font-faces.ts';
+import { xmlCharError } from '../../../../engine/code/edit.ts';
 import { loadTextLib, type FontInfo } from '../text/load.ts';
 
 export { appFontName };
@@ -41,6 +42,23 @@ export const FONT_PREFIX = 'draw:font:';
 export const FONTS_FULL = 'Storage is full: remove fonts or drafts you don’t need, then add the font again.';
 export const couldNotLoad = (family: string) => `Draw couldn’t load ${family}. Try again when you’re online.`;
 export const namedLikeApp = (family: string) => `Draw can’t take ${family}: it shares a name with Draw’s own interface fonts.`;
+export const MAX_FAMILY_CHARS = 128;
+export const badFamilyName = (why: string) => `Draw can’t use this font’s name: ${why}.`;
+
+/**
+ * Why Draw can't take a family name, or null: a name the drawing's font-family can hold, so no
+ * character XML can't hold (P0's message), no control character (C0 or C1: a tab or a line break in a
+ * name would be normalized away in an attribute, and would break a <style> rule), and at most 128
+ * characters.
+ */
+export function familyNameError(family: string): string | null {
+  const xml = xmlCharError(family);
+  if (xml) return badFamilyName(xml);
+  const c = /[\u0000-\u001f\u007f-\u009f]/.exec(family);
+  if (c) return badFamilyName(`it holds the control character U+${c[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+  if ([...family].length > MAX_FAMILY_CHARS) return badFamilyName(`it is longer than ${MAX_FAMILY_CHARS} characters`);
+  return null;
+}
 
 export class FontError extends Error {}
 
@@ -120,10 +138,10 @@ export function reservedNames(...texts: string[]): string[] {
   return [...out];
 }
 
-/** Is this a record fonts.ts wrote (every project on the origin can write the database)? */
+/** Is this a record fonts.ts wrote (every project on the origin can write the database), with a family add() takes? */
 export function isMyFont(v: unknown, id: string): v is MyFont {
   const f = v as MyFont;
-  return !!f && typeof f === 'object' && f.id === id && typeof f.family === 'string' && f.family !== '' && Number.isFinite(f.weight) && (f.style === 'normal' || f.style === 'italic') && typeof f.fileName === 'string' && (['woff2', 'woff', 'truetype', 'opentype'] as unknown[]).includes(f.format) && f.bytes instanceof ArrayBuffer && Array.isArray(f.reserved) && f.reserved.every((r) => typeof r === 'string') && typeof f.copyright === 'string' && typeof f.licence === 'string' && Number.isFinite(f.fsType) && Number.isFinite(f.added);
+  return !!f && typeof f === 'object' && f.id === id && typeof f.family === 'string' && f.family !== '' && familyNameError(f.family) === null && !appFontName(f.family) && Number.isFinite(f.weight) && (f.style === 'normal' || f.style === 'italic') && typeof f.fileName === 'string' && (['woff2', 'woff', 'truetype', 'opentype'] as unknown[]).includes(f.format) && f.bytes instanceof ArrayBuffer && Array.isArray(f.reserved) && f.reserved.every((r) => typeof r === 'string') && typeof f.copyright === 'string' && typeof f.licence === 'string' && Number.isFinite(f.fsType) && Number.isFinite(f.added);
 }
 
 const isQuota = (e: unknown) => e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED');
@@ -292,6 +310,8 @@ export function createFonts(deps: FontDeps): Fonts {
       }
       const family = info.family.trim();
       if (!family) throw new FontError(UNREADABLE);
+      const badName = familyNameError(family);
+      if (badName) throw new FontError(badName);
       if (appFontName(family)) throw new FontError(namedLikeApp(family));
       const id = await deps.sha256(bytes);
       const font: MyFont = { id, family, weight: info.weight, style: info.italic ? 'italic' : 'normal', fileName, format, bytes: copy(bytes), added: deps.now(), copyright: info.copyright, licence: info.licence, reserved: reservedNames(info.copyright, info.licence), fsType: info.fsType };

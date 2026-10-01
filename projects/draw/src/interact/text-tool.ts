@@ -42,7 +42,9 @@ export function textMarkup(p: Point, c: TextCtx): string {
 export function cssFamilyName(family: string): string {
   const words = family.trim().split(/\s+/);
   const KEYWORDS = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|ui-rounded|math|emoji|fangsong|inherit|initial|unset|revert|revert-layer|default)$/i;
-  const ident = (w: string) => /^-?(?:[_a-zA-Z -￿])[-_a-zA-Z0-9 -￿]*$/.test(w) && !/^--/.test(w);
+  // A name character is ASCII's, or any from U+00A0 up to U+FFFD: U+FFFE and U+FFFF are characters XML
+  // can't hold, so they are never name characters (and Set font refuses a value holding one).
+  const ident = (w: string) => /^-?(?:[_a-zA-Z\u00A0-\uFFFD])[-_a-zA-Z0-9\u00A0-\uFFFD]*$/.test(w) && !/^--/.test(w);
   return words.every((w) => ident(w) && !KEYWORDS.test(w)) ? words.join(' ') : `'${family.trim().replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 

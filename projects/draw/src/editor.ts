@@ -2034,6 +2034,7 @@ export class Editor {
    * with its generic (`Archivo, sans-serif`; yours with sans-serif), or a generic alone; where the
    * family has no face at a text's weight or style, the same entry writes the nearest real one, so
    * the canvas never draws a synthetic bold or italic (text to path couldn't copy it). The sheet closes.
+   * A value XML can't hold is refused with P0's message (nothing is written).
    */
   setFont(family: string): void {
     const doc = this.#doc;
@@ -2041,6 +2042,8 @@ export class Editor {
     if (!doc || !ids.length) return;
     const generic = GENERICS.has(family.toLowerCase());
     const value = generic ? family : fontValue(family, catalogueFamily(family)?.generic ?? 'sans-serif');
+    const bad = xmlCharError(value);
+    if (bad) return void this.notice.set(bad);
     const faces = generic ? null : this.familyFaces(family);
     const ctx = this.styleCtx;
     let refused: { id: NodeId; why: string }[] = [];

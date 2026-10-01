@@ -54,6 +54,28 @@ test('Metadata on, on lab/access.svg, writes SVG Lab’s bare markup after the <
   assert.equal(serialize(tabs), '<svg xmlns="http://www.w3.org/2000/svg">\r\n\t<title>T</title>\r\n\t<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\r\n\t\t<dc:creator>You</dc:creator>\r\n\t\t<dc:date>2026-09-25</dc:date>\r\n\t</metadata>\r\n</svg>');
 });
 
+test('Metadata on then off keeps a file’s own <metadata> that holds a comment, text, CDATA or a processing instruction but no element, with all of it (only the dc declaration on added stays); an empty <metadata></metadata> (or one of whitespace) is still taken away by on then off, as before, since nothing of the file’s is lost', () => {
+  for (const inner of ['<!-- made by hand, keep -->', 'Created with Hand Tools 2.1', '\n  <!-- a --> text <![CDATA[ x ]]>\n', '<![CDATA[x]]>', '<?app keep?>', '\n  <!-- kept -->\n']) {
+    const src = `<svg xmlns="http://www.w3.org/2000/svg"><metadata>${inner}</metadata><rect width="1" height="1"/></svg>`;
+    const doc = load(src);
+    const s = new Session(doc);
+    s.dispatch('on', (apply) => planMetadata(doc, true, LAB, apply));
+    assert.match(serialize(doc), /<dc:creator>You<\/dc:creator>/, JSON.stringify(inner));
+    s.dispatch('off', (apply) => planMetadata(doc, false, LAB, apply));
+    assert.equal(serialize(doc), src.replace('<metadata>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'), `${JSON.stringify(inner)}: on then off`);
+    s.undo();
+    s.undo();
+    assert.equal(serialize(doc), src);
+  }
+  for (const inner of ['', '\n  ']) {
+    const doc = load(`<svg xmlns="http://www.w3.org/2000/svg"><metadata>${inner}</metadata><rect width="1" height="1"/></svg>`);
+    const s = new Session(doc);
+    s.dispatch('on', (apply) => planMetadata(doc, true, LAB, apply));
+    s.dispatch('off', (apply) => planMetadata(doc, false, LAB, apply));
+    assert.equal(serialize(doc), '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>', `${JSON.stringify(inner)}: nothing of the file’s in it`);
+  }
+});
+
 test('an RDF file (tools/inkscape-1x-layers.svg): dc:creator and dc:date go inside its cc:Work, indented as it is, dc declared already; its dc:title is shown and edited in place; off takes away what the tab shows and keeps the rest', () => {
   const src = corpus('tools/inkscape-1x-layers.svg');
   const doc = load(src);

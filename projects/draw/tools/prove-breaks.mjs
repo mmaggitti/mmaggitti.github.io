@@ -3310,6 +3310,38 @@ const BREAKS = [
     file: 'projects/draw/src/app.css', from: '.draw-tabs > button { padding: 0 var(--space-4); }', to: '.draw-tabs > button { padding: 0 var(--space-8); }',
     run: DRAW_E2E, expect: /phoneRulesOnTheAccessPanel \((956|796)\)[\s\S]*(is outside the 440 pt row|scrolls sideways)/,
   },
+  // P1-M4, hardened: font names XML can hold, font files bounded by what they unpack to, a file's own
+  // <metadata> kept (quick unless marked).
+  {
+    id: 'B625', what: 'Add a font… stores a family XML can’t hold (U+0001: Set font would write a file that no longer parses)',
+    file: 'projects/draw/src/platform/fonts.ts', from: '      const badName = familyNameError(family);\n      if (badName) throw new FontError(badName);\n', to: '',
+    run: drawTests('fonts.test.ts'), expect: /✖ a family XML can’t hold, holding a control character/,
+  },
+  {
+    id: 'B626', what: 'a stored font record whose family XML can’t hold (another script on the origin wrote it) is read back',
+    file: 'projects/draw/src/platform/fonts.ts', from: "f.family !== '' && familyNameError(f.family) === null && !appFontName(f.family) && ", to: "f.family !== '' && ",
+    run: drawTests('fonts.test.ts'), expect: /✖ a family XML can’t hold, holding a control character/,
+  },
+  {
+    id: 'B627', what: 'Set font writes a family XML can’t hold into the drawing',
+    file: 'projects/draw/src/editor.ts', from: '    const bad = xmlCharError(value);\n    if (bad) return void this.notice.set(bad);\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ Set font refuses a family XML can’t hold/,
+  },
+  {
+    id: 'B628', what: 'the Text tool’s name characters take U+FFFE and U+FFFF again (a family holding one is written bare)',
+    file: 'projects/draw/src/interact/text-tool.ts', from: '[_a-zA-Z\\u00A0-\\uFFFD])[-_a-zA-Z0-9\\u00A0-\\uFFFD]', to: '[_a-zA-Z\\u00A0-\\uFFFF])[-_a-zA-Z0-9\\u00A0-\\uFFFF]',
+    run: drawTests('text-tool.test.ts'), expect: /✖ a family holding U\+FFFE or U\+FFFF is never written bare/,
+  },
+  {
+    id: 'B629', what: 'fontkit gets a font whose header says it unpacks to 768 MB (no bound on what a WOFF or WOFF2 declares)',
+    file: 'projects/draw/src/text/outline-lib.ts', from: '  if (size > MAX_UNPACKED) throw new Error(`a font that unpacks to ${size} bytes (the most is ${MAX_UNPACKED})`);\n', to: '',
+    run: drawTests('text-lib.test.ts'), expect: /✖ a font whose header says it unpacks to more than 30 MB/,
+  },
+  {
+    id: 'B630', what: 'Metadata off takes away a <metadata> holding no element, with the comment, text or CDATA in it',
+    file: 'engine/access/metadata.ts', from: '    if (meta && empty(meta.id) && meta.attrs', to: '    if (meta && !kids(doc, meta.id).length && meta.attrs',
+    run: engineTests('access/metadata.test.ts'), expect: /✖ Metadata on then off keeps a file’s own <metadata>/,
+  },
 ];
 
 const args = process.argv.slice(2);

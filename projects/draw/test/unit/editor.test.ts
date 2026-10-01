@@ -2940,6 +2940,20 @@ test('a pick in the Font sheet is one "Set font" entry over the selected texts: 
   assert.equal(r.editor.textSelected(), false, 'the root selected too: no Text section');
 });
 
+test('Set font refuses a family XML can’t hold (U+FFFE, U+0001) with P0’s message: nothing is written and no entry is made', () => {
+  const src = BOARD('<text id="a">A</text>\n');
+  const r = rig(HOST, {}, undefined, { fonts: fakeFonts(), prefs: fakePrefs() });
+  r.editor.open(src);
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.openFontSheet();
+  for (const [family, why] of [['Bad\uFFFEFont', "XML can't hold the character U+FFFE"], ['Bad\u0001Font', "XML can't hold the character U+0001"]]) {
+    r.editor.setFont(family);
+    assert.equal(r.editor.notice.get(), why, JSON.stringify(family));
+    assert.equal(r.editor.source(), src, 'nothing written');
+    assert.equal(r.editor.history.get().canUndo, false, 'no entry');
+  }
+});
+
 test('the fonts port: after open, the file’s own faces (documentFaces) and the faces its text asks for that Draw holds (use); again after a font edit and a <style> edit; [] when the drawing closes', () => {
   const fonts = fakeFonts();
   const face = '@font-face{font-family:Own;src:url(data:font/woff2;base64,d09GMg==)}';

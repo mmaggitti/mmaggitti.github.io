@@ -15,7 +15,8 @@
 //   root's leading <title> and <desc>, before the drawing, spelt as SVG Lab's code writes it: in a
 //   file laid out on lines, each item on a line of its own one indent deeper than the <metadata> (the
 //   <metadata>'s own indent again: two spaces in SVG Lab's files), else all on one line. Off takes away every item the tab shows, and
-//   the <metadata> when nothing is left in it and it carries nothing but namespace declarations. A
+//   the <metadata> when nothing but whitespace is left in it (a comment, text, CDATA or processing
+//   instruction of the file's keeps it) and it carries nothing but namespace declarations. A
 //   <metadata> Draw's own state shares (draw:state, P1-M1) stays while that does.
 // - planMetaText(doc, item, text): an item's text in place.
 
@@ -129,7 +130,12 @@ export function planMetadata(doc: Doc, on: boolean, values: { creator: string; d
   if (!on) {
     for (let i = m.items.length - 1; i >= 0; i--) removeWithSpace(doc, m.items[i].id, apply);
     const meta = m.metadata === null ? null : el(doc, m.metadata);
-    if (meta && !kids(doc, meta.id).length && meta.attrs.every((a) => a.ns === NS.xmlns || (a.ns === DRAW_NS && a.local === 'made'))) removeWithSpace(doc, meta.id, apply);
+    // Only whitespace left: a comment, text, CDATA or processing instruction of the file's keeps it.
+    const empty = (id: NodeId) => el(doc, id).children.every((c) => {
+      const n = doc.nodes.get(c)!;
+      return n.kind === 'text' && /^[ \t\r\n]*$/.test(n.raw);
+    });
+    if (meta && empty(meta.id) && meta.attrs.every((a) => a.ns === NS.xmlns || (a.ns === DRAW_NS && a.local === 'made'))) removeWithSpace(doc, meta.id, apply);
     return;
   }
   const has = (local: string) => m.items.some((i) => i.key === `dc:${local}`);

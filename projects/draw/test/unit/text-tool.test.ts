@@ -28,3 +28,10 @@ test('a family is written bare when every word is an identifier and none a keywo
   assert.equal(fontValue('Source Sans 3', 'sans-serif'), "'Source Sans 3', sans-serif");
   assert.equal(fontValue('serif', null), 'serif');
 });
+
+test('a family holding U+FFFE or U+FFFF is never written bare: they are no name characters (XML can’t hold them); U+FFFD and other characters from U+00A0 still are', () => {
+  assert.equal(cssFamilyName('Bad\uFFFEFont'), "'Bad\uFFFEFont'");
+  assert.equal(cssFamilyName('Bad\uFFFFFont'), "'Bad\uFFFFFont'");
+  assert.equal(cssFamilyName('\uFFFEFont'), "'\uFFFEFont'", 'as its first character too');
+  assert.equal(cssFamilyName('Caf\u00e9 \uFFFD'), 'Caf\u00e9 \uFFFD');
+});
