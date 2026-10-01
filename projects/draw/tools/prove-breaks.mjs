@@ -2909,6 +2909,12 @@ const BREAKS = [
     file: 'engine/path/segments.ts', from: '    else text = inPlace(seg, spans, texts, cmd, lastChar);', to: '    else text = inPlace(seg, spans, texts, cmd, out.slice(-1));',
     run: engineTests('path/costs.test.ts'), expect: /✖ a segment rewrite and a node drag frame take linear time/,
   },
+  {
+    // The same text either way, so only the cost can show it.
+    id: 'B548', what: 'R2: Reverse with no chosen node re-reads and rewrites the whole path once per subpath (quadratic)',
+    file: 'engine/path/segments.ts', from: '  const out = reverseSubpaths(t, sub);\n', to: '  let out: string | null = null;\n  if (sub !== null) out = reverseSubpaths(t, sub);\n  else for (let s = 0; s < subpathCount(t.abs); s++) out = reverseSubpaths(readPathText(out ?? raw), s) ?? out;\n',
+    run: engineTests('path/costs.test.ts'), expect: /✖ Reverse with no chosen node takes linear time/,
+  },
 ];
 
 const args = process.argv.slice(2);

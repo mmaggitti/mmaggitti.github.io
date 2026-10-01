@@ -361,6 +361,37 @@ test('Reverse over every subpath of every corpus path: the subpath draws the sam
   assert.ok(n > 700, `only ${n} subpaths reversed (${skipped} had nothing to reverse)`);
 });
 
+test('Reverse with no chosen node writes exactly what reversing each subpath in turn (each over the last result) writes, over every corpus path, refusals included', () => {
+  const outcome = (f: () => string): string => {
+    try {
+      return f();
+    } catch (e) {
+      assert.ok(e instanceof TokenEditError, String(e));
+      return `refused: ${e.message}`;
+    }
+  };
+  let n = 0;
+  for (const { file, d } of corpusPaths()) {
+    const each = outcome(() => {
+      let out = d;
+      let reversed = 0;
+      for (let s = 0; s < subpathCount(toAbsolute(parsePath(d))); s++) {
+        try {
+          out = reverseSubpath(out, s);
+          reversed++;
+        } catch (e) {
+          if (!(e instanceof TokenEditError && /no segment to reverse/.test(e.message))) throw e;
+        }
+      }
+      if (!reversed) throw new TokenEditError('There’s no segment to reverse.');
+      return out;
+    });
+    assert.equal(outcome(() => reverseSubpath(d, null)), each, `${file}: ${d.slice(0, 60)}…`);
+    if (!each.startsWith('refused')) n++;
+  }
+  assert.ok(n > 300, `only ${n} corpus paths reversed`);
+});
+
 // ── an arc's flags ─────────────────────────────────────────────────────────────────────────────
 
 test('setArcFlags writes an arc’s two flag characters in place, packed flags too (0 01, 001), every other byte kept; anything but an arc is refused', () => {

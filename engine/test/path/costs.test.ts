@@ -1,36 +1,39 @@
 // What a write to a long path costs (the P1-M3 review): time in proportion to the path, never to its
 // square. Each case runs on a path and on one 4× as long; linear costs about 4×, so the bound is 6×,
-// and a pause of the runner's is forgiven by measuring a miss twice more (the fastest run of each size
-// counts). Each also has an absolute limit that the quadratic code missed by 5× or more. Its own file,
-// so the deliberate breaks that run segments.test.ts don't wait for it.
+// and a pause of the runner's is forgiven by measuring a miss again (the fastest run of each size
+// counts), but never a run past 4× the absolute limit, which no pause explains. Each limit is one the
+// quadratic code missed by 5× or more. Its own file, so the deliberate breaks that run
+// segments.test.ts don't wait for it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { descendants, parseDoc, type Doc, type NodeId } from '../../model/doc.ts';
-import { toggleRelative } from '../../path/segments.ts';
+import { parsePath } from '../../path/parse.ts';
+import { toAbsolute } from '../../path/abs.ts';
+import { reverseSubpath, subpathCount, toggleRelative } from '../../path/segments.ts';
 import { planNodeDrag } from '../../path/nodes.ts';
+import { TokenEditError } from '../../code/edit.ts';
 
 const ONE = { step: 1, k: 1 };
 
-/** The fastest of `runs` timings of act (ms). */
-function fastest(act: () => void, runs = 1): number {
-  let best = Infinity;
-  for (let i = 0; i < runs; i++) {
-    const t = performance.now();
-    act();
-    best = Math.min(best, performance.now() - t);
-  }
-  return best;
+/** How long act takes (ms). */
+function time(act: () => void): number {
+  const t = performance.now();
+  act();
+  return performance.now() - t;
 }
 
-/** small and big (4× the work): under `most`× the time, and big under `limit` ms, the fastest of up to three runs each. */
-function linear(what: string, small: () => void, big: () => void, limit: number, most = 6): void {
+/**
+ * small, and big (4× the work): big under `most`× small and under `limit` ms, the fastest of up to
+ * `runs` runs of each size.
+ */
+function linear(what: string, small: () => void, big: () => void, limit: number, runs = 3, most = 6): void {
   small(); // warm the engine up
-  let s = fastest(small);
-  let b = fastest(big);
-  for (let again = 0; again < 2 && (b >= most * s || b >= limit); again++) {
-    s = Math.min(s, fastest(small));
-    b = Math.min(b, fastest(big));
+  let s = time(small);
+  let b = time(big);
+  for (let again = 1; again < runs && (b >= most * s || b >= limit) && b < 4 * limit; again++) {
+    s = Math.min(s, time(small));
+    b = Math.min(b, time(big));
   }
   assert.ok(b < most * s, `${what}: ${s.toFixed(0)} ms, then ${b.toFixed(0)} ms for 4× the work (×${(b / s).toFixed(1)}; linear is ×4, the most ×${most})`);
   assert.ok(b < limit, `${what}: ${b.toFixed(0)} ms for the larger (the limit is ${limit})`);
@@ -61,4 +64,33 @@ test('a segment rewrite and a node drag frame take linear time: Make relative an
     assert.ok(!('refused' in plan) && plan.edits.length === 1, 'test setup: the drag planned one edit');
   };
   linear('a node drag frame (planNodeDrag)', drag(a), drag(b), 1000);
+});
+
+/** n/2 relative subpaths of one line each (m, then l), with decimals: Reverse compensates every m after the first. */
+const relativeLines = (n: number): string =>
+  Array.from({ length: n / 2 }, (_, i) => `m ${((i % 7) * 0.7 + 0.1).toFixed(1)} ${((i % 5) * 0.3 + 0.2).toFixed(1)} l ${((i % 11) * 0.4 + 1.1).toFixed(1)} ${((i % 3) * 0.9 - 1.3).toFixed(1)}`).join(' ');
+
+/** Every subpath reversed one at a time, each over the last result: what Reverse with no chosen node wrote before it read once. */
+function oneByOne(d: string): string {
+  let out = d;
+  for (let s = 0; s < subpathCount(toAbsolute(parsePath(d))); s++) {
+    try {
+      out = reverseSubpath(out, s);
+    } catch (e) {
+      if (!(e instanceof TokenEditError && /no segment to reverse/.test(e.message))) throw e;
+    }
+  }
+  return out;
+}
+
+// R2: Reverse with no chosen node read and wrote the whole path once per subpath. Its runs are a few
+// ms, so a miss is measured up to four times more. Measured in node: about 6 and 23 ms over 1,000 and
+// 4,000 segments (500 and 2,000 subpaths); the quadratic code took 0.5 s and 8.3 s.
+test('Reverse with no chosen node takes linear time: over 4,000 segments (2,000 subpaths) it costs under 6× what it costs over 1,000, and writes exactly what reversing each subpath in turn writes', () => {
+  const small = relativeLines(1000);
+  const big = relativeLines(4000);
+  const sample = relativeLines(200);
+  assert.equal(reverseSubpath(sample, null), oneByOne(sample), 'one pass and one subpath at a time write the same text');
+  assert.ok(reverseSubpath(small, null).startsWith('m 1.2 -1.1 l -1.1 1.3 m 3.4 -1.2 l -1.5 0.4 '), 'test setup: each subpath reversed, the m after each compensated');
+  linear('Reverse (reverseSubpath, every subpath)', () => void reverseSubpath(small, null), () => void reverseSubpath(big, null), 1000, 5);
 });
