@@ -14,6 +14,7 @@ import { descendants, type ElementNode } from '../../../../engine/model/doc.ts';
 import { importReport } from '../../../../engine/report/import-report.ts';
 import { attributeRenders, elementRenders, urlAllowed } from '../../../../engine/policy/render-policy.ts';
 import { corpus, corpusBytes, edit, fakeEditor, FakeTimers, lockTable, SAMPLE } from './fakes.ts';
+import { PRESETS } from '../../../../engine/presets/quick-starts.ts';
 
 const DAY = 86_400_000;
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -565,4 +566,82 @@ test('Convert rem to user units rewrites every rem number in attributes and styl
   assert.equal(ws.current.get()!.report.rem.count, 0, 'the report counts none now');
   editor.undo();
   assert.equal(editor.source(), text, 'one undo');
+});
+
+// ── P1-M5: New… (Draw's blank, the quick starts, SVG Lab's templates) ───────────────────────────
+
+test('New drawing from each preset: it opens as a new drawing named for it, its text exactly and nothing to undo; the drawing open before, changed, stays in Files as its own draft; the new one is a draft only once it changes', async () => {
+  const { ws, editor, store, settle } = rig();
+  await ws.openSample();
+  edit(editor, 'circle', '<circle cx="9" cy="9" r="3"/>'); // the sample, changed once
+  const changed = editor.source();
+  for (const p of PRESETS) {
+    assert.ok(await ws.newFrom(p.id), p.id);
+    assert.equal(editor.source(), p.text, `${p.id}: the preset's text, byte for byte`);
+    assert.equal(ws.current.get()?.name, p.drawing, `${p.id} is named for it`);
+    assert.equal(ws.current.get()?.via, 'new');
+    assert.equal(editor.history.get().canUndo, false, `${p.id}: a new drawing has nothing to undo`);
+    assert.equal(ws.panel.get(), null, 'no report over it');
+    assert.equal(ws.autosave.draftId, null, `${p.id} is not a draft until it changes`);
+  }
+  assert.equal(await ws.newFrom('no-such-preset'), false);
+  await settle();
+  const drafts = await store.list();
+  assert.deepEqual(drafts.map((d) => d.name), ['Sample'], 'the drawing open before is in Files, and none of the untouched presets is');
+  assert.equal((await store.load(drafts[0].id))!.text, changed, 'saved to its own draft, its change and all');
+  edit(editor, 'circle', '<circle cx="50" cy="40" r="20"/>'); // SVG Lab's logo, open last, changes
+  await settle();
+  assert.deepEqual((await store.list()).map((d) => d.name).sort(), ['SVG Lab logo', 'Sample']);
+  assert.equal(ws.exportFile('as-is')!.fileName, 'SVG Lab logo.svg', 'its files are named for it');
+  assert.ok(await ws.newDrawing());
+  assert.equal(editor.source(), BLANK, 'New is the New sheet’s Blank');
+  assert.equal(ws.current.get()?.name, 'Blank');
+});
+
+test('Replace this one: the open drawing’s content becomes the preset’s in one entry that undo takes back byte for byte; it keeps its name and its draft, and the import report is read again', async () => {
+  const { ws, editor, store, settle } = rig();
+  void ws.openSample();
+  assert.ok(await ws.openText(SAMPLE, 'sunset.svg', 'paste')); // a draft at once
+  const id = ws.autosave.draftId!;
+  ws.show('new');
+  assert.equal(ws.canReplace(), true);
+  for (const p of PRESETS) {
+    assert.ok(ws.replaceFrom(p.id), p.id);
+    assert.equal(editor.source(), p.text, `${p.id}: a drawing with nothing outside its root becomes the preset byte for byte`);
+    assert.equal(editor.history.get().undoLabel, `Replace with ${p.drawing}`);
+    assert.equal(ws.panel.get(), null, 'the sheet closes');
+    assert.equal(ws.current.get()?.name, 'sunset', 'the drawing keeps its name');
+    assert.equal(ws.autosave.draftId, id, 'and its draft');
+    assert.deepEqual(ws.current.get()!.report, importReport(editor.doc!), 'the report is the new content’s');
+    await settle();
+    assert.equal((await store.load(id))!.text, p.text, 'the draft holds it');
+    editor.undo();
+    assert.equal(editor.source(), SAMPLE, `${p.id}: one undo gives the drawing back byte for byte`);
+    assert.equal(editor.history.get().canUndo, false);
+  }
+  await settle();
+  assert.equal((await store.load(id))!.text, SAMPLE);
+  assert.equal((await store.list()).length, 1, 'no new draft');
+  assert.equal(ws.replaceFrom('no-such-preset'), false);
+});
+
+test('Replace this one refuses where nothing can be written: a drawing another tab holds, and a file shown as source', async () => {
+  const kv = memoryKV();
+  const locks = lockTable();
+  await new DraftStore(kv).create('Theirs', corpus('tools/inkscape-plain-svg.svg'), 'theirs');
+  locks.other.add('theirs');
+  const { ws, editor } = rig(kv, locks);
+  void ws.openSample();
+  await ws.boot('', () => {});
+  assert.equal(editor.readOnly.get(), true, 'test setup: read-only');
+  assert.equal(ws.canReplace(), false);
+  assert.equal(ws.replaceFrom('lab-icon'), false);
+  assert.equal(editor.notice.get(), READ_ONLY);
+  assert.equal(editor.source(), corpus('tools/inkscape-plain-svg.svg'));
+  await ws.openText('<svg xmlns="http://www.w3.org/2000/svg"><g></svg>', '', 'paste');
+  assert.ok(ws.unparsed.get(), 'test setup: shown as source');
+  assert.equal(ws.canReplace(), false);
+  assert.equal(ws.replaceFrom('lab-icon'), false);
+  assert.ok(await ws.newFrom('lab-icon'), 'New drawing still opens');
+  assert.equal(editor.source(), corpus('lab/create-icon.svg'));
 });

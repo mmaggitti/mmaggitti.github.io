@@ -109,7 +109,10 @@ import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
-import { decodePng } from './probe-helpers/png.mjs';
+import { decodePng, pixelShare, rgbaImage } from './probe-helpers/png.mjs';
+import { PRESETS } from '../../../engine/presets/quick-starts.ts';
+import { gridShows } from '../../../engine/export/raster.ts';
+import { pngCopy } from '../../../engine/export/png-source.ts';
 import { shape as shapeText } from '../src/text/outline-lib.ts';
 import { browserCanon, canonDiffs, engineCanon, PROBES, probeProblems } from './probe-helpers/xml-canon.mjs';
 import { geometryKnown } from './probe-helpers/geometry-known.mjs';
@@ -297,6 +300,11 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theAccessPanelNamesTheDrawing);
   await check(theScreenReaderPreviewFollowsTheFile);
   for (const height of [956, 796]) await check(phoneRulesOnTheAccessPanel, height);
+  // P1-M5: finish, export, iPad and Create.
+  await check(newSheetOpensTemplatesAndQuickStarts);
+  for (const dpr of [1, 3]) await check(theFinishSheetPreviewsAndComparesPixels, dpr);
+  await check(pngIsPreparedAndSharedInsideTheTap);
+  for (const height of [956, 796]) await check(phoneRulesOnTheFinishSheet, height);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -7656,6 +7664,414 @@ const INTER_WORDMARK = (() => {
   const shaped = shapeText(new Uint8Array(fontBytes('inter', 'inter-latin-700-normal.woff2')), ['Inter wordmark']);
   return (shaped.runs[0].glyphs.reduce((t, g) => t + g.xAdvance, 0) * 20) / shaped.unitsPerEm;
 })();
+
+// ── P1-M5: finish, export, iPad and Create. ──────────────────────────────────────────────────
+
+// Files → New…: the New sheet.
+async function openNewSheet(page) {
+  await openFilesMenu(page);
+  await page.locator('.draw-new').tap();
+  await page.locator('.draw-preset').first().waitFor();
+}
+// A preset from the New sheet, as a new drawing ('new') or over the open one ('replace').
+async function fromPreset(page, id, how) {
+  await openNewSheet(page);
+  await page.locator(`.draw-preset[data-preset="${id}"]`).tap();
+  await page.locator(how === 'new' ? '.draw-new-go' : '.draw-new-replace').tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
+const undoButton = (page) => page.locator('.draw-rail button[aria-label^="Undo"]');
+// The paper's centre on screen (the artboard's), and the pixel drawn there.
+async function paperCentre(page) {
+  const b = await page.locator('.draw-paper').boundingBox();
+  return pixelAt(page, { x: b.x + b.width / 2, y: b.y + b.height / 2 });
+}
+// Runs in the page: the drawn <text>'s advance in screen px, and a sans-serif one's in the light DOM
+// at the same weight and on-screen size.
+function wordWidths() {
+  const t = document.querySelector('.draw-host').shadowRoot.querySelector('text');
+  const k = t.getScreenCTM().a;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('style', 'position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; visibility: hidden');
+  document.body.append(svg);
+  const r = document.createElementNS(ns, 'text');
+  for (const [a, v] of [['font-family', 'sans-serif'], ['font-weight', '900'], ['font-size', String(parseFloat(getComputedStyle(t).fontSize) * k)]]) r.setAttribute(a, v);
+  r.textContent = t.textContent;
+  svg.append(r);
+  const ref = r.getComputedTextLength();
+  svg.remove();
+  return { drawn: t.getComputedTextLength() * k, ref };
+}
+
+// New… (P1-M5): the sample, changed once (a keyword token), then Files → New…: three groups (Blank,
+// Quick starts, SVG Lab's templates) and seven rows, each at least 44 × 44; a pick alone changes
+// nothing and offers New drawing and Replace this one, both at least 44 × 44. Replace this one writes
+// the App icon over the changed sample (the file is the preset's exactly, the name kept, Undo named
+// "Undo Replace with App icon"; the canvas draws its #264653 at the paper's centre), and Undo gives
+// the sample back byte for byte. Then New drawing, each preset in turn: the file is its text byte for
+// byte (SVG Lab's three are the lab's own exports), named for it, Undo disabled; the App icon's
+// paper centre is #264653, and the Wordmark's text is drawn in Archivo 900 (loaded, and wider than
+// sans-serif's at its size). The changed sample is in Files' draft list.
+async function newSheetOpensTemplatesAndQuickStarts(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await showCode(page);
+    await tapToken(page.locator('.cv-block', { hasText: '<polyline' }).locator('.cv-enum').first()); // stroke-linecap
+    const changed = await source(page);
+    must(changed === SAMPLE.replace('stroke-linecap="round"', 'stroke-linecap="square"'), 'test setup: the sample did not change');
+    await page.locator('.draw-save[data-save="saved"]').waitFor({ timeout: 5000 });
+    await openNewSheet(page);
+    const sheet = await page.evaluate(() => ({
+      groups: [...document.querySelectorAll('.draw-presets > .draw-subhead')].map((h) => h.textContent),
+      rows: [...document.querySelectorAll('.draw-preset')].map((b) => ({ id: b.dataset.preset, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })),
+    }));
+    must(JSON.stringify(sheet.groups) === JSON.stringify(['Blank', 'Quick starts', 'SVG Lab’s templates']), `the New sheet's groups are ${JSON.stringify(sheet.groups)}`);
+    must(sheet.rows.map((r) => r.id).join() === PRESETS.map((p) => p.id).join(), `its rows are ${sheet.rows.map((r) => r.id)}`);
+    for (const r of sheet.rows) must(r.w >= TAP_MIN - 0.5 && r.h >= TAP_MIN - 0.5, `the ${r.id} row is ${Math.round(r.w)}×${Math.round(r.h)}`);
+    must(await page.locator('.draw-new-go, .draw-new-replace').count() === 0, 'New drawing or Replace this one shows before a preset is picked');
+    await page.locator('.draw-preset[data-preset="quick-app-icon"]').tap();
+    must(await source(page) === changed, 'a pick alone changed the drawing');
+    const choice = await page.evaluate(() => [...document.querySelectorAll('.draw-new-go, .draw-new-replace')].map((b) => ({ text: b.textContent, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height, bottom: b.getBoundingClientRect().bottom })));
+    must(choice.length === 2 && choice[0].text === 'New drawing' && choice[1].text === 'Replace this one' && choice.every((c) => c.w >= TAP_MIN - 0.5 && c.h >= TAP_MIN - 0.5 && c.bottom <= 956.5), `the choice: ${JSON.stringify(choice)}`);
+    // Replace this one: SVG Lab's way.
+    await page.locator('.draw-new-replace').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    const appIcon = PRESETS.find((p) => p.id === 'quick-app-icon').text;
+    must(await source(page) === appIcon, `Replace this one wrote:\n${await source(page)}`);
+    must(await page.locator('.draw-name').textContent() === 'Sample', `the drawing is named ${await page.locator('.draw-name').textContent()} after Replace this one`);
+    must(await undoButton(page).getAttribute('aria-label') === 'Undo Replace with App icon', `Undo reads ${await undoButton(page).getAttribute('aria-label')}`);
+    await twoFrames(page);
+    const replaced = await paperCentre(page);
+    must(near3(replaced, [0x26, 0x46, 0x53], 2), `the replaced drawing's paper centre is ${replaced}, not #264653`);
+    await undoButton(page).tap();
+    must(await source(page) === changed, 'Undo did not give the sample back byte for byte');
+    // New drawing, each preset in turn.
+    for (const p of PRESETS) {
+      await fromPreset(page, p.id, 'new');
+      await until(`${p.id} opens`, async () => (await source(page)) === p.text).catch(async () => {
+        throw new Error(`${p.id} opened as:\n${await source(page)}`);
+      });
+      if (p.group === 'lab') must(p.text === LAB(`create-${p.id.slice('lab-'.length)}.svg`), `${p.id} is not the lab's own export`);
+      must(await page.locator('.draw-name').textContent() === p.drawing, `${p.id} is named ${await page.locator('.draw-name').textContent()}`);
+      must(await undoButton(page).isDisabled(), `${p.id}: Undo is enabled on a new drawing`);
+      if (p.id === 'quick-app-icon') {
+        await twoFrames(page);
+        const c = await paperCentre(page);
+        must(near3(c, [0x26, 0x46, 0x53], 2), `the App icon's paper centre is ${c}, not #264653`);
+      }
+      if (p.id === 'quick-wordmark') {
+        await until('Archivo 900 loads', () => page.evaluate(faceLoaded, ['Archivo', '900', 'normal']), 8000);
+        const w = await page.evaluate(wordWidths);
+        must(w.drawn > w.ref * 1.02, `the Wordmark is ${w.drawn.toFixed(1)} px wide, sans-serif's ${w.ref.toFixed(1)}: not drawn in Archivo`);
+      }
+    }
+    await openFilesMenu(page);
+    await until('the drafts are listed', async () => (await page.locator('.draw-draft-name').count()) > 0);
+    const names = await page.locator('.draw-draft-name').allTextContents();
+    must(names.length === 1 && names[0] === 'Sample', `Files lists ${JSON.stringify(names)}: the changed sample should be the one draft`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// Runs in the page: an <img>'s pixels at its natural size, RGBA in rows (a blob: image is the page's own).
+async function imagePixels(sel) {
+  const img = typeof sel === 'string' ? document.querySelector(sel) : sel;
+  await img.decode();
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  return { width: c.width, height: c.height, data: [...ctx.getImageData(0, 0, c.width, c.height).data] };
+}
+// Runs in the page: an SVG drawn at w × h on a transparent canvas, as an <img> of it (the engine's own raster).
+async function rasterOf({ svg, w, h }) {
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await img.decode();
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return [...c.getContext('2d').getImageData(0, 0, w, h).data];
+}
+const rgbaAt = (img, x, y) => img.data.slice((y * img.width + x) * 4, (y * img.width + x) * 4 + 4);
+
+// The Finish sheet on lab/vector.svg (at deviceScaleFactor 1 and 3): seven previews whose PNGs are
+// 16 … 1024 px (naturalWidth), each on light, dark and the checkerboard, shown at their own size up to
+// 128 and within the sheet above it; in the 64 px PNG the centre pixel is the star's #f1faee and a
+// pixel on the middle row 12% in from the left the circle's #2a9d8f (± 2). The comparison: 32 × 32
+// pressed first, the Pixels image 32 × 32 with image-rendering: pixelated, the captions exactly the
+// lab's; 16 × 16 makes "16 × 16 = 256 dots"; the grid shows exactly when gridShows says for the pane's
+// width at this ratio (at 1×: 16 yes, 32 no; at 3×: 32 yes; 64 no at either); the Vector pane is an
+// <img> of data:image/svg+xml; and the sheet holds no circle or polygon (pictures, never the DOM).
+async function theFinishSheetPreviewsAndComparesPixels(browser, origin, dpr) {
+  await withPage(browser, origin, 956, async (page, errors) => {
+    must((await page.evaluate((t) => window.drawTest.render(t), LAB('vector.svg'))).ok, 'test setup: lab/vector.svg did not open');
+    await page.locator('.draw-bar .draw-finish').tap();
+    await until('the icon set is made', async () => (await page.locator('.draw-icon-img').count()) === 21, 15000);
+    const icons = await page.evaluate(() => {
+      const body = document.querySelector('.draw-finish-body').getBoundingClientRect();
+      return [...document.querySelectorAll('.draw-icon')].map((f) => ({
+        size: Number(f.dataset.size),
+        backs: [...f.querySelectorAll('.draw-icon-cell')].map((c) => c.dataset.back),
+        imgs: [...f.querySelectorAll('img')].map((i) => ({ nw: i.naturalWidth, nh: i.naturalHeight, w: i.getBoundingClientRect().width, left: i.getBoundingClientRect().left, right: i.getBoundingClientRect().right, rendering: getComputedStyle(i).imageRendering })),
+        bg: [...f.querySelectorAll('.draw-icon-cell')].map((c) => getComputedStyle(c).backgroundColor + ' ' + getComputedStyle(c).backgroundImage.slice(0, 24)),
+        label: f.querySelector('figcaption').textContent,
+        body: { left: body.left, right: body.right },
+      }));
+    });
+    must(icons.map((i) => i.size).join() === '16,32,64,128,256,512,1024', `the previews are ${icons.map((i) => i.size)}`);
+    for (const i of icons) {
+      must(i.backs.join() === 'light,dark,checker', `${i.size} px is shown on ${i.backs}`);
+      must(i.bg[0].startsWith('rgb(255, 255, 255)') && i.bg[1].startsWith('rgb(28, 28, 30)') && /conic-gradient/.test(i.bg[2]), `${i.size} px's backgrounds: ${JSON.stringify(i.bg)}`);
+      for (const m of i.imgs) {
+        must(m.nw === i.size && m.nh === i.size, `the ${i.size} px PNG is ${m.nw}×${m.nh}`);
+        if (i.size <= 128) must(Math.abs(m.w - i.size) < 0.5 && m.rendering === 'pixelated', `the ${i.size} px preview is shown ${m.w} wide (${m.rendering}), not at its own size`);
+        else must(m.left >= i.body.left - 0.5 && m.right <= i.body.right + 0.5, `the ${i.size} px preview at ${Math.round(m.left)}–${Math.round(m.right)} leaves the sheet`);
+      }
+      if (i.size >= 512) must(/^\d+ px, shown at \d+%$/.test(i.label), `the ${i.size} px preview is labelled ${JSON.stringify(i.label)}`);
+    }
+    const px64 = await page.evaluate(imagePixels, '.draw-icon[data-size="64"] img');
+    const centre = rgbaAt(px64, 32, 32);
+    const left = rgbaAt(px64, Math.floor(0.12 * 64), 32);
+    must(near3(centre, [0xf1, 0xfa, 0xee], 2) && centre[3] === 255, `the 64 px PNG's centre is ${centre}, not the star's #f1faee`);
+    must(near3(left, [0x2a, 0x9d, 0x8f], 2) && left[3] === 255, `the 64 px PNG 12% in from the left is ${left}, not the circle's #2a9d8f`);
+    // The comparison.
+    const dots = page.locator('.draw-dots button');
+    must((await dots.allTextContents()).join() === '16 × 16,32 × 32,64 × 64', `the chips read ${await dots.allTextContents()}`);
+    const pane = async () => page.evaluate(() => {
+      const img = document.querySelector('.draw-pane-pixels');
+      return {
+        pressed: [...document.querySelectorAll('.draw-dots button')].map((b) => b.getAttribute('aria-pressed')),
+        nw: img?.naturalWidth, nh: img?.naturalHeight, rendering: img && getComputedStyle(img).imageRendering,
+        width: document.querySelector('.draw-pane').getBoundingClientRect().width,
+        grid: !!document.querySelector('.draw-pane-grid'),
+        captions: [...document.querySelectorAll('.draw-compare figcaption span')].map((s) => s.textContent),
+        vector: document.querySelector('.draw-pane-vector')?.getAttribute('src')?.startsWith('data:image/svg+xml;charset=utf-8,') ?? false,
+        dpr: devicePixelRatio,
+      };
+    });
+    await until('the 32 × 32 pixels are made', async () => (await pane()).nw === 32, 8000);
+    const at32 = await pane();
+    must(at32.dpr === dpr, `test setup: devicePixelRatio is ${at32.dpr}`);
+    must(at32.pressed.join() === 'false,true,false', `32 × 32 is not the one pressed first: ${at32.pressed}`);
+    must(at32.nh === 32 && at32.rendering === 'pixelated', `the Pixels image is ${at32.nw}×${at32.nh}, ${at32.rendering}`);
+    must(at32.captions.join('|') === '32 × 32 = 1,024 dots|2 shapes, sharp at any size', `the captions read ${JSON.stringify(at32.captions)}`);
+    must(at32.vector === true, 'the Vector pane is not an <img> of a data:image/svg+xml URL');
+    const want = { 16: true, 32: dpr >= 3, 64: false };
+    for (const res of [32, 16, 64]) {
+      if (res !== 32) {
+        await dots.nth([16, 32, 64].indexOf(res)).tap();
+        await until(`the ${res} × ${res} pixels are made`, async () => (await pane()).nw === res, 8000);
+      }
+      const p = await pane();
+      if (res === 16) must(p.captions[0] === '16 × 16 = 256 dots', `16 × 16 reads ${p.captions[0]}`);
+      must(p.grid === gridShows(p.width, dpr, res) && p.grid === want[res], `at ${dpr}× and ${res} dots the grid ${p.grid ? 'shows' : "doesn't show"} on a ${p.width} px pane`);
+    }
+    must(await page.evaluate(() => document.querySelector('.draw-modal').querySelectorAll('circle, polygon').length) === 0, 'the sheet holds the drawing’s elements: a picture of it is meant');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { deviceScaleFactor: dpr });
+}
+
+// PNG, prepared before the tap and shared inside it: a file with an Inter 700 text, a rect and a
+// <foreignObject>, opened as card.svg (its As-paths Clean export taken first, as a download). With the
+// text library's chunk held, Finish's Share reads "Preparing…" and is disabled; released, it is
+// enabled. With navigator.canShare saying yes and navigator.share a stub that records
+// navigator.userActivation.isActive and keeps the files, a tap on Share calls it once, active, with
+// seven files card-16.png … card-1024.png, each image/png and decoding to its size; the 64 px file is
+// the same engine's raster of Clean's As-paths file (at most 0.1% of pixels differ by more than 2) and
+// not that of the As-text file (more than 1% differ: its text went as paths); the sheet notes the
+// foreignObject left out. 2× (decoding held) reads "Preparing…", then shares one card@2x.png of twice
+// the artboard. With canShare gone, the files are Download buttons, and a tap downloads that one
+// file. And P0's ACTIVE file: Finish makes its PNGs with nothing run, no CSP violation and no request
+// off the page.
+const PNG_CARD = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 50">
+  <rect x="4" y="5" width="40" height="40" fill="#e76f51"/>
+  <text x="48" y="36" font-family="Inter, sans-serif" font-weight="700" font-size="28" fill="#264653">Ink</text>
+  <foreignObject x="60" y="40" width="30" height="8"><p xmlns="${XHTML_NS}">hi</p></foreignObject>
+</svg>
+`;
+async function pngIsPreparedAndSharedInsideTheTap(browser, origin) {
+  await withPage(browser, origin, 956, async (page, errors, context) => {
+    await page.evaluate(() => {
+      navigator.canShare = undefined; // Export downloads, which the check reads
+    });
+    await pickFile(page, 'card.svg', Buffer.from(PNG_CARD));
+    await closeModal(page);
+    // Clean's As-paths file, from Export.
+    await page.locator('.draw-export').tap();
+    await page.locator('.draw-export-text button', { hasText: 'As paths' }).tap();
+    const clean = page.locator('.draw-export-go[data-kind="clean"]');
+    await until('As paths is ready', async () => !(await clean.isDisabled()), 8000);
+    const [download] = await Promise.all([page.waitForEvent('download'), clean.tap()]);
+    const asPaths = readFileSync(await download.path(), 'utf8');
+    must(/<path [^>]*d="M /.test(asPaths) && !/<text/.test(asPaths), 'test setup: the As-paths export still has its text');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    // The share sheet: a stub that keeps what it is handed, and whether the tap's activation was live.
+    await page.evaluate(() => {
+      window.__shares = [];
+      navigator.canShare = (d) => Array.isArray(d?.files);
+      navigator.share = async (d) => {
+        window.__shares.push({ active: navigator.userActivation.isActive, files: d.files });
+      };
+    });
+    const shared = () => page.evaluate(async () => Promise.all(window.__shares.map(async (s) => ({
+      active: s.active,
+      files: await Promise.all(s.files.map(async (f) => {
+        const b = new Uint8Array(await f.arrayBuffer());
+        let bin = '';
+        for (const x of b) bin += String.fromCharCode(x);
+        return { name: f.name, type: f.type, b64: btoa(bin) };
+      })),
+    }))));
+    let release;
+    const held = new Promise((ok) => (release = ok));
+    await page.route(/outline-lib-[^/]*\.js$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const share = page.locator('.draw-png-share');
+    await page.locator('.draw-bar .draw-finish').tap();
+    await share.waitFor();
+    const waiting = { text: await share.textContent(), disabled: await share.isDisabled() };
+    must(waiting.text === 'Preparing…' && waiting.disabled, `while the PNGs are prepared, Share reads ${JSON.stringify(waiting.text)}${waiting.disabled ? '' : ' and is enabled'}`);
+    release();
+    await until('the icon set is ready', async () => !(await share.isDisabled()), 15000);
+    must(await share.textContent() === 'Share', `once ready, Share reads ${JSON.stringify(await share.textContent())}`);
+    must((await page.locator('.draw-png-note').allTextContents()).some((n) => n.includes('foreignObject')), `the sheet doesn't say the foreignObject was left out: ${await page.locator('.draw-png-note').allTextContents()}`);
+    await share.tap();
+    await until('the share sheet is asked', async () => (await page.evaluate(() => window.__shares.length)) > 0);
+    await page.waitForTimeout(300);
+    const s1 = await shared();
+    must(s1.length === 1, `one tap asked for the share sheet ${s1.length} times`);
+    must(s1[0].active === true, 'navigator.share was called without the tap’s user activation');
+    const sizes = [[16, 8], [32, 16], [64, 32], [128, 64], [256, 128], [512, 256], [1024, 512]];
+    must(s1[0].files.map((f) => f.name).join() === sizes.map(([n]) => `card-${n}.png`).join(), `the files are ${s1[0].files.map((f) => f.name)}`);
+    for (const [i, f] of s1[0].files.entries()) {
+      const png = decodePng(Buffer.from(f.b64, 'base64'));
+      must(f.type === 'image/png' && png.width === sizes[i][0] && png.height === sizes[i][1], `${f.name} is ${f.type}, ${png.width}×${png.height}`);
+    }
+    const got = decodePng(Buffer.from(s1[0].files[2].b64, 'base64'));
+    const engineRaster = async (text) => {
+      const copy = pngCopy(text, 64, 32);
+      return rgbaImage(64, 32, await page.evaluate(rasterOf, { svg: copy.text, w: 64, h: 32 }));
+    };
+    const pathsDiff = pixelShare(got, await engineRaster(asPaths));
+    const textDiff = pixelShare(got, await engineRaster(cleanExport(parseDoc(PNG_CARD).doc).text));
+    must(pathsDiff <= 0.001, `the 64 px PNG differs from the engine's raster of Clean's As-paths file in ${(pathsDiff * 100).toFixed(2)}% of its pixels`);
+    must(textDiff > 0.01, `the 64 px PNG is the As-text file's raster (${(textDiff * 100).toFixed(2)}% differ): its text did not go as paths`);
+    // 2×: made when picked (decoding held so its "Preparing…" can be read), one file of twice the artboard.
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    await page.evaluate(() => {
+      window.__hold = new Promise((ok) => (window.__release = ok));
+      const decode = HTMLImageElement.prototype.decode;
+      HTMLImageElement.prototype.decode = function () {
+        return window.__hold.then(() => decode.call(this));
+      };
+    });
+    await page.locator('.draw-bar .draw-finish').tap();
+    await page.locator('.draw-png-choice button', { hasText: '2×' }).tap();
+    const two = { text: await share.textContent(), disabled: await share.isDisabled() };
+    must(two.text === 'Preparing…' && two.disabled, `2× reads ${JSON.stringify(two.text)} while its file is made${two.disabled ? '' : ', enabled'}`);
+    await page.evaluate(() => window.__release());
+    await until('2× is ready', async () => !(await share.isDisabled()), 15000);
+    await share.tap();
+    await until('the second share', async () => (await page.evaluate(() => window.__shares.length)) === 2);
+    const s2 = (await shared())[1];
+    const twice = decodePng(Buffer.from(s2.files[0].b64, 'base64'));
+    must(s2.active && s2.files.length === 1 && s2.files[0].name === 'card@2x.png' && twice.width === 200 && twice.height === 100, `2× shared ${JSON.stringify(s2.files.map((f) => f.name))} (${twice.width}×${twice.height})`);
+    // No file sharing: a Download button per file, one tap one file.
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    await page.evaluate(() => {
+      navigator.canShare = undefined;
+    });
+    await page.locator('.draw-bar .draw-finish').tap();
+    const downloads = page.locator('.draw-png-download');
+    await until('the Download buttons', async () => (await downloads.count()) === 7, 15000);
+    must(await share.count() === 0, 'Share is offered where the browser can’t share files');
+    const [one] = await Promise.all([page.waitForEvent('download'), downloads.nth(1).tap()]);
+    const file = decodePng(readFileSync(await one.path()));
+    must(one.suggestedFilename() === 'card-32.png' && file.width === 32 && file.height === 16, `a Download tap downloaded ${one.suggestedFilename()} (${file.width}×${file.height})`);
+    await closeModal(page);
+    // P0's ACTIVE file: nothing in it runs or loads while its PNGs are made.
+    const quiet = watch(page, context, origin);
+    must((await page.evaluate((t) => window.drawTest.render(t), ACTIVE)).ok, 'test setup: ACTIVE did not open');
+    await page.locator('.draw-bar .draw-finish').tap();
+    await until('ACTIVE’s PNGs are made', async () => (await downloads.count()) === 7, 15000);
+    must(await page.evaluate(() => window.__pwned) === undefined, `something in ACTIVE ran: ${await page.evaluate(() => window.__pwned)}`);
+    await quiet('Finish on ACTIVE');
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
+
+// The phone rules on the Finish sheet (at 956 and 796 tall), with a drawing whose name is long: the
+// top bar (Files, the name, preview, Fit, Finish, Export) scrolls sideways in its own box, opening at
+// its start, while the page never does; every bar button is at least 44 × 44 and comes fully into the
+// window somewhere in the bar's scroll range; the name shows in full. In the sheet: every chip,
+// choice, row and button at least 44 × 44, no sideways scroll at its top or bottom, and Share in the
+// bottom quarter of the window, above the home indicator, wherever the sheet is scrolled.
+async function phoneRulesOnTheFinishSheet(browser, origin, height) {
+  await withPage(browser, origin, height, async (page, errors) => {
+    const NAME = 'A long drawing name that makes the bar scroll';
+    await pickFile(page, `${NAME}.svg`, Buffer.from(LAB('vector.svg')));
+    await closeModal(page);
+    const bar = await page.evaluate(() => {
+      const b = document.querySelector('.draw-bar');
+      const de = document.documentElement;
+      const name = document.querySelector('.draw-name');
+      return {
+        sw: b.scrollWidth, cw: b.clientWidth, left: b.scrollLeft, height: b.getBoundingClientRect().height,
+        page: de.scrollWidth - de.clientWidth, name: name.textContent, nameCut: name.scrollWidth - name.clientWidth,
+        buttons: [...b.querySelectorAll('button')].map((x) => x.className.split(' ').pop()),
+      };
+    });
+    must(bar.buttons.join() === 'draw-files,draw-fit,draw-finish,draw-export', `the bar's buttons are ${bar.buttons}`);
+    must(bar.sw > bar.cw, `the bar doesn't scroll (${bar.sw} ≤ ${bar.cw}) with a long name`);
+    must(bar.left === 0, `the bar opens scrolled to ${bar.left}, not its start`);
+    must(bar.page <= 0, `the page scrolls sideways by ${bar.page}`);
+    must(bar.height === 44, `the bar is ${bar.height} tall, not 44`);
+    must(bar.name === NAME && bar.nameCut <= 0, `the name is cut short: ${JSON.stringify(bar.name)} (${bar.nameCut} px hidden)`);
+    for (const cls of bar.buttons) {
+      const r = await page.evaluate((c) => {
+        const el = document.querySelector(`.draw-bar .${c}`);
+        el.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+        const b = el.getBoundingClientRect();
+        return { w: b.width, h: b.height, left: b.left, right: b.right, page: document.documentElement.scrollWidth - document.documentElement.clientWidth, scrollX };
+      }, cls);
+      must(r.w >= TAP_MIN - 0.5 && r.h >= TAP_MIN - 0.5 && r.left >= -0.5 && r.right <= 440.5 && r.scrollX === 0 && r.page <= 0, `${cls} is ${Math.round(r.w)}×${Math.round(r.h)} at ${Math.round(r.left)}–${Math.round(r.right)} in the bar's range (page scrolled to ${r.scrollX})`);
+    }
+    await page.evaluate(() => {
+      document.querySelector('.draw-bar').scrollLeft = 0;
+      navigator.canShare = (d) => Array.isArray(d?.files);
+      navigator.share = async () => {};
+    });
+    await page.locator('.draw-bar .draw-finish').tap();
+    const share = page.locator('.draw-png-share');
+    await until('Share is ready', async () => (await share.count()) === 1 && !(await share.isDisabled()), 15000);
+    const problems = [];
+    for (const where of ['top', 'bottom']) {
+      await page.evaluate((w) => {
+        const body = document.querySelector('.draw-finish-body');
+        body.scrollTop = w === 'top' ? 0 : body.scrollHeight;
+      }, where);
+      await twoFrames(page);
+      const r = await page.evaluate(rulesNow, TAP_MIN);
+      if (r.small.length) problems.push(`${where}: tap targets under ${TAP_MIN}pt: ${r.small.join(', ')}`);
+      if (r.fields.length) problems.push(`${where}: field(s) under 16px: ${r.fields.join(', ')}`);
+      if (r.sw > r.cw) problems.push(`${where}: the page scrolls sideways (${r.sw} > ${r.cw})`);
+      const s = await page.evaluate(() => {
+        const body = document.querySelector('.draw-finish-body');
+        const b = document.querySelector('.draw-png-share').getBoundingClientRect();
+        return { top: b.top, bottom: b.bottom, h: innerHeight, sideways: body.scrollWidth - body.clientWidth, scrolled: body.scrollTop };
+      });
+      if (s.sideways > 0) problems.push(`${where}: the sheet scrolls sideways by ${s.sideways}`);
+      if (!(s.top >= s.h * 0.75 && s.bottom <= s.h + 0.5)) problems.push(`${where} (scrolled to ${s.scrolled}): Share at ${Math.round(s.top)}–${Math.round(s.bottom)} is not in the bottom quarter of the ${s.h} window`);
+    }
+    must(problems.length === 0, `440×${height}:\n${problems.join('\n')}`);
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  });
+}
 
 async function withPage(browser, origin, height, fn, options = {}) {
   const context = await browser.newContext({ ...PHONE, viewport: { width: 440, height }, ...options });

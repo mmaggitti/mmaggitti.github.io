@@ -1,5 +1,6 @@
 // Minimal PNG decoder for reading pixel colours out of Playwright screenshots in node, without a
-// dependency: 8-bit RGB or RGBA, non-interlaced, all five row filters. Anything else throws.
+// dependency: 8-bit RGB or RGBA, non-interlaced, all five row filters. Anything else throws. Also
+// what a canvas's PNG encoder writes, so Finish's PNGs (P1-M5) decode here, and pixelShare compares two.
 
 import { inflateSync } from 'node:zlib';
 
@@ -51,5 +52,33 @@ export function decodePng(buf) {
       const i = y * stride + x * channels;
       return [px[i], px[i + 1], px[i + 2]];
     },
+    /** Red, green, blue and alpha (255 for an RGB image). */
+    rgba(x, y) {
+      const i = y * stride + x * channels;
+      return [px[i], px[i + 1], px[i + 2], channels === 4 ? px[i + 3] : 255];
+    },
   };
+}
+
+/**
+ * The share of pixels that differ by more than `tol` in any channel, colours compared premultiplied
+ * by their alpha (so a fully transparent pixel is the same whatever colour it holds). `a` and `b` are
+ * decodePng's results, or { width, height, rgba(x, y) } of the same size.
+ */
+export function pixelShare(a, b, tol = 2) {
+  if (a.width !== b.width || a.height !== b.height) throw new Error(`pixelShare: ${a.width}×${a.height} against ${b.width}×${b.height}`);
+  let differ = 0;
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      const p = a.rgba(x, y), q = b.rgba(x, y);
+      const pm = (c, i) => (i === 3 ? c[3] : (c[i] * c[3]) / 255);
+      if ([0, 1, 2, 3].some((i) => Math.abs(pm(p, i) - pm(q, i)) > tol)) differ++;
+    }
+  }
+  return differ / (a.width * a.height);
+}
+
+/** An image of `width` × `height` from RGBA bytes in rows (what a canvas's getImageData gives), for pixelShare. */
+export function rgbaImage(width, height, data) {
+  return { width, height, rgba: (x, y) => { const i = (y * width + x) * 4; return [data[i], data[i + 1], data[i + 2], data[i + 3]]; } };
 }
