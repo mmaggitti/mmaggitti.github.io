@@ -3477,6 +3477,11 @@ const BREAKS = [
     file: 'projects/draw/src/editor.ts', from: '    return !GENERIC_FAMILIES.has(family.trim().toLowerCase()) && this.familyFaces(family) === null;', to: '    return false;',
     run: drawTests('editor.test.ts'), expect: /✖ Inspect marks a family Draw holds no file for/,
   },
+  {
+    id: 'B658', what: 'the bar echoes the drawing’s title in the page (the canvas host still aria-hidden), so the accessibility tree reads the drawing: only the ariaSnapshot assertion can see it', slow: true, checks: ['theAccessPanelNamesTheDrawing'],
+    file: 'projects/draw/src/panels/ContextBar.tsx', from: '    <div className="draw-context">\n      {notice && (', to: '    <div className="draw-context">\n      <span className="ds-small">{editor.access()?.drawing.title?.text}</span>\n      {notice && (',
+    run: DRAW_E2E, expect: /theAccessPanelNamesTheDrawing: the page's accessibility tree reads the drawing/,
+  },
 ];
 
 const args = process.argv.slice(2);
