@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { parseDoc, serialize, serializeNode, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
-import { parseFragment } from '../model/fragment.ts';
+import { parseDoc, serialize, serializeNode, serializeParts, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { parseFragment, replaceContent } from '../model/fragment.ts';
 import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
@@ -204,4 +204,48 @@ test('Edit source cannot bring in a DOCTYPE or an XML declaration (a browser ref
   }
   assert.ok(parseFragment(r.doc, r.doc.root, '<?xml-stylesheet href="a.css"?><rect/>').ok, 'another processing instruction is fine');
   assert.equal(serialize(r.doc), before);
+});
+
+// ── P1-M5: Edit the drawing's source (the root's whole content) ────────────────────────────────
+
+const WHOLE = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by hand -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n  <title>t</title>\n  <rect x="1" y="1" width="2" height="2"/>\n</svg>\n<!-- after -->\n`;
+
+test('serializeParts: an element as its start tag, its content and its end tag, exactly as serialize writes them', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const parts = serializeParts(doc, doc.root);
+  assert.deepEqual(parts, { start: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">', content: '\n  <title>t</title>\n  <rect x="1" y="1" width="2" height="2"/>\n', end: '</svg>' });
+  assert.equal(parts.start + parts.content + parts.end, serializeNode(doc, doc.root));
+  const empty = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  assert.ok(empty.ok);
+  assert.deepEqual(serializeParts(empty.doc, empty.doc.root), { start: '<svg xmlns="http://www.w3.org/2000/svg"/>', content: '', end: '' });
+});
+
+test('replaceContent: the root becomes exactly its start tag, the text and its end tag, the prolog and epilog kept, in one entry undo takes back', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const s = new Session(doc);
+  const text = '\n  <circle cx="5" cy="5" r="3"/>\n  <!-- a note -->\n';
+  s.dispatch('Edit source', (apply) => {
+    const r = replaceContent(doc, doc.root, text, apply);
+    assert.ok(r.ok);
+  });
+  assert.equal(serialize(doc), `<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by hand -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${text}</svg>\n<!-- after -->\n`);
+  assert.equal(s.undoLabel, 'Edit source');
+  s.undo();
+  assert.equal(serialize(doc), WHOLE, 'one undo gives the bytes back');
+  assert.equal(s.canUndo, false, 'it was one entry');
+});
+
+test('replaceContent: text that doesn’t parse changes nothing and says where', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const ops: unknown[] = [];
+  const r = replaceContent(doc, doc.root, '\n  <rect x="1"\n', (op) => ops.push(op));
+  assert.ok(!r.ok && r.error.at > 0 && r.error.at <= '\n  <rect x="1"\n'.length, JSON.stringify(r));
+  assert.equal(ops.length, 0, 'no op');
+  assert.equal(serialize(doc), WHOLE);
 });

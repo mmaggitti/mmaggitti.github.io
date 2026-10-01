@@ -15,6 +15,7 @@
 
 import { DEFAULT_LIMITS, type Limits } from '../xml/cst.ts';
 import { el, parseDoc, serialize, type Doc, type ElementNode, type Node, type NodeId } from './doc.ts';
+import { opInsert, opRemove, type Op } from '../commands/ops.ts';
 
 const XMLNS = 'http://www.w3.org/2000/xmlns/';
 const WRAPPER = 'draw-fragment';
@@ -64,6 +65,20 @@ export function parseFragment(doc: Doc, scope: NodeId, text: string): FragmentRe
   for (const id of top) adopt(id, null);
   doc.version++;
   return { ok: true, nodes: [...top] };
+}
+
+/**
+ * Edit the drawing's source (P1-M5): everything inside `scope` (its elements, text, comments and PIs)
+ * replaced by what `text` parses to there, in order, as ops handed to `apply` (one transaction), so the
+ * element becomes exactly its start tag, the text and its end tag, and whatever lies outside it (the
+ * prolog and epilog, for the root) stays. Text that doesn't parse changes nothing and says where.
+ */
+export function replaceContent(doc: Doc, scope: NodeId, text: string, apply: (op: Op) => void): { ok: true } | { ok: false; error: { at: number; message: string } } {
+  const made = parseFragment(doc, scope, text);
+  if (!made.ok) return made;
+  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));
+  made.nodes.forEach((id, i) => apply(opInsert(doc, id, scope, i)));
+  return { ok: true };
 }
 
 // The tokens the parser would count in the saved document (every node, and each end tag), so a
