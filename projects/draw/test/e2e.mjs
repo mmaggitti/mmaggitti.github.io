@@ -1842,7 +1842,8 @@ async function importReportBuckets(browser, origin) {
       for (const item of items) must(listed.some((t) => t.startsWith(item)), `${rel}: ${item} is not listed under ${bucket} (${listed.slice(0, 6).join(', ')})`);
       const notes = await page.locator('.draw-notes li').allTextContents();
       must(JSON.stringify(notes) === JSON.stringify(want.notes), `${rel}: the notes are ${JSON.stringify(notes)}`);
-      // The file's Creative Commons block (RDF, Dublin Core) is metadata Draw keeps, never edits.
+      // The file's Creative Commons block (RDF, Dublin Core) is metadata Draw keeps, never listed as
+      // editable (the Access tab edits its Dublin Core items, and a note says so).
       const editable = await page.locator('.draw-group[data-bucket="editable"] .draw-item .ds-mono').allTextContents();
       const metadata = editable.filter((t) => /^<?(rdf|dc|dcterms|cc):/.test(t));
       must(metadata.length === 0, `${rel}: metadata is listed as editable: ${metadata.join(', ')}`);
