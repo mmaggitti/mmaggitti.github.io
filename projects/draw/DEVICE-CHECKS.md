@@ -71,5 +71,8 @@ To take the house's group: tap the roof, then More → Select group.
 | 49 | The text's position handle | Select a text: grab its position handle (on the first line's baseline, at the text's x and y) with your thumb, first try, at the fit and zoomed in to about 4×; the whole text moves, every line with it, and Undo puts it back | ☐ |
 | 50 | Text to path | Type a short word in one of Draw's fonts (Inter, say) and make it large, then More → Text to path: zoomed in to about 4×, it looks the same before and after, now a path | ☐ |
 | 51 | Export with fonts | A drawing with an Inter text and an IBM Plex Sans text: Export, Text → With fonts, Clean SVG, save to Files, then open it in Safari: the Inter text draws in Inter, and the IBM Plex text draws too, as paths (the sheet said its font reserves "Plex") | ☐ |
+| 52 | VoiceOver reads the title | Open a drawing, Access tab: Title on, type a name, then Export → Clean SVG, save to Files, and open it from Files in Safari with VoiceOver on (Settings → Accessibility): it reads the name you typed, then "image", as the tab's preview said | ☐ |
+| 53 | The Access fields and the keyboard | Access tab: tap the Title field, the Description box and the Language field in turn; the page never zooms, each field stays in view above the keyboard (scroll the sheet if it must), and Done or Return keeps what you typed | ☐ |
+| 54 | The five tabs | The code sheet's tab row (Code, Layers, Inspect, Access, Support) fits across the screen with a shape selected, every tab easy to hit with your thumb, and the selection's name still shows (shortened if it must) | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

@@ -154,7 +154,10 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   `font-face` rule): Draw's ten from `@fontsource` when a drawing uses one, yours from IndexedDB, and
   a file's own `data:` faces page-wide, never under a name Draw's interface uses. The text library
   loads from a lazy chunk in `src/text/`. Text to path and Export's text choices load the same chunk;
-  a font with a Reserved Font Name is never embedded: its text is exported as paths.
+  a font with a Reserved Font Name is never embedded: its text is exported as paths. The Access
+  tab writes a drawing's title, description, role, language and Dublin Core metadata through
+  `engine/access/`; its screen-reader preview is computed from the model, never the page (the
+  canvas host stays aria-hidden).
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
