@@ -11,13 +11,16 @@
 //
 // Values are the engine's decoded values (what a browser's parser would have produced), text goes
 // in as text nodes, and comments, processing instructions, the DOCTYPE and CDATA markers never
-// reach the page. The canvas's own stylesheet is made here too: app CSS, never document content,
-// but it is a stylesheet write, and those live only here.
+// reach the page; nor does a <style>'s @font-face rule (engine/policy/font-face-rules.ts: a
+// document's own faces reach the page only through Draw's registration). The canvas's own
+// stylesheet is made here too: app CSS, never document content, but it is a stylesheet write, and
+// those live only here.
 
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
 import { NS, findAttr, type Attr, type Doc, type ElementNode, type LeafNode, textContent } from '../../../../engine/model/doc.ts';
 import { decodeAttr } from '../../../../engine/xml/entities.ts';
 import { fmt } from '../../../../engine/values/number-format.ts';
+import { canvasStyleTexts } from '../../../../engine/policy/font-face-rules.ts';
 import {
   animatesAttribute, attrKey, cssAllowed, cssUrlsLocal, elementRenders, extensionsSupported, hasDuplicateAttrs, hrefFragmentIds, isAnimation, renderValue,
   smilHrefLost, smilTargetAllowed,
@@ -194,11 +197,22 @@ export function sinkAttributes(target: Element, doc: Doc, node: ElementNode, sup
   return dropped;
 }
 
-/** A text or CDATA node's text as a Text node; null for comments, PIs, the DOCTYPE and refused CSS. */
+/**
+ * A text or CDATA node's text as a Text node; null for comments, PIs, the DOCTYPE and refused CSS. A
+ * <style>'s leaves are drawn with its @font-face rules taken out (canvasStyleTexts), or not at all
+ * where that can't be settled, and what is drawn is judged again.
+ */
 export function sinkText(doc: Doc, node: LeafNode, parent: ElementNode): Text | null {
   if (!purify || (node.kind !== 'text' && node.kind !== 'cdata')) return null;
-  if (isStyle(parent) && !cssOk(textContent(doc, parent.id))) return null;
-  return document.createTextNode(textContent(doc, node.id));
+  if (!isStyle(parent)) return document.createTextNode(textContent(doc, node.id));
+  if (!cssOk(textContent(doc, parent.id))) return null;
+  const leaves = parent.children.filter((id) => {
+    const kind = doc.nodes.get(id)?.kind;
+    return kind === 'text' || kind === 'cdata';
+  });
+  const drawn = canvasStyleTexts(leaves.map((id) => textContent(doc, id)));
+  const at = leaves.indexOf(node.id);
+  return drawn && at >= 0 && cssOk(drawn.join('')) ? document.createTextNode(drawn[at]) : null;
 }
 
 // The app's own rules for the canvas's shadow root, adopted by the renderer. As !important author

@@ -16,10 +16,12 @@
 //
 // Known shadow-root gaps are reported, not gated, in the engines listed for them (a case's `gap`),
 // and gated like any other row everywhere else: a document's own @font-face does not register in a
-// shadow tree in Chromium (the probe shows it). The decision (P1-M4): Draw registers a document's
-// own data: faces on document.fonts (src/platform/fonts.ts), so both engines draw them; this row
-// still tests the engine, not Draw, so Chromium's gap stays known here. WebKit, the phone's
-// engine, must pass every row.
+// shadow tree in Chromium (the probe shows it), while WebKit connects it to the page-wide
+// document.fonts. The decision (P1-M4): Draw's canvas declares no face of a document's (the sink
+// takes @font-face out of its copy of each <style>: engine/policy/font-face-rules.ts), and Draw
+// registers a document's own data: faces on document.fonts itself (src/platform/fonts.ts, under its
+// name guard and caps), so both engines draw them that one way. This row still tests the engine,
+// not Draw, so Chromium's gap stays known here. WebKit, the phone's engine, must pass every row.
 
 import { readFileSync } from 'node:fs';
 import { decodePng } from './probe-helpers/png.mjs';

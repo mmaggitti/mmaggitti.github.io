@@ -47,7 +47,7 @@ Tests live in `engine/test/` and run in Draw's build (`npm run test:unit` in `pr
 | `model/fragment.ts` | Edit source: markup parsed into an existing document, with the namespaces and entities in scope there, within what the document has left of its limits. |
 | `commands/` | Every edit as a reversible op; transactions, undo and redo, and drags that commit as one history entry. Undo restores byte-identical source (10k seeded sequences). A Session's optional `finish` hook runs after each transaction's and drag frame's own ops, and what it applies joins them (undo and redo never call it). |
 | `code/` | The code panel's typed tokens (numbers, colours, keywords, text, references) with spans into the raw text, so a token edit rewrites only that token's bytes. |
-| `policy/` | What the canvas may render (`render-policy.ts`, from the ledger's generated `tables.ts`) and each element's and attribute's ledger class (`classify.ts`). |
+| `policy/` | What the canvas may render (`render-policy.ts`, from the ledger's generated `tables.ts`), a `<style>`'s text as the canvas draws it, without its `@font-face` rules (`font-face-rules.ts`), and each element's and attribute's ledger class (`classify.ts`). |
 | `report/` | The import report: what Draw can edit, keeps as-is, only previews, or does not know, for any opened file, and the external entities it declares (never fetched); the style rules that can't match on the canvas (focus, tabindex and link selectors, P1-M4 S3). |
 | `export/` | Clean export: editor data (Inkscape, Illustrator, Sketch…) removed, every other byte kept. |
 | `ledger/` | The support ledger: `ledger.json` (source of truth), `LEDGER.md` (generated report), `ids.lock` (rows are never deleted). |

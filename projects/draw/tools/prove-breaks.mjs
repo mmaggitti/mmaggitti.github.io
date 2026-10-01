@@ -3167,7 +3167,7 @@ const BREAKS = [
     run: DRAW_E2E, expect: /fontsLoadOnlyWhatTheDrawingUses: (before any text, |the drawing fetched )/,
   },
   {
-    id: 'B597', what: 'the editor never registers a file’s own faces (documentFaces): Chromium draws the text in serif (WebKit draws a shadow tree’s own @font-face anyway, so Chromium is where this shows)', slow: true, checks: ['aFilesOwnFontDrawsInEveryEngine'],
+    id: 'B597', what: 'the editor never registers a file’s own faces (documentFaces): the text draws in serif, in either engine (the canvas’s copy of the file’s <style> declares no face)', slow: true, checks: ['aFilesOwnFontDrawsInEveryEngine'],
     file: 'projects/draw/src/editor.ts', from: '      fonts.documentFaces(fontFaces(doc).faces);\n', to: '',
     run: DRAW_E2E, expect: /aFilesOwnFontDrawsInEveryEngine: iiiiiiii in the file's own face measures/,
   },
@@ -3491,6 +3491,32 @@ const BREAKS = [
     id: 'B660', what: 'With fonts embeds a face whatever its size (a 15 MB font makes an export larger than Draw opens)',
     file: 'projects/draw/src/export/svg.ts', from: ' : cost > room ? overOpenLimit(held.family) : null;', to: ' : null;',
     run: drawTests('export-text.test.ts'), expect: /✖ With fonts writes a face as paths, saying so, when embedding its file would make the export larger/,
+  },
+  // The canvas declares no face of a document's: the sink draws each <style> without its @font-face rules.
+  {
+    id: 'B661', what: 'the canvas’s copy of a <style> keeps its @font-face rules (WebKit would connect the file’s face to document.fonts, past the name guard and the caps)',
+    file: 'engine/policy/font-face-rules.ts', from: '      out += css.slice(kept, i);\n      kept = i = end;\n', to: '      i = end;\n',
+    run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ a face rule goes, and only it/,
+  },
+  {
+    id: 'B662', what: 'an at-keyword holding a backslash is drawn on the remover’s own reading of its escape, not refused',
+    file: 'engine/policy/font-face-rules.ts', from: "    if (tok.kind === 'at' && tok.escaped) return null;\n", to: '',
+    run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ what can’t be settled is refused/,
+  },
+  {
+    id: 'B663', what: 'a <style> whose face rule straddles two leaves is drawn leaf by leaf (the browser joins them into a face rule)',
+    file: 'engine/policy/font-face-rules.ts', from: '  return withoutFontFaces(joined) === joined ? [...leaves] : null;', to: '  return [...leaves];',
+    run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ a <style> split over leaves/,
+  },
+  {
+    id: 'B664', what: 'the remover reads a quoted string as code (an "@font-face" in a font name refuses the <style>, a } in a face’s string ends its block early)',
+    file: 'engine/policy/font-face-rules.ts', from: `  if (c === '"' || c === "'") return { kind: 'string', end: stringEnd(t, i) };`, to: `  if (c === '"' || c === "'") return { kind: 'delim', end: i + 1 };`,
+    run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ an "@font-face" in a comment or a string stays/,
+  },
+  {
+    id: 'B665', what: 'no rule starts inside a block, so a face rule nested in @media, @supports or @layer refuses the <style> instead of going',
+    file: 'engine/policy/font-face-rules.ts', from: "      ruleStart = c === '}' && parens === 0;", to: '      ruleStart = false;',
+    run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ a face rule goes, and only it/,
   },
 ];
 
