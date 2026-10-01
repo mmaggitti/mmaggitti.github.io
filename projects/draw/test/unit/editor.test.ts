@@ -13,6 +13,7 @@ import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED,
 import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
 import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
+import type { TextLib } from '../../src/text/load.ts';
 import { OFFLINE as TEXT_OFFLINE } from '../../src/text/pipeline.ts';
 import { NOT_HELD } from '../../../../engine/text/outline.ts';
 import type { Fonts } from '../../src/platform/fonts.ts';
@@ -3057,7 +3058,7 @@ test('Text to path refuses, saying why and writing nothing: a font Draw holds no
 test('Text to path refuses a selection whose texts hold more than 20,000 characters, before its library loads, saying so; 20,000 are outlined', async () => {
   let loads = 0;
   // A library that draws each character as a box (fontkit over 20,000 characters is the pipeline test’s matter).
-  const boxes = async () => {
+  const boxes = async (): Promise<TextLib> => {
     loads++;
     return { openFont, shape: (_b: Uint8Array, runs: readonly string[]) => ({ unitsPerEm: 1000, runs: runs.map((t) => ({ glyphs: [...t].map(() => ({ commands: [{ command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [500, 0] }, { command: 'lineTo', args: [500, 700] }, { command: 'closePath', args: [] }], xAdvance: 500, xOffset: 0, yOffset: 0 })), missing: [] })) }) };
   };
