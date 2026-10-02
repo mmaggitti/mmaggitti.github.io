@@ -1,0 +1,118 @@
+/* Flow: an app shell. The canvas pans and zooms inside itself, so the document never scrolls.
+   Sizes in rem (ds tokens); px only via --tap-min and hairlines, per the design system. */
+
+html, body, #root { height: 100%; }
+body { overflow: hidden; overscroll-behavior: none; }
+
+.flow {
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.flow-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.flow-title { margin: 0; font-size: var(--text-lg); line-height: var(--leading-tight); }
+.flow-count, .flow-status { margin: 0; font-size: var(--text-sm); white-space: nowrap; }
+.flow-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+
+/* ── Canvas ─────────────────────────────────────────────────────────────── */
+
+.flow-canvas { flex: 1; min-height: 0; position: relative; }
+
+.react-flow {
+  --xy-background-color: var(--bg);
+  --xy-background-pattern-color: var(--line);
+  --xy-edge-stroke: var(--text-muted);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-edge-stroke-width: 2;
+  --xy-minimap-background-color: var(--surface);
+  --xy-attribution-background-color: transparent;
+  font-family: var(--font-ui);
+}
+
+/* The minimap crowds a phone; it shows from tablet width up. */
+@media (max-width: 40em) {
+  .react-flow__minimap { display: none; }
+}
+
+/* ── Nodes ──────────────────────────────────────────────────────────────── */
+
+.fnode {
+  min-width: 8rem;
+  max-width: 15rem;
+  padding: var(--space-3) var(--space-4);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: var(--leading-tight);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.fnode--decision { border-color: var(--accent); border-style: double; border-width: 3px; }
+.fnode--io { border-radius: 999rem; padding-inline: var(--space-5); }
+.fnode--note {
+  border-style: dashed;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.fnode.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); }
+
+/* Handles: a visible dot, and a finger-sized hit area around it. */
+.react-flow__handle.fhandle {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid var(--surface);
+  background: var(--accent);
+}
+.react-flow__handle.fhandle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+
+/* ── Sheets and bar ─────────────────────────────────────────────────────── */
+
+.flow-sheet {
+  padding: var(--space-3) var(--space-4) 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.flow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.flow-grid > .ds-btn { min-height: max(var(--tap-min), var(--control-h-sm)); }
+.flow-kind--decision { border-color: var(--accent); border-style: double; border-width: 3px; }
+.flow-kind--io { border-radius: 999rem; }
+.flow-kind--note { border-style: dashed; }
+
+.flow-edit { display: flex; flex-direction: column; gap: var(--space-3); }
+.flow-input {
+  min-height: max(var(--tap-min), var(--control-h));
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+.flow-row { display: flex; gap: var(--space-3); }
+
+.flow-bar { max-width: none; gap: var(--space-2); padding-inline: var(--space-3); border-top: 1px solid var(--line); }
+.flow-bar > .ds-btn { padding: 0 var(--space-1); min-width: 0; }
+.ds-btn:disabled { opacity: 0.45; }
