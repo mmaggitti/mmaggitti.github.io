@@ -41,7 +41,10 @@ export default async function run({ browser, origin }) {
     const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     must(sideways === 0, `page scrolls sideways by ${sideways}px`);
     const canvas = await page.locator('.flow-canvas').boundingBox();
-    for (const id of ['n1', 'n2', 'n3', 'n4', 'n5']) await inside(node(id), canvas, `starter ${id}`);
+    for (const id of ['n1', 'n2', 'n3', 'n4', 'n5']) {
+      await node(id).waitFor(); // visible: React Flow has measured it
+      await inside(node(id), canvas, `starter ${id}`);
+    }
 
     // 1b. The dots: at least 14px across; a finger REACH px outside a dot still lands on it; and the
     // middle of every node belongs to the node, so a finger there drags the node, not a connection.
@@ -84,7 +87,8 @@ export default async function run({ browser, origin }) {
     await sheetButton('Step').tap();
     await expectCount('6 nodes · 0 edges');
     await inside(node('n6'), canvas, 'added n6');
-    must((await node('n6').innerText()).trim() === 'Step', 'added node is not labelled Step');
+    // React Flow shows a new node once it has measured it, a frame or so later; hidden, it has no innerText.
+    await waitFor(async () => (await node('n6').innerText()).trim() === 'Step', 'added node is not labelled Step');
     await button('Edit').waitFor();
 
     // 4. Edit its label from the sheet.
