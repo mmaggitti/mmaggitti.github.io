@@ -87,7 +87,9 @@ export class ContentError extends Error {
  * back (Session.run): nothing changes.
  */
 export function replaceContent(doc: Doc, scope: NodeId, text: string, apply: (op: Op) => void): void {
-  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));
+  // Last child first: each removal is then at the end of the list (and its undo appends), not a
+  // shift of every child after it.
+  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));
   const made = parseFragment(doc, scope, text);
   if (!made.ok) throw new ContentError(made.error.at, made.error.message);
   made.nodes.forEach((id, i) => apply(opInsert(doc, id, scope, i)));

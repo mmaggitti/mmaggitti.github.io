@@ -21,7 +21,9 @@ export function replaceDrawing(doc: Doc, text: string, apply: (op: Op) => void):
   const from = el(src, src.root);
   const root = el(doc, doc.root);
   if (from.qname !== root.qname) throw new TokenEditError(`this drawing’s root is <${root.qname}>, which can’t take the content of an <${from.qname}>: use New drawing`);
-  for (const c of [...root.children]) apply(opRemove(doc, c));
+  // Last child first: each removal is then at the end of the list (and its undo appends), not a
+  // shift of every child after it.
+  for (const c of [...root.children].reverse()) apply(opRemove(doc, c));
   for (const a of [...root.attrs]) apply(opPutAttr(doc, root.id, a.ns, a.local, null));
   from.attrs.forEach((a, index) => apply(opPutAttr(doc, root.id, a.ns, a.local, { index, attr: { ...a } })));
   const inner = from.src?.endTag ? text.slice(from.src.tag.end, from.src.endTag.start) : '';

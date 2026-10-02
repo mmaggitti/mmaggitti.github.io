@@ -8,6 +8,7 @@ import { parseDoc, serialize, el, descendants, NS, type Doc } from '../model/doc
 import { replaceDrawing } from '../model/replace.ts';
 import { Session } from '../commands/session.ts';
 import { TokenEditError } from '../code/edit.ts';
+import { linear } from './timing.ts';
 
 const LAB = (f: string) => readFileSync(new URL(`./fixtures/corpus/lab/${f}`, import.meta.url), 'utf8');
 const open = (text: string): { doc: Doc; s: Session } => {
@@ -62,4 +63,15 @@ test('what can’t be written is refused and changes nothing: a root of another 
   assert.throws(() => plain.s.dispatch('Replace', (apply) => replaceDrawing(plain.doc, '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>', apply)), TokenEditError);
   assert.equal(serialize(plain.doc), LAB('create-icon.svg'));
   assert.equal(plain.s.canUndo, false);
+});
+
+test('Replace this one costs time in proportion to the children it replaces, and so does its undo', () => {
+  const over = (n: number) => {
+    const { doc, s } = open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${'<rect/>'.repeat(n)}</svg>`);
+    return () => {
+      s.dispatch('Replace with SVG Lab icon', (apply) => replaceDrawing(doc, LAB('create-icon.svg'), apply));
+      s.undo();
+    };
+  };
+  linear('Replace this one over 10,000 and 40,000 children, then its undo', over(10_000), over(40_000), { limit: 400 });
 });

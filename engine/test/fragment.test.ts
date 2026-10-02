@@ -8,6 +8,7 @@ import { ContentError, parseFragment, replaceContent } from '../model/fragment.t
 import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
+import { linear } from './timing.ts';
 
 const SRC = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="http://www.w3.org/1999/xlink">\n  <g id="a"><rect  width="1"/></g>\n  <circle r="2"/>\n</svg>`;
 
@@ -264,4 +265,18 @@ test('replaceContent measures the text without the content it replaces: an uncha
   assert.equal(s.canUndo, false);
   assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, `${inner}${inner}`, apply)), /the document would have more than 200000 nodes/, 'past the limit by itself, it is still refused');
   assert.equal(serialize(doc), big);
+});
+
+test('replaceContent costs time in proportion to the children it replaces, and so does its undo', () => {
+  const over = (n: number) => {
+    const p = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${'<rect/>'.repeat(n)}</svg>`);
+    assert.ok(p.ok);
+    const doc = p.doc;
+    const s = new Session(doc);
+    return () => {
+      s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, '<circle r="1"/>', apply));
+      s.undo();
+    };
+  };
+  linear('Edit the drawing’s source over 10,000 and 40,000 children, then its undo', over(10_000), over(40_000), { limit: 400 });
 });

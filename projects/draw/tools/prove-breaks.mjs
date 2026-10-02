@@ -3738,7 +3738,7 @@ const BREAKS = [
   },
   {
     id: 'B708', what: 'the whole-content replace leaves the old first child',
-    file: 'engine/model/fragment.ts', from: 'for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));', to: 'for (const c of [...el(doc, scope).children].slice(1)) apply(opRemove(doc, c));',
+    file: 'engine/model/fragment.ts', from: 'for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));', to: 'for (const c of [...el(doc, scope).children].reverse().slice(0, -1)) apply(opRemove(doc, c));',
     run: engineTests('fragment.test.ts'), expect: /✖ replaceContent: the root becomes exactly its start tag/,
   },
   {
@@ -3829,8 +3829,19 @@ const BREAKS = [
   },
   {
     id: 'B726', what: 'Edit the drawing’s source parses the text before the old content goes, so it spends the limits twice: an unchanged Apply of 150,000 nodes is refused',
-    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n', to: '  const made = parseFragment(doc, scope, text);\n  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n',
+    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n', to: '  const made = parseFragment(doc, scope, text);\n  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));\n',
     run: engineTests('fragment.test.ts'), expect: /✖ replaceContent measures the text without the content it replaces/,
+  },
+  {
+    id: 'B727', what: 'Replace this one removes the open drawing’s children first to last: each removal shifts every child after it (quadratic), and so does its undo',
+    file: 'engine/model/replace.ts', from: '  for (const c of [...root.children].reverse()) apply(opRemove(doc, c));', to: '  for (const c of [...root.children]) apply(opRemove(doc, c));',
+    run: engineTests('replace.test.ts'), expect: /✖ Replace this one costs time in proportion to the children it replaces/,
+  },
+  {
+    // Only the cost test runs: the same plant makes the 150,000-node replace in the same file take minutes.
+    id: 'B728', what: 'Edit the drawing’s source removes the root’s children first to last: each removal shifts every child after it (quadratic), and so does its undo',
+    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));', to: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));',
+    run: ['node', ['--test', '--test-reporter=spec', '--test-name-pattern=costs time in proportion', '../../engine/test/fragment.test.ts'], DRAW], expect: /✖ replaceContent costs time in proportion to the children it replaces/,
   },
 ];
 
