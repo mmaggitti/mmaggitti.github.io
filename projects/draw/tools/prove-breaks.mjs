@@ -3796,6 +3796,12 @@ const BREAKS = [
     file: 'engine/text/to-path.ts', from: "'font-family', 'font-size', 'font-size-adjust',", to: "'font-family', 'font-size-adjust',",
     run: DRAW_E2E, expect: /goldenWordmark: wordmark: the file is not test\/golden\/wordmark\.svg byte for byte/,
   },
+  // P1-M5, the fixes after the build.
+  {
+    id: 'B720', what: 'inflate hands the decompressor the whole compressed file at once (Blob.stream()), so a link’s bomb expands far past the cap before a byte of it is counted',
+    file: 'projects/draw/src/platform/files.ts', from: '  const stream = slices.pipeThrough(new DecompressionStream(format));', to: '  const stream = new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new DecompressionStream(format));',
+    run: drawTests('files.test.ts'), expect: /✖ a link or an \.svgz reaches the decompressor 4 KiB at a time[\s\S]*went in chunks of up to \d+ bytes/,
+  },
 ];
 
 const args = process.argv.slice(2);
