@@ -76,6 +76,14 @@ for (const name of names) {
   console.log(`built ${name}`);
 }
 
+// The launcher (and the Studio's page picker) lists projects in the order they were created, oldest
+// first: the order of their first commits in this repo (lean-keypoint-math counts from its first
+// commit under lean/keypoint-math, before it moved). Add a new project's name at the end; a name
+// missing here sorts after all of these.
+const CREATED = ['hello', 'studio', 'svg-lab', 'draw', 'cs-probe', 'tetons', 'cad-kernel', 'lean-keypoint-math'];
+const rank = (name) => (CREATED.includes(name) ? CREATED.indexOf(name) : CREATED.length);
+cards.sort((a, b) => rank(a.name) - rank(b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
 writeFileSync(join(OUT, 'index.html'), launcher(cards.filter((c) => !c.unlisted)));
 // The studio's page picker reads this. Left out: the studio (it can't inspect itself), Draw (an
 // editor holding a GitHub token must never run inside another page's frame) and unlisted projects.

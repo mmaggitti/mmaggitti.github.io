@@ -60,6 +60,8 @@ A project is one of two kinds:
   Commit `package-lock.json`.
 
 The launcher card takes the project's `<title>` and `<meta name="description">`, so set both.
+Cards run oldest first, in the order of the `CREATED` list in `scripts/build-site.mjs`: add a new
+project's name at the end of it.
 
 ## Ship loop: push straight to main
 
