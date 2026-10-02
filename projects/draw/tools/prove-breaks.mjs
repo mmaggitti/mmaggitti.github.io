@@ -1380,7 +1380,7 @@ const BREAKS = [
   {
     id: 'B249', what: 'a phase-0 row is reopened after the P0 exit',
     file: 'engine/ledger/ledger.json', from: '"group":"P0","phase":0,"status":"done","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]', to: '"group":"P0","phase":0,"status":"planned","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]',
-    run: LEDGER_CHECK, expect: /feature:meta-csp: phase 0 is behind the current phase 1 but the row is planned/,
+    run: LEDGER_CHECK, expect: /feature:meta-csp: phase 0 is behind the current phase \d+ but the row is planned/,
   },
   // P0-M5 review fixes: the served profile (version 4).
   {
