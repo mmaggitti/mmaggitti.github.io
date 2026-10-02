@@ -1,0 +1,20 @@
+name = "keypoint_math"
+version = "0.1.0"
+keywords = ["math"]
+defaultTargets = ["KeypointMath"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+relaxedAutoImplicit = false
+weak.linter.mathlibStandardSet = true
+maxSynthPendingDepth = 3
+# Mathlib's style set wants a Mathlib copyright header on every file; this project doesn't use one.
+weak.linter.style.header = false
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.35.0-rc3"
+
+[[lean_lib]]
+name = "KeypointMath"

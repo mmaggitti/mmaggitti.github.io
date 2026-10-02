@@ -46,6 +46,8 @@ scripts/check-public.mjs  the guard
 scripts/check-units.mjs   rem, not px (see Design system)
 scripts/check-deps.mjs    Core & Seams apps: every direct dependency registered and pinned exactly
 .github/workflows/deploy.yml   guard → units → build → WebKit smoke → deploy, on every push to main
+lean/<name>/              Lean 4 + Mathlib proof projects; not built or served. Never commit .lake/
+                          (gitignored, several GB): build in a copy outside the repo, copy sources in.
 ```
 
 A project is one of two kinds:
