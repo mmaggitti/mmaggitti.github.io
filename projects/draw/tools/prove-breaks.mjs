@@ -192,9 +192,10 @@ const BREAKS = [
     run: LEDGER_CHECK, expect: /no row for the SVG element <rect>/,
   },
   {
-    // One phase past wherever the ledger stands, whose rows are never all done while it is built.
-    id: 'B22', what: 'the phase is raised before its rows are done',
-    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 1}`,
+    // Two phases past wherever the ledger stands: the next phase's rows are never all done while it is
+    // built (the current phase's may all be, just before the gate rises, as P1's were in P1-M5).
+    id: 'B22', what: 'the phase is raised before its rows are done (two phases at once: with every row of the current phase done, the next one is a legitimate raise)',
+    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 2}`,
     run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is (?:planned|partial)/,
   },
   {
