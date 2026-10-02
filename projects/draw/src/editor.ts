@@ -4230,6 +4230,21 @@ export class Editor {
     this.#show();
   }
 
+  // The hover's snap targets (#snapTargets), kept while nothing they depend on changes: the document
+  // and its version, the view, the selection, the tool, the snap preferences, the grid and the shapes
+  // left out. A hovering Pencil moves every frame, and gathering measures every shape in the drawing,
+  // so it is gathered on the first frame after a change, as a drag gathers its own once.
+  #hoverCache: { key: readonly unknown[]; targets: SnapTargets } | null = null;
+  #hoverTargets(moving: readonly NodeId[]): SnapTargets {
+    const doc = this.#doc!;
+    const key = [doc, doc.version, this.#box, this.#viewport, this.#M, this.#size, this.selection.get(), this.tool.get(), this.snap.get(), this.grid.get(), ...moving];
+    const c = this.#hoverCache;
+    if (c && c.key.length === key.length && c.key.every((v, i) => v === key[i])) return c.targets;
+    const targets = this.#snapTargets(moving);
+    this.#hoverCache = { key, targets };
+    return targets;
+  }
+
   // What a press at `at` would take, as pointerDown picks it: a handle within 26 px (no guide's pill
   // first), the Pen's own handles; and the point it would snap to: a move's targets for Select (the
   // selection's own left out), a point's for the Shapes tool and the Pen. A snap is marked only where
@@ -4240,16 +4255,16 @@ export class Editor {
     let snap: { p: Point; lines: Line[] } | null = null;
     if (tool === 'pen') {
       handle = pickHandle(this.#penHandles(true), at)?.id ?? null;
-      if (this.#pen) snap = this.#snapRoot(at, this.#snapTargets(this.#pen.id !== null ? [this.#pen.id] : []), this.#penStep());
+      if (this.#pen) snap = this.#snapRoot(at, this.#hoverTargets(this.#pen.id !== null ? [this.#pen.id] : []), this.#penStep());
     } else if (tool === 'shapes') {
-      snap = this.#snapRoot(at, this.#snapTargets([]), this.#rootStep());
+      snap = this.#snapRoot(at, this.#hoverTargets([]), this.#rootStep());
     } else if (tool === 'select' || tool === 'node') {
       handle = pickPill(model.guides, at) === null ? (pickHandle(model.handles, at)?.id ?? null) : null;
     }
     const box = this.#box;
     const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
     // A move's step at this zoom (#openMove's), for the axis no target takes.
-    if (tool === 'select' && toHost) snap = this.#snapRoot(at, this.#snapTargets([...this.selection.get()]), snapStep(Math.sqrt(Math.abs(toHost[0] * toHost[3] - toHost[1] * toHost[2]))));
+    if (tool === 'select' && toHost) snap = this.#snapRoot(at, this.#hoverTargets([...this.selection.get()]), snapStep(Math.sqrt(Math.abs(toHost[0] * toHost[3] - toHost[1] * toHost[2]))));
     const ring = snap && snap.lines.length && toHost ? applyM(toHost, snap.p.x, snap.p.y) : null;
     return { handle, ring: ring && { x: ring[0], y: ring[1] }, lines: ring ? snap!.lines : [] };
   }

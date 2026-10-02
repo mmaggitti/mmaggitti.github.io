@@ -3369,6 +3369,33 @@ test('a hovering Pencil lights the handle a press would take, within 26 px and n
   assert.equal(r.editor.history.get().canUndo, false, 'and made no entry');
 });
 
+test('a hovering Pencil gathers its snap targets once while nothing they depend on changes: ten frames measure the drawing as one gather does, and once more after an edit, a pan, a snap preference, a tool or a selection changes', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  const shapes = Array.from({ length: 50 }, (_, i) => `<rect id="s${i}" x="${i}" y="${i % 10}" width="5" height="5"/>`).join('');
+  r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${shapes}</svg>`);
+  r.editor.pickTool('shapes');
+  // Nothing is selected, so only the snap targets measure the drawing's shapes (s49 among them).
+  const last = idOf(r, 's49');
+  const measures = () => measured.filter((ids) => ids.includes(last)).length;
+  /** How often the drawing is measured over a change and then `n` hover frames. */
+  const over = (change: () => void, n: number) => {
+    const before = measures();
+    change();
+    for (let i = 0; i < n; i++) r.editor.hover({ x: 120 + i, y: 140 + i });
+    return measures() - before;
+  };
+  const gather = over(() => {}, 1);
+  assert.ok(gather > 0, 'the first frame gathers the targets');
+  assert.equal(over(() => {}, 9), 0, 'nine more frames on an unchanged drawing measure nothing again: ten frames, one gather');
+  assert.equal(over(() => r.editor.addGuide('v'), 10), gather, 'an edit (a guide) and ten frames: one gather');
+  assert.equal(over(() => r.editor.panBy(30, 0), 10), gather, 'a pan and ten frames: one gather');
+  assert.equal(over(() => r.editor.snap.set({ grid: false, guides: true, shapes: true, artboard: false }), 10), gather, 'a snap preference and ten frames: one gather');
+  assert.equal(over(() => r.editor.pickTool('select'), 10), gather, 'a tool change and ten frames: one gather');
+  assert.equal(over(() => r.editor.select([idOf(r, 's0')]), 10), gather, 'a selection and ten frames: one gather');
+  r.editor.hover(null);
+});
+
 test('a hover ends with a press, a tool change and an open', () => {
   const r = rig();
   r.editor.open(PENCIL_BOX);

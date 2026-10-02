@@ -3843,6 +3843,11 @@ const BREAKS = [
     file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));', to: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));',
     run: ['node', ['--test', '--test-reporter=spec', '--test-name-pattern=costs time in proportion', '../../engine/test/fragment.test.ts'], DRAW], expect: /✖ replaceContent costs time in proportion to the children it replaces/,
   },
+  {
+    id: 'B729', what: 'a hovering Pencil gathers its snap targets on every frame (no cache): it measures the whole drawing each move',
+    file: 'projects/draw/src/editor.ts', from: '    if (c && c.key.length === key.length && c.key.every((v, i) => v === key[i])) return c.targets;\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a hovering Pencil gathers its snap targets once while nothing they depend on changes/,
+  },
 ];
 
 const args = process.argv.slice(2);
