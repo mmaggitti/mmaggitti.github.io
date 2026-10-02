@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P2**. 1332 rows: 763 planned, 3 partial, 564 done, 2 superseded.
+Current phase: **P2**. 1332 rows: 762 planned, 3 partial, 565 done, 2 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -17,7 +17,7 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 | syntax | 23 | 0 | 0 | 23 | 0 |
 | namespace | 21 | 3 | 2 | 16 | 0 |
 | capability | 480 | 296 | 0 | 182 | 2 |
-| feature | 101 | 56 | 0 | 45 | 0 |
+| feature | 101 | 55 | 0 | 46 | 0 |
 
 ## By phase
 
@@ -25,7 +25,7 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
 | P1 | 319 | 0 | 0 | 318 | 1 |
-| P2 | 75 | 72 | 3 | 0 | 0 |
+| P2 | 75 | 71 | 3 | 1 | 0 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
 | P5 | 126 | 126 | 0 | 0 | 0 |

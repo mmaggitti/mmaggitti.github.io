@@ -32,7 +32,7 @@ projects/<name>/          one folder per project. Lowercase, digits, hyphens onl
 projects/<name>/test/e2e.mjs   optional end-to-end test; npm test runs it (see Testing)
 projects/studio/          the live-DOM studio, a tool rather than a mini project (see Studio)
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
-projects/draw/            Draw, the SVG editor (Vite + React + TS); unlisted until Release 1 (see Draw)
+projects/draw/            Draw, the SVG editor (Vite + React + TS); on the launcher, never in Studio's picker (see Draw)
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
@@ -122,8 +122,9 @@ turn it into a phone-first page and SVG editor.
 
 Mark's SVG-native design editor, built from SVG Lab. The approved plan (phases P0 to P8, the
 support ledger, the security design) is in the vault's `_audit/2026-09-27 approved-plan draw.md`,
-with dated revisions beside it; each phase opens with its own short plan. Until Release 1 it carries
-`<meta name="launcher" content="unlisted">`: deployed and tested, not on the launcher.
+with dated revisions beside it; each phase opens with its own short plan. Draw is on the launcher
+(since 2026-10-02, ahead of Release 1). `scripts/build-site.mjs` keeps it out of the Studio's page picker:
+an editor that will hold a GitHub token must never run inside another page's frame.
 
 - **One render sink.** Document content reaches the page only through
   `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
