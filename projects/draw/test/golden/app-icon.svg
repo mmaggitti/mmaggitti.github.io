@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" xmlns:draw="https://mmaggitti.github.io/draw/ns">
+  <defs draw:made="true"><linearGradient id="linear-1" x1="0" y1="0" x2="0" y2="1" draw:made="true"><stop offset="0" stop-color="#264653"/><stop offset="1" stop-color="#e76f51"/></linearGradient><radialGradient id="gloss-1" cx="0.35" cy="0.3" r="0.8" draw:made="true"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e76f51"/></radialGradient></defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#linear-1)"/>
+  <polygon points="512,307 560.2,445.66 706.97,448.65 589.99,537.34 632.5,677.85 512,594 391.5,677.85 434.01,537.34 317.03,448.65 463.8,445.66" fill="url(#gloss-1)" stroke="none" draw:gen="star" draw:cx="512" draw:cy="512" draw:r="205" draw:inner="0.4" draw:tips="5"/>
+</svg>

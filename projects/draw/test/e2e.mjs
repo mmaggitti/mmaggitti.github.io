@@ -116,7 +116,7 @@ import { importReport } from '../../../engine/report/import-report.ts';
 import { cleanExport } from '../../../engine/export/clean.ts';
 import { rootBounds } from '../../../engine/geometry/bounds.ts';
 import { rootViewport } from '../src/canvas/artboard.ts';
-import { decodePng, pixelShare, rgbaImage } from './probe-helpers/png.mjs';
+import { alphaMaskShare, decodePng, pixelShare, quadrantDeltaE, rgbaImage } from './probe-helpers/png.mjs';
 import { PRESETS } from '../../../engine/presets/quick-starts.ts';
 import { gridShows } from '../../../engine/export/raster.ts';
 import { pngCopy } from '../../../engine/export/png-source.ts';
@@ -323,6 +323,10 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   await check(theInsertToolPutsSvgInAsAGroup);
   await check(editTheWholeDrawingsSource);
   await check(anEmptyDrawingSaysAddAShape);
+  // P1-M5 S4: the golden tests.
+  await check(goldenBellIcon);
+  await check(goldenAppIcon);
+  await check(goldenWordmark);
   const proven = [...passed].filter((name) => !unproven.has(name));
   const lines = [...proven.map((name) => ({ file: 'projects/draw/test/e2e.mjs', name, engine })), ...(ONLY ? [] : [{ complete: true, engine, calls }])];
   writeFileSync(EVIDENCE, lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
@@ -8789,6 +8793,196 @@ async function anEmptyDrawingSaysAddAShape(browser, origin) {
     must(h?.text === 'Add a shape with the tools' && centred(h), `at 1180 × 820 the hint is ${JSON.stringify(h)}`);
     must(errors.length === 0, `errors:\n${errors.join('\n')}`);
   }, { viewport: { width: 1180, height: 820 } });
+}
+
+// ── P1-M5 S4: the golden tests ──────────────────────────────────────────────────────────────────
+//
+// Three drawings built through the UI from a quick start (New… → New drawing), at 440 × 956 @1x in
+// the light theme, with the default snapping (the Snap sheet is never opened: its grid step would
+// write Draw's state into the file). Every tap and drag lands on the screen point of a chosen root
+// point, at the fit, where the snap step is a whole unit, so each lands on that point in any engine.
+// The file must equal test/golden/<name>.svg byte for byte; the icon set's 64 and 256 px PNGs (the
+// Finish sheet's Share, through a stub) are compared in two tiers: (1) with this engine's own raster
+// of the golden file at that size, at most 0.1% of the pixels more than 2 apart in any channel;
+// (2) with the committed PNGs, made in Chromium: the alpha masks (alpha ≥ 128) differ in at most 1% of
+// the pixels, and each quadrant's mean colour by at most ΔE 5 (CIE76, CIELAB D65).
+// GOLDEN=update writes the three files instead and then fails, so an update is never evidence; with
+// CI set as well it fails before writing anything.
+
+const GOLDEN_DIR = join(HERE, 'golden');
+const GOLDEN = process.env.GOLDEN;
+
+// Throws before anything is drawn when the goldens can't be compared or written here.
+function goldenMode() {
+  if (GOLDEN && GOLDEN !== 'update') throw new Error(`GOLDEN=${GOLDEN}: only GOLDEN=update writes the goldens`);
+  if (GOLDEN && process.env.CI) throw new Error('GOLDEN=update never runs in CI: the goldens are made once, by hand, and committed');
+}
+
+// The drawing's icon set from the Finish sheet, through a share stub: its 64 and 256 px PNGs.
+async function iconSetPngs(page) {
+  await page.evaluate(() => {
+    window.__shares = [];
+    navigator.canShare = (d) => Array.isArray(d?.files);
+    navigator.share = async (d) => void window.__shares.push(d.files);
+  });
+  await page.locator('.draw-bar .draw-finish').tap();
+  const share = page.locator('.draw-png-share');
+  await until('the icon set is ready', async () => (await share.count()) === 1 && !(await share.isDisabled()), 20000);
+  await share.tap();
+  await until('the share sheet is asked', async () => (await page.evaluate(() => window.__shares.length)) > 0);
+  const files = await page.evaluate(async () => Promise.all(window.__shares[0].map(async (f) => {
+    const b = new Uint8Array(await f.arrayBuffer());
+    let bin = '';
+    for (const x of b) bin += String.fromCharCode(x);
+    return { name: f.name, b64: btoa(bin) };
+  })));
+  const of = (n) => {
+    const f = files.find((x) => x.name.endsWith(`-${n}.png`));
+    if (!f) throw new Error(`the icon set has no ${n} px file: ${files.map((x) => x.name)}`);
+    return Buffer.from(f.b64, 'base64');
+  };
+  return { 64: of(64), 256: of(256) };
+}
+
+// The first line where two texts differ, with its number, from each.
+function firstDifference(got, want) {
+  const [g, w] = [got.split('\n'), want.split('\n')];
+  const i = g.findIndex((line, n) => line !== w[n]);
+  const at = i === -1 ? Math.min(g.length, w.length) : i;
+  return `line ${at + 1}:\n       drawn:  ${JSON.stringify(g[at] ?? '(the end)')}\n       golden: ${JSON.stringify(w[at] ?? '(the end)')}`;
+}
+
+// The file and its PNGs against the goldens (or, under GOLDEN=update, written as them).
+async function againstGolden(page, name, svg, pngs) {
+  const file = (end) => join(GOLDEN_DIR, `${name}${end}`);
+  if (GOLDEN === 'update') {
+    mkdirSync(GOLDEN_DIR, { recursive: true });
+    writeFileSync(file('.svg'), svg);
+    for (const n of [64, 256]) writeFileSync(file(`-${n}.png`), pngs[n]);
+    console.log(`     draw e2e: golden ${name}: wrote test/golden/${name}.svg, ${name}-64.png and ${name}-256.png`);
+    throw new Error('goldens written: run again without GOLDEN');
+  }
+  const want = readFileSync(file('.svg'), 'utf8');
+  must(svg === want, `${name}: the file is not test/golden/${name}.svg byte for byte; first difference at ${firstDifference(svg, want)}`);
+  for (const n of [64, 256]) {
+    const got = decodePng(pngs[n]);
+    const copy = pngCopy(want, got.width, got.height);
+    const own = rgbaImage(got.width, got.height, await page.evaluate(rasterOf, { svg: copy.text, w: got.width, h: got.height }));
+    const tier1 = pixelShare(got, own);
+    const ref = decodePng(readFileSync(file(`-${n}.png`)));
+    must(got.width === ref.width && got.height === ref.height, `${name} ${n}: the PNG is ${got.width}×${got.height}, the golden ${ref.width}×${ref.height}`);
+    const mask = alphaMaskShare(got, ref);
+    const de = quadrantDeltaE(got, ref);
+    console.log(`     draw e2e: golden ${name} ${n} px: tier 1 ${(tier1 * 100).toFixed(3)}% of pixels differ from this engine's raster of the golden; tier 2 ${(mask * 100).toFixed(3)}% of the alpha mask, quadrant ΔE ${de.map((d) => d.toFixed(2)).join(' ')}`);
+    must(tier1 <= 0.001, `${name} ${n} px: ${(tier1 * 100).toFixed(3)}% of the pixels differ by more than 2 from this engine's raster of the golden file`);
+    must(mask <= 0.01, `${name} ${n} px: the alpha mask differs from the golden PNG's in ${(mask * 100).toFixed(2)}% of the pixels`);
+    must(de.every((d) => d <= 5), `${name} ${n} px: the quadrants' mean colours are ΔE ${de.map((d) => d.toFixed(2)).join(', ')} from the golden PNG's`);
+  }
+}
+
+// A quick start opened as a new drawing, at the fit.
+async function goldenStart(page, id) {
+  await fromPreset(page, id, 'new');
+  const text = PRESETS.find((p) => p.id === id).text;
+  await until(`${id} opens`, async () => (await source(page)) === text);
+  await twoFrames(page);
+}
+// A tap at the screen point of a root point.
+async function tapRoot(page, x, y) {
+  const p = await page.evaluate(screenPoint, { x, y });
+  await page.touchscreen.tap(p.x, p.y);
+  await page.waitForTimeout(50);
+}
+
+// The bell icon's root points on the 24 × 24 board: the Pen taps the rim's two ends, then drags from
+// the top to TOP_OUT (a curve whose in-handle, the drag reflected, is (20, 3)), and Close curves back
+// to the start through the top's out-handle; the clapper is the Shapes tool's circle, under the rim.
+const BELL = { rim: [[4, 16], [20, 16]], top: [12, 3], topOut: [4, 3], clapper: [12, 19] };
+
+// The bell icon (24 × 24): New… → Icon; the Pen's closed body (two taps, a drag, Close); the Shapes
+// tool's circle under it; Select all, More → Group. The file is the golden byte for byte, and its icon
+// set's 64 and 256 px PNGs pass both tiers.
+async function goldenBellIcon(browser, origin) {
+  goldenMode();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await goldenStart(page, 'quick-icon-24');
+    await page.locator('.draw-pen-tool').tap();
+    for (const [x, y] of BELL.rim) await tapRoot(page, x, y);
+    const from = await page.evaluate(screenPoint, { x: BELL.top[0], y: BELL.top[1] });
+    const to = await page.evaluate(screenPoint, { x: BELL.topOut[0], y: BELL.topOut[1] });
+    await dragOnCanvas(page, 'mouse', from, { x: to.x - from.x, y: to.y - from.y }, 8);
+    await page.waitForTimeout(50);
+    await page.locator('.draw-ctx-btn[aria-label="Close"]').tap();
+    await page.waitForTimeout(50);
+    must(/<path d="M 4 16 L 20 16 Q 20 3 12 3 Q 4 3 4 16 Z"/.test(await source(page)), `the Pen's body is not M 4 16 L 20 16 Q 20 3 12 3 Q 4 3 4 16 Z:\n${await source(page)}`);
+    await shapesTap(page, 'Circle', ...BELL.clapper);
+    await moreCommand(page, 'Select all');
+    await moreCommand(page, 'Group');
+    must(await label(page) === '<g>', `Group left ${await label(page)} selected`);
+    const svg = await source(page);
+    await againstGolden(page, 'bell-icon', svg, await iconSetPngs(page));
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { colorScheme: 'light' });
+}
+
+// The app icon (1024 × 1024): New… → App icon; the rect selected, Inspect → Fill → Linear (SVG Lab's
+// top-to-bottom linear-1); the Shapes tool's star tapped at the centre; More → Gloss on the star
+// (gloss-1). The file is the golden byte for byte, and its PNGs pass both tiers.
+async function goldenAppIcon(browser, origin) {
+  goldenMode();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await goldenStart(page, 'quick-app-icon');
+    await tapRoot(page, 512, 160);
+    must(await label(page) === '<rect>', `a tap on the board selected ${await label(page)}`);
+    await showInspect(page);
+    await page.locator('.draw-inspect [aria-label="fill kind"] button', { hasText: /^Linear$/ }).tap();
+    must((await source(page)).includes('fill="url(#linear-1)"'), `Linear did not fill the rect with linear-1:\n${await source(page)}`);
+    await toPeek(page);
+    await shapesTap(page, 'Star', 512, 512);
+    must(await label(page) === '<polygon>', `the star tap selected ${await label(page)}`);
+    await moreCommand(page, 'Gloss');
+    must((await source(page)).includes('fill="url(#gloss-1)"'), `Gloss did not fill the star with gloss-1:\n${await source(page)}`);
+    const svg = await source(page);
+    await againstGolden(page, 'app-icon', svg, await iconSetPngs(page));
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { colorScheme: 'light' });
+}
+
+// The wordmark (640 × 200): New… → Wordmark; the text selected, Edit text → "SUNWAVE" (SVG Lab's logo
+// word); More → Text to path; the Shapes tool's circle (r 36: 18 × the board's scale) tapped at
+// WORD_SUN, left of the word and above its cap height, where no point of it falls in the letters
+// (the word leaves 56 units each side, under the circle's 72, so beside it alone it would overlap,
+// and no snap target is within 8 px of the tap). The file is the golden byte for byte, and its PNGs
+// pass both tiers.
+const WORD_SUN = [40, 36];
+async function goldenWordmark(browser, origin) {
+  goldenMode();
+  await withPage(browser, origin, 956, async (page, errors) => {
+    await goldenStart(page, 'quick-wordmark');
+    await until('Archivo 900 loads', () => page.evaluate(faceLoaded, ['Archivo', '900', 'normal']), 8000);
+    await tapRoot(page, 320, 100);
+    must(await label(page) === '<text>', `a tap on the word selected ${await label(page)}`);
+    await page.locator('.draw-context .draw-edit-text').tap();
+    await page.locator('.draw-lines').fill('SUNWAVE');
+    await page.locator('.draw-modal-done').tap();
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must((await source(page)).includes('>SUNWAVE</text>'), `Edit text did not write SUNWAVE:\n${await source(page)}`);
+    await moreCommand(page, 'Text to path');
+    await until('Text to path writes', async () => !(await source(page)).includes('<text'), 8000);
+    await shapesTap(page, 'Circle', ...WORD_SUN);
+    // Every whole root point of the circle's disc, against the word's fill.
+    const inWord = await page.evaluate(([cx, cy, r]) => {
+      const word = document.querySelector('.draw-host').shadowRoot.querySelector('path');
+      let n = 0;
+      for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r && word.isPointInFill(new DOMPoint(x, y))) n++;
+      return n;
+    }, [...WORD_SUN, 36]);
+    must((await source(page)).includes(`<circle cx="${WORD_SUN[0]}" cy="${WORD_SUN[1]}" r="36"`), `the circle is not at (${WORD_SUN}) with r 36:\n${await source(page)}`);
+    must(inWord === 0, `${inWord} points of the circle fall in the word's letters`);
+    const svg = await source(page);
+    await againstGolden(page, 'wordmark', svg, await iconSetPngs(page));
+    must(errors.length === 0, `errors:\n${errors.join('\n')}`);
+  }, { colorScheme: 'light' });
 }
 
 async function withPage(browser, origin, height, fn, options = {}) {
