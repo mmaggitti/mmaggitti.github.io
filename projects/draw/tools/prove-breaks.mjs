@@ -3863,6 +3863,11 @@ const BREAKS = [
     },
     run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is planned/,
   },
+  {
+    id: 'B732', what: 'the PNG copy drops the app icon’s gloss (the star filled flat): a fault in the copy the app’s PNGs take, which tier 1 sees only against the golden file itself', slow: true, checks: ['goldenAppIcon'],
+    file: 'engine/export/png-source.ts', from: '  return { text: serialize(doc), notes };', to: "  return { text: serialize(doc).replace(/fill=\"url\\(#gloss-\\d+\\)\"/g, 'fill=\"#e76f51\"'), notes };",
+    run: DRAW_E2E, expect: /goldenAppIcon: app-icon 64 px: [\d.]+% of the pixels differ by more than 2 from this engine's raster of the golden file/,
+  },
 ];
 
 const args = process.argv.slice(2);

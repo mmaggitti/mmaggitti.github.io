@@ -8866,8 +8866,9 @@ async function againstGolden(page, name, svg, pngs) {
   must(svg === want, `${name}: the file is not test/golden/${name}.svg byte for byte; first difference at ${firstDifference(svg, want)}`);
   for (const n of [64, 256]) {
     const got = decodePng(pngs[n]);
-    const copy = pngCopy(want, got.width, got.height);
-    const own = rgbaImage(got.width, got.height, await page.evaluate(rasterOf, { svg: copy.text, w: got.width, h: got.height }));
+    // The golden file itself, drawn at the PNG's size (it has a width, a height and a viewBox): never
+    // through the PNG copy the app's own files take, so a fault there can't be on both sides.
+    const own = rgbaImage(got.width, got.height, await page.evaluate(rasterOf, { svg: want, w: got.width, h: got.height }));
     const tier1 = pixelShare(got, own);
     const ref = decodePng(readFileSync(file(`-${n}.png`)));
     must(got.width === ref.width && got.height === ref.height, `${name} ${n}: the PNG is ${got.width}×${got.height}, the golden ${ref.width}×${ref.height}`);
