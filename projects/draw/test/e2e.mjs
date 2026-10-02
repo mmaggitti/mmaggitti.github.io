@@ -7712,22 +7712,19 @@ async function paperCentre(page) {
   const b = await page.locator('.draw-paper').boundingBox();
   return pixelAt(page, { x: b.x + b.width / 2, y: b.y + b.height / 2 });
 }
-// Runs in the page: the drawn <text>'s advance in screen px, and a sans-serif one's in the light DOM
-// at the same weight and on-screen size.
-function wordWidths() {
+// Runs in the page: the faces document.fonts.load finds for Archivo 900 at the drawn <text>'s size,
+// the text's advance (user units, at its own font size), and the same string's width on a canvas at
+// that size in Archivo 900 and in sans-serif (each engine has its own sans-serif, wider or narrower).
+async function wordWidths() {
   const t = document.querySelector('.draw-host').shadowRoot.querySelector('text');
-  const k = t.getScreenCTM().a;
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('style', 'position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; visibility: hidden');
-  document.body.append(svg);
-  const r = document.createElementNS(ns, 'text');
-  for (const [a, v] of [['font-family', 'sans-serif'], ['font-weight', '900'], ['font-size', String(parseFloat(getComputedStyle(t).fontSize) * k)]]) r.setAttribute(a, v);
-  r.textContent = t.textContent;
-  svg.append(r);
-  const ref = r.getComputedTextLength();
-  svg.remove();
-  return { drawn: t.getComputedTextLength() * k, ref };
+  const size = parseFloat(getComputedStyle(t).fontSize);
+  const faces = await document.fonts.load(`900 ${size}px Archivo`, t.textContent);
+  const ctx = document.createElement('canvas').getContext('2d');
+  const width = (font) => {
+    ctx.font = font;
+    return ctx.measureText(t.textContent).width;
+  };
+  return { faces: faces.length, drawn: t.getComputedTextLength(), archivo: width(`900 ${size}px Archivo`), sans: width(`900 ${size}px sans-serif`) };
 }
 
 // New… (P1-M5): the sample, changed once (a keyword token), then Files → New…: three groups (Blank,
@@ -7737,8 +7734,10 @@ function wordWidths() {
 // "Undo Replace with App icon"; the canvas draws its #264653 at the paper's centre), and Undo gives
 // the sample back byte for byte. Then New drawing, each preset in turn: the file is its text byte for
 // byte (SVG Lab's three are the lab's own exports), named for it, Undo disabled; the App icon's
-// paper centre is #264653, and the Wordmark's text is drawn in Archivo 900 (loaded, and wider than
-// sans-serif's at its size). The changed sample is in Files' draft list.
+// paper centre is #264653, and the Wordmark's text is drawn in Archivo 900: document.fonts.load finds
+// its face, the text's width is that face's on a canvas within 1.5%, and it differs from sans-serif's
+// by more than 3% (sans-serif is narrower in Chromium, wider in WebKit). The changed sample is in
+// Files' draft list.
 async function newSheetOpensTemplatesAndQuickStarts(browser, origin) {
   await withPage(browser, origin, 956, async (page, errors) => {
     await showCode(page);
@@ -7788,7 +7787,9 @@ async function newSheetOpensTemplatesAndQuickStarts(browser, origin) {
       if (p.id === 'quick-wordmark') {
         await until('Archivo 900 loads', () => page.evaluate(faceLoaded, ['Archivo', '900', 'normal']), 8000);
         const w = await page.evaluate(wordWidths);
-        must(w.drawn > w.ref * 1.02, `the Wordmark is ${w.drawn.toFixed(1)} px wide, sans-serif's ${w.ref.toFixed(1)}: not drawn in Archivo`);
+        must(w.faces > 0, 'document.fonts.load finds no Archivo 900 face for the Wordmark');
+        must(Math.abs(w.drawn - w.archivo) <= 0.015 * w.archivo, `the Wordmark is ${w.drawn.toFixed(1)} units wide, Archivo 900's ${w.archivo.toFixed(1)} on a canvas: not drawn in Archivo`);
+        must(Math.abs(w.drawn - w.sans) > 0.03 * w.sans, `the Wordmark is ${w.drawn.toFixed(1)} units wide, sans-serif's ${w.sans.toFixed(1)}: too close to tell the faces apart`);
       }
     }
     await openFilesMenu(page);
@@ -8972,9 +8973,19 @@ async function goldenAppIcon(browser, origin) {
 // word); More → Text to path; the Shapes tool's circle (r 36: 18 × the board's scale) tapped at
 // WORD_SUN, left of the word and above its cap height, where no point of it falls in the letters
 // (the word leaves 56 units each side, under the circle's 72, so beside it alone it would overlap,
-// and no snap target is within 8 px of the tap). The file is the golden byte for byte, and its PNGs
-// pass both tiers.
+// and no snap target is within 8 px of the tap). Its centre is then typed into its cx and cy tokens
+// (the code's Number sheet): at about 1.5 units a pixel, a tap WebKit takes in whole pixels can land
+// a unit off. The file is the golden byte for byte, and its PNGs pass both tiers.
 const WORD_SUN = [40, 36];
+// The selected element's number token (the nth in its code block) typed to `value` in the Number sheet.
+async function typeToken(page, tag, nth, value) {
+  await showCode(page);
+  await tapToken(page.locator('.cv-block', { hasText: tag }).locator('.cv-number').nth(nth));
+  await page.locator('.draw-strip-value').tap();
+  await page.locator('.draw-modal input').first().fill(String(value));
+  await page.locator('.draw-modal-done').tap();
+  await page.locator('.draw-modal').waitFor({ state: 'detached' });
+}
 async function goldenWordmark(browser, origin) {
   goldenMode();
   await withPage(browser, origin, 956, async (page, errors) => {
@@ -8990,6 +9001,8 @@ async function goldenWordmark(browser, origin) {
     await moreCommand(page, 'Text to path');
     await until('Text to path writes', async () => !(await source(page)).includes('<text'), 8000);
     await shapesTap(page, 'Circle', ...WORD_SUN);
+    await typeToken(page, '<circle', 0, WORD_SUN[0]); // cx
+    await typeToken(page, '<circle', 1, WORD_SUN[1]); // cy
     // Every whole root point of the circle's disc, against the word's fill.
     const inWord = await page.evaluate(([cx, cy, r]) => {
       const word = document.querySelector('.draw-host').shadowRoot.querySelector('path');
