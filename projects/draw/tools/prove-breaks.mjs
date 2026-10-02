@@ -3868,6 +3868,11 @@ const BREAKS = [
     file: 'engine/export/png-source.ts', from: '  return { text: serialize(doc), notes };', to: "  return { text: serialize(doc).replace(/fill=\"url\\(#gloss-\\d+\\)\"/g, 'fill=\"#e76f51\"'), notes };",
     run: DRAW_E2E, expect: /goldenAppIcon: app-icon 64 px: [\d.]+% of the pixels differ by more than 2 from this engine's raster of the golden file/,
   },
+  {
+    id: 'B733', what: 'check-bundle misses an indirect eval ((0, eval)(…) and eval?.(…), the minified spellings)',
+    file: 'projects/draw/tools/check-bundle.mjs', from: '|\\beval\\s*\\)\\s*\\(|\\beval\\s*\\?\\.\\s*\\(|', to: '|',
+    run: drawTests('check-bundle.test.ts'), expect: /✖ check-bundle: each pattern planted in a chunk fails the build/,
+  },
 ];
 
 const args = process.argv.slice(2);
