@@ -46,6 +46,10 @@ scripts/check-public.mjs  the guard
 scripts/check-units.mjs   rem, not px (see Design system)
 scripts/check-deps.mjs    Core & Seams apps: every direct dependency registered and pinned exactly
 .github/workflows/deploy.yml   guard → units → build → WebKit smoke → deploy, on every push to main
+projects/lean-keypoint-math/   static: index.html is the "Keypoint Detector Math" doc (formulas pre-rendered
+                          as KaTeX MathML, drawings as inline SVG), then the Lean 4 + Mathlib proofs below it.
+                          Never let .lake/ (several GB) into it, or a local build copies it to _site/:
+                          build the Lean project in a copy outside the repo, then copy the sources in.
 ```
 
 A project is one of two kinds:
@@ -56,6 +60,8 @@ A project is one of two kinds:
   Commit `package-lock.json`.
 
 The launcher card takes the project's `<title>` and `<meta name="description">`, so set both.
+Cards run oldest first, in the order of the `CREATED` list in `scripts/build-site.mjs`: add a new
+project's name at the end of it.
 
 ## Ship loop: push straight to main
 
