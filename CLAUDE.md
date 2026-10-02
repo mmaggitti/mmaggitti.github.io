@@ -167,7 +167,9 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   46em and wider the ToolRail is a column on the left; an Apple Pencil latches pen mode, where fingers
   only navigate and a hovering Pencil previews handles and snapping (the rail's Pencil leaves it).
   SVG Lab's code head links each lesson to Draw (`#import`); the Insert tool puts SVG into the
-  drawing as one group; the code panel's Edit edits the whole drawing's content.
+  drawing as one group; the code panel's Edit edits the whole drawing's content. The golden tests
+  build three drawings from the quick starts through the UI and hold each file, and its 64 and 256 px
+  PNGs, to `test/golden/`; `GOLDEN=update` remakes them (never in CI).
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
@@ -191,7 +193,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   page. A row whose note or reason names an e2e check must cite it (ledger-check), so the evidence
   holds that claim too.
 - **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
-  earlier phase must be done or superseded. P0 closed on 2026-09-29 (`currentPhase` 1).
+  earlier phase must be done or superseded. P0 closed on 2026-09-29 and P1 on 2026-10-02
+  (`currentPhase` 2).
 
 ## Cloud-container limits
 
