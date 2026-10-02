@@ -3822,6 +3822,11 @@ const BREAKS = [
     file: 'projects/draw/src/workspace.ts', from: 'styles(report) > styles(before) ? INSERTED_STYLES : ', to: '',
     run: drawTests('workspace.test.ts'), expect: /✖ Insert says what it did/,
   },
+  {
+    id: 'B725', what: 'planInsert keeps the insert’s entity references as written (a.raw), so its shapes take the drawing’s declaration of the same name, or fail where the drawing has none',
+    file: 'engine/model/insert.ts', from: '  const unresolved = expandReferences(src);\n', to: '  const unresolved = new Set<string>();\n',
+    run: engineTests('model/insert.test.ts'), expect: /✖ the insert’s entity references are written out as their values/,
+  },
 ];
 
 const args = process.argv.slice(2);

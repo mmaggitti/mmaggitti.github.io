@@ -5,7 +5,10 @@
 //
 // 1. The text is parsed by the engine's parser. One with no <svg is wrapped as SVG Lab wraps a paste,
 //    <svg xmlns="http://www.w3.org/2000/svg">…</svg>. A file that isn't well-formed is refused with the
-//    parser's words and where (line and column); a root that isn't SVG's <svg> is refused.
+//    parser's words and where (line and column); a root that isn't SVG's <svg> is refused. Its entity
+//    references are written out as their values (escaped, with character references only), so what is
+//    inserted never depends on a DOCTYPE: the file's own is left behind, and the drawing's may declare
+//    the same names differently. One Draw can't expand (an external entity) refuses the insert.
 // 2. Every id it uses that the document already uses gets a fresh one (ids.ts freshId, as Duplicate's
 //    copies do), and its references inside the inserted content follow it: in attributes (renameIdsIn)
 //    and in a <style> it brings (renameIdsInStyles: url(#…) and #id selectors). The <style> itself is
@@ -22,9 +25,10 @@
 //    transform). A root's own transform (SVG 2) comes after Draw's placement. A fragment with no viewBox
 //    and no size stays where its markup puts it.
 
-import { NS, el, parseDoc, serializeNode, type Attr, type Doc, type ElementNode } from './doc.ts';
+import { NS, descendants, el, parseDoc, serializeNode, type Attr, type Doc, type ElementNode } from './doc.ts';
 import { freshId, idsInUse, renameIdsIn, renameIdsInStyles } from './ids.ts';
-import { decodeAttr } from '../xml/entities.ts';
+import { decodeAttr, decodeText, escape, newBudget } from '../xml/entities.ts';
+import { opSetAttrRaw, opSetLeafRaw } from '../commands/ops.ts';
 import { parseLength, toUserUnits } from '../values/length.ts';
 import { parseViewBox } from '../values/viewbox.ts';
 import { fmt } from '../values/number-format.ts';
@@ -58,6 +62,24 @@ function length(doc: Doc, root: ElementNode, name: 'width' | 'height'): number |
 
 const written = (a: Attr) => ` ${a.qname}=${a.quote}${a.raw}${a.quote}`;
 
+// A decoded value written so that it reads back the same with no DOCTYPE: escaped for its quote (or as
+// text), and the whitespace a character reference made kept as one (a literal tab, line feed or
+// carriage return reads back as a space in an attribute, and a carriage return as a line feed in text).
+const asWritten = (value: string, quote: '"' | "'" | null): string =>
+  escape(value, quote).replace(quote === null ? /\r/g : /[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** Every attribute value and text node of `src` holding a reference, as its value written out; the names it can't expand. */
+function expandReferences(src: Doc): Set<string> {
+  const unresolved = new Set<string>();
+  const budget = newBudget();
+  for (const n of [...descendants(src, src.root)]) {
+    if (n.kind === 'element') {
+      for (const a of n.attrs) if (a.raw.includes('&')) opSetAttrRaw(src, n.id, a.ns, a.local, asWritten(decodeAttr(a.raw, src.entities, budget, unresolved), a.quote));
+    } else if (n.kind === 'text' && n.raw.includes('&')) opSetLeafRaw(src, n.id, asWritten(decodeText(n.raw, src.entities, budget, unresolved), null));
+  }
+  return unresolved;
+}
+
 /** Does the document's root bind namespace prefix `prefix` ('' for the default) to `uri`? */
 function binds(doc: Doc, prefix: string, uri: string): boolean {
   const root = el(doc, doc.root);
@@ -81,6 +103,8 @@ export function planInsert(doc: Doc, text: string, at: { x: number; y: number },
   const src = parsed.doc;
   const root = el(src, src.root);
   if (root.ns !== NS.svg || root.local !== 'svg') return { refused: `Only SVG can be inserted, and this file’s root is <${root.qname}>.` };
+  const unresolved = expandReferences(src);
+  if (unresolved.size) return { refused: `That SVG uses the entity &${[...unresolved][0]}; from outside the file, which Draw can’t expand, so it can’t be inserted.` };
 
   // Ids the document already uses: fresh ones, with their references inside the insert.
   const used = idsInUse(doc);
