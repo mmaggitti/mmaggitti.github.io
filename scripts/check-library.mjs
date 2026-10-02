@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Library and served-SVG gate. Everything under /draw/library/ is public and served, and every
-// .svg on this site can be opened as a document on the shared origin, where its scripts would run.
+// Served-SVG gate. Every .svg on this site can be opened as a document on the shared origin, where
+// its scripts would run, and anything under /draw/library/ would be served as is (Draw has no
+// library: the folder stays absent, and this keeps anything put there inert).
 //
 //   node scripts/check-library.mjs              source mode: projects/draw/public/library/
 //   node scripts/check-library.mjs --site _site site mode: every .svg in the built site, plus
@@ -8,9 +9,8 @@
 //                                               'allow-same-origin' anywhere under /draw/ (its
 //                                               script preview must stay an opaque origin)
 //
-// The rules live in scripts/lib/ so Draw's pre-save checks run the identical code before a save
-// commits (a commit to this public repo is published even if this gate later blocks the deploy).
-// Findings print as `path:line  rule`, never the matched text.
+// The rules live in scripts/lib/ (svg-profile.mjs). Findings print as `path:line  rule`, never the
+// matched text.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';

@@ -54,7 +54,7 @@ const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .
 // A Draw e2e break that names its `checks`: Draw's bundle alone, rebuilt without its unit tests (one
 // may catch the same plant first; this proves the e2e check can) into the last built _site, then
 // just those checks. It needs a built _site; the run puts Draw's own bundle back afterwards.
-const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && node tools/library-index.mjs >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
+const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
 const DRAW_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && E2E=draw node scripts/smoke-test.mjs`], REPO];
 // A break in SVG Lab (P1-M5: its Open in Draw link), whose page build-site copies as it is: the lab is
 // copied over the last built _site's, after Draw's own bundle (so a Draw break earlier in the batch
@@ -3892,6 +3892,26 @@ const BREAKS = [
     id: 'B737', what: 'rasterize encodes the SVG outside its try, so text it can’t encode throws instead of saying “failed”',
     file: 'projects/draw/src/platform/raster.ts', from: '  const img = new Image();\n  try {\n    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n', to: '  const img = new Image();\n  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n  try {\n',
     run: drawTests('raster.test.ts'), expect: /✖ rasterize lets go of the canvas once the PNG is out[\s\S]*URIError/,
+  },
+  {
+    id: 'B738', what: 'the CSP lets the page talk to GitHub’s API again (a whole-directive check, not a substring one, sees it)', slow: true, checks: ['cspIsFirstAndEnforced'],
+    file: 'projects/draw/vite.config.ts', from: `  "connect-src 'self'",\n`, to: `  "connect-src 'self' https://api.github.com",\n`,
+    run: DRAW_E2E, expect: /cspIsFirstAndEnforced: the CSP's connect-src is "'self' https:\/\/api\.github\.com", not "'self'"/,
+  },
+  {
+    id: 'B739', what: 'a network call in src/github/ passes check-sinks (that folder was the library’s, and Draw has no library)',
+    create: 'projects/draw/src/github/client.ts', content: 'export const get = (url: string) => fetch(url);\n',
+    run: CHECK_SINKS, expect: /src\/github\/client\.ts:1  fetch/,
+  },
+  {
+    id: 'B740', what: 'a password field passes check-sinks, even in the file the library’s token form would have been',
+    create: 'projects/draw/src/github/TokenForm.tsx', content: 'export const TokenField = () => <input type="password" />;\n',
+    run: CHECK_SINKS, expect: /src\/github\/TokenForm\.tsx:1  password-field/,
+  },
+  {
+    id: 'B741', what: 'the Support search stops looking in reasons (the test stands a made-up partial row in when the ledger has none)',
+    file: 'projects/draw/src/support.ts', from: "r.note ?? '', r.reason ?? '', r.supersededBy ?? ''", to: "r.note ?? '', r.supersededBy ?? ''",
+    run: drawTests('support.test.ts'), expect: /✖ the search finds rows by every word[\s\S]*reasons are searched too/,
   },
 ];
 

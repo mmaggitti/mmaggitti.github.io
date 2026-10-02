@@ -1,8 +1,8 @@
 // Draw end-to-end test, run by scripts/smoke-test.mjs against the built site (Chromium in the
 // cloud container, WebKit in CI). Throws on the first failure.
 //
-// P0-M0 covers the rails: the CSP backstop, staying off the launcher and the Studio picker, the
-// served (empty) library index, and the phone rules. P0-M2 adds the canvas: the sample renders
+// P0-M0 covers the rails: the CSP backstop, a launcher card but never the Studio picker, and the
+// phone rules. P0-M2 adds the canvas: the sample renders
 // whole and where it should, every file in the round-trip corpus renders (and only what the
 // ledger's tables allow, with nothing leaving the page), the edges of the policy (DOMPurify's
 // second opinion, SMIL judged against the element the browser animates, <switch>, refused roots),
@@ -100,7 +100,6 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROFILE_VERSION } from '../../../scripts/lib/svg-profile.mjs';
 import { RENDER_SVG_ATTRIBUTE_PATTERNS, RENDER_SVG_ATTRIBUTES, RENDER_SVG_ELEMENTS, RENDER_XHTML_ATTRIBUTE_PATTERNS, RENDER_XHTML_ATTRIBUTES, RENDER_XHTML_ELEMENTS } from '../../../engine/policy/tables.ts';
 import probe from './probe-shadow.mjs';
 import rendererPatch from './renderer-patch.mjs';
@@ -183,7 +182,6 @@ export default async function run({ browser, origin, engine = browser.browserTyp
   };
   await check(cspIsFirstAndEnforced);
   await check(listedButNeverFramed);
-  await check(libraryIndexServed);
   for (const height of [956, 796]) await check(phoneRules, height);
   await check(sampleRenders);
   await check(corpusStaysInert);
@@ -343,8 +341,10 @@ async function cspIsFirstAndEnforced(browser, origin) {
     });
     must(first === 'meta Content-Security-Policy', `first element in <head> is "${first}", not the CSP meta`);
     const csp = await page.evaluate(() => document.head.firstElementChild.getAttribute('content'));
-    for (const d of ["script-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'none'", "connect-src 'self' https://api.github.com"]) {
-      must(csp.includes(d), `CSP lacks ${d}`);
+    // Each directive whole, not a substring: "connect-src 'self'" must not also allow another host.
+    const directives = new Map(csp.split(';').map((d) => d.trim().split(/\s+/)).filter((t) => t[0]).map(([name, ...values]) => [name, values.join(' ')]));
+    for (const [name, value] of [['script-src', "'self'"], ['object-src', "'none'"], ['base-uri', "'none'"], ['form-action', "'none'"], ['connect-src', "'self'"]]) {
+      must(directives.get(name) === value, `the CSP's ${name} is "${directives.get(name) ?? '(missing)'}", not "${value}"`);
     }
     must(errors.length === 0, `errors on load:\n${errors.join('\n')}`);
 
@@ -366,8 +366,8 @@ async function cspIsFirstAndEnforced(browser, origin) {
   });
 }
 
-// Draw has a card on the launcher, and is never offered to the Studio's frame picker (an editor that
-// will hold a GitHub token must not run inside another page's frame).
+// Draw has a card on the launcher, and is never offered to the Studio's frame picker (Draw is an
+// editor, not a page to inspect, and the Studio's tree doesn't follow its shadow-root canvas).
 async function listedButNeverFramed(browser, origin) {
   await withPage(browser, origin, 956, async (page) => {
     const launcher = await page.evaluate(async () => (await fetch('/')).text());
@@ -376,13 +376,6 @@ async function listedButNeverFramed(browser, origin) {
     must(/href="(?:\.?\/)?hello\/?"/.test(launcher), 'test setup: the launcher link pattern no longer matches a listed project');
     const pages = await page.evaluate(async () => (await fetch('/pages.json')).json());
     must(!pages.some((p) => p.path === '/draw/'), 'pages.json offers /draw/ to the Studio picker');
-  });
-}
-
-async function libraryIndexServed(browser, origin) {
-  await withPage(browser, origin, 956, async (page) => {
-    const idx = await page.evaluate(async () => (await fetch('/draw/library/index.json', { cache: 'no-store' })).json());
-    must(idx.profileVersion === PROFILE_VERSION && Array.isArray(idx.items), `bad library index: ${JSON.stringify(idx)}`);
   });
 }
 
