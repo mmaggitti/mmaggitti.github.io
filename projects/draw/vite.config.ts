@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react';
 
 // The app's Content Security Policy, as the first element in <head> of the BUILT page (the dev
 // server with HMR needs inline scripts, so it is build-only). It is a backstop behind the render
-// sink: inline handlers and javascript: URLs that slip past it are blocked, and the only other
-// host the app may talk to is GitHub's API (the library, from P2). Violations log console errors,
-// which the smoke test fails on. Pages can't send CSP headers, so a meta tag is the only option.
+// sink: inline handlers and javascript: URLs that slip past it are blocked, and the app talks to no
+// host but its own. Violations log console errors, which the smoke test fails on. Pages can't send
+// CSP headers, so a meta tag is the only option.
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -13,7 +13,7 @@ const CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self' data: blob:",
   "media-src 'self' data: blob:",
-  "connect-src 'self' https://api.github.com",
+  "connect-src 'self'",
   "worker-src 'self'",
   "frame-src 'self'",
   "object-src 'none'",

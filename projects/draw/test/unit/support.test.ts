@@ -33,7 +33,11 @@ test('the search finds rows by every word, in any field, and says how many it di
   assert.ok(want.length > 0 && want.every((r) => found.includes(r)), 'the phase and the status are words to find, whatever their case');
   const hidden = search(LEDGER.rows, 'preserve-hidden element', 10_000).rows;
   assert.ok(hidden.length > 0 && hidden.every((r) => r.class === 'preserve-hidden' || /preserve-hidden/.test(r.note ?? '')));
-  const reasoned = LEDGER.rows.find((r) => r.reason && !`${r.id} ${r.name} ${r.note ?? ''}`.toLowerCase().includes(r.reason.slice(0, 24).toLowerCase()))!;
-  assert.ok(search(LEDGER.rows, reasoned.reason!.slice(0, 24), 10_000).rows.includes(reasoned), 'reasons are searched too');
+  // A row found only by its reason. Only a partial row has one, and the ledger may have none, so a
+  // made-up partial row stands in then.
+  const reasoned = LEDGER.rows.find((r) => r.reason && !`${r.id} ${r.name} ${r.note ?? ''}`.toLowerCase().includes(r.reason.slice(0, 24).toLowerCase()))
+    ?? { id: 'feature:made-up', kind: 'feature', name: 'a made-up row', phase: 2, status: 'partial' as const, reason: 'only its reason says zebra crossing' };
+  const rows = LEDGER.rows.includes(reasoned) ? LEDGER.rows : [...LEDGER.rows, reasoned];
+  assert.ok(search(rows, reasoned.reason!.slice(0, 24), 10_000).rows.includes(reasoned), 'reasons are searched too');
   assert.equal(search(LEDGER.rows, 'no such thing anywhere').matched, 0);
 });

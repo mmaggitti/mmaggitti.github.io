@@ -45,8 +45,9 @@ jobs:
       - name: Design system — rem, not px
         run: node scripts/check-units.mjs
 
-      # Draw's library is public and served: every .svg in it must be inert (scripts/lib/svg-profile.mjs).
-      - name: Library — served SVG must be inert (sources)
+      # Anything in Draw's public/library/ would be served as is (Draw has no library; the folder
+      # stays absent): every .svg there must be inert (scripts/lib/svg-profile.mjs).
+      - name: Served SVG must be inert (sources)
         run: node scripts/check-library.mjs
 
       # Core & Seams apps: every direct dependency is in the register and pinned; every action is registered.
@@ -76,7 +77,7 @@ jobs:
 
       # Every .svg the site serves, from any project, can be opened as a document on the shared
       # origin, where its scripts would run. Checked on the built output, after every build step.
-      - name: Library — every served SVG is inert (built site)
+      - name: Served SVG — every .svg is inert (built site)
         run: node scripts/check-library.mjs --site _site
 
       - name: Install WebKit

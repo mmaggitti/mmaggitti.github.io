@@ -2,7 +2,7 @@
 
 GENERATED from `ledger.json` by `projects/draw/tools/ledger-check.mjs --write`. Do not edit.
 
-Current phase: **P2**. 1332 rows: 762 planned, 3 partial, 565 done, 2 superseded.
+Current phase: **P2**. 1332 rows: 756 planned, 0 partial, 568 done, 8 superseded.
 
 A row is `done` only when the tests it cites passed: unit tests in the build, e2e checks (`test/e2e.mjs#<check>`) in the smoke test after it, which is WebKit in CI. Raising the current phase is the phase exit: every row of an earlier phase must then be done or superseded. Rows are never deleted.
 
@@ -10,14 +10,14 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 
 | Kind | Rows | planned | partial | done | superseded |
 |---|---|---|---|---|---|
-| element | 188 | 143 | 1 | 44 | 0 |
+| element | 188 | 143 | 0 | 45 | 0 |
 | attribute | 386 | 208 | 0 | 178 | 0 |
 | property | 48 | 32 | 0 | 16 | 0 |
 | value | 85 | 25 | 0 | 60 | 0 |
 | syntax | 23 | 0 | 0 | 23 | 0 |
-| namespace | 21 | 3 | 2 | 16 | 0 |
+| namespace | 21 | 3 | 0 | 18 | 0 |
 | capability | 480 | 296 | 0 | 182 | 2 |
-| feature | 101 | 55 | 0 | 46 | 0 |
+| feature | 101 | 49 | 0 | 46 | 6 |
 
 ## By phase
 
@@ -25,7 +25,7 @@ A row is `done` only when the tests it cites passed: unit tests in the build, e2
 |---|---|---|---|---|---|
 | P0 | 246 | 0 | 0 | 246 | 0 |
 | P1 | 319 | 0 | 0 | 318 | 1 |
-| P2 | 75 | 71 | 3 | 1 | 0 |
+| P2 | 75 | 65 | 0 | 4 | 6 |
 | P3 | 162 | 162 | 0 | 0 | 0 |
 | P4 | 275 | 275 | 0 | 0 | 0 |
 | P5 | 126 | 126 | 0 | 0 | 0 |
@@ -81,14 +81,18 @@ Each lesson's capabilities and the phases that deliver them.
 
 ## Partial rows
 
-- `element:*/*` (P2): kept and never rendered, and editor data (Inkscape, Illustrator, Sketch) is stripped from clean exports; the sidecar arrives with the P2 publish pipeline
-- `namespace:inkscape` (P2): kept and never rendered, and stripped from clean exports; the sidecar arrives with the P2 publish pipeline
-- `namespace:other` (P2): kept and never rendered; the sidecar arrives with the P2 publish pipeline (clean exports keep it: only editor namespaces are stripped)
+None.
 
 ## Superseded rows
 
 - `capability:grid/tap-to-place` (P1) → capability:grid/center-handle
 - `capability:code/css-and-script-tokens` (P6) → capability:code/css-tokens, capability:code/script-tokens
+- `feature:library-connect` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
+- `feature:library-publish` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
+- `feature:library-conflicts` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
+- `feature:share-links` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
+- `feature:private-terms` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
+- `feature:served-profile-before-save` (P2) → decision 2026-10-02: Draw stays light and public; files move by import and export only
 
 ## Re-phased rows
 

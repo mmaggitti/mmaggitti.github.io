@@ -36,7 +36,7 @@ projects/draw/            Draw, the SVG editor (Vite + React + TS); on the launc
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
-scripts/check-library.mjs every served .svg is inert; the library holds only allowed files (see Draw)
+scripts/check-library.mjs every served .svg is inert (see Draw)
 ds/ds.css                 the design system (served at /ds/ds.css); specimen page at /ds/
 core-and-seams/           Core & Seams, the system for Rust/WASM + TS apps: GENERATED, published from
                           its private source; never edit here (see Design system); specimen at /core-and-seams/
@@ -123,9 +123,16 @@ turn it into a phone-first page and SVG editor.
 Mark's SVG-native design editor, built from SVG Lab. The approved plan (phases P0 to P8, the
 support ledger, the security design) is in the vault's `_audit/2026-09-27 approved-plan draw.md`,
 with dated revisions beside it; each phase opens with its own short plan. Draw is on the launcher
-(since 2026-10-02, ahead of Release 1). `scripts/build-site.mjs` keeps it out of the Studio's page picker:
-an editor that will hold a GitHub token must never run inside another page's frame.
+(since 2026-10-02). `scripts/build-site.mjs` keeps it out of the Studio's page picker: Draw is an
+editor, not a page to inspect, and the Studio's tree doesn't follow its shadow-root canvas.
 
+- **Paused after P1 (Mark, 2026-10-02).** Draw stays light and entirely public: a drawing comes in
+  and goes out only by import and export (a file, or an `#import` link). The GitHub library planned
+  for P2 is dropped: its ledger rows are superseded, and its plumbing is gone from the code (no
+  GitHub host in the CSP, no token form, no library index). Everything after P1 is open: re-plan it
+  with Mark before building anything. Where to resume: the vault's
+  `10 output/mmaggitti-github-io/STEP-AWAY.md` (on branch `claude/mmaggitti-github-io-plans` until
+  Mark merges it).
 - **One render sink.** Document content reaches the page only through
   `src/canvas/safe-sink.ts`. `tools/check-sinks.mjs` fails the build on:
   - `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
@@ -134,10 +141,10 @@ an editor that will hold a GitHub token must never run inside another page's fra
     elements and attributes, markup parsing and stylesheet writes (`dom-write`). Plain elements
     and text (`dom-text`) are also allowed in `src/codeview/`, which shows the source as text and
     never as markup;
-  - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
+  - storage outside `src/platform/`, and network outside `platform/` and `export/`;
   - file, clipboard, drag-and-drop, share, compression-stream, Web Locks and history APIs outside
     `src/platform/` (`file-api`);
-  - a password field outside `src/github/TokenForm.tsx`;
+  - a password field anywhere (Draw holds no credentials);
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
 - **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every
   reference kind resolves; Chromium alone doesn't load a document's own `@font-face` there).
@@ -178,22 +185,19 @@ an editor that will hold a GitHub token must never run inside another page's fra
   build three drawings from the quick starts through the UI and hold each file, and its 64 and 256 px
   PNGs, to `test/golden/`; `GOLDEN=update` remakes them (never in CI).
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
-  `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
+  `connect-src 'self'`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
   extensions, so `node --test` runs it as-is and any project may import it.
 - **The support ledger** (`engine/ledger/ledger.json`) says what Draw edits, keeps, previews or
   drops, and which SVG Lab capability lands in which phase. `tools/ledger-check.mjs` gates the
   build. Rows are never deleted.
-- **The library** (from P2, `projects/draw/public/library/`, served at `/draw/library/`) is public.
-  - Every `.svg` in it, and every `.svg` anywhere on the site, must pass
-    `scripts/lib/svg-profile.mjs` (`scripts/check-library.mjs`, source and `--site` modes, both
-    in CI). A script-bearing design keeps its source only in its escaped `.draw.json` sidecar.
-  - `index.json` is generated at build, never committed.
-  - The GitHub token comes from Mark at run time (Keychain-filled, memory only), never from a file.
+- **Served SVG.** Every `.svg` anywhere on the site must pass `scripts/lib/svg-profile.mjs`
+  (`scripts/check-library.mjs`, source and `--site` modes, both in CI). Draw has no library:
+  `projects/draw/public/library/` stays absent, and the source mode keeps anything put there inert.
 - **Device checks:** `projects/draw/DEVICE-CHECKS.md` lists what CI can't prove (gesture feel, iOS
   pickers and share sheets, the keyboard, storage); Mark signs it on his phone for each phase.
 - **Build chain:** `check-sinks → ledger-check → tsc → node --test (engine + unit, recorded as
-  evidence) → ledger-check --evidence → vite build → check-bundle → library-index`. It runs inside
+  evidence) → ledger-check --evidence → vite build → check-bundle`. It runs inside
   `npm run build`, so CI gates all of it. After the smoke test, `ledger-check --e2e-evidence`
   requires every e2e check a ledger row cites to have passed in that run (WebKit in CI), in every
   call and asserting something, in a complete run newer than the e2e, its helpers and the built
@@ -201,7 +205,7 @@ an editor that will hold a GitHub token must never run inside another page's fra
   holds that claim too.
 - **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
   earlier phase must be done or superseded. P0 closed on 2026-09-29 and P1 on 2026-10-02
-  (`currentPhase` 2).
+  (`currentPhase` 2, which stays until the roadmap after P1 is re-planned).
 
 ## Cloud-container limits
 

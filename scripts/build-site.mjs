@@ -86,7 +86,8 @@ cards.sort((a, b) => rank(a.name) - rank(b.name) || (a.name < b.name ? -1 : a.na
 
 writeFileSync(join(OUT, 'index.html'), launcher(cards.filter((c) => !c.unlisted)));
 // The studio's page picker reads this. Left out: the studio (it can't inspect itself), Draw (an
-// editor holding a GitHub token must never run inside another page's frame) and unlisted projects.
+// editor, not a page to inspect; the studio's tree doesn't follow its shadow-root canvas) and
+// unlisted projects.
 const NOT_FRAMED = new Set(['studio', 'draw']);
 const pages = [
   { path: '/', title: 'Projects' },
