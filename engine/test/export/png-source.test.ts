@@ -3,7 +3,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NO_FOREIGN_OBJECT, pngCopy, textCount } from '../../export/png-source.ts';
+import { NO_FOREIGN_OBJECT, pngCopier, pngCopy, textCount } from '../../export/png-source.ts';
+import { linear } from '../timing.ts';
 
 const copy = (text: string, w: number, h: number) => {
   const r = pngCopy(text, w, h);
@@ -42,4 +43,18 @@ test('a file that doesn’t parse is refused, with the parser’s words; textCou
   assert.ok('refused' in r && r.refused.length > 0);
   assert.equal(textCount('<svg xmlns="http://www.w3.org/2000/svg"><text>a</text><g><text>b</text></g><path d="M0 0"/></svg>'), 2);
   assert.equal(textCount('<svg xmlns="http://www.w3.org/2000/svg"/>'), 0);
+});
+
+test('pngCopier makes a sheet’s copies from one parse: each is pngCopy’s text at its size, and 28 files cost about what one does', () => {
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"><g><foreignObject width="1" height="1"/></g><path d="M0 0h24"/></svg>';
+  const copies = pngCopier(src);
+  for (const [w, h] of [[16, 8], [1024, 512], [3, 1]]) assert.deepEqual(copies(w, h), pngCopy(src, w, h), `${w} × ${h}`);
+  assert.deepEqual(pngCopier('<svg xmlns="http://www.w3.org/2000/svg"><g></svg>')(4, 4), pngCopy('<svg xmlns="http://www.w3.org/2000/svg"><g></svg>', 4, 4), 'a refusal too');
+  const big = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${'<rect width="1" height="1"/>'.repeat(20_000)}</svg>`;
+  const sizes = [16, 32, 64, 128, 256, 512, 1024];
+  const four = [...sizes, ...sizes, ...sizes, ...sizes];
+  linear('one copier: a file, then 28 files (four icon sets) from one parse', () => void pngCopier(big)(64, 64), () => {
+    const c = pngCopier(big);
+    for (const n of four) c(n, n);
+  }, { most: 2, limit: 400 });
 });

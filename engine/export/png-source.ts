@@ -1,5 +1,6 @@
 // The file a PNG is drawn from (P1-M5), pure: Clean's file with its text as paths (Draw's Export,
-// projects/draw/src/export/png.ts makes it), then, in one parse and one serialize:
+// projects/draw/src/export/png.ts makes it), then, in one parse and one serialize for every size a
+// sheet makes (pngCopier: each file then writes only its own width and height into the copy):
 // - every <foreignObject> leaves (WebKit won't let a page read back a canvas that drew an SVG image
 //   holding one: its SVGImage.cpp renderingTaintsOrigin), and a note says so;
 // - the root's width and height become the PNG's size in pixels, plain numbers;
@@ -42,8 +43,13 @@ function side(doc: Doc, name: 'width' | 'height'): number | null {
   return v != null && Number.isFinite(v) && v > 0 ? v : null;
 }
 
-/** The copy of `text` a PNG of w × h pixels is drawn from (the module header), or why it can't be read. */
-export function pngCopy(text: string, w: number, h: number): PngCopy | { refused: string } {
+// The root's width and height while the copy is made: characters no document can hold (XML refuses
+// U+FFFE and U+FFFF), so each file writes its own numbers in their place and nothing else.
+const WIDTH = '\uFFFF';
+const HEIGHT = '\uFFFE';
+
+// The copy with its root's width and height left open (one parse and one serialize).
+function openCopy(text: string): PngCopy | { refused: string } {
   const parsed = parseDoc(text);
   if (!parsed.ok) return { refused: parsed.error.message };
   const doc = parsed.doc;
@@ -58,9 +64,29 @@ export function pngCopy(text: string, w: number, h: number): PngCopy | { refused
     const oh = side(doc, 'height');
     if (ow !== null && oh !== null) setAttr(doc, doc.root, null, 'viewBox', `0 0 ${fmt(ow)} ${fmt(oh)}`);
   }
-  setAttr(doc, doc.root, null, 'width', String(w));
-  setAttr(doc, doc.root, null, 'height', String(h));
+  setAttr(doc, doc.root, null, 'width', WIDTH);
+  setAttr(doc, doc.root, null, 'height', HEIGHT);
   return { text: serialize(doc), notes };
+}
+
+/** Every PNG copy of one source, at w × h pixels each: what pngCopier returns. */
+export type PngCopies = (w: number, h: number) => PngCopy | { refused: string };
+
+/**
+ * The PNG copies of `text` for one sheet (the module header): the copy is made on the first call, and
+ * each call writes only the root's width and height into it; or why it can't be read.
+ */
+export function pngCopier(text: string): PngCopies {
+  let made: PngCopy | { refused: string } | null = null;
+  return (w, h) => {
+    made ??= openCopy(text);
+    return 'refused' in made ? made : { text: made.text.replace(WIDTH, String(w)).replace(HEIGHT, String(h)), notes: [...made.notes] };
+  };
+}
+
+/** The copy of `text` a PNG of w × h pixels is drawn from (the module header), or why it can't be read. */
+export function pngCopy(text: string, w: number, h: number): PngCopy | { refused: string } {
+  return pngCopier(text)(w, h);
 }
 
 /** How many <text> elements a file holds (a PNG draws a text left as text in a fallback font). */

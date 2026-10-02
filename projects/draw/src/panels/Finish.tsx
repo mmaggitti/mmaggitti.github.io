@@ -5,7 +5,8 @@
 //
 // - Every PNG is drawn from one source, made when the sheet opens: Clean's copy with its text as paths
 //   (export/png.ts), each file its PNG copy at its size (no <foreignObject>, the root sized to the
-//   file), rasterized only by src/platform/raster.ts, one at a time. The icon set is made at once (it
+//   file; the copy is parsed once for the sheet, the Vector pane's too, and each file writes only its
+//   width and height), rasterized only by src/platform/raster.ts, one at a time. The icon set is made at once (it
 //   is also the previews); 1×, 2× and 3× when picked. Share reads "Preparing…" and is disabled until
 //   every file of the choice is ready, so a tap shares them inside its own activation.
 // - The sheet shows pictures of the drawing (PNGs as blob URLs, and the Vector pane's own SVG as an
@@ -22,8 +23,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import type { Editor } from '../editor.ts';
 import type { Workspace } from '../workspace.ts';
 import { DOTS, FIRST_DOTS, ICON_SIZES, SCALES, dotsCaption, gridShows, pngSize, shapeCount, shapesCaption, type PixelSize, type PngChoice } from '../../../../engine/export/raster.ts';
-import { pngCopy } from '../../../../engine/export/png-source.ts';
-import { clampedNote, freshCaps, makePng, pngName, type MadePng, type PngSource } from '../export/png.ts';
+import { pngCopier, type PngCopies } from '../../../../engine/export/png-source.ts';
+import { clampedNote, freshCaps, makePng, pngName, type MadePng } from '../export/png.ts';
 import { previewUrl, rasterize, revokeAll } from '../platform/raster.ts';
 import { canShareFiles, downloadFile, shareFiles } from '../platform/share.ts';
 import { useStore } from './store.ts';
@@ -62,7 +63,8 @@ export function Finish({ workspace, editor }: { workspace: Workspace; editor: Ed
 
 function FinishBody({ workspace, board, shapes }: { workspace: Workspace; board: { width: number; height: number }; shapes: number }) {
   const name = workspace.fileName;
-  const [source, setSource] = useState<PngSource | null>(null);
+  // The PNG source's notes, and its copies for every file of the sheet (one parse).
+  const [source, setSource] = useState<{ notes: string[]; copies: PngCopies } | null>(null);
   const [icons, setIcons] = useState<(Result | undefined)[]>(() => ICON_SIZES.map(() => undefined));
   const [scaled, setScaled] = useState<Partial<Record<number, Result>>>({});
   const [pixels, setPixels] = useState<Partial<Record<number, Result>>>({});
@@ -77,10 +79,10 @@ function FinishBody({ workspace, board, shapes }: { workspace: Workspace; board:
   const sharing = useRef(false);
 
   // One file, after the ones before it (one rasterization at a time), unless the sheet has closed.
-  const make = (src: PngSource, wanted: PixelSize, fileName: string): Promise<Result | null> => {
+  const make = (copies: PngCopies, wanted: PixelSize, fileName: string): Promise<Result | null> => {
     const job = queue.current.then(async (): Promise<Result | null> => {
       if (!alive.current) return null;
-      const r = await makePng(src.text, wanted, fileName, rasterize, caps.current);
+      const r = await makePng(copies, wanted, fileName, rasterize, caps.current);
       if (!alive.current) return null;
       if ('refused' in r) return r;
       return { ...r, url: previewUrl(r.blob), file: new File([r.blob], r.name, { type: 'image/png' }) };
@@ -94,9 +96,10 @@ function FinishBody({ workspace, board, shapes }: { workspace: Workspace; board:
     void (async () => {
       const src = await workspace.pngSource();
       if (!alive.current || !src) return;
-      setSource(src);
+      const copies = pngCopier(src.text);
+      setSource({ notes: src.notes, copies });
       ICON_SIZES.forEach((n, i) => {
-        void make(src, pngSize(board, { icon: n }), pngName(name, { icon: n })).then((r) => r && setIcons((was) => was.map((x, j) => (j === i ? r : x))));
+        void make(copies, pngSize(board, { icon: n }), pngName(name, { icon: n })).then((r) => r && setIcons((was) => was.map((x, j) => (j === i ? r : x))));
       });
     })();
     return () => {
@@ -109,14 +112,14 @@ function FinishBody({ workspace, board, shapes }: { workspace: Workspace; board:
   // The comparison's dots, made when chosen (32 first).
   useEffect(() => {
     if (!source || pixels[res]) return;
-    void make(source, { w: res, h: res }, `${res}.png`).then((r) => r && setPixels((was) => ({ ...was, [res]: r })));
+    void make(source.copies, { w: res, h: res }, `${res}.png`).then((r) => r && setPixels((was) => ({ ...was, [res]: r })));
   }, [source, res]);
 
   // 1×, 2× or 3×, made when picked.
   useEffect(() => {
     if (!source || choice === 'icons' || scaled[choice]) return;
     const k = choice;
-    void make(source, pngSize(board, { scale: k }), pngName(name, { scale: k })).then((r) => r && setScaled((was) => ({ ...was, [k]: r })));
+    void make(source.copies, pngSize(board, { scale: k }), pngName(name, { scale: k })).then((r) => r && setScaled((was) => ({ ...was, [k]: r })));
   }, [source, choice]);
 
   const chosen: (Result | undefined)[] = choice === 'icons' ? icons : [scaled[choice]];
@@ -150,7 +153,7 @@ function FinishBody({ workspace, board, shapes }: { workspace: Workspace; board:
   // The Vector pane: the PNG source's own SVG as an image, scaled to the pane (sharp at any size).
   const vector = useMemo(() => {
     if (!source) return null;
-    const c = pngCopy(source.text, ...sizeOf(pngSize(board, { icon: 1024 })));
+    const c = source.copies(...sizeOf(pngSize(board, { icon: 1024 })));
     return 'refused' in c ? null : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(c.text)}`;
   }, [source, board]);
   const px = pixels[res];

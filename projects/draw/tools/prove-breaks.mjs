@@ -3567,7 +3567,7 @@ const BREAKS = [
   },
   {
     id: 'B674', what: 'the PNG copy keeps the root’s own width (the image is drawn at the file’s size, not the PNG’s)',
-    file: 'engine/export/png-source.ts', from: "  setAttr(doc, doc.root, null, 'width', String(w));\n", to: '',
+    file: 'engine/export/png-source.ts', from: "  setAttr(doc, doc.root, null, 'width', WIDTH);\n", to: '',
     run: engineTests('export/png-source.test.ts'), expect: /✖ the root’s width and height become the PNG’s/,
   },
   {
@@ -3847,6 +3847,11 @@ const BREAKS = [
     id: 'B729', what: 'a hovering Pencil gathers its snap targets on every frame (no cache): it measures the whole drawing each move',
     file: 'projects/draw/src/editor.ts', from: '    if (c && c.key.length === key.length && c.key.every((v, i) => v === key[i])) return c.targets;\n', to: '',
     run: drawTests('editor.test.ts'), expect: /✖ a hovering Pencil gathers its snap targets once while nothing they depend on changes/,
+  },
+  {
+    id: 'B730', what: 'the Finish sheet’s copies parse the drawing again for every PNG size (one parse per file, not per sheet)',
+    file: 'engine/export/png-source.ts', from: '    made ??= openCopy(text);', to: '    made = openCopy(text);',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ pngCopier makes a sheet’s copies from one parse/,
   },
 ];
 

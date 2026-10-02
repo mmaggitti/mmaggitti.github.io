@@ -8,7 +8,8 @@
 //   (the text library isn't loaded for nothing). Should the text tools fail to load, the file is
 //   Clean's with its text as text, and a note says why.
 // - Each file is the source's PNG copy at its size (engine/export/png-source.ts: no <foreignObject>, the
-//   root sized to the file), rasterized. A size past the device's canvas area is clamped, first to
+//   root sized to the file; the sheet's pngCopier parses the source once, and each file writes only its
+//   width and height), rasterized. A size past the device's canvas area is clamped, first to
 //   8192 × 8192 (iOS 18 on), and when the device refuses that, to 4096 × 4096 (iOS 16.4 to 17), then
 //   tried again; the cap that worked is kept for the visit, so later files start there. Refused there
 //   too, the file says it can't be made. A clamped file says so.
@@ -17,7 +18,7 @@
 
 import { NS, descendants, type Doc } from '../../../../engine/model/doc.ts';
 import { cleanExport } from '../../../../engine/export/clean.ts';
-import { pngCopy, textCount } from '../../../../engine/export/png-source.ts';
+import { textCount, type PngCopies } from '../../../../engine/export/png-source.ts';
 import { clampArea, type PngChoice, type PixelSize } from '../../../../engine/export/raster.ts';
 import { fileNameFor, prepareExport, type ExportDeps } from './svg.ts';
 
@@ -76,12 +77,12 @@ export interface Caps {
 }
 export const freshCaps = (): Caps => ({ at: 0 });
 
-/** One PNG of the source at `wanted` pixels, clamped to the device as the module header says, or why it can't be made. */
-export async function makePng(source: string, wanted: PixelSize, name: string, raster: Raster, caps: Caps): Promise<MadePng | { refused: string }> {
+/** One PNG of the source (its sheet's copies) at `wanted` pixels, clamped to the device as the module header says, or why it can't be made. */
+export async function makePng(copies: PngCopies, wanted: PixelSize, name: string, raster: Raster, caps: Caps): Promise<MadePng | { refused: string }> {
   for (let i = caps.at; i < AREA_CAPS.length; i++) {
     const cap = AREA_CAPS[i];
     const size = clampArea(wanted.w, wanted.h, cap);
-    const copy = pngCopy(source, size.w, size.h);
+    const copy = copies(size.w, size.h);
     if ('refused' in copy) return { refused: copy.refused };
     const r = await raster(copy.text, size.w, size.h);
     if (r === 'tainted') return { refused: TAINTED };

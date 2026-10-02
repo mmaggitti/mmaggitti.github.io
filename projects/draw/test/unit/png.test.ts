@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseDoc, type Doc } from '../../../../engine/model/doc.ts';
 import { cleanExport } from '../../../../engine/export/clean.ts';
-import { NO_FOREIGN_OBJECT } from '../../../../engine/export/png-source.ts';
+import { NO_FOREIGN_OBJECT, pngCopier } from '../../../../engine/export/png-source.ts';
 import { AREA_CAPS, FAILED, FALLBACK_FONT, TAINTED, TOO_LARGE, clampedNote, freshCaps, makePng, pngName, pngSource, textAsText, type Raster } from '../../src/export/png.ts';
 import { prepareExport, type ExportDeps } from '../../src/export/svg.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
@@ -89,36 +89,36 @@ test('the clamp: a PNG past 8192² is clamped to it; a device that refuses that 
   // iOS 18: 8192² works.
   const calls: [number, number][] = [];
   const caps = freshCaps();
-  const big = await makePng(SRC, { w: 16000, h: 5000 }, 'Wordmark@3x.png', device(8192 * 8192, calls), caps);
+  const big = await makePng(pngCopier(SRC), { w: 16000, h: 5000 }, 'Wordmark@3x.png', device(8192 * 8192, calls), caps);
   assert.ok(!('refused' in big));
   assert.deepEqual(big.size, { w: 14654, h: 4579 });
   assert.equal(big.clamped, 8192 * 8192);
   assert.deepEqual(calls, [[14654, 4579]], 'one try, at the first cap');
   assert.equal(clampedNote(big.name, big.size, big.clamped!), 'Wordmark@3x.png is 14654 × 4579: this device makes PNGs up to 67,108,864 pixels.');
-  const small = await makePng(SRC, { w: 1920, h: 600 }, 'Wordmark@3x.png', device(8192 * 8192, calls), caps);
+  const small = await makePng(pngCopier(SRC), { w: 1920, h: 600 }, 'Wordmark@3x.png', device(8192 * 8192, calls), caps);
   assert.ok(!('refused' in small) && small.clamped === null && small.size.w === 1920, 'a size within the cap is left as it is');
   // iOS 17: 8192² is refused, so 4096², and the next file starts there.
   const older: [number, number][] = [];
   const caps17 = freshCaps();
-  const a = await makePng(SRC, { w: 16000, h: 5000 }, 'a.png', device(4096 * 4096, older), caps17);
+  const a = await makePng(pngCopier(SRC), { w: 16000, h: 5000 }, 'a.png', device(4096 * 4096, older), caps17);
   assert.ok(!('refused' in a));
   assert.deepEqual(older, [[14654, 4579], [7327, 2289]], 'tried at 8192², then at 4096²');
   assert.equal(a.clamped, 4096 * 4096);
   older.length = 0;
-  const b = await makePng(SRC, { w: 9000, h: 9000 }, 'b.png', device(4096 * 4096, older), caps17);
+  const b = await makePng(pngCopier(SRC), { w: 9000, h: 9000 }, 'b.png', device(4096 * 4096, older), caps17);
   assert.ok(!('refused' in b));
   assert.deepEqual(older, [[4096, 4096]], 'the next file starts at the cap that worked');
 });
 
 test('a PNG the device refuses at 4096² too says it can’t be that big; a tainted canvas and a failed draw refuse in their own words', async () => {
   const calls: [number, number][] = [];
-  const refused = await makePng(SRC, { w: 3000, h: 3000 }, 'x.png', device(1000, calls), freshCaps());
+  const refused = await makePng(pngCopier(SRC), { w: 3000, h: 3000 }, 'x.png', device(1000, calls), freshCaps());
   assert.deepEqual(refused, { refused: TOO_LARGE });
   assert.equal(TOO_LARGE, 'This device can’t make a PNG that big.');
   assert.deepEqual(calls, [[3000, 3000], [3000, 3000]], 'within both caps, so the same size twice');
-  assert.deepEqual(await makePng(SRC, { w: 64, h: 20 }, 'x.png', device(1e9, [], () => 'tainted'), freshCaps()), { refused: TAINTED });
-  assert.deepEqual(await makePng(SRC, { w: 64, h: 20 }, 'x.png', device(1e9, [], () => 'failed'), freshCaps()), { refused: FAILED });
-  const fo = await makePng('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><foreignObject/></svg>', { w: 4, h: 4 }, 'x.png', device(1e9, []), freshCaps());
+  assert.deepEqual(await makePng(pngCopier(SRC), { w: 64, h: 20 }, 'x.png', device(1e9, [], () => 'tainted'), freshCaps()), { refused: TAINTED });
+  assert.deepEqual(await makePng(pngCopier(SRC), { w: 64, h: 20 }, 'x.png', device(1e9, [], () => 'failed'), freshCaps()), { refused: FAILED });
+  const fo = await makePng(pngCopier('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><foreignObject/></svg>'), { w: 4, h: 4 }, 'x.png', device(1e9, []), freshCaps());
   assert.ok(!('refused' in fo) && fo.notes.includes(NO_FOREIGN_OBJECT), 'the copy’s note comes with the file');
 });
 
