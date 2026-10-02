@@ -43,7 +43,7 @@
 //   focus (Field kind 'access'); typing a title where there is none makes it, in that one entry.
 
 import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, serializeParts, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
-import { parseFragment, replaceContent } from '../../../engine/model/fragment.ts';
+import { ContentError, parseFragment, replaceContent } from '../../../engine/model/fragment.ts';
 import { planInsert } from '../../../engine/model/insert.ts';
 import { shapeCount } from '../../../engine/export/raster.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
@@ -4012,13 +4012,10 @@ export class Editor {
     if (!doc) return { message: 'Nothing is open', at: 0, line: 1, column: 1 };
     if (this.readOnly.get()) return { message: READ_ONLY, at: 0, line: 1, column: 1 };
     if (!this.#session || this.#live || this.#nudge || this.#gesture) return { message: 'Finish the edit in progress first', at: 0, line: 1, column: 1 };
-    let error: { at: number; message: string } | null = null;
-    this.#session.dispatch('Edit source', (apply) => {
-      const r = replaceContent(doc, doc.root, text, apply);
-      if (!r.ok) error = r.error;
-    });
-    if (error) {
-      const e: { at: number; message: string } = error;
+    try {
+      this.#session.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, text, apply));
+    } catch (e) {
+      if (!(e instanceof ContentError)) throw e;
       return { message: e.message, at: e.at, ...lineColumn(text, e.at) };
     }
     this.#noteDetached();

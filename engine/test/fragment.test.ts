@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { parseDoc, serialize, serializeNode, serializeParts, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
-import { parseFragment, replaceContent } from '../model/fragment.ts';
+import { ContentError, parseFragment, replaceContent } from '../model/fragment.ts';
 import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
@@ -228,10 +228,7 @@ test('replaceContent: the root becomes exactly its start tag, the text and its e
   const doc = p.doc;
   const s = new Session(doc);
   const text = '\n  <circle cx="5" cy="5" r="3"/>\n  <!-- a note -->\n';
-  s.dispatch('Edit source', (apply) => {
-    const r = replaceContent(doc, doc.root, text, apply);
-    assert.ok(r.ok);
-  });
+  s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, text, apply));
   assert.equal(serialize(doc), `<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by hand -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${text}</svg>\n<!-- after -->\n`);
   assert.equal(s.undoLabel, 'Edit source');
   s.undo();
@@ -243,9 +240,28 @@ test('replaceContent: text that doesn’t parse changes nothing and says where',
   const p = parseDoc(WHOLE);
   assert.ok(p.ok);
   const doc = p.doc;
-  const ops: unknown[] = [];
-  const r = replaceContent(doc, doc.root, '\n  <rect x="1"\n', (op) => ops.push(op));
-  assert.ok(!r.ok && r.error.at > 0 && r.error.at <= '\n  <rect x="1"\n'.length, JSON.stringify(r));
-  assert.equal(ops.length, 0, 'no op');
-  assert.equal(serialize(doc), WHOLE);
+  const s = new Session(doc);
+  const bad = '\n  <rect x="1"\n';
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, bad, apply)), (e: unknown) => e instanceof ContentError && e.at > 0 && e.at <= bad.length);
+  assert.equal(serialize(doc), WHOLE, 'the old content’s removal is rolled back');
+  assert.equal(s.canUndo, false, 'no entry');
+});
+
+test('replaceContent measures the text without the content it replaces: an unchanged replace of 150,000 nodes passes, and a malformed one changes nothing', () => {
+  const big = `<svg xmlns="http://www.w3.org/2000/svg">${'<rect/>'.repeat(150_000)}</svg>`;
+  const p = parseDoc(big);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const s = new Session(doc);
+  const inner = serializeParts(doc, doc.root).content;
+  s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, inner, apply));
+  assert.equal(serialize(doc), big, 'the same bytes: within the node limit once the old content is out');
+  assert.equal(s.undoLabel, 'Edit source');
+  s.undo();
+  assert.equal(serialize(doc), big);
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, `${inner}<rect`, apply)), ContentError);
+  assert.equal(serialize(doc), big, 'a malformed one changes nothing');
+  assert.equal(s.canUndo, false);
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, `${inner}${inner}`, apply)), /the document would have more than 200000 nodes/, 'past the limit by itself, it is still refused');
+  assert.equal(serialize(doc), big);
 });

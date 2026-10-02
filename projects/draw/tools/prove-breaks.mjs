@@ -3742,8 +3742,8 @@ const BREAKS = [
     run: engineTests('fragment.test.ts'), expect: /✖ replaceContent: the root becomes exactly its start tag/,
   },
   {
-    id: 'B709', what: 'an Apply that doesn’t parse changes the file (the content is removed before the text is parsed)',
-    file: 'engine/model/fragment.ts', from: '  const made = parseFragment(doc, scope, text);\n  if (!made.ok) return made;\n  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n', to: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n  if (!made.ok) return made;\n',
+    id: 'B709', what: 'an Apply that doesn’t parse changes the file (the old content’s removal is kept: nothing throws, so nothing rolls back)',
+    file: 'engine/model/fragment.ts', from: '  if (!made.ok) throw new ContentError(made.error.at, made.error.message);\n', to: '  if (!made.ok) return;\n',
     run: drawTests('editor.test.ts'), expect: /✖ Edit the drawing’s source: the sheet holds everything between the root’s tags/,
   },
   {
@@ -3826,6 +3826,11 @@ const BREAKS = [
     id: 'B725', what: 'planInsert keeps the insert’s entity references as written (a.raw), so its shapes take the drawing’s declaration of the same name, or fail where the drawing has none',
     file: 'engine/model/insert.ts', from: '  const unresolved = expandReferences(src);\n', to: '  const unresolved = new Set<string>();\n',
     run: engineTests('model/insert.test.ts'), expect: /✖ the insert’s entity references are written out as their values/,
+  },
+  {
+    id: 'B726', what: 'Edit the drawing’s source parses the text before the old content goes, so it spends the limits twice: an unchanged Apply of 150,000 nodes is refused',
+    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n', to: '  const made = parseFragment(doc, scope, text);\n  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));\n',
+    run: engineTests('fragment.test.ts'), expect: /✖ replaceContent measures the text without the content it replaces/,
   },
 ];
 
