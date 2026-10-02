@@ -7910,8 +7910,9 @@ async function theFinishSheetPreviewsAndComparesPixels(browser, origin, dpr) {
 // not that of the As-text file (more than 1% differ: its text went as paths); the sheet notes the
 // foreignObject left out. 2× (decoding held) reads "Preparing…", then shares one card@2x.png of twice
 // the artboard. With canShare gone, the files are Download buttons, and a tap downloads that one
-// file. And P0's ACTIVE file: Finish makes its PNGs with nothing run, no CSP violation and no request
-// off the page.
+// file. A 3000 × 3000 board at 3× is clamped to 8192 × 8192, and the sheet says so in the clamp
+// note's words. And P0's ACTIVE file: Finish makes its PNGs with nothing run, no CSP violation and no
+// request off the page.
 const PNG_CARD = `<svg xmlns="${SVG_NS}" viewBox="0 0 100 50">
   <rect x="4" y="5" width="40" height="40" fill="#e76f51"/>
   <text x="48" y="36" font-family="Inter, sans-serif" font-weight="700" font-size="28" fill="#264653">Ink</text>
@@ -8019,6 +8020,15 @@ async function pngIsPreparedAndSharedInsideTheTap(browser, origin) {
     const [one] = await Promise.all([page.waitForEvent('download'), downloads.nth(1).tap()]);
     const file = decodePng(readFileSync(await one.path()));
     must(one.suggestedFilename() === 'card-32.png' && file.width === 32 && file.height === 16, `a Download tap downloaded ${one.suggestedFilename()} (${file.width}×${file.height})`);
+    await closeModal(page);
+    // A clamped file says so: a 3000 × 3000 board at 3× asks for 9000 × 9000, past the first cap
+    // (8192 × 8192, in every engine), so the file is 8192 × 8192 and the sheet says why.
+    must((await page.evaluate((t) => window.drawTest.render(t), `<svg xmlns="${SVG_NS}" viewBox="0 0 3000 3000"><rect width="3000" height="3000" fill="#2a9d8f"/></svg>`)).ok, 'test setup: the 3000 × 3000 board did not open');
+    await page.locator('.draw-bar .draw-finish').tap();
+    await page.locator('.draw-png-choice button', { hasText: '3×' }).tap();
+    await until('3× is made', async () => (await page.locator('.draw-png-file[data-ready]').count()) === 1, 30000);
+    const clamped = { size: await page.locator('.draw-png-file .draw-png-size').first().textContent(), notes: await page.locator('.draw-png-note').allTextContents() };
+    must(clamped.size === '8192 × 8192' && clamped.notes.includes('card@3x.png is 8192 × 8192: this device makes PNGs up to 67,108,864 pixels.'), `3× of a 3000 × 3000 board: ${JSON.stringify(clamped)}`);
     await closeModal(page);
     // P0's ACTIVE file: nothing in it runs or loads while its PNGs are made.
     const quiet = watch(page, context, origin);
