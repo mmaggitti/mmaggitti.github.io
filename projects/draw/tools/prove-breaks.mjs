@@ -3770,6 +3770,31 @@ const BREAKS = [
     id: 'B714', what: 'the empty hint never hides: it shows over any open drawing', slow: true, checks: ['anEmptyDrawingSaysAddAShape'],
     file: 'projects/draw/src/panels/Canvas.tsx', from: "if (tool !== 'pen' && editor.isEmpty()) {", to: "if (tool !== 'pen' && !!editor.doc) {",
     run: DRAW_E2E, expect: /anEmptyDrawingSaysAddAShape: the hint stayed with a shape on the canvas/,
+  },  // P1-M5 S4: the golden tests.
+  {
+    id: 'B715', what: 'the PNG comparisons count alpha 128 as transparent (alphaMaskShare’s threshold off by one)',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: 'if ((a.rgba(x, y)[3] >= at) !== (b.rgba(x, y)[3] >= at)) differ++;', to: 'if ((a.rgba(x, y)[3] > at) !== (b.rgba(x, y)[3] > at)) differ++;',
+    run: drawTests('png-compare.test.ts'), expect: /✖ alphaMaskShare: the share of pixels opaque/,
+  },
+  {
+    id: 'B716', what: 'quadrantDeltaE averages every pixel’s colour, transparent ones too',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: '        if (p[3] < at) continue;\n', to: '',
+    run: drawTests('png-compare.test.ts'), expect: /✖ quadrantDeltaE: each quadrant’s mean colour/,
+  },
+  {
+    id: 'B717', what: 'the Icon 24 quick start’s stroke-width="2" becomes 1.5', slow: true, checks: ['goldenBellIcon'],
+    file: 'engine/presets/quick-starts.ts', from: 'stroke="currentColor" stroke-width="2" stroke-linecap="round"', to: 'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"',
+    run: DRAW_E2E, expect: /goldenBellIcon: bell-icon: the file is not test\/golden\/bell-icon\.svg byte for byte/,
+  },
+  {
+    id: 'B718', what: 'Gloss’s gradient centre moves from cx 0.35 to 0.4', slow: true, checks: ['goldenAppIcon'],
+    file: 'engine/paint/gloss.ts', from: "export const GLOSS_ATTRS = 'cx=\"0.35\" cy=\"0.3\" r=\"0.8\"';", to: "export const GLOSS_ATTRS = 'cx=\"0.4\" cy=\"0.3\" r=\"0.8\"';",
+    run: DRAW_E2E, expect: /goldenAppIcon: app-icon: the file is not test\/golden\/app-icon\.svg byte for byte/,
+  },
+  {
+    id: 'B719', what: 'Text to path keeps font-size on its path', slow: true, checks: ['goldenWordmark'],
+    file: 'engine/text/to-path.ts', from: "'font-family', 'font-size', 'font-size-adjust',", to: "'font-family', 'font-size-adjust',",
+    run: DRAW_E2E, expect: /goldenWordmark: wordmark: the file is not test\/golden\/wordmark\.svg byte for byte/,
   },
 ];
 
