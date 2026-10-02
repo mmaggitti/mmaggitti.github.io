@@ -3853,6 +3853,16 @@ const BREAKS = [
     file: 'engine/export/png-source.ts', from: '    made ??= openCopy(text);', to: '    made = openCopy(text);',
     run: engineTests('export/png-source.test.ts'), expect: /✖ pngCopier makes a sheet’s copies from one parse/,
   },
+  {
+    // The gate's boundary, whatever the phase: the first done row exactly one phase behind the current
+    // one is reopened (B22 and B249 plant faults two phases behind, which a gate off by one still refuses).
+    id: 'B731', what: 'a row one phase behind the current phase is reopened (planned): the gate lets the phase just behind keep open rows',
+    file: 'engine/ledger/ledger.json', from: /^[\s\S]+$/, to: (text) => {
+      const phase = Number(/"currentPhase": (\d+)/.exec(text)[1]);
+      return text.replace(new RegExp(`^(\\{"id":"[^"]+",[^\\n]*?"phase":${phase - 1},"status":)"done"`, 'm'), '$1"planned"');
+    },
+    run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is planned/,
+  },
 ];
 
 const args = process.argv.slice(2);
