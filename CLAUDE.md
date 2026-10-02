@@ -134,8 +134,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
     and text (`dom-text`) are also allowed in `src/codeview/`, which shows the source as text and
     never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
-  - file, clipboard, drag-and-drop, share, Web Locks and history APIs outside `src/platform/`
-    (`file-api`);
+  - file, clipboard, drag-and-drop, share, compression-stream, Web Locks and history APIs outside
+    `src/platform/` (`file-api`);
   - a password field outside `src/github/TokenForm.tsx`;
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
 - **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every

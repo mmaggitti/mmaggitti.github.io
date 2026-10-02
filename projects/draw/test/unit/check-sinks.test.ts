@@ -150,3 +150,57 @@ test('check-sinks keeps rasterizing to src/platform/ (P1-M5): new Image, new Off
   const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export type Kind = 'image' | 'canvas';\nexport const n = (x: { image: number }) => x.image;\nexport const m = (images: string[]) => images.length;\n" });
   assert.equal(fine.code, 0, fine.out);
 });
+
+test('check-sinks bans the raster names in any spelling outside src/platform/ (an alias, globalThis.…, [\'…\'], ?.(), and the read-back APIs): one finding per spelling; in platform/ they pass', () => {
+  const spellings = [
+    'export const a1 = () => new Image();',
+    'export const a2 = () => new Image;',
+    "export const a3 = () => new self['Image']();",
+    'export const a4 = () => new globalThis.Image(1, 1);',
+    'export const a5 = () => new globalThis.OffscreenCanvas(8, 8);',
+    "export const a6 = () => new window['OffscreenCanvas'](8, 8);",
+    'const OC = OffscreenCanvas; export const a7 = () => new OC(8, 8);',
+    "export const a8 = (c: HTMLCanvasElement) => c['getContext']('2d');",
+    "export const a9 = (c: HTMLCanvasElement) => c.getContext?.('2d');",
+    'export const a10 = (c: HTMLCanvasElement) => c.toDataURL();',
+    'export const a11 = (c: OffscreenCanvas) => c.transferToImageBitmap();',
+    'export const a12 = (c: HTMLCanvasElement) => c.captureStream();',
+    "export const a13 = (c: OffscreenCanvas) => c['convertToBlob']();",
+    'export const a14 = (b: Blob) => globalThis.createImageBitmap?.(b);',
+    "export const a15 = (b: Blob) => self['createImageBitmap'](b);",
+    'export const a16 = (c: HTMLCanvasElement) => c.transferControlToOffscreen();',
+    'export const a17 = (x: CanvasRenderingContext2D) => x.getImageData(0, 0, 1, 1);',
+  ];
+  const text = spellings.join('\n') + '\n';
+  const r = sinks({ 'projects/draw/src/panels/Sneaky.tsx': text, 'projects/draw/src/platform/raster-too.ts': text });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, spellings.map((_, i) => `projects/draw/src/panels/Sneaky.tsx:${i + 1} raster`).sort());
+  const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export type Kind = 'image' | 'canvas';\nexport const n = (x: { image: number }) => x.image;\nexport const d = () => new ImageData(1, 1);\nexport const el = (i: HTMLImageElement) => i.naturalWidth;\n" });
+  assert.equal(fine.code, 0, fine.out);
+});
+
+test('check-sinks keeps the share sheet, the clipboard, execCommand and the compression streams to src/platform/ in any spelling (?., [\'…\'], destructured): one finding per spelling; in platform/ they pass', () => {
+  const spellings = [
+    'export const s1 = () => navigator.share({ text: "x" });',
+    'export const s2 = () => navigator?.share({ text: "x" });',
+    "export const s3 = () => navigator['share']({ text: 'x' });",
+    'export const s4 = () => globalThis.navigator.canShare({});',
+    "export const s6 = () => (window.navigator as any)['canShare']({});",
+    'export const k1 = () => navigator.clipboard.writeText("x");',
+    "export const k2 = () => navigator['clipboard'].readText();",
+    'export const k3 = () => navigator?.clipboard?.read();',
+    'const { clipboard } = navigator; export const k4 = () => clipboard.read();',
+    "export const k5 = (e: ClipboardEvent) => e.clipboardData?.getData('text');",
+    "export const k6 = () => document.execCommand('copy');",
+    "export const k7 = (e: ClipboardEvent) => e['clipboardData'];",
+    'export const c1 = () => new CompressionStream("deflate-raw");',
+    "export const c2 = () => new globalThis.DecompressionStream('deflate-raw');",
+    "export const c3 = () => new (self as any)['CompressionStream']('gzip');",
+  ];
+  const text = spellings.join('\n') + '\n';
+  const r = sinks({ 'projects/draw/src/panels/Sneaky.tsx': text, 'projects/draw/src/platform/files-too.ts': text });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.findings, spellings.map((_, i) => `projects/draw/src/panels/Sneaky.tsx:${i + 1} file-api`).sort());
+  const fine = sinks({ 'projects/draw/src/panels/Fine.tsx': "export const label = 'Share';\nexport const n = (o: { share: boolean }) => o.share;\nexport const m = (props: { share: () => void }) => { const { share } = props; return share; };\nexport const KINDS = ['share', 'download'];\n" });
+  assert.equal(fine.code, 0, fine.out);
+});

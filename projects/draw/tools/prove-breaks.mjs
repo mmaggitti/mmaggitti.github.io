@@ -3587,7 +3587,7 @@ const BREAKS = [
   },
   {
     id: 'B678', what: 'check-sinks misses new OffscreenCanvas outside src/platform/',
-    file: 'projects/draw/tools/check-sinks.mjs', from: '/\\bnew\\s+(Image|OffscreenCanvas)\\s*\\(|', to: '/\\bnew\\s+(Image)\\s*\\(|',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['raster', /\\b(OffscreenCanvas|createImageBitmap|", to: "['raster', /\\b(createImageBitmap|",
     run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps rasterizing to src\/platform\//,
   },
   {
@@ -3801,6 +3801,16 @@ const BREAKS = [
     id: 'B720', what: 'inflate hands the decompressor the whole compressed file at once (Blob.stream()), so a link’s bomb expands far past the cap before a byte of it is counted',
     file: 'projects/draw/src/platform/files.ts', from: '  const stream = slices.pipeThrough(new DecompressionStream(format));', to: '  const stream = new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new DecompressionStream(format));',
     run: drawTests('files.test.ts'), expect: /✖ a link or an \.svgz reaches the decompressor 4 KiB at a time[\s\S]*went in chunks of up to \d+ bytes/,
+  },
+  {
+    id: 'B721', what: 'check-sinks’ raster rule goes back to the call forms only (new Image(, new OffscreenCanvas(, getContext( …): an alias, globalThis.…, [\'…\'], ?.() and the read-back APIs pass',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "  ['raster', /\\b(OffscreenCanvas|createImageBitmap|getContext|toBlob|toDataURL|convertToBlob|getImageData|transferToImageBitmap|transferControlToOffscreen|captureStream)\\b|\\bnew\\s+(?:[\\w$]+\\s*\\??\\.\\s*)*Image\\b|\\[\\s*['\"`]Image['\"`]\\s*\\]/, ['projects/draw/src/platform/']],", to: "  ['raster', /\\bnew\\s+(Image|OffscreenCanvas)\\s*\\(|\\b(getContext|toBlob|convertToBlob|createImageBitmap)\\s*\\(/, ['projects/draw/src/platform/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks bans the raster names in any spelling outside src\/platform\//,
+  },
+  {
+    id: 'B722', what: 'check-sinks’ file-api rule goes back to navigator.… only, without execCommand or the compression streams (?., [\'…\'], a destructured clipboard and new CompressionStream pass)',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker|execCommand|CompressionStream|DecompressionStream)\\b|\\.arrayBuffer\\s*\\(|\\bnavigator\\s*\\??\\.\\s*(clipboard|share|canShare|locks)\\b|\\[\\s*['\"`](clipboard|share|canShare|locks)['\"`]\\s*\\]|\\{[^}]*\\b(clipboard|share|canShare|locks)\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*navigator\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],", to: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\\b|\\.arrayBuffer\\s*\\(|navigator\\.(clipboard|share|canShare|locks)\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps the share sheet, the clipboard, execCommand and the compression streams to src\/platform\//,
   },
 ];
 
