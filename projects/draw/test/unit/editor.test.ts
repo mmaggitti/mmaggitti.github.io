@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { descendants, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, Editor, LOCKED, lineColumn, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
+import { BOOLEAN_LABELS, BOOLEAN_OPS, DETACHED, DRAWING_CHANGED, EMPTY_HINT, Editor, LOCKED, lineColumn, PEN_MODE_NOTICE, READ_ONLY, STYLE_PAINT, TEXT_FIRST, type CanvasPort, type EditorPorts } from '../../src/editor.ts';
 import { TEXT_NOTICE } from '../../src/interact/text-tool.ts';
 import { catalogueFamily, faceFile } from '../../src/platform/font-catalogue.ts';
 import { openFont, shape } from '../../src/text/outline-lib.ts';
@@ -3330,4 +3330,206 @@ test('an Access field is one entry while it has focus (P1-M4 S3): the drawing’
   r.editor.fieldEnd();
   assert.equal(entry(), 'Set metadata');
   assert.equal(r.editor.source(), plot.replace('<dc:title>Matplotlib v3.8.2, https://matplotlib.org/</dc:title>', '<dc:title>Mark</dc:title>'));
+});
+
+// ── P1-M5: Apple Pencil (hover, the remap, pen mode) ──────────────────────────────────────────
+
+const PENCIL_BOX = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="30" y="30" width="40" height="40"/>
+</svg>`;
+const rectXY = (r: Rig) => {
+  const n = element(doc(r), (e) => e.local === 'rect');
+  return [Number(attr(n, 'x')), Number(attr(n, 'y'))];
+};
+
+test('a hovering Pencil lights the handle a press would take, within 26 px and not beyond, and marks the point a press would snap to; nothing in the file or the history changes', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  r.editor.snap.set({ grid: false, guides: true, shapes: false, artboard: false });
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const before = r.editor.source();
+  const se = r.editor.overlayModel().handles.filter((h) => h.kind === 'anchor').sort((p, q) => q.at.x + q.at.y - (p.at.x + p.at.y))[0];
+  r.editor.hover({ x: se.at.x - 20, y: se.at.y });
+  assert.equal(r.editor.overlayModel().hover?.handle, se.id, '20 px from the bottom-right corner: that handle');
+  r.editor.hover({ x: se.at.x - 40, y: se.at.y });
+  assert.equal(r.editor.overlayModel().hover?.handle, null, '40 px away: none');
+  r.editor.addGuide('v'); // x = 50
+  const guideX = hostAt(r, 50, 0).x;
+  r.editor.hover({ x: guideX + 3, y: hostAt(r, 0, 90).y });
+  const h = r.editor.overlayModel().hover!;
+  assert.ok(h.ring && Math.abs(h.ring.x - guideX) < 0.5, `the snap ring at ${h.ring?.x}, the guide at ${guideX}`);
+  assert.ok(h.lines.some((l) => Math.abs(l.from.x - guideX) < 0.5 && Math.abs(l.to.x - guideX) < 0.5), 'and the snap line on the guide');
+  r.editor.hover({ x: guideX + 60, y: hostAt(r, 0, 90).y });
+  assert.equal(r.editor.overlayModel().hover?.ring, null, 'far from every target: no ring');
+  r.editor.hover(null);
+  assert.equal(r.editor.overlayModel().hover, undefined, 'gone');
+  r.editor.undo(); // the guide
+  assert.equal(r.editor.source(), before, 'hovering wrote nothing');
+  assert.equal(r.editor.history.get().canUndo, false, 'and made no entry');
+});
+
+test('a hovering Pencil gathers its snap targets once while nothing they depend on changes: ten frames measure the drawing as one gather does, and once more after an edit, a pan, a snap preference, a tool or a selection changes', () => {
+  const measured: NodeId[][] = [];
+  const r = rig(HOST, { measure: (ids) => (measured.push([...ids]), measureWith(r.editor, ids, true)) });
+  const shapes = Array.from({ length: 50 }, (_, i) => `<rect id="s${i}" x="${i}" y="${i % 10}" width="5" height="5"/>`).join('');
+  r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${shapes}</svg>`);
+  r.editor.pickTool('shapes');
+  // Nothing is selected, so only the snap targets measure the drawing's shapes (s49 among them).
+  const last = idOf(r, 's49');
+  const measures = () => measured.filter((ids) => ids.includes(last)).length;
+  /** How often the drawing is measured over a change and then `n` hover frames. */
+  const over = (change: () => void, n: number) => {
+    const before = measures();
+    change();
+    for (let i = 0; i < n; i++) r.editor.hover({ x: 120 + i, y: 140 + i });
+    return measures() - before;
+  };
+  const gather = over(() => {}, 1);
+  assert.ok(gather > 0, 'the first frame gathers the targets');
+  assert.equal(over(() => {}, 9), 0, 'nine more frames on an unchanged drawing measure nothing again: ten frames, one gather');
+  assert.equal(over(() => r.editor.addGuide('v'), 10), gather, 'an edit (a guide) and ten frames: one gather');
+  assert.equal(over(() => r.editor.panBy(30, 0), 10), gather, 'a pan and ten frames: one gather');
+  assert.equal(over(() => r.editor.snap.set({ grid: false, guides: true, shapes: true, artboard: false }), 10), gather, 'a snap preference and ten frames: one gather');
+  assert.equal(over(() => r.editor.pickTool('select'), 10), gather, 'a tool change and ten frames: one gather');
+  assert.equal(over(() => r.editor.select([idOf(r, 's0')]), 10), gather, 'a selection and ten frames: one gather');
+  r.editor.hover(null);
+});
+
+test('a hover ends with a press, a tool change and an open', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  const a = idOf(r, 'a');
+  r.editor.select([a]);
+  const se = r.editor.overlayModel().handles.find((h) => h.kind === 'anchor')!;
+  const near = { x: se.at.x + 5, y: se.at.y + 5 };
+  r.editor.hover(near);
+  assert.ok(r.editor.overlayModel().hover);
+  r.editor.pointerDown(near, [a], { add: false });
+  assert.equal(r.editor.overlayModel().hover, undefined, 'a press');
+  r.editor.pointerCancel();
+  r.editor.hover(near);
+  r.editor.pickTool('shapes');
+  assert.equal(r.editor.overlayModel().hover, undefined, 'a tool change');
+  r.editor.pickTool('select');
+  r.editor.hover(near);
+  r.editor.open(PENCIL_BOX);
+  assert.equal(r.editor.overlayModel().hover, undefined, 'an open');
+});
+
+test('a pan during a Pencil drag leaves the dragged shape under the pen: the press keeps its point in root units', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  r.editor.snap.set(NO_SNAP);
+  const a = idOf(r, 'a');
+  const at0 = hostAt(r, 50, 50);
+  // A finger pans 40 px while the Pencil holds its press; the pen then goes to the point it pressed.
+  r.editor.pointerDown(at0, [a], { add: false });
+  r.editor.panBy(40, 0);
+  r.editor.pointerDrag({ x: at0.x + 40, y: at0.y });
+  r.editor.pointerUp({ x: at0.x + 40, y: at0.y });
+  assert.deepEqual(rectXY(r), [30, 30], 'the shape has not moved');
+  // A drag of 10 px, a 40 px pan, then the pen 10 px further: the shape is under the pen, 20 px left of where it began in the drawing.
+  const k = pxPerUnit(r);
+  const p0 = hostAt(r, 50, 50);
+  r.editor.pointerDown(p0, [a], { add: false });
+  r.editor.pointerDrag({ x: p0.x + 10, y: p0.y });
+  r.editor.panBy(40, 0);
+  assert.equal(rectXY(r)[0], 30 + Math.round((10 - 40) / k), 'the pan redraws the frame: the shape stays under the pen');
+  r.editor.pointerDrag({ x: p0.x + 20, y: p0.y });
+  r.editor.pointerUp({ x: p0.x + 20, y: p0.y });
+  assert.deepEqual(rectXY(r), [30 + Math.round((20 - 40) / k), 30]);
+  assert.equal(r.editor.history.get().undoLabel, 'Move', 'one entry');
+  r.editor.undo();
+  assert.deepEqual(rectXY(r), [30, 30]);
+});
+
+test('pen mode: the Stage’s latch sets penMode and says so once a visit; the Pencil button leaves it', () => {
+  const r = rig();
+  r.editor.open(PENCIL_BOX);
+  assert.equal(r.editor.penMode.get(), false);
+  r.editor.enterPenMode();
+  assert.equal(r.editor.penMode.get(), true);
+  assert.equal(r.editor.notice.get(), PEN_MODE_NOTICE);
+  assert.equal(PEN_MODE_NOTICE, 'Apple Pencil draws; fingers move the view. Tap Pencil in the rail to draw with a finger.');
+  r.editor.notice.set(null);
+  r.editor.leavePenMode();
+  assert.equal(r.editor.penMode.get(), false);
+  r.editor.enterPenMode();
+  assert.equal(r.editor.penMode.get(), true, 'latched again');
+  assert.equal(r.editor.notice.get(), null, 'the notice is said once a visit');
+});
+
+// ── P1-M5 S3: Insert, Edit the drawing's source, the empty state ───────────────────────────────
+
+const INSERT_INTO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect id="a" x="10" y="10" width="10" height="10"/>
+</svg>`;
+
+test('Insert puts SVG in as one <g>, last in the root: one "Insert" entry that undo takes back, the <g> selected, the tool kept; a refusal is the notice and the sheet stays', () => {
+  const r = rig();
+  r.editor.open(INSERT_INTO);
+  r.editor.pickTool('node');
+  r.editor.openInsert();
+  assert.equal(r.editor.sheet.get()?.kind, 'insert');
+  assert.equal(r.editor.insert('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle id="a" cx="50" cy="40" r="24"/><use href="#a"/></svg>'), true);
+  assert.equal(r.editor.source(), INSERT_INTO.replace('\n</svg>', '\n  <g><circle id="a-2" cx="50" cy="40" r="24"/><use href="#a-2"/></g>\n</svg>'), 'its clashing id renamed with its reference');
+  const g = element(doc(r), (n) => n.local === 'g');
+  assert.deepEqual([...r.editor.selection.get()], [g.id], 'the <g> is selected');
+  assert.equal(r.editor.tool.get(), 'node', 'the tool is kept');
+  assert.equal(r.editor.sheet.get(), null, 'the sheet closed');
+  assert.equal(r.editor.history.get().undoLabel, 'Insert');
+  r.editor.undo();
+  assert.equal(r.editor.source(), INSERT_INTO, 'undo gives the file back');
+  assert.equal(r.editor.history.get().canUndo, false, 'it was one entry');
+  r.editor.openInsert();
+  assert.equal(r.editor.insert('<svg xmlns="http://www.w3.org/2000/svg"><rect</svg>'), false);
+  assert.match(r.editor.notice.get() ?? '', /can’t be read \(line 1, column/);
+  assert.equal(r.editor.sheet.get()?.kind, 'insert', 'the sheet stays for another try');
+  assert.equal(r.editor.source(), INSERT_INTO);
+});
+
+test('Edit the drawing’s source: the sheet holds everything between the root’s tags; Apply is one "Edit source" entry undo takes back; text that doesn’t parse changes nothing and says where', () => {
+  const r = rig();
+  const file = `<?xml version="1.0"?>\n${INSERT_INTO}\n`;
+  r.editor.open(file);
+  assert.equal(r.editor.canEditDrawingSource(), true);
+  r.editor.select([idOf(r, 'a')]);
+  r.editor.openDrawingSource();
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'source' && sheet.whole, 'the source sheet, on the whole drawing');
+  assert.deepEqual(sheet.whole, { start: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">', end: '</svg>' });
+  assert.equal(sheet.text, '\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n');
+  const text = '\n  <rect id="a" x="10" y="10" width="10" height="10"/>\n  <circle cx="50" cy="50" r="5"/>\n';
+  assert.equal(r.editor.applyDrawingSource(text), null);
+  assert.equal(r.editor.source(), `<?xml version="1.0"?>\n${sheet.whole.start}${text}${sheet.whole.end}\n`, 'exactly the start tag, the text and the end tag; the prolog and epilog kept');
+  assert.equal(r.editor.sheet.get(), null);
+  assert.equal(r.editor.selection.get().size, 0, 'the selection empties');
+  assert.equal(r.editor.history.get().undoLabel, 'Edit source');
+  r.editor.undo();
+  assert.equal(r.editor.source(), file, 'one undo gives the bytes back');
+  r.editor.openDrawingSource();
+  const bad = r.editor.applyDrawingSource('\n  <rect\n');
+  assert.ok(bad && bad.line === 3 && bad.column === 1, JSON.stringify(bad));
+  assert.equal(r.editor.source(), file, 'nothing changed');
+  assert.equal(r.editor.history.get().canUndo, false);
+  assert.equal(r.editor.sheet.get()?.kind, 'source', 'the sheet keeps the text');
+});
+
+test('the empty state: an open drawing with nothing the canvas draws as a shape (lab/create.svg, only a <title>, only a <defs>) is empty, until a shape; the hint’s words with the rail below and on the left', () => {
+  const r = rig();
+  for (const body of ['', '<title>Nothing yet</title>', '<defs><linearGradient id="g"/><rect id="r" width="1" height="1"/></defs>']) {
+    r.editor.open(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`);
+    assert.equal(r.editor.isEmpty(), true, body || 'nothing');
+  }
+  r.editor.pickTool('shapes');
+  const at = hostAt(r, 50, 50);
+  r.editor.pointerDown(at, [], { add: false });
+  r.editor.pointerUp(at);
+  assert.equal(r.editor.isEmpty(), false, 'a shape placed');
+  r.editor.undo();
+  assert.equal(r.editor.isEmpty(), true, 'and undone');
+  r.editor.open(INSERT_INTO);
+  assert.equal(r.editor.isEmpty(), false);
+  assert.deepEqual(EMPTY_HINT, { below: 'Add a shape below', left: 'Add a shape with the tools' });
 });

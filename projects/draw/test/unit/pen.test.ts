@@ -73,7 +73,7 @@ test('Pen drags: a drag makes a Q leaving the point along the drag (its in-handl
   assert.equal(d(e), 'M 20 80 Q 40 30 50 20 C 60 10 70 60 80 50');
   tap(e, 90, 90); // A (80, 50) was dragged to (90, 40): a Q leaving it that way
   assert.equal(d(e), 'M 20 80 Q 40 30 50 20 C 60 10 70 60 80 50 Q 90 40 90 90');
-  // The brief's e2e numbers: a drag from (80, 50) to (90, 40) after (20, 80), (50, 20), (80, 80) appends Q 70 60 80 50.
+  // The e2e's numbers (thePenTapsLinesAndDragsCurves): a drag from (80, 50) to (90, 40) after (20, 80), (50, 20), (80, 80) appends Q 70 60 80 50.
   const f = open(CREATE);
   f.pickTool('pen');
   tap(f, 20, 80);

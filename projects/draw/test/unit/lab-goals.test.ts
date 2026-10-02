@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { attrValue, descendants, textContent, type Doc, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { Editor } from '../../src/editor.ts';
 import type { ViewBlock, ViewToken } from '../../src/codeview/code-view.ts';
-import { bind, corpus, fakePorts } from './fakes.ts';
+import { SAMPLE, bind, corpus, edit, fakePorts, lockTable } from './fakes.ts';
 import { dashPresets, paintKinds } from '../../src/style-edit.ts';
 import { colorChoices, styleSlot, PALETTE } from '../../src/color-choices.ts';
 import { parsePath } from '../../../../engine/path/parse.ts';
@@ -19,6 +19,10 @@ import { tokenizeAttr, tokenizeText } from '../../../../engine/code/tokens.ts';
 import { arcCenter, arcPoint, type ArcCenter } from '../../../../engine/path/arc.ts';
 import { insideAt } from '../../../../engine/path/winding.ts';
 import { donutOf, donutSlices } from '../../../../engine/generators/donut.ts';
+import { DOTS, FIRST_DOTS, dotsCaption, fitInto, gridShows, shapeCount, shapesCaption } from '../../../../engine/export/raster.ts';
+import { Workspace } from '../../src/workspace.ts';
+import { DraftStore, memoryJournal, memoryKV } from '../../src/platform/drafts.ts';
+import { readFileSync } from 'node:fs';
 
 interface Rig {
   editor: Editor;
@@ -28,6 +32,15 @@ interface Rig {
 
 /** The real editor over fake ports that keep the code listing, with a lab corpus file open (`patched`: the elements the canvas patches). */
 function open(name: string, patched?: NodeId[]): Rig {
+  const { editor, listing } = listingEditor(patched);
+  const file = corpus(name);
+  const r = editor.open(file);
+  assert.ok(r.ok, r.error);
+  return { editor, file, listing };
+}
+
+/** The real editor over fake ports that keep the code listing, nothing open yet. */
+function listingEditor(patched?: NodeId[]): { editor: Editor; listing: Map<string, ViewBlock> } {
   const listing = new Map<string, ViewBlock>();
   const ports = fakePorts();
   if (patched) ports.canvas = { ...ports.canvas, patchAttributes: (id) => void patched.push(id) };
@@ -46,11 +59,7 @@ function open(name: string, patched?: NodeId[]): Rig {
       for (const k of keys) listing.delete(k);
     },
   };
-  const editor = bind(ports, new Editor(ports));
-  const file = corpus(name);
-  const r = editor.open(file);
-  assert.ok(r.ok, r.error);
-  return { editor, file, listing };
+  return { editor: bind(ports, new Editor(ports)), listing };
 }
 
 const doc = (r: Rig): Doc => r.editor.doc!;
@@ -1141,4 +1150,225 @@ test('lab/create.svg (name-drawing): the Access tab’s Title on writes SVG Lab�
   assert.equal(r.editor.source(), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="drawing-title">\n  <title id="drawing-title">My drawing</title>\n</svg>\n');
   assert.equal(r.editor.access()!.said, '“My drawing, image”');
   oneEntry(r, 'Add title');
+});
+
+// ── P1-M5 S1: the Finish sheet's comparison (the Vector lesson), and SVG Lab's templates from New… ──
+
+const LAB_PAGE = readFileSync(new URL('../../../svg-lab/index.html', import.meta.url), 'utf8');
+
+test('lab/vector.svg (two-pane-compare, raster-resolution, pixel-grid, pane-captions): Finish’s comparison for the lab’s own file: 32 dots first of 16, 32 and 64, its square board filling them, the captions exactly the lab’s, and at a 202 px pane the grid for 16 at any ratio, for 32 only at 3×, never for 64', () => {
+  const r = open('lab/vector.svg');
+  assert.deepEqual(DOTS, [16, 32, 64]);
+  assert.equal(FIRST_DOTS, 32);
+  assert.match(LAB_PAGE, /res: 32,/, 'the lab’s first res');
+  assert.match(LAB_PAGE, /\[16, 32, 64\]\.map\(\(r\) => `<button class="chip" data-res="\$\{r\}"/, 'the lab’s chips');
+  const board = r.editor.board()!;
+  assert.deepEqual(board, { x: 0, y: 0, width: 100, height: 100 });
+  for (const res of DOTS) assert.deepEqual(fitInto(board, res), { x: 0, y: 0, w: res, h: res }, `its square board fills ${res} × ${res}`);
+  // The captions, as the lab writes them (draw, L1325-1326) for its two nodes.
+  assert.match(LAB_PAGE, /`\$\{s\.res\} × \$\{s\.res\} = \$\{\(s\.res \* s\.res\)\.toLocaleString\('en-US'\)\} dots`/);
+  assert.match(LAB_PAGE, /`\$\{nodes\.length\} shapes, sharp at any size`/);
+  assert.equal(dotsCaption(32), '32 × 32 = 1,024 dots');
+  assert.equal(dotsCaption(16), '16 × 16 = 256 dots');
+  assert.equal(shapeCount(doc(r)), 2, 'the circle and the star');
+  assert.equal(shapesCaption(shapeCount(doc(r))), '2 shapes, sharp at any size');
+  // The lab's grid rule (paintPx): sc = the pane's device pixels over the dots, shown at 12 or more.
+  assert.match(LAB_PAGE, /const sc = W \/ \(v\.w \* k\);\n\s*if \(sc >= 12\)/);
+  assert.deepEqual([gridShows(202, 1, 16), gridShows(202, 3, 16)], [true, true]);
+  assert.deepEqual([gridShows(202, 1, 32), gridShows(202, 3, 32)], [false, true]);
+  assert.deepEqual([gridShows(202, 1, 64), gridShows(202, 3, 64)], [false, false]);
+  assert.equal(r.editor.source(), r.file, 'the file never changes');
+});
+
+/** A Workspace over the listing editor (drafts in memory), with a drawing changed before New: the preset opened as a new drawing. */
+async function openPreset(id: string) {
+  const { editor, listing } = listingEditor();
+  const kv = memoryKV();
+  const store = new DraftStore(kv);
+  const ws = new Workspace(editor, { store, lock: lockTable().lock, sample: SAMPLE, journal: memoryJournal() });
+  await ws.openSample();
+  edit(editor, 'circle', '<circle cx="1" cy="1" r="1"/>'); // the drawing open before, changed
+  const before = editor.source();
+  assert.ok(await ws.newFrom(id));
+  await ws.autosave.flush();
+  const r: Rig = { editor, file: editor.source(), listing };
+  return { r, ws, store, before };
+}
+
+test('SVG Lab’s Icon from New… (template-icon): lab/create-icon.svg byte for byte as a new drawing; its rect takes the corner handles and its rx token sets 24, its heart the Node tool’s anchors and controls; one entry each', async () => {
+  const { r, ws } = await openPreset('lab-icon');
+  assert.equal(r.editor.source(), corpus('lab/create-icon.svg'));
+  assert.equal(ws.current.get()?.name, 'SVG Lab icon');
+  const rect = element(r, 'rect');
+  r.editor.select([rect.id]);
+  const ids = r.editor.overlayModel().handles.map((h) => h.id);
+  for (const c of ['tl', 'tr', 'br', 'bl']) assert.ok(ids.includes(c), `the rect’s ${c} corner handle: ${ids}`);
+  gesture(r, handleAt(r, 'br'), hostOf(r, 92, 92));
+  assert.equal(r.editor.source(), r.file.replace('width="76"', 'width="80"').replace('height="76"', 'height="80"'), 'a corner drag: only its width and height');
+  oneEntry(r, 'Resize');
+  r.editor.undo();
+  setNumber(r, rect.id, 'rx=', '24');
+  assert.equal(r.editor.source(), edited(r.file, 'rx="18"', 'rx="24"'), 'the rx token: only its bytes');
+  oneEntry(r, r.editor.history.get().undoLabel!);
+  r.editor.undo();
+  const heart = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([heart.id]);
+  const hs = r.editor.overlayModel().handles;
+  assert.deepEqual(hs.filter((h) => /^a\d/.test(h.id)).map((h) => h.id), ['a0', 'a1', 'a2', 'a3'], 'the heart’s four anchors');
+  assert.equal(hs.filter((h) => /^c\d/.test(h.id)).length, 8, 'and its eight curve controls');
+  assert.deepEqual(hostOf(r, 50, 40), handleAt(r, 'a0'), 'its first anchor sits on M 50 40');
+});
+
+test('SVG Lab’s Logo from New… (template-logo): lab/create-logo.svg byte for byte as a new drawing; its wave’s Q controls and anchors in the Node tool, and its SUNWAVE text takes Edit text', async () => {
+  const { r, ws } = await openPreset('lab-logo');
+  assert.equal(r.editor.source(), corpus('lab/create-logo.svg'));
+  assert.equal(ws.current.get()?.name, 'SVG Lab logo');
+  const wave = element(r, 'path');
+  r.editor.pickTool('node');
+  r.editor.select([wave.id]);
+  assert.deepEqual(r.editor.overlayModel().handles.map((h) => h.id), ['center', 'c1', 'c2', 'a0', 'a1', 'a2'], 'the wave’s two Q controls and three anchors');
+  assert.deepEqual(handleAt(r, 'c1'), hostOf(r, 40, 32), 'its first control on Q 40 32');
+  assert.deepEqual(handleAt(r, 'c2'), hostOf(r, 60, 56), 'its second on Q 60 56');
+  assert.deepEqual(handleAt(r, 'a2'), hostOf(r, 70, 44), 'and its end anchor on 70 44');
+  r.editor.pickTool('select');
+  const text = element(r, 'text');
+  r.editor.select([text.id]);
+  assert.equal(r.editor.canEditText(), true);
+  r.editor.editText();
+  const sheet = r.editor.sheet.get();
+  assert.ok(sheet?.kind === 'lines' && sheet.text === 'SUNWAVE', 'Edit text opens on SUNWAVE');
+  r.editor.closeSheet();
+});
+
+test('SVG Lab’s Blank from New… (template-blank): lab/create-blank.svg byte for byte as a new drawing, and the drawing open before it, changed, stays in Files as its draft', async () => {
+  const { r, ws, store, before } = await openPreset('lab-blank');
+  assert.equal(r.editor.source(), corpus('lab/create-blank.svg'));
+  assert.equal(ws.current.get()?.name, 'SVG Lab blank');
+  assert.equal(r.editor.history.get().canUndo, false, 'a new drawing');
+  const drafts = await store.list();
+  assert.deepEqual(drafts.map((d) => d.name), ['Sample'], 'the drawing open before is a draft');
+  assert.equal((await store.load(drafts[0].id))!.text, before, 'with its change');
+});
+
+// ── P1-M5 S3: the rest of Create ─────────────────────────────────────────────────────────────
+
+/** The file changed, and only inside the value of attribute `attr` (written once in the file). */
+function onlyIn(r: Rig, attr: string): void {
+  const now = r.editor.source();
+  const i = r.file.indexOf(`${attr}="`);
+  assert.ok(i >= 0 && r.file.indexOf(`${attr}="`, i + 1) === -1, `${attr} occurs once`);
+  const start = i + attr.length + 2;
+  const end = r.file.indexOf('"', start);
+  assert.equal(now.slice(0, start), r.file.slice(0, start), `before ${attr}'s value`);
+  assert.equal(now.slice(now.length - (r.file.length - end)), r.file.slice(end), `after ${attr}'s value`);
+  assert.notEqual(now, r.file);
+}
+
+test('lab/create-icon.svg and lab/create-logo.svg (code-tokens): a number scrubbed and one set in its sheet, a fill and a stroke through the Colour sheet, a path letter’s cycle (the heart’s C, the wave’s Q), linecap and linejoin; each one entry and only its bytes', () => {
+  const icon = open('lab/create-icon.svg');
+  const rect = element(icon, 'rect');
+  const x = token(icon, rect.id, 'number', 'x=');
+  icon.editor.scrubStart(x.block, x.token);
+  icon.editor.scrub(2);
+  icon.editor.scrubEnd(true);
+  assert.equal(icon.editor.source(), edited(icon.file, '\n    x="12"', '\n    x="14"'));
+  oneEntry(icon, 'Scrub x');
+  icon.editor.undo();
+  setNumber(icon, rect.id, 'rx=', '9');
+  assert.equal(icon.editor.source(), edited(icon.file, 'rx="18"', 'rx="9"'));
+  oneEntry(icon, 'Set rx');
+  icon.editor.undo();
+  const fill = token(icon, rect.id, 'color', 'fill');
+  icon.editor.tapToken(fill.block, fill.token);
+  assert.equal(icon.editor.sheet.get()?.kind, 'color');
+  assert.ok('text' in icon.editor.sheetInput('#e9c46a'));
+  icon.editor.closeSheet();
+  assert.equal(icon.editor.source(), edited(icon.file, 'fill="#264653"', 'fill="#e9c46a"'));
+  oneEntry(icon, 'Set fill');
+  icon.editor.undo();
+  const heart = element(icon, 'path');
+  const C = token(icon, heart.id, 'enum', 'd=');
+  assert.equal(C.block.text.slice(C.token.start, C.token.end), 'C');
+  icon.editor.tapToken(C.block, C.token);
+  onlyIn(icon, 'd');
+  oneEntry(icon, 'Set segment');
+  icon.editor.undo();
+
+  const logo = open('lab/create-logo.svg');
+  const wave = element(logo, 'path');
+  const stroke = token(logo, wave.id, 'color', 'stroke');
+  logo.editor.tapToken(stroke.block, stroke.token);
+  assert.equal(logo.editor.sheet.get()?.kind, 'color');
+  assert.ok('text' in logo.editor.sheetInput('#e76f51'));
+  logo.editor.closeSheet();
+  assert.equal(logo.editor.source(), edited(logo.file, 'stroke="#264653"', 'stroke="#e76f51"'));
+  oneEntry(logo, 'Set stroke');
+  logo.editor.undo();
+  for (const name of ['stroke-linecap', 'stroke-linejoin']) {
+    const k = token(logo, wave.id, 'enum', name);
+    logo.editor.tapToken(k.block, k.token);
+    assert.notEqual(attrValue(doc(logo), wave, null, name), 'round', `${name} cycles`);
+    onlyIn(logo, name);
+    oneEntry(logo, `Set ${name}`);
+    logo.editor.undo();
+  }
+  const Q = token(logo, wave.id, 'enum', 'd=');
+  assert.equal(Q.block.text.slice(Q.token.start, Q.token.end), 'Q');
+  logo.editor.tapToken(Q.block, Q.token);
+  onlyIn(logo, 'd');
+  oneEntry(logo, 'Set segment');
+});
+
+/** The real editor in a Workspace over memoryKV() drafts, with lab/create.svg opened as a file. */
+async function createWorkspace() {
+  const { editor, listing } = listingEditor();
+  const store = new DraftStore(memoryKV());
+  const ws = new Workspace(editor, { store, lock: lockTable().lock, sample: SAMPLE, journal: memoryJournal() });
+  await ws.openSample();
+  assert.ok(await ws.openText(corpus('lab/create.svg'), 'create.svg', 'file'));
+  const r: Rig = { editor, file: editor.source(), listing };
+  return { r, ws, store };
+}
+
+test('lab/create.svg (export, goal-export): a shape placed; Copy puts the standalone file on the clipboard, xmlns and all; an As-is export is that file under the drawing’s name; and an export resets the draft’s “not exported” reminder', async () => {
+  const { r, ws, store } = await createWorkspace();
+  place(r, 'rect', 50, 50);
+  assert.ok(r.editor.source() !== r.file && /<rect /.test(r.editor.source()), 'a shape placed');
+  await ws.autosave.flush();
+  let copied: string | null = null;
+  assert.ok(await ws.copy(async (t) => ((copied = t), true)));
+  assert.equal(copied, r.editor.source(), 'Copy: the whole file');
+  assert.match(copied!, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/, 'standalone, with its xmlns');
+  const f = ws.exportFile('as-is')!;
+  assert.equal(f.fileName, 'create.svg', 'named for its drawing, not my-drawing.svg');
+  assert.equal(new TextDecoder().decode(f.bytes), r.editor.source());
+  const draft = async () => (await store.list()).find((d) => d.name === 'create')!;
+  assert.equal((await draft()).exported, null, 'a draft not exported yet');
+  await ws.exported({ fileName: f.fileName, kind: f.kind }, 'downloaded');
+  assert.notEqual((await draft()).exported, null, 'the goal: it left Draw, and the reminder reset');
+});
+
+test('lab/create.svg (paste-shapes): the Insert tool puts the lab’s logo in as one <g> holding its circle, path and text, with no transform (both boards are 100 units), selected, in one entry', () => {
+  const r = open('lab/create.svg');
+  assert.ok(r.editor.insert(corpus('lab/create-logo.svg')));
+  const root = doc(r).nodes.get(doc(r).root) as ElementNode;
+  const last = [...root.children].reverse().map((c) => doc(r).nodes.get(c)!).find((n): n is ElementNode => n.kind === 'element')!;
+  assert.equal(last.local, 'g');
+  assert.equal(attrValue(doc(r), last, null, 'transform'), null, 'no transform');
+  const kids = last.children.map((c) => doc(r).nodes.get(c)!).filter((n): n is ElementNode => n.kind === 'element').map((n) => n.local);
+  assert.deepEqual(kids, ['circle', 'path', 'text']);
+  assert.deepEqual([...r.editor.selection.get()], [last.id], 'selected');
+  oneEntry(r, 'Insert');
+});
+
+test('lab/create.svg (empty-state): empty at first, not once the Shapes tool places a shape, empty again after undo; the hint is the app’s, never in the file', () => {
+  const r = open('lab/create.svg');
+  assert.equal(r.editor.isEmpty(), true);
+  place(r, 'rect', 50, 50);
+  assert.equal(r.editor.isEmpty(), false);
+  r.editor.undo();
+  assert.equal(r.editor.isEmpty(), true);
+  assert.equal(r.editor.source(), r.file);
+  assert.ok(!r.editor.source().includes('Add a shape'), 'never in the file');
 });

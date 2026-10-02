@@ -8,13 +8,15 @@
 // of its size, node count, depth (from the insertion point) and entity budget, so Draw never writes
 // a file it can't open again. What the text spends on entities is charged to the document's budget
 // for good (an undo can bring any version back), and what is left is measured with the element Edit
-// source replaces still in place: both err on the side of refusing.
+// source replaces still in place: both err on the side of refusing. Replacing a whole element's
+// content (replaceContent) removes the old content first, so it is measured without it.
 //
 // Nodes made here have no source span: serialize writes them from their own raw pieces, which are
 // exactly the text that was parsed.
 
 import { DEFAULT_LIMITS, type Limits } from '../xml/cst.ts';
 import { el, parseDoc, serialize, type Doc, type ElementNode, type Node, type NodeId } from './doc.ts';
+import { opInsert, opRemove, type Op } from '../commands/ops.ts';
 
 const XMLNS = 'http://www.w3.org/2000/xmlns/';
 const WRAPPER = 'draw-fragment';
@@ -64,6 +66,33 @@ export function parseFragment(doc: Doc, scope: NodeId, text: string): FragmentRe
   for (const id of top) adopt(id, null);
   doc.version++;
   return { ok: true, nodes: [...top] };
+}
+
+/** Text replaceContent can't parse: where in the text, and why. Thrown inside the transaction, so the removals roll back. */
+export class ContentError extends Error {
+  at: number;
+  constructor(at: number, message: string) {
+    super(message);
+    this.at = at;
+  }
+}
+
+/**
+ * Edit the drawing's source (P1-M5): everything inside `scope` (its elements, text, comments and PIs)
+ * replaced by what `text` parses to there, in order, as ops handed to `apply` (one transaction), so the
+ * element becomes exactly its start tag, the text and its end tag, and whatever lies outside it (the
+ * prolog and epilog, for the root) stays. The old content is removed first, as Replace this one does
+ * (model/replace.ts), so the text has the document's limits without it: an unchanged Apply always fits.
+ * Text that doesn't parse throws ContentError, saying where, and the transaction rolls the removals
+ * back (Session.run): nothing changes.
+ */
+export function replaceContent(doc: Doc, scope: NodeId, text: string, apply: (op: Op) => void): void {
+  // Last child first: each removal is then at the end of the list (and its undo appends), not a
+  // shift of every child after it.
+  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));
+  const made = parseFragment(doc, scope, text);
+  if (!made.ok) throw new ContentError(made.error.at, made.error.message);
+  made.nodes.forEach((id, i) => apply(opInsert(doc, id, scope, i)));
 }
 
 // The tokens the parser would count in the saved document (every node, and each end tag), so a

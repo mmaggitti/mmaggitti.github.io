@@ -3,11 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { parseDoc, serialize, serializeNode, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
-import { parseFragment } from '../model/fragment.ts';
+import { parseDoc, serialize, serializeNode, serializeParts, descendants, el, NS, type Doc, type ElementNode, type NodeId } from '../model/doc.ts';
+import { ContentError, parseFragment, replaceContent } from '../model/fragment.ts';
 import { ENTITY_BUDGET } from '../xml/entities.ts';
 import { opInsert, opRemove } from '../commands/ops.ts';
 import { Session } from '../commands/session.ts';
+import { linear } from './timing.ts';
 
 const SRC = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="http://www.w3.org/1999/xlink">\n  <g id="a"><rect  width="1"/></g>\n  <circle r="2"/>\n</svg>`;
 
@@ -204,4 +205,78 @@ test('Edit source cannot bring in a DOCTYPE or an XML declaration (a browser ref
   }
   assert.ok(parseFragment(r.doc, r.doc.root, '<?xml-stylesheet href="a.css"?><rect/>').ok, 'another processing instruction is fine');
   assert.equal(serialize(r.doc), before);
+});
+
+// ── P1-M5: Edit the drawing's source (the root's whole content) ────────────────────────────────
+
+const WHOLE = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by hand -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n  <title>t</title>\n  <rect x="1" y="1" width="2" height="2"/>\n</svg>\n<!-- after -->\n`;
+
+test('serializeParts: an element as its start tag, its content and its end tag, exactly as serialize writes them', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const parts = serializeParts(doc, doc.root);
+  assert.deepEqual(parts, { start: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">', content: '\n  <title>t</title>\n  <rect x="1" y="1" width="2" height="2"/>\n', end: '</svg>' });
+  assert.equal(parts.start + parts.content + parts.end, serializeNode(doc, doc.root));
+  const empty = parseDoc('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  assert.ok(empty.ok);
+  assert.deepEqual(serializeParts(empty.doc, empty.doc.root), { start: '<svg xmlns="http://www.w3.org/2000/svg"/>', content: '', end: '' });
+});
+
+test('replaceContent: the root becomes exactly its start tag, the text and its end tag, the prolog and epilog kept, in one entry undo takes back', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const s = new Session(doc);
+  const text = '\n  <circle cx="5" cy="5" r="3"/>\n  <!-- a note -->\n';
+  s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, text, apply));
+  assert.equal(serialize(doc), `<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by hand -->\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${text}</svg>\n<!-- after -->\n`);
+  assert.equal(s.undoLabel, 'Edit source');
+  s.undo();
+  assert.equal(serialize(doc), WHOLE, 'one undo gives the bytes back');
+  assert.equal(s.canUndo, false, 'it was one entry');
+});
+
+test('replaceContent: text that doesn’t parse changes nothing and says where', () => {
+  const p = parseDoc(WHOLE);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const s = new Session(doc);
+  const bad = '\n  <rect x="1"\n';
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, bad, apply)), (e: unknown) => e instanceof ContentError && e.at > 0 && e.at <= bad.length);
+  assert.equal(serialize(doc), WHOLE, 'the old content’s removal is rolled back');
+  assert.equal(s.canUndo, false, 'no entry');
+});
+
+test('replaceContent measures the text without the content it replaces: an unchanged replace of 150,000 nodes passes, and a malformed one changes nothing', () => {
+  const big = `<svg xmlns="http://www.w3.org/2000/svg">${'<rect/>'.repeat(150_000)}</svg>`;
+  const p = parseDoc(big);
+  assert.ok(p.ok);
+  const doc = p.doc;
+  const s = new Session(doc);
+  const inner = serializeParts(doc, doc.root).content;
+  s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, inner, apply));
+  assert.equal(serialize(doc), big, 'the same bytes: within the node limit once the old content is out');
+  assert.equal(s.undoLabel, 'Edit source');
+  s.undo();
+  assert.equal(serialize(doc), big);
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, `${inner}<rect`, apply)), ContentError);
+  assert.equal(serialize(doc), big, 'a malformed one changes nothing');
+  assert.equal(s.canUndo, false);
+  assert.throws(() => s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, `${inner}${inner}`, apply)), /the document would have more than 200000 nodes/, 'past the limit by itself, it is still refused');
+  assert.equal(serialize(doc), big);
+});
+
+test('replaceContent costs time in proportion to the children it replaces, and so does its undo', () => {
+  const over = (n: number) => {
+    const p = parseDoc(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${'<rect/>'.repeat(n)}</svg>`);
+    assert.ok(p.ok);
+    const doc = p.doc;
+    const s = new Session(doc);
+    return () => {
+      s.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, '<circle r="1"/>', apply));
+      s.undo();
+    };
+  };
+  linear('Edit the drawing’s source over 10,000 and 40,000 children, then its undo', over(10_000), over(40_000), { reps: 5, runs: 5, most: 8, limit: 2000 });
 });

@@ -24,6 +24,8 @@ const CLEAN = [
 
 const PLANTS: [rule: string, code: string][] = [
   ['eval', 'const x = eval("1 + 1");'],
+  ['eval', 'const y = (0, eval)("1 + 1");'],
+  ['eval', 'const z = eval?.("1 + 1");'],
   ['eval', 'setTimeout("tick()", 10);'],
   ['eval', 'setInterval(`tick()`, 10);'],
   ['new-function', 'const g = new Function(body);'],

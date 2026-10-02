@@ -56,6 +56,11 @@ const E2E_EVIDENCE = 'node projects/draw/tools/ledger-check.mjs --e2e-evidence .
 // just those checks. It needs a built _site; the run puts Draw's own bundle back afterwards.
 const DRAW_BUNDLE = 'cd projects/draw && BASE_PATH=/draw/ npx vite build >/dev/null && node tools/library-index.mjs >/dev/null && rm -rf ../../_site/draw && cp -r dist ../../_site/draw && cd ../..';
 const DRAW_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && E2E=draw node scripts/smoke-test.mjs`], REPO];
+// A break in SVG Lab (P1-M5: its Open in Draw link), whose page build-site copies as it is: the lab is
+// copied over the last built _site's, after Draw's own bundle (so a Draw break earlier in the batch
+// can't leave its plant there), then Draw's e2e runs. The run copies the restored lab back afterwards.
+const LAB_COPY = 'cp projects/svg-lab/index.html _site/svg-lab/index.html';
+const LAB_E2E = ['sh', ['-c', `test -f _site/index.html && ${DRAW_BUNDLE} && ${LAB_COPY} && E2E=draw node scripts/smoke-test.mjs`], REPO];
 const SITE_E2E_EVIDENCE = ['sh', ['-c', `node scripts/build-site.mjs >/dev/null && node scripts/check-library.mjs --site _site && { E2E=draw node scripts/smoke-test.mjs; ${E2E_EVIDENCE}; }`], REPO];
 
 const BREAKS = [
@@ -187,9 +192,10 @@ const BREAKS = [
     run: LEDGER_CHECK, expect: /no row for the SVG element <rect>/,
   },
   {
-    // One phase past wherever the ledger stands, whose rows are never all done while it is built.
-    id: 'B22', what: 'the phase is raised before its rows are done',
-    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 1}`,
+    // Two phases past wherever the ledger stands: the next phase's rows are never all done while it is
+    // built (the current phase's may all be, just before the gate rises, as P1's were in P1-M5).
+    id: 'B22', what: 'the phase is raised before its rows are done (two phases at once: with every row of the current phase done, the next one is a legitimate raise)',
+    file: 'engine/ledger/ledger.json', from: /"currentPhase": (\d+)/, to: (_, phase) => `"currentPhase": ${Number(phase) + 2}`,
     run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is (?:planned|partial)/,
   },
   {
@@ -664,7 +670,7 @@ const BREAKS = [
   },
   {
     id: 'B111', what: "the More sheet offers Edit source whatever is selected", slow: true, checks: ['editSourceRoundTrip'],
-    file: 'projects/draw/src/panels/ContextBar.tsx', from: '{editor.canEditSource() && (', to: '{true && (',
+    file: 'projects/draw/src/commands.ts', from: "more: true, shown: (c) => c.editor.canEditSource(),", to: 'more: true, shown: () => true,',
     run: DRAW_E2E, expect: /Edit source is offered for the root <svg>/,
   },
   {
@@ -1374,7 +1380,7 @@ const BREAKS = [
   {
     id: 'B249', what: 'a phase-0 row is reopened after the P0 exit',
     file: 'engine/ledger/ledger.json', from: '"group":"P0","phase":0,"status":"done","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]', to: '"group":"P0","phase":0,"status":"planned","tests":["projects/draw/test/e2e.mjs#cspIsFirstAndEnforced"]',
-    run: LEDGER_CHECK, expect: /feature:meta-csp: phase 0 is behind the current phase 1 but the row is planned/,
+    run: LEDGER_CHECK, expect: /feature:meta-csp: phase 0 is behind the current phase \d+ but the row is planned/,
   },
   // P0-M5 review fixes: the served profile (version 4).
   {
@@ -1795,7 +1801,7 @@ const BREAKS = [
   },
   {
     id: 'B334', what: 'a nudge (or Delete) acts while a field has focus',
-    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = '.draw-code';",
+    file: 'projects/draw/src/keys.ts', from: "const FIELD = 'input, textarea, select';", to: "const FIELD = 'no-field';",
     run: drawTests('keys.test.ts'), expect: /✖ no key acts in a field, in the code view, under a sheet/,
   },
   {
@@ -1831,7 +1837,7 @@ const BREAKS = [
   },
   {
     id: 'B341', what: 'the arrows nudge while a code token has focus', slow: true, checks: ['arrowsNudgeOnlyTheCanvasSelection'],
-    file: 'projects/draw/src/keys.ts', from: "const ELSEWHERE = 'input, textarea, select, .draw-code';", to: "const ELSEWHERE = 'input, textarea, select';",
+    file: 'projects/draw/src/keys.ts', from: "return t?.closest?.('.draw-code') ? 'code' : 'canvas';", to: "return 'canvas';",
     run: DRAW_E2E, expect: /arrowsNudgeOnlyTheCanvasSelection: the arrows on a focused colour token nudged the circle/,
   },
   {
@@ -2170,7 +2176,7 @@ const BREAKS = [
   },
   {
     id: 'B393', what: 'F13: the Snap sheet is rendered inside the canvas again (clipped by it, under its chrome and marks)', slow: true, checks: ['theSnapSheetIsReachableOnThePhone'],
-    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => setOpen(false)} />}',
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "{open && createPortal(<SnapSheet editor={editor} close={() => ui.snapOpen.set(false)} />, area.current?.closest('.draw') ?? document.body)}", to: '{open && <SnapSheet editor={editor} close={() => ui.snapOpen.set(false)} />}',
     run: DRAW_E2E, expect: /theSnapSheetIsReachableOnThePhone: (Done is at .* outside the|on top of (Done|the Grid step field) is)/,
   },
   {
@@ -2299,7 +2305,7 @@ const BREAKS = [
   // P1-M2 S1 (slow: one per new e2e check, each naming it).
   {
     id: 'B430', what: 'a Shapes tap places at the canvas’s top-left, not under the finger', slow: true, checks: ['aTapPlacesTheLabsDefaultScaledToTheArtboard'],
-    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
+    file: 'projects/draw/src/editor.ts', from: '      const p = this.#snapRoot(this.#now(g, g.at0), this.#snapTargets([]), d.step).p;', to: '      const p = this.#snapRoot({ x: 0, y: 0 }, this.#snapTargets([]), d.step).p;',
     run: DRAW_E2E, expect: /aTapPlacesTheLabsDefaultScaledToTheArtboard: the rect is not exactly the lab's, centred on \(50, 50\)/,
   },
   {
@@ -2409,8 +2415,8 @@ const BREAKS = [
   {
     id: 'B451', what: 'the Colour sheet is rendered inside .draw-canvas (contain: strict clips it and holds its fixed position), a second slow break for phoneRulesOnInspectAndThePicker because only the browser’s layout can see a Done that is clipped or covered', slow: true, checks: ['phoneRulesOnInspectAndThePicker'],
     file: 'projects/draw/src/panels/Sheets.tsx',
-    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
-    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
+    from: /^(import \{ useEffect[^\n]*\n)([\s\S]*?)    <Modal key=\{key\} title=\{title\} onClose=\{close\} done=\{sheet\.kind !== 'source'\} mono=\{mono\}>\n      <Body editor=\{editor\} workspace=\{workspace\} sheet=\{sheet\} close=\{close\} \/>\n    <\/Modal>\n/m,
+    to: "$1import { createPortal } from 'react-dom';\n$2    createPortal(<Modal key={key} title={title} onClose={close} done={sheet.kind !== 'source'} mono={mono}>\n      <Body editor={editor} workspace={workspace} sheet={sheet} close={close} />\n    </Modal>, document.querySelector('.draw-canvas') ?? document.body)\n",
     run: DRAW_E2E, expect: /phoneRulesOnInspectAndThePicker \((956|796)\): 440×(956|796): (Done is at .* outside the|on top of (Done|the Colour field) is)/,
   },
   // P1-M2 S3: gradients, gloss and the gradient handles. The engine first (quick).
@@ -3518,6 +3524,375 @@ const BREAKS = [
     file: 'engine/policy/font-face-rules.ts', from: "      ruleStart = c === '}' && parens === 0;", to: '      ruleStart = false;',
     run: engineTests('policy/font-face-rules.test.ts'), expect: /✖ a face rule goes, and only it/,
   },
+  // P1-M5 S1: quick starts, the Finish sheet and PNG.
+  {
+    id: 'B666', what: 'SVG Lab’s Logo preset drifts from the lab’s own export (its wave’s stroke-width)',
+    file: 'engine/presets/quick-starts.ts', from: '    stroke-width="4"\n', to: '    stroke-width="5"\n',
+    run: engineTests('presets/quick-starts.test.ts'), expect: /✖ SVG Lab’s three are its own exports of Blank, Icon and Logo/,
+  },
+  {
+    id: 'B667', what: 'the Icon 24 quick start loses stroke-linejoin="round"',
+    file: 'engine/presets/quick-starts.ts', from: 'stroke-linecap="round" stroke-linejoin="round">', to: 'stroke-linecap="round">',
+    run: engineTests('presets/quick-starts.test.ts'), expect: /✖ the quick starts are exactly a stroke icon’s 24 × 24 board/,
+  },
+  {
+    id: 'B668', what: 'pngSize gives an icon size to the artboard’s shorter side',
+    file: 'engine/export/raster.ts', from: 'return board.width >= board.height ? { w: n, h: other } : { w: other, h: n };', to: 'return board.width >= board.height ? { w: other, h: n } : { w: n, h: other };',
+    run: engineTests('export/raster.test.ts'), expect: /✖ pngSize: an icon size is the longer side/,
+  },
+  {
+    id: 'B669', what: 'clampArea rounds its sides up, past the cap',
+    file: 'engine/export/raster.ts', from: '  let cw = Math.max(1, Math.floor(w * k));\n  let ch = Math.max(1, Math.floor(h * k));\n', to: '  let cw = Math.max(1, Math.ceil(w * k));\n  let ch = Math.max(1, Math.ceil(h * k));\n  if (cw) return { w: cw, h: ch, clamped: true };\n',
+    run: engineTests('export/raster.test.ts'), expect: /✖ clampArea: the largest size of the same aspect within the area/,
+  },
+  {
+    id: 'B670', what: 'gridShows ignores the devicePixelRatio (the grid at 32 dots never shows on a @3x phone)',
+    file: 'engine/export/raster.ts', from: 'Math.round(paneCssPx * devicePixelRatio)', to: 'Math.round(paneCssPx)',
+    run: engineTests('export/raster.test.ts'), expect: /✖ gridShows: SVG Lab’s rule/,
+  },
+  {
+    id: 'B671', what: 'the Pixels caption loses its thousands separator (“1024 dots”)',
+    file: 'engine/export/raster.ts', from: "${(res * res).toLocaleString('en-US')} dots", to: '${res * res} dots',
+    run: engineTests('export/raster.test.ts'), expect: /✖ the captions are SVG Lab’s/,
+  },
+  {
+    id: 'B672', what: 'shapeCount counts the shapes waiting in <defs>',
+    file: 'engine/export/raster.ts', from: "new Set(['defs', 'symbol', 'clipPath', 'mask', 'pattern', 'marker'])", to: "new Set(['symbol', 'clipPath', 'mask', 'pattern', 'marker'])",
+    run: engineTests('export/raster.test.ts'), expect: /✖ shapeCount: what the canvas draws as shapes/,
+  },
+  {
+    id: 'B673', what: 'the PNG copy keeps a <foreignObject> nested in a group (only the root’s own children are looked at)',
+    file: 'engine/export/png-source.ts', from: '      else walk(c);\n', to: '',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ a <foreignObject> leaves the copy at any depth/,
+  },
+  {
+    id: 'B674', what: 'the PNG copy keeps the root’s own width (the image is drawn at the file’s size, not the PNG’s)',
+    file: 'engine/export/png-source.ts', from: "  setAttr(doc, doc.root, null, 'width', WIDTH);\n", to: '',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ the root’s width and height become the PNG’s/,
+  },
+  {
+    id: 'B675', what: 'the clamp gives up after 8192² instead of trying 4096² (no PNG past 4096² on iOS 17)',
+    file: 'projects/draw/src/export/png.ts', from: "    if (r === 'too-large') continue;", to: "    if (r === 'too-large') break;",
+    run: drawTests('png.test.ts'), expect: /✖ the clamp: a PNG past 8192² is clamped to it/,
+  },
+  {
+    id: 'B676', what: 'the PNG source takes Clean’s text as text (an image draws it in its fallback font)',
+    file: 'projects/draw/src/export/png.ts', from: '  if (!hasText(doc)) return { text: cleanExport(doc).text, notes: [] };', to: '  if (hasText(doc) || !hasText(doc)) return { text: cleanExport(doc).text, notes: [] };',
+    run: drawTests('png.test.ts'), expect: /✖ the PNG source is Clean’s file with its text as paths/,
+  },
+  {
+    id: 'B677', what: 'shareFiles awaits before navigator.share (WebKit refuses: the tap’s activation is gone)',
+    file: 'projects/draw/src/platform/share.ts', from: "    if (!nav?.canShare?.(data)) return 'unshared';\n    asked = nav.share(data);", to: "    if (!nav?.canShare?.(data)) return 'unshared';\n    await Promise.resolve();\n    asked = nav.share(data);",
+    run: drawTests('share.test.ts'), expect: /✖ shareFiles asks for the share sheet before anything is awaited/,
+  },
+  {
+    id: 'B678', what: 'check-sinks misses new OffscreenCanvas outside src/platform/',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "['raster', /\\b(OffscreenCanvas|createImageBitmap|", to: "['raster', /\\b(createImageBitmap|",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps rasterizing to src\/platform\//,
+  },
+  {
+    id: 'B679', what: 'New drawing opens a preset bound to the open drawing’s draft (the preset is saved over it)',
+    file: 'projects/draw/src/workspace.ts', from: "return p ? this.#open({ via: 'new', name: p.drawing, text: p.text }, {}) : Promise.resolve(false);", to: "return p ? this.#open({ via: 'draft', name: p.drawing, text: p.text }, { draft: this.autosave.draftId ?? undefined }) : Promise.resolve(false);",
+    run: drawTests('workspace.test.ts'), expect: /✖ New drawing from each preset/,
+  },
+  {
+    id: 'B680', what: 'Replace this one keeps the open drawing’s root attributes (the file is not the preset’s)',
+    file: 'engine/model/replace.ts', from: '  for (const a of [...root.attrs]) apply(opPutAttr(doc, root.id, a.ns, a.local, null));\n', to: '',
+    run: engineTests('replace.test.ts'), expect: /✖ a drawing with nothing before or after its root becomes the other file byte for byte/,
+  },
+  {
+    id: 'B681', what: 'Replace this one leaves the import report of the drawing that was there',
+    file: 'projects/draw/src/workspace.ts', from: '    if (current) this.current.set({ ...current, report: importReport(doc) });\n    return true;', to: '    return true;',
+    run: drawTests('workspace.test.ts'), expect: /✖ Replace this one: the open drawing’s content becomes the preset’s/,
+  },
+  {
+    id: 'B682', what: 'the e2e’s pixelShare compares colours without their alpha (a transparent pixel’s colour counts)',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: 'const pm = (c, i) => (i === 3 ? c[3] : (c[i] * c[3]) / 255);', to: 'const pm = (c, i) => c[i];',
+    run: drawTests('png-compare.test.ts'), expect: /✖ pixelShare: the share of pixels differing/,
+  },
+  {
+    id: 'B683', what: 'the New sheet’s SVG Lab Icon row picks the Logo preset', slow: true, checks: ['newSheetOpensTemplatesAndQuickStarts'],
+    file: 'projects/draw/src/panels/FileSheets.tsx', from: 'onClick={() => setPicked(p.id)}', to: "onClick={() => setPicked(p.id === 'lab-icon' ? 'lab-logo' : p.id)}",
+    run: DRAW_E2E, expect: /newSheetOpensTemplatesAndQuickStarts: lab-icon opened as/,
+  },
+  {
+    id: 'B684', what: 'the Pixels pane is drawn smoothed (image-rendering: auto), not as dots', slow: true, checks: ['theFinishSheetPreviewsAndComparesPixels'],
+    file: 'projects/draw/src/app.css', from: '.draw-pane-pixels { image-rendering: pixelated; }', to: '.draw-pane-pixels { image-rendering: auto; }',
+    run: DRAW_E2E, expect: /theFinishSheetPreviewsAndComparesPixels \(1\): the Pixels image is 32×32, auto/,
+  },
+  {
+    id: 'B685', what: 'the PNGs are drawn from Clean’s file with its text as text (the image’s fallback font, not the text’s)', slow: true, checks: ['pngIsPreparedAndSharedInsideTheTap'],
+    file: 'projects/draw/src/export/png.ts', from: '  if (!hasText(doc)) return { text: cleanExport(doc).text, notes: [] };', to: '  if (hasText(doc) || !hasText(doc)) return { text: cleanExport(doc).text, notes: [] };',
+    run: DRAW_E2E, expect: /pngIsPreparedAndSharedInsideTheTap: (while the PNGs are prepared|the 64 px PNG)/,
+  },
+  {
+    id: 'B686', what: 'the Finish sheet’s dot chips drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
+    file: 'projects/draw/src/app.css', from: '.draw-dots { margin-bottom: var(--space-3); }', to: '.draw-dots { margin-bottom: var(--space-3); }\n.draw-dots > button { min-height: 2rem; height: 2rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): 440×956:\n\s+(top|bottom): tap targets under 44pt/,
+  },
+  {
+    id: 'B687', what: 'the top bar no longer scrolls in its own box (a long name pushes Export out of reach): a second slow break for this check, since whether the bar scrolls is layout, which only a browser has', slow: true, checks: ['phoneRulesOnTheFinishSheet'],
+    file: 'projects/draw/src/app.css', from: '  overflow-x: auto;\n  overflow-y: hidden;\n  overscroll-behavior-x: contain;\n', to: '',
+    run: DRAW_E2E, expect: /phoneRulesOnTheFinishSheet \(956\): the bar doesn't scroll/,
+  },
+  // P1-M5 S2: commands, the wide layout and Apple Pencil.
+  {
+    id: 'B688', what: 'commandForKey maps ⌘Y to Undo (Undo claims Redo’s key first)',
+    file: 'projects/draw/src/commands.ts', from: "{ id: 'undo', name: 'Undo', group: 'Edit', keys: ['Mod+Z'],", to: "{ id: 'undo', name: 'Undo', group: 'Edit', keys: ['Mod+Z', 'Mod+Y'],",
+    run: drawTests('commands.test.ts'), expect: /✖ each key names its one command/,
+  },
+  {
+    id: 'B689', what: 'the palette’s search matches only a name’s start',
+    file: 'projects/draw/src/commands.ts', from: '    return words.every((w) => text.includes(w));', to: '    return words.every((w) => c.name.toLocaleLowerCase().startsWith(w));',
+    run: drawTests('commands.test.ts'), expect: /✖ the palette’s search/,
+  },
+  {
+    id: 'B690', what: 'a canvas command’s key acts in a field',
+    file: 'projects/draw/src/commands.ts', from: '{ field: [], sheet: [],', to: "{ field: ['canvas'], sheet: [],",
+    run: drawTests('commands.test.ts'), expect: /✖ where a key acts/,
+  },
+  {
+    id: 'B691', what: 'Undo’s key doesn’t act in the code view',
+    file: 'projects/draw/src/commands.ts', from: "code: ['code'], canvas:", to: 'code: [], canvas:',
+    run: drawTests('commands.test.ts'), expect: /✖ where a key acts/,
+  },
+  {
+    id: 'B692', what: 'More’s rows come out in another order (Stroke… before Fill…)',
+    file: 'projects/draw/src/commands.ts', from: "ids: ['edit-source', 'fill', 'stroke', 'gloss',", to: "ids: ['edit-source', 'stroke', 'fill', 'gloss',",
+    run: drawTests('commands.test.ts'), expect: /✖ the bar and More, from the registry/,
+  },
+  {
+    id: 'B693', what: 'the gesture machine latches pen mode on a touch',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "      if (e.kind === 'pen') this.latched = true;", to: "      if (e.kind !== 'mouse') this.latched = true;",
+    run: drawTests('viewport.test.ts'), expect: /✖ pen mode latches on a pen press and on a pen hover, never on a touch/,
+  },
+  {
+    id: 'B694', what: 'in pen mode one finger becomes the tool',
+    file: 'projects/draw/src/canvas/gestures.ts', from: 'if (this.latched && fingers.length === 1) {', to: 'if (this.latched && fingers.length === 0) {',
+    run: drawTests('viewport.test.ts'), expect: /✖ in pen mode one finger pans once it moves and never becomes the tool/,
+  },
+  {
+    id: 'B695', what: 'in pen mode a quick two-finger tap undoes',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "const tap = !this.latched && e.type === 'up'", to: "const tap = e.type === 'up'",
+    run: drawTests('viewport.test.ts'), expect: /✖ in pen mode one finger pans once it moves and never becomes the tool/,
+  },
+  {
+    id: 'B696', what: 'a pen move with a button down is taken for hover',
+    file: 'projects/draw/src/canvas/gestures.ts', from: "      if (e.type === 'move' && e.buttons === 0) {", to: "      if (e.type === 'move') {",
+    run: drawTests('viewport.test.ts'), expect: /✖ a hovering Pencil: a pen move with no button/,
+  },
+  {
+    id: 'B697', what: 'the rail’s Pencil button doesn’t leave pen mode (the machine stays latched)',
+    file: 'projects/draw/src/canvas/gestures.ts', from: '  leavePenMode(): void {\n    this.latched = false;\n  }', to: '  leavePenMode(): void {\n  }',
+    run: drawTests('viewport.test.ts'), expect: /✖ the Pencil button: leaving pen mode/,
+  },
+  {
+    id: 'B698', what: 'a hovering Pencil lights a handle 40 px away',
+    file: 'projects/draw/src/editor.ts', from: '(pickHandle(model.handles, at)?.id ?? null)', to: '(pickHandle(model.handles, at, 50)?.id ?? null)',
+    run: drawTests('editor.test.ts'), expect: /✖ a hovering Pencil lights the handle a press would take/,
+  },
+  {
+    id: 'B699', what: 'a pan during a Pencil drag moves the dragged shape off the pen (the press isn’t kept in root units)',
+    file: 'projects/draw/src/editor.ts', from: '    const at = this.#then(g, g.at);\n    const [rx, ry] = applyM(m.rootInv, at.x - g.at0.x, at.y - g.at0.y);', to: '    const at = g.at;\n    const [rx, ry] = applyM(m.rootInv, at.x - g.at0.x, at.y - g.at0.y);',
+    run: drawTests('editor.test.ts'), expect: /✖ a pan during a Pencil drag leaves the dragged shape under the pen/,
+  },
+  {
+    id: 'B700', what: '⌘K is not wired: the keys get no panels, so the palette never opens from the keyboard', slow: true, checks: ['commandsRunFromTheBarMoreKeysAndPalette'],
+    file: 'projects/draw/src/panels/App.tsx', from: "document.querySelector('.draw-modal') !== null, ctx);", to: "document.querySelector('.draw-modal') !== null);",
+    run: DRAW_E2E, expect: /commandsRunFromTheBarMoreKeysAndPalette: timed out waiting until Meta\+K opens Commands/,
+  },
+  {
+    id: 'B701', what: 'the wide layout starts at 64em: the rail stays at the bottom at 956 and 820', slow: true, checks: ['theWideLayoutPutsTheRailOnTheLeft'],
+    file: 'projects/draw/src/app.css', from: '@media (min-width: 46em) {\n  .draw { display: grid;', to: '@media (min-width: 64em) {\n  .draw { display: grid;',
+    run: DRAW_E2E, expect: /theWideLayoutPutsTheRailOnTheLeft: 820×1180: the rail .* is not a column left of the canvas/,
+  },
+  {
+    id: 'B702', what: 'the Stage reads the Pencil as a finger: no pen mode, and a finger moves the circle', slow: true, checks: ['thePencilDrawsWhileFingersNavigate'],
+    file: 'projects/draw/src/canvas/stage.ts', from: "(e.pointerType === 'pen' ? 'pen' :", to: "(e.pointerType === 'pen' ? 'touch' :",
+    run: DRAW_E2E, expect: /thePencilDrawsWhileFingersNavigate: timed out waiting until the notice says pen mode/,
+  },
+  {
+    id: 'B703', what: 'the Stage drops a buttonless pen move (it reads as pressed, never as hover)', slow: true, checks: ['aHoveringPencilShowsHandlesAndSnaps'],
+    file: 'projects/draw/src/canvas/stage.ts', from: 'kind: kindOf(e), buttons: e.buttons });', to: 'kind: kindOf(e), buttons: e.buttons || 1 });',
+    run: DRAW_E2E, expect: /aHoveringPencilShowsHandlesAndSnaps: 20 px from the bottom-right corner the lit handles are/,
+  },
+  {
+    id: 'B704', what: 'the palette’s rows drop to 2rem, under the 44 pt floor', slow: true, checks: ['phoneRulesOnTheCommandPalette'],
+    file: 'projects/draw/src/app.css', from: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }', to: '.draw-palette-row[aria-selected="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }\n.draw-palette-row { min-height: 2rem; height: 2rem; }',
+    run: DRAW_E2E, expect: /phoneRulesOnTheCommandPalette \(956\): 440×956:\n\s+"": tap targets under 44pt/,
+  },  // P1-M5 S3: Open in Draw, Insert and the rest of Create.
+  {
+    id: 'B705', what: 'planInsert keeps an id the drawing already uses (no rename)',
+    file: 'engine/model/insert.ts', from: '  renameIdsIn(src, src.root, map, () => {});\n', to: '',
+    run: engineTests('model/insert.test.ts'), expect: /✖ an id the drawing already uses gets a fresh one/,
+  },
+  {
+    id: 'B706', what: 'planInsert drops the root’s fill from the <g>',
+    file: 'engine/model/insert.ts', from: "'baseProfile', 'transform']);", to: "'baseProfile', 'transform', 'fill']);",
+    run: engineTests('model/insert.test.ts'), expect: /✖ the <g> takes the root’s attributes but/,
+  },
+  {
+    id: 'B707', what: 'planInsert scales a small insert up to 80% of the artboard',
+    file: 'engine/model/insert.ts', from: 'if (board && board.width > 0 && board.height > 0 && (box.width * s > board.width || box.height * s > board.height)) {', to: 'if (board && board.width > 0 && board.height > 0) {',
+    run: engineTests('model/insert.test.ts'), expect: /✖ placement: a 24 × 24 viewBox at its own size/,
+  },
+  {
+    id: 'B708', what: 'the whole-content replace leaves the old first child',
+    file: 'engine/model/fragment.ts', from: 'for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));', to: 'for (const c of [...el(doc, scope).children].reverse().slice(0, -1)) apply(opRemove(doc, c));',
+    run: engineTests('fragment.test.ts'), expect: /✖ replaceContent: the root becomes exactly its start tag/,
+  },
+  {
+    id: 'B709', what: 'an Apply that doesn’t parse changes the file (the old content’s removal is kept: nothing throws, so nothing rolls back)',
+    file: 'engine/model/fragment.ts', from: '  if (!made.ok) throw new ContentError(made.error.at, made.error.message);\n', to: '  if (!made.ok) return;\n',
+    run: drawTests('editor.test.ts'), expect: /✖ Edit the drawing’s source: the sheet holds everything between the root’s tags/,
+  },
+  {
+    id: 'B710', what: 'isEmpty counts any element, so a drawing holding only a <title> is not empty',
+    file: 'projects/draw/src/editor.ts', from: 'return !!this.#doc && shapeCount(this.#doc) === 0;', to: "return !!this.#doc && el(this.#doc, this.#doc.root).children.every((c) => this.#doc!.nodes.get(c)!.kind !== 'element');",
+    run: drawTests('editor.test.ts'), expect: /✖ the empty state: an open drawing with nothing the canvas draws as a shape/,
+  },
+  {
+    id: 'B711', what: 'SVG Lab’s link deflates with "deflate" (a zlib header) instead of "deflate-raw": Draw can’t read it', slow: true, checks: ['svgLabOpensInDraw'],
+    file: 'projects/svg-lab/index.html', from: "new CompressionStream('deflate-raw')", to: "new CompressionStream('deflate')",
+    run: LAB_E2E, expect: /svgLabOpensInDraw: Vector: Draw opened \d+ characters, not the lab's file/,
+  },
+  {
+    id: 'B712', what: 'Insert writes the inserted <svg> instead of a <g>', slow: true, checks: ['theInsertToolPutsSvgInAsAGroup'],
+    file: 'engine/model/insert.ts', from: 'return { markup: `<g${attrs}>${inner}</g>`, renamed: map.size };', to: 'return { markup: `<svg${attrs}>${inner}</svg>`, renamed: map.size };',
+    run: DRAW_E2E, expect: /theInsertToolPutsSvgInAsAGroup: the file is not lab\/create\.svg with the logo's content in one <g>/,
+  },
+  {
+    id: 'B713', what: 'the code panel’s Edit opens the selected element’s source, not the drawing’s', slow: true, checks: ['editTheWholeDrawingsSource'],
+    file: 'projects/draw/src/panels/CodePanel.tsx', from: 'onClick={() => editor.openDrawingSource()}', to: 'onClick={() => editor.openSource()}',
+    run: DRAW_E2E, expect: /editTheWholeDrawingsSource: the code panel’s Edit did not open the drawing’s source/,
+  },
+  {
+    id: 'B714', what: 'the empty hint never hides: it shows over any open drawing', slow: true, checks: ['anEmptyDrawingSaysAddAShape'],
+    file: 'projects/draw/src/panels/Canvas.tsx', from: "if (tool !== 'pen' && editor.isEmpty()) {", to: "if (tool !== 'pen' && !!editor.doc) {",
+    run: DRAW_E2E, expect: /anEmptyDrawingSaysAddAShape: the hint stayed with a shape on the canvas/,
+  },  // P1-M5 S4: the golden tests.
+  {
+    id: 'B715', what: 'the PNG comparisons count alpha 128 as transparent (alphaMaskShare’s threshold off by one)',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: 'if ((a.rgba(x, y)[3] >= at) !== (b.rgba(x, y)[3] >= at)) differ++;', to: 'if ((a.rgba(x, y)[3] > at) !== (b.rgba(x, y)[3] > at)) differ++;',
+    run: drawTests('png-compare.test.ts'), expect: /✖ alphaMaskShare: the share of pixels opaque/,
+  },
+  {
+    id: 'B716', what: 'quadrantDeltaE averages every pixel’s colour, transparent ones too',
+    file: 'projects/draw/test/probe-helpers/png.mjs', from: '        if (p[3] < at) continue;\n', to: '',
+    run: drawTests('png-compare.test.ts'), expect: /✖ quadrantDeltaE: each quadrant’s mean colour/,
+  },
+  {
+    id: 'B717', what: 'the Icon 24 quick start’s stroke-width="2" becomes 1.5', slow: true, checks: ['goldenBellIcon'],
+    file: 'engine/presets/quick-starts.ts', from: 'stroke="currentColor" stroke-width="2" stroke-linecap="round"', to: 'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"',
+    run: DRAW_E2E, expect: /goldenBellIcon: bell-icon: the file is not test\/golden\/bell-icon\.svg byte for byte/,
+  },
+  {
+    id: 'B718', what: 'Gloss’s gradient centre moves from cx 0.35 to 0.4', slow: true, checks: ['goldenAppIcon'],
+    file: 'engine/paint/gloss.ts', from: "export const GLOSS_ATTRS = 'cx=\"0.35\" cy=\"0.3\" r=\"0.8\"';", to: "export const GLOSS_ATTRS = 'cx=\"0.4\" cy=\"0.3\" r=\"0.8\"';",
+    run: DRAW_E2E, expect: /goldenAppIcon: app-icon: the file is not test\/golden\/app-icon\.svg byte for byte/,
+  },
+  {
+    id: 'B719', what: 'Text to path keeps font-size on its path', slow: true, checks: ['goldenWordmark'],
+    file: 'engine/text/to-path.ts', from: "'font-family', 'font-size', 'font-size-adjust',", to: "'font-family', 'font-size-adjust',",
+    run: DRAW_E2E, expect: /goldenWordmark: wordmark: the file is not test\/golden\/wordmark\.svg byte for byte/,
+  },
+  // P1-M5, the fixes after the build.
+  {
+    id: 'B720', what: 'inflate hands the decompressor the whole compressed file at once (Blob.stream()), so a link’s bomb expands far past the cap before a byte of it is counted',
+    file: 'projects/draw/src/platform/files.ts', from: '  const stream = slices.pipeThrough(new DecompressionStream(format));', to: '  const stream = new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new DecompressionStream(format));',
+    run: drawTests('files.test.ts'), expect: /✖ a link or an \.svgz reaches the decompressor 4 KiB at a time[\s\S]*went in chunks of up to \d+ bytes/,
+  },
+  {
+    id: 'B721', what: 'check-sinks’ raster rule goes back to the call forms only (new Image(, new OffscreenCanvas(, getContext( …): an alias, globalThis.…, [\'…\'], ?.() and the read-back APIs pass',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "  ['raster', /\\b(OffscreenCanvas|createImageBitmap|getContext|toBlob|toDataURL|convertToBlob|getImageData|transferToImageBitmap|transferControlToOffscreen|captureStream)\\b|\\bnew\\s+(?:[\\w$]+\\s*\\??\\.\\s*)*Image\\b|\\[\\s*['\"`]Image['\"`]\\s*\\]/, ['projects/draw/src/platform/']],", to: "  ['raster', /\\bnew\\s+(Image|OffscreenCanvas)\\s*\\(|\\b(getContext|toBlob|convertToBlob|createImageBitmap)\\s*\\(/, ['projects/draw/src/platform/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks bans the raster names in any spelling outside src\/platform\//,
+  },
+  {
+    id: 'B722', what: 'check-sinks’ file-api rule goes back to navigator.… only, without execCommand or the compression streams (?., [\'…\'], a destructured clipboard and new CompressionStream pass)',
+    file: 'projects/draw/tools/check-sinks.mjs', from: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker|execCommand|CompressionStream|DecompressionStream)\\b|\\.arrayBuffer\\s*\\(|\\bnavigator\\s*\\??\\.\\s*(clipboard|share|canShare|locks)\\b|\\[\\s*['\"`](clipboard|share|canShare|locks)['\"`]\\s*\\]|\\{[^}]*\\b(clipboard|share|canShare|locks)\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*navigator\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],", to: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\\b|\\.arrayBuffer\\s*\\(|navigator\\.(clipboard|share|canShare|locks)\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],",
+    run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps the share sheet, the clipboard, execCommand and the compression streams to src\/platform\//,
+  },
+  {
+    id: 'B723', what: 'planInsert leaves an inserted <style> as written: its url(#…) and #id selectors keep an id it renamed, so they point at the drawing’s element',
+    file: 'engine/model/insert.ts', from: '  renameIdsInStyles(src, src.root, map, () => {});\n', to: '',
+    run: engineTests('model/insert.test.ts'), expect: /✖ a <style> the insert brings is kept, and a renamed id’s url\(#…\) and #id selectors in it follow/,
+  },
+  {
+    id: 'B724', what: 'Insert says only “Inserted.” when the file brings a <style>, whose rules reach the drawing’s own shapes',
+    file: 'projects/draw/src/workspace.ts', from: 'styles(report) > styles(before) ? INSERTED_STYLES : ', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ Insert says what it did/,
+  },
+  {
+    id: 'B725', what: 'planInsert keeps the insert’s entity references as written (a.raw), so its shapes take the drawing’s declaration of the same name, or fail where the drawing has none',
+    file: 'engine/model/insert.ts', from: '  const unresolved = expandReferences(src);\n', to: '  const unresolved = new Set<string>();\n',
+    run: engineTests('model/insert.test.ts'), expect: /✖ the insert’s entity references are written out as their values/,
+  },
+  {
+    id: 'B726', what: 'Edit the drawing’s source parses the text before the old content goes, so it spends the limits twice: an unchanged Apply of 150,000 nodes is refused',
+    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));\n  const made = parseFragment(doc, scope, text);\n', to: '  const made = parseFragment(doc, scope, text);\n  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));\n',
+    run: engineTests('fragment.test.ts'), expect: /✖ replaceContent measures the text without the content it replaces/,
+  },
+  {
+    id: 'B727', what: 'Replace this one removes the open drawing’s children first to last: each removal shifts every child after it (quadratic), and so does its undo',
+    file: 'engine/model/replace.ts', from: '  for (const c of [...root.children].reverse()) apply(opRemove(doc, c));', to: '  for (const c of [...root.children]) apply(opRemove(doc, c));',
+    run: engineTests('replace.test.ts'), expect: /✖ Replace this one costs time in proportion to the children it replaces/,
+  },
+  {
+    // Only the cost test runs: the same plant makes the 150,000-node replace in the same file take minutes.
+    id: 'B728', what: 'Edit the drawing’s source removes the root’s children first to last: each removal shifts every child after it (quadratic), and so does its undo',
+    file: 'engine/model/fragment.ts', from: '  for (const c of [...el(doc, scope).children].reverse()) apply(opRemove(doc, c));', to: '  for (const c of [...el(doc, scope).children]) apply(opRemove(doc, c));',
+    run: ['node', ['--test', '--test-reporter=spec', '--test-name-pattern=costs time in proportion', '../../engine/test/fragment.test.ts'], DRAW], expect: /✖ replaceContent costs time in proportion to the children it replaces/,
+  },
+  {
+    id: 'B729', what: 'a hovering Pencil gathers its snap targets on every frame (no cache): it measures the whole drawing each move',
+    file: 'projects/draw/src/editor.ts', from: '    if (c && c.key.length === key.length && c.key.every((v, i) => v === key[i])) return c.targets;\n', to: '',
+    run: drawTests('editor.test.ts'), expect: /✖ a hovering Pencil gathers its snap targets once while nothing they depend on changes/,
+  },
+  {
+    id: 'B730', what: 'the Finish sheet’s copies parse the drawing again for every PNG size (one parse per file, not per sheet)',
+    file: 'engine/export/png-source.ts', from: '    made ??= openCopy(text);', to: '    made = openCopy(text);',
+    run: engineTests('export/png-source.test.ts'), expect: /✖ pngCopier makes a sheet’s copies from one parse/,
+  },
+  {
+    // The gate's boundary, whatever the phase: the first done row exactly one phase behind the current
+    // one is reopened (B22 and B249 plant faults two phases behind, which a gate off by one still refuses).
+    id: 'B731', what: 'a row one phase behind the current phase is reopened (planned): the gate lets the phase just behind keep open rows',
+    file: 'engine/ledger/ledger.json', from: /^[\s\S]+$/, to: (text) => {
+      const phase = Number(/"currentPhase": (\d+)/.exec(text)[1]);
+      return text.replace(new RegExp(`^(\\{"id":"[^"]+",[^\\n]*?"phase":${phase - 1},"status":)"done"`, 'm'), '$1"planned"');
+    },
+    run: LEDGER_CHECK, expect: /: phase \d+ is behind the current phase \d+ but the row is planned/,
+  },
+  {
+    id: 'B732', what: 'the PNG copy drops the app icon’s gloss (the star filled flat): a fault in the copy the app’s PNGs take, which tier 1 sees only against the golden file itself', slow: true, checks: ['goldenAppIcon'],
+    file: 'engine/export/png-source.ts', from: '  return { text: serialize(doc), notes };', to: "  return { text: serialize(doc).replace(/fill=\"url\\(#gloss-\\d+\\)\"/g, 'fill=\"#e76f51\"'), notes };",
+    run: DRAW_E2E, expect: /goldenAppIcon: app-icon 64 px: [\d.]+% of the pixels differ by more than 2 from this engine's raster of the golden file/,
+  },
+  {
+    id: 'B733', what: 'check-bundle misses an indirect eval ((0, eval)(…) and eval?.(…), the minified spellings)',
+    file: 'projects/draw/tools/check-bundle.mjs', from: '|\\beval\\s*\\)\\s*\\(|\\beval\\s*\\?\\.\\s*\\(|', to: '|',
+    run: drawTests('check-bundle.test.ts'), expect: /✖ check-bundle: each pattern planted in a chunk fails the build/,
+  },
+  {
+    id: 'B734', what: 'Delete or ⌫ with only the root selected does nothing (no word that the root can’t be deleted)',
+    file: 'projects/draw/src/commands.ts', from: 'can: someNotRoot, keyCan: some, run: (c) => c.editor.delete() },', to: 'can: someNotRoot, run: (c) => c.editor.delete() },',
+    run: drawTests('keys.test.ts'), expect: /✖ Delete or ⌫ with only the root selected says the root can’t be deleted/,
+  },
+  {
+    id: 'B735', what: 'planInsert writes the root’s transform back escaping only & and ", so a < in it makes a <g> that can’t be read',
+    file: 'engine/model/insert.ts', from: "attrs += ` transform=\"${asWritten(transform, '\"')}\"`;", to: "attrs += ` transform=\"${transform.replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}\"`;",
+    run: engineTests('model/insert.test.ts'), expect: /✖ the root’s own transform goes on the <g> escaped for its quotes/,
+  },
+  {
+    id: 'B736', what: 'rasterize keeps the canvas’s buffer after the PNG is out (up to 8192² × 4 bytes until it is collected)',
+    file: 'projects/draw/src/platform/raster.ts', from: '    canvas.width = 0;\n    canvas.height = 0;\n', to: '',
+    run: drawTests('raster.test.ts'), expect: /✖ rasterize lets go of the canvas once the PNG is out[\s\S]*the canvas’s buffer is let go/,
+  },
+  {
+    id: 'B737', what: 'rasterize encodes the SVG outside its try, so text it can’t encode throws instead of saying “failed”',
+    file: 'projects/draw/src/platform/raster.ts', from: '  const img = new Image();\n  try {\n    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n', to: '  const img = new Image();\n  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n  try {\n',
+    run: drawTests('raster.test.ts'), expect: /✖ rasterize lets go of the canvas once the PNG is out[\s\S]*URIError/,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -3631,6 +4006,7 @@ for (const b of chosen) {
   if (!caught) undetected++;
   console.log(`${caught ? 'red ✓' : 'GREEN ✗'}  ${b.id}  ${b.what}${caught ? '' : `\n        expected ${b.expect} in:\n${out.split('\n').slice(-8).map((l) => '        ' + l).join('\n')}`}`);
 }
-if (chosen.some((b) => b.run === DRAW_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
+if (chosen.some((b) => b.run === DRAW_E2E || b.run === LAB_E2E)) execFileSync('sh', ['-c', DRAW_BUNDLE], { cwd: REPO, stdio: 'ignore' }); // Draw's own bundle back in _site
+if (chosen.some((b) => b.run === LAB_E2E)) execFileSync('sh', ['-c', LAB_COPY], { cwd: REPO, stdio: 'ignore' }); // the restored lab back in _site
 console.log(undetected ? `\n${undetected} break(s) went undetected.` : `\nAll ${chosen.length} break(s) went red.`);
 process.exitCode = undetected ? 1 : 0;

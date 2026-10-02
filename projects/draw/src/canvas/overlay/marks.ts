@@ -3,7 +3,8 @@
 // the rotation guide, a gradient's guides (Edit on canvas: its unit box, line, circle and focus
 // arm), a path's arms and mirror guides (the Node tool and the Pen, P1-M3), an arc's ghost arcs and
 // flag labels, a path's direction arrows and a donut's percentage labels (P1-M3 S2) and the handles,
-// with SVG Lab's look. The model is in host px; every
+// with SVG Lab's look; and a hovering Apple Pencil's marks (P1-M5): the handle a press would take,
+// lit, and the point it would snap to, a ring on M1's snap lines. The model is in host px; every
 // coordinate written here is in the overlay's own px (the host's offset added), so an outline's
 // points read as where it is drawn. Every element is reused between frames (a drag frame changes
 // attributes, never the element list), and only what changed is written.
@@ -17,6 +18,12 @@ const n2 = (v: number) => (Math.round(v * 100) / 100).toString();
 /** Set an attribute only when it differs. */
 function put(el: Element, name: string, value: string): void {
   if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+
+/** A hovering Pencil's handle carries data-hover, and only it (P1-M5). */
+function lit(el: Element, on: boolean): void {
+  if (on) put(el, 'data-hover', '');
+  else if (el.hasAttribute('data-hover')) el.removeAttribute('data-hover');
 }
 
 /** A group of like elements, grown as needed and hidden when not used. */
@@ -59,6 +66,8 @@ export const HANDLE = {
   rot: ['circle', 8, 9.5],
 } as const;
 
+/** The ring where a hovering Pencil's press would snap (P1-M5), px. */
+export const SNAP_RING_R = 5;
 /** The centre handle's dot (SVG Lab's). */
 export const CENTRE_DOT_R = 2.2;
 /** A mirror guide's dashed dot (SVG Lab's .refl), px. */
@@ -90,6 +99,7 @@ export class Marks {
   #labels: Pool;
   #flagLabels: Pool;
   #donutLabels: Pool;
+  #rings: Pool;
 
   constructor(svg: SVGSVGElement) {
     this.#root = document.createElementNS(SVG_NS, 'g');
@@ -119,6 +129,7 @@ export class Marks {
     this.#labels = new Pool(r, 'text', 'draw-mark-label');
     this.#flagLabels = new Pool(r, 'text', 'draw-flag-label');
     this.#donutLabels = new Pool(r, 'text', 'draw-donut-label');
+    this.#rings = new Pool(r, 'circle', 'draw-snap-ring');
   }
 
   #o: Point = { x: 0, y: 0 }; // the host's top-left in the overlay's px
@@ -134,7 +145,7 @@ export class Marks {
     this.#lines(this.#localGrid, local?.lines ?? []);
     this.#lines(this.#localAxes, local?.axes ?? []);
     this.#lines(this.#coords, model.coords?.lines ?? []);
-    this.#lines(this.#snap, model.snapLines);
+    this.#lines(this.#snap, model.hover?.lines.length ? [...model.snapLines, ...model.hover.lines] : model.snapLines);
     this.#lines(this.#guides, model.guides.map((g) => (g.axis === 'v' ? { from: { x: g.at, y: -offset.y }, to: { x: g.at, y: hostHeight + offset.y } } : { from: { x: -offset.x, y: g.at }, to: { x: hostWidth + offset.x, y: g.at } })));
     const [m] = this.#marquee.take(model.marquee ? 1 : 0);
     if (m && model.marquee) {
@@ -184,7 +195,14 @@ export class Marks {
       put(pills[i], 'rx', '10');
       put(pills[i], 'class', g.active ? 'draw-pill on' : 'draw-pill');
     });
-    this.#handles(model.handles);
+    this.#handles(model.handles, model.hover?.handle ?? null);
+    const ring = model.hover?.ring ?? null;
+    const [rg] = this.#rings.take(ring ? 1 : 0);
+    if (rg && ring) {
+      put(rg, 'cx', X(ring.x));
+      put(rg, 'cy', Y(ring.y));
+      put(rg, 'r', String(SNAP_RING_R));
+    }
     this.#text([...(model.coords?.labels ?? []), ...(local?.labels ?? []), ...(grad?.labels ?? [])]);
     const flags = this.#flagLabels.take(paths?.flags.length ?? 0);
     paths?.flags.forEach((f, i) => {
@@ -214,7 +232,7 @@ export class Marks {
     });
   }
 
-  #handles(list: readonly Handle[]): void {
+  #handles(list: readonly Handle[], hovered: string | null): void {
     const hs = list.map((h) => ({ ...h, at: { x: h.at.x + this.#o.x, y: h.at.y + this.#o.y } }));
     const squares = hs.filter((h) => HANDLE[h.kind][0] !== 'circle');
     const circles = hs.filter((h) => HANDLE[h.kind][0] === 'circle');
@@ -227,8 +245,9 @@ export class Marks {
       put(sq[i], 'width', n2(2 * a));
       put(sq[i], 'height', n2(2 * a));
       put(sq[i], 'transform', shape === 'diamond' ? `rotate(45 ${n2(h.at.x)} ${n2(h.at.y)})` : '');
-      put(sq[i], 'class', `draw-hd ${h.kind}${h.active ? ' on' : ''}`);
+      put(sq[i], 'class', `draw-hd ${h.kind}${h.active ? ' on' : ''}${h.id === hovered ? ' hover' : ''}`);
       put(sq[i], 'data-handle', h.id);
+      lit(sq[i], h.id === hovered);
     });
     const ci = this.#circles.take(circles.length);
     circles.forEach((h, i) => {
@@ -236,8 +255,9 @@ export class Marks {
       put(ci[i], 'cx', n2(h.at.x));
       put(ci[i], 'cy', n2(h.at.y));
       put(ci[i], 'r', String(h.active ? on : size));
-      put(ci[i], 'class', `draw-hd ${h.kind}${h.active ? ' on' : ''}`);
+      put(ci[i], 'class', `draw-hd ${h.kind}${h.active ? ' on' : ''}${h.id === hovered ? ' hover' : ''}`);
       put(ci[i], 'data-handle', h.id);
+      lit(ci[i], h.id === hovered);
     });
     const centres = hs.filter((h) => h.kind === 'center');
     const dots = this.#dots.take(centres.length);

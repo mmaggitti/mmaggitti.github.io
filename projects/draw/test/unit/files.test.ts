@@ -3,8 +3,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gzipSync } from 'node:zlib';
-import { decodeImport, decodeSvg, encodeImport, encodeSvg, looksLikeSvg, pasted, readFile, sniffEncoding, FileTooLargeError, MAX_SVG_BYTES } from '../../src/platform/files.ts';
+import { constants, deflateRawSync, gzipSync } from 'node:zlib';
+import { decodeImport, decodeSvg, encodeImport, encodeSvg, looksLikeSvg, pasted, readFile, sniffEncoding, FileTooLargeError, INFLATE_SLICE, MAX_SVG_BYTES } from '../../src/platform/files.ts';
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><text>Café ✓</text></svg>';
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -25,6 +25,54 @@ test('a gzip that expands past the limit fails cleanly and early', async () => {
   const bomb = new Uint8Array(gzipSync(Buffer.alloc(MAX_SVG_BYTES + 1024 * 1024, 0x20)));
   assert.ok(bomb.byteLength < 100_000, 'test setup: a small file');
   await assert.rejects(decodeSvg(bomb), FileTooLargeError);
+});
+
+test('a link or an .svgz reaches the decompressor 4 KiB at a time, and a bomb is still refused past the cap', async () => {
+  // A decompressor inflates the whole of each chunk it is given before a byte can be counted, so a
+  // chunk is all the expansion the cap can't see: this one records every chunk it is given.
+  const Real = globalThis.DecompressionStream;
+  let fed: number[] = [];
+  globalThis.DecompressionStream = class {
+    readonly readable: ReadableStream<Uint8Array>;
+    readonly writable: WritableStream<BufferSource>;
+    constructor(format: CompressionFormat) {
+      const tap = new TransformStream<BufferSource, BufferSource>({
+        transform(chunk, c) {
+          fed.push(chunk.byteLength);
+          c.enqueue(chunk);
+        },
+      });
+      this.writable = tap.writable;
+      this.readable = tap.readable.pipeThrough(new Real(format));
+    }
+  } as unknown as typeof DecompressionStream;
+  const sum = (a: number[]) => a.reduce((s, n) => s + n, 0);
+  try {
+    // A file that barely compresses (random hex): both callers read all of it, a slice at a time.
+    let x = 0x2545f491;
+    const hex = Array.from({ length: 300_000 }, () => ((x ^= x << 13), (x ^= x >>> 17), (x ^= x << 5), (x >>> 0) & 15).toString(16)).join('');
+    const big = `<svg xmlns="http://www.w3.org/2000/svg"><desc>${hex}</desc></svg>`;
+    const frag = await encodeImport(big);
+    fed = [];
+    assert.equal(await decodeImport('#' + frag), big);
+    assert.ok(Math.max(...fed) <= INFLATE_SLICE, `the link went in chunks of up to ${Math.max(...fed)} bytes`);
+    assert.ok(fed.length > 30, `the link went in ${fed.length} chunk(s)`);
+    const svgz = new Uint8Array(gzipSync(utf8(big)));
+    fed = [];
+    assert.equal((await decodeSvg(svgz)).text, big);
+    assert.equal(sum(fed), svgz.byteLength, 'every byte of the .svgz went in');
+    assert.ok(Math.max(...fed) <= INFLATE_SLICE, `the .svgz went in chunks of up to ${Math.max(...fed)} bytes`);
+    // A bomb of more than 1 MB compressed (about a gigabyte of zeros, deflate at its ~1,030 to 1):
+    // refused once 20 MB comes out, and given to the decompressor a slice at a time too.
+    const zeros = deflateRawSync(Buffer.alloc(64 << 20), { level: 9, finishFlush: constants.Z_SYNC_FLUSH });
+    const bomb = Buffer.concat(Array(16).fill(zeros));
+    assert.ok(bomb.byteLength > 1e6, 'test setup: over 1 MB compressed');
+    fed = [];
+    await assert.rejects(decodeImport('#import=' + bomb.toString('base64url')), (e: Error) => e instanceof FileTooLargeError && /expands past 20 MB/.test(e.message));
+    assert.ok(Math.max(...fed) <= INFLATE_SLICE, `the bomb went in chunks of up to ${Math.max(...fed)} bytes`);
+  } finally {
+    globalThis.DecompressionStream = Real;
+  }
 });
 
 test('legacy encodings from the XML declaration and UTF-16 by BOM', async () => {

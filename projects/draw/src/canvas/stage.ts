@@ -6,6 +6,10 @@
 //   first (elementsFromPoint, or elementFromPoint where a shadow root has no such method: feature-
 //   detected, never by browser), mapped back to NodeIds by the renderer. ⇧, ⌘ or Ctrl adds.
 // - Two fingers pinch and pan the view; a quick two-finger tap is undo.
+// - Apple Pencil (P1-M5): its first press or hover latches pen mode (the editor's penMode, and once
+//   its notice); then fingers only navigate, one finger panning, and a two-finger tap is no undo, until
+//   the rail's Pencil button leaves it. A hovering Pencil (a pen pointermove with no button pressed)
+//   shows what a press would take; leaving, a cancel or a press ends that.
 // - The wheel pans; with ctrl (a trackpad pinch, or ctrl and the wheel) it zooms about the pointer.
 // - A press on the app's own controls over the drawing (.draw-chrome: Play, Files, Grid, Snap), or
 //   on a sheet one opened, is theirs.
@@ -51,7 +55,11 @@ export class Stage {
       target.addEventListener(type, fn as EventListener, options);
       this.#off.push(() => target.removeEventListener(type, fn as EventListener, options));
     };
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) on<PointerEvent>(area, type, (e) => this.#pointer(e));
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave']) on<PointerEvent>(area, type, (e) => this.#pointer(e));
+    // The rail's Pencil button leaves pen mode: the machine follows the editor.
+    this.#off.push(editor.penMode.subscribe(() => {
+      if (!editor.penMode.get()) this.#gestures.leavePenMode();
+    }));
     on<WheelEvent>(area, 'wheel', (e) => this.#wheel(e), { passive: false });
     for (const type of ['gesturestart', 'gesturechange', 'gestureend']) on<Event>(area.ownerDocument, type, (e) => e.preventDefault(), { passive: false });
     const ro = new ResizeObserver(() => editor.resize(this.size()));
@@ -71,7 +79,7 @@ export class Stage {
   }
 
   #pointer(e: PointerEvent): void {
-    const type = e.type === 'pointerdown' ? 'down' : e.type === 'pointermove' ? 'move' : e.type === 'pointerup' ? 'up' : 'cancel';
+    const type = e.type === 'pointerdown' ? 'down' : e.type === 'pointermove' ? 'move' : e.type === 'pointerup' ? 'up' : e.type === 'pointerleave' ? 'leave' : 'cancel';
     if (type === 'down' && e.pointerType === 'mouse' && e.button !== 0) return;
     // The app's own controls over the drawing (Play, Files, Grid, Snap) and the sheets they open
     // (the Snap sheet sits in the canvas) take their taps as buttons do.
@@ -84,7 +92,8 @@ export class Stage {
       }
     }
     const box = this.#host.getBoundingClientRect();
-    const events = this.#gestures.feed({ type, id: e.pointerId, x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp, kind: kindOf(e) });
+    const events = this.#gestures.feed({ type, id: e.pointerId, x: e.clientX - box.left, y: e.clientY - box.top, t: e.timeStamp, kind: kindOf(e), buttons: e.buttons });
+    if (this.#gestures.penMode && !this.#editor.penMode.get()) this.#editor.enterPenMode();
     for (const g of events) this.#gesture(g, e);
     if (events.length) e.preventDefault();
   }
@@ -111,6 +120,15 @@ export class Stage {
         return ed.navEnd();
       case 'two-finger-tap':
         return ed.undo();
+      case 'pan':
+        return ed.panBy(g.at.x - g.from.x, g.at.y - g.from.y);
+      case 'pan-start':
+      case 'pan-end':
+        return;
+      case 'hover':
+        return ed.hover(g.at);
+      case 'hover-end':
+        return ed.hover(null);
     }
   }
 

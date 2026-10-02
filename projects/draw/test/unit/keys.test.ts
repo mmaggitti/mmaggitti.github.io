@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { descendants, type ElementNode, type NodeId } from '../../../../engine/model/doc.ts';
 import { Keys, NUDGE_SHIFT, type KeyInput } from '../../src/keys.ts';
+import { barCommands } from '../../src/commands.ts';
+import { ROOT_DELETE } from '../../src/interact/structure.ts';
 import type { Editor } from '../../src/editor.ts';
 import { fakeEditor } from './fakes.ts';
 
@@ -107,6 +109,21 @@ test('no key acts in a field, in the code view, under a sheet, or once another h
   for (const k of ['ArrowRight', 'Delete']) assert.equal(press(k, { altKey: true }).prevented, false, `⌥${k} is not ours`);
   editor.select([]);
   for (const k of ['ArrowRight', 'Delete', 'Backspace']) assert.equal(press(k).prevented, false, `${k} with nothing selected (the page may scroll)`);
+  assert.equal(editor.source(), before, 'nothing changed');
+  assert.equal(editor.history.get().canUndo, false);
+});
+
+test('Delete or ⌫ with only the root selected says the root can’t be deleted and changes nothing; the bar’s Delete stays disabled there', () => {
+  const { editor, press } = setup();
+  const before = editor.source();
+  editor.select([editor.doc!.root]);
+  const bar = barCommands({ editor, workspace: null, ui: null }).find((b) => b.command.id === 'delete');
+  assert.equal(bar?.disabled, true, 'the bar’s Delete is disabled on the root alone');
+  for (const k of ['Delete', 'Backspace']) {
+    editor.notice.set(null);
+    assert.ok(press(k).prevented, `${k} is taken`);
+    assert.equal(editor.notice.get(), ROOT_DELETE, `${k} says why`);
+  }
   assert.equal(editor.source(), before, 'nothing changed');
   assert.equal(editor.history.get().canUndo, false);
 });

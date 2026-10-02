@@ -134,8 +134,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
     and text (`dom-text`) are also allowed in `src/codeview/`, which shows the source as text and
     never as markup;
   - storage outside `src/platform/`, and network outside `platform/`, `github/` and `export/`;
-  - file, clipboard, drag-and-drop, share, Web Locks and history APIs outside `src/platform/`
-    (`file-api`);
+  - file, clipboard, drag-and-drop, share, compression-stream, Web Locks and history APIs outside
+    `src/platform/` (`file-api`);
   - a password field outside `src/github/TokenForm.tsx`;
   - `allow-same-origin` anywhere (the script preview stays an opaque origin).
 - **The canvas is an open shadow root** (decided by `test/probe-shadow.mjs` in WebKit, CI run 13: every
@@ -164,6 +164,18 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   tab writes a drawing's title, description, role, language and Dublin Core metadata through
   `engine/access/`; its screen-reader preview is computed from the model, never the page (the
   canvas host stays aria-hidden).
+- **Finish and PNG (P1-M5).** PNG is made only by `src/platform/raster.ts` (check-sinks' `raster`
+  rule), from Clean's copy with its text as paths and no `<foreignObject>`, prepared before the tap
+  and shared inside it, its area clamped to the device's canvas. New… opens a preset
+  (`engine/presets/`) as a new drawing, or writes it over the open drawing in one entry
+  (`engine/model/replace.ts`); the top bar scrolls sideways in its own box, never the page. One
+  command registry (`src/commands.ts`) feeds the ContextBar, More, the keys and the ⌘K palette; at
+  46em and wider the ToolRail is a column on the left; an Apple Pencil latches pen mode, where fingers
+  only navigate and a hovering Pencil previews handles and snapping (the rail's Pencil leaves it).
+  SVG Lab's code head links each lesson to Draw (`#import`); the Insert tool puts SVG into the
+  drawing as one group; the code panel's Edit edits the whole drawing's content. The golden tests
+  build three drawings from the quick starts through the UI and hold each file, and its 64 and 256 px
+  PNGs, to `test/golden/`; `GOLDEN=update` remakes them (never in CI).
 - **The built page's first `<head>` element is a meta CSP** (`script-src 'self'`,
   `connect-src 'self' https://api.github.com`, …): a backstop, not the defense.
 - **`engine/` is DOM-free and dependency-free**, in erasable TypeScript with `.ts` import
@@ -187,7 +199,8 @@ with dated revisions beside it; each phase opens with its own short plan. Until 
   page. A row whose note or reason names an e2e check must cite it (ledger-check), so the evidence
   holds that claim too.
 - **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
-  earlier phase must be done or superseded. P0 closed on 2026-09-29 (`currentPhase` 1).
+  earlier phase must be done or superseded. P0 closed on 2026-09-29 and P1 on 2026-10-02
+  (`currentPhase` 2).
 
 ## Cloud-container limits
 

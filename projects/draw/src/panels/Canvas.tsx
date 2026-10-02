@@ -12,11 +12,14 @@
 // Draw's own state; it is rendered in the app's root, outside the canvas, whose containment would
 // clip it and whose chrome and marks would paint over it, as the ContextBar's More sheet is); and when there is something to say, a file that isn't well-formed (it is shown only as
 // source, in the code), a drawing the canvas couldn't draw (the file and the code are kept), and,
-// under reduced motion, Play for a drawing that animates (it opens paused, top-right).
+// under reduced motion, Play for a drawing that animates (it opens paused, top-right). Over a drawing
+// with nothing to draw (no shape, text, image or use: P1-M5's empty state, SVG Lab's "Add a shape
+// below"), a hint the taps pass through, "Add a shape with the tools" where the rail is on the left;
+// it is the app's, never in the file, and goes with the first shape.
 
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import type { Editor } from '../editor.ts';
+import { EMPTY_HINT, type Editor } from '../editor.ts';
 import type { Unparsed } from '../workspace.ts';
 import { failureText } from '../files-view.ts';
 import { useStore } from './store.ts';
@@ -27,6 +30,8 @@ import { Stage } from '../canvas/stage.ts';
 import type { Views } from './views.ts';
 import { Modal } from './Sheets.tsx';
 import type { SnapPrefs } from '../interact/snap.ts';
+import type { PanelUi } from './ui.ts';
+import { WIDE, useMedia } from './media.ts';
 
 interface Props {
   editor: Editor;
@@ -37,9 +42,11 @@ interface Props {
   files: () => void;
   onDrag: (e: DragEvent) => void;
   onDrop: (e: DragEvent) => void;
+  /** The panels' side of the commands: the Snap sheet opens from the palette too. */
+  ui: PanelUi;
 }
 
-export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }: Props) {
+export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop, ui }: Props) {
   const area = useRef<HTMLElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const marks = useRef<HTMLDivElement>(null);
@@ -74,7 +81,7 @@ export function Canvas({ editor, views, error, unparsed, files, onDrag, onDrop }
       <div ref={host} className="draw-host" aria-hidden="true" />
       <div ref={marks} className="draw-marks" />
       <GridButton editor={editor} />
-      <SnapButton editor={editor} area={area} />
+      <SnapButton editor={editor} area={area} ui={ui} />
       {error && <p className="draw-error ds-small">Can&rsquo;t show the drawing: {error}.</p>}
       <Over editor={editor} unparsed={unparsed} files={files} />
     </main>
@@ -87,16 +94,19 @@ const GRID_ICON = (
   </svg>
 );
 
-/** The Grid button: the grid over the paper, on or off (the device pref draw:grid, never the file). */
+/** The grid over the paper, on or off: the device pref draw:grid, never the file (the Grid button, and the palette's Grid). */
+export function toggleGrid(editor: Editor): void {
+  const on = editor.grid.get();
+  writePref('grid', on ? null : 'on');
+  editor.grid.set(!on);
+}
+
+/** The Grid button. */
 function GridButton({ editor }: { editor: Editor }) {
   const on = useStore(editor.grid);
   useEffect(() => editor.grid.set(readPref('grid') === 'on'), [editor]);
-  const toggle = () => {
-    writePref('grid', on ? null : 'on');
-    editor.grid.set(!on);
-  };
   return (
-    <button type="button" className="draw-chrome draw-grid-btn" aria-label="Grid" aria-pressed={on} onClick={toggle}>
+    <button type="button" className="draw-chrome draw-grid-btn" aria-label="Grid" aria-pressed={on} onClick={() => toggleGrid(editor)}>
       {GRID_ICON}
     </button>
   );
@@ -119,15 +129,15 @@ function readSnap(): SnapPrefs {
 }
 
 /** The Snap button and its sheet (in the app's root, not the canvas): the grid, its step, what snaps, and the guides. */
-function SnapButton({ editor, area }: { editor: Editor; area: RefObject<HTMLElement | null> }) {
-  const [open, setOpen] = useState(false);
+function SnapButton({ editor, area, ui }: { editor: Editor; area: RefObject<HTMLElement | null>; ui: PanelUi }) {
+  const open = useStore(ui.snapOpen);
   useEffect(() => editor.snap.set(readSnap()), [editor]);
   return (
     <>
-      <button type="button" className="draw-chrome draw-snap-btn" aria-label="Snap" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+      <button type="button" className="draw-chrome draw-snap-btn" aria-label="Snap" aria-haspopup="dialog" onClick={() => ui.snapOpen.set(true)}>
         {SNAP_ICON}
       </button>
-      {open && createPortal(<SnapSheet editor={editor} close={() => setOpen(false)} />, area.current?.closest('.draw') ?? document.body)}
+      {open && createPortal(<SnapSheet editor={editor} close={() => ui.snapOpen.set(false)} />, area.current?.closest('.draw') ?? document.body)}
     </>
   );
 }
@@ -216,6 +226,9 @@ function SnapSheet({ editor, close }: { editor: Editor; close: () => void }) {
 function Over({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed | null; files: () => void }) {
   const broken = useStore(editor.canvasError);
   const motion = useStore(editor.motion);
+  const tool = useStore(editor.tool);
+  useStore(editor.version);
+  const wide = useMedia(WIDE);
   if (unparsed) {
     return (
       <div className="draw-over draw-chrome draw-unparsed" role="status">
@@ -236,6 +249,13 @@ function Over({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed 
           Files
         </button>
       </div>
+    );
+  }
+  if (tool !== 'pen' && editor.isEmpty()) {
+    return (
+      <p className="draw-over draw-chrome draw-empty" role="status">
+        {wide ? EMPTY_HINT.left : EMPTY_HINT.below}
+      </p>
     );
   }
   if (motion === 'paused' || motion === 'playing') {

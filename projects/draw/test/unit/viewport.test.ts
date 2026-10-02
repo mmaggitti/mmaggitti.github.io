@@ -142,3 +142,61 @@ test('a drag that starts after the pointer was held still for 450 ms is held; a 
   assert.equal(start([ev('down', 1, 10, 10, 0, 'mouse'), ev('move', 1, 30, 10, 600, 'mouse')])?.held, true, 'the mouse too');
   assert.equal(start([ev('down', 9, 10, 10, 0, 'pen'), ev('move', 9, 30, 10, 500, 'pen')])?.held, true, 'and the Pencil');
 });
+
+// ── P1-M5: pen mode, the Pencil's hover, and the Pencil button ──────────────────────────────────
+
+const hover = (type: PointerInput['type'], x: number, y: number, t: number, buttons = 0): PointerInput => ({ type, id: 9, x, y, t, kind: 'pen', buttons });
+const feedAll = (m: GestureMachine, inputs: PointerInput[]) => inputs.flatMap((i) => m.feed(i)).map((e) => e.type);
+
+test('pen mode latches on a pen press and on a pen hover, never on a touch or the mouse, and lasts until left', () => {
+  const touch = new GestureMachine();
+  feedAll(touch, [ev('down', 1, 10, 10, 0), ev('move', 1, 40, 10, 5), ev('up', 1, 40, 10, 9), ev('down', 2, 10, 10, 20, 'mouse'), ev('up', 2, 10, 10, 30, 'mouse')]);
+  assert.equal(touch.penMode, false, 'fingers and the mouse');
+  const press = new GestureMachine();
+  feedAll(press, [ev('down', 9, 10, 10, 0, 'pen'), ev('up', 9, 10, 10, 5, 'pen')]);
+  assert.equal(press.penMode, true, 'a pen press');
+  feedAll(press, [ev('down', 1, 10, 10, 100), ev('up', 1, 10, 10, 120)]);
+  assert.equal(press.penMode, true, 'still on after a finger');
+  const hovered = new GestureMachine();
+  assert.deepEqual(feedAll(hovered, [hover('move', 10, 10, 0)]), ['hover']);
+  assert.equal(hovered.penMode, true, 'a pen hover');
+});
+
+test('in pen mode one finger pans once it moves and never becomes the tool; two still pinch; a two-finger tap is no undo', () => {
+  const m = new GestureMachine();
+  feedAll(m, [ev('down', 9, 50, 50, 0, 'pen'), ev('up', 9, 50, 50, 5, 'pen')]);
+  assert.deepEqual(feedAll(m, [ev('down', 1, 100, 100, 10), ev('move', 1, 102, 100, 12), ev('move', 1, 130, 100, 20), ev('move', 1, 140, 110, 30), ev('up', 1, 140, 110, 40)]),
+    ['pan-start', 'pan', 'pan', 'pan-end'], 'a one-finger drag pans');
+  const pans: GestureEvent[] = [];
+  for (const i of [ev('down', 1, 100, 100, 50), ev('move', 1, 130, 100, 60), ev('move', 1, 140, 110, 70)]) pans.push(...m.feed(i));
+  assert.deepEqual(pans.filter((e) => e.type === 'pan'), [{ type: 'pan', from: { x: 100, y: 100 }, at: { x: 130, y: 100 } }, { type: 'pan', from: { x: 130, y: 100 }, at: { x: 140, y: 110 } }], 'each pan from where the last left off, the first from the press');
+  m.feed(ev('up', 1, 140, 110, 80));
+  assert.deepEqual(feedAll(m, [ev('down', 1, 10, 10, 100), ev('up', 1, 11, 10, 120)]), [], 'a one-finger tap does nothing');
+  assert.deepEqual(feedAll(m, [ev('down', 1, 10, 10, 200), ev('down', 2, 60, 10, 220), ev('up', 1, 10, 10, 320), ev('up', 2, 60, 10, 330)]), ['nav-start', 'nav-end'], 'a quick two-finger tap: no undo');
+  assert.deepEqual(feedAll(m, [ev('down', 1, 10, 10, 400), ev('move', 1, 40, 10, 410), ev('down', 2, 60, 10, 420), ev('move', 2, 90, 10, 430), ev('up', 1, 40, 10, 440), ev('up', 2, 90, 10, 450)]),
+    ['pan-start', 'pan', 'pan-end', 'nav-start', 'nav', 'nav-end'], 'a second finger turns a pan into a pinch');
+  assert.deepEqual(feedAll(m, [ev('down', 9, 50, 50, 500, 'pen'), ev('down', 1, 200, 200, 510), ev('move', 9, 80, 50, 520, 'pen'), ev('move', 1, 240, 200, 530), ev('move', 9, 90, 50, 540, 'pen'), ev('up', 1, 240, 200, 550), ev('up', 9, 90, 50, 560, 'pen')]),
+    ['tool-down', 'tool-drag-start', 'pan-start', 'pan', 'tool-drag', 'pan-end', 'tool-drag-end'], 'a finger pans while the Pencil drags');
+});
+
+test('a hovering Pencil: a pen move with no button and no press is hover; it ends on leaving, on a cancel and before any press; a pen move with a button down is no hover', () => {
+  const m = new GestureMachine();
+  assert.deepEqual(feedAll(m, [hover('move', 10, 10, 0), hover('move', 12, 10, 5), hover('leave', 12, 10, 9)]), ['hover', 'hover', 'hover-end']);
+  assert.deepEqual(m.feed(hover('move', 20, 20, 10)), [{ type: 'hover', at: { x: 20, y: 20 } }]);
+  assert.deepEqual(feedAll(m, [hover('cancel', 20, 20, 12)]), ['hover-end'], 'a cancel');
+  assert.deepEqual(feedAll(m, [hover('move', 20, 20, 20), ev('down', 1, 300, 300, 25), ev('up', 1, 300, 300, 30)]), ['hover', 'hover-end'], 'a finger’s press ends it (and, in pen mode, does nothing else)');
+  assert.deepEqual(feedAll(m, [hover('move', 20, 20, 40), ev('down', 9, 20, 20, 45, 'pen'), ev('up', 9, 20, 20, 50, 'pen')]), ['hover', 'hover-end', 'tool-down', 'tool-tap'], 'the pen’s own press');
+  assert.deepEqual(feedAll(new GestureMachine(), [hover('move', 10, 10, 0, 1), hover('leave', 10, 10, 5, 1)]), [], 'a button pressed: no hover');
+  assert.deepEqual(feedAll(new GestureMachine(), [hover('leave', 10, 10, 0)]), [], 'a leave with no hover says nothing');
+});
+
+test('the Pencil button: leaving pen mode gives a finger the tool and the two-finger tap’s undo back; the next pen event latches it again', () => {
+  const m = new GestureMachine();
+  feedAll(m, [ev('down', 9, 50, 50, 0, 'pen'), ev('up', 9, 50, 50, 5, 'pen')]);
+  m.leavePenMode();
+  assert.equal(m.penMode, false);
+  assert.deepEqual(feedAll(m, [ev('down', 1, 10, 10, 10), ev('move', 1, 40, 10, 20), ev('up', 1, 40, 10, 30)]), ['tool-down', 'tool-drag-start', 'tool-drag-end'], 'a finger draws again');
+  assert.deepEqual(feedAll(m, [ev('down', 1, 10, 10, 100), ev('down', 2, 60, 10, 120), ev('up', 1, 10, 10, 220), ev('up', 2, 60, 10, 230)]), ['tool-down', 'tool-cancel', 'nav-start', 'nav-end', 'two-finger-tap'], 'and a two-finger tap undoes');
+  feedAll(m, [hover('move', 20, 20, 300), hover('leave', 20, 20, 310)]);
+  assert.equal(m.penMode, true, 'a hover latches it again');
+});

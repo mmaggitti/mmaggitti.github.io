@@ -26,9 +26,15 @@
 // (for the chosen node, when Make smooth or Make corner applies), Close or Open, Relative or
 // Absolute, Reverse (the chosen node's subpath, or every subpath: S2), and More. Each a 44 pt icon
 // button.
+//
+// P1-M5: the selection's buttons and More's rows come from the command registry (src/commands.ts
+// BAR and MORE), each running its command, so the bar, More, the keys and the palette run the same
+// code; they look and behave exactly as before. The Shapes kinds, the Text tool's font, the Pen's bar
+// and the Node tool's bar are modes and keep their own buttons here.
 
-import { useEffect, useState, type ReactNode } from 'react';
-import { BOOLEAN_LABELS, BOOLEAN_OPS, type Editor } from '../editor.ts';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import type { Editor } from '../editor.ts';
+import { barCommands, moreSections, type Command, type Ctx } from '../commands.ts';
 import { SHAPE_KINDS, SHAPE_NAMES, type ShapeKind } from '../interact/shapes-tool.ts';
 import { TEXT_DEFAULTS } from '../platform/font-catalogue.ts';
 import type { Unparsed } from '../workspace.ts';
@@ -68,7 +74,11 @@ const KIND_ICONS: Record<ShapeKind, ReactNode> = {
   spiral: icon(<path d="M12 12c0-1 1.5-1 1.5 0s-1 2.5-3 2.5-3-2-3-3.5 2-4.5 4.5-4.5 5.5 2.5 5.5 5.5-3 7-7 7-8-3.5-8-7.5" />),
 };
 
-export function ContextBar({ editor, unparsed, files }: { editor: Editor; unparsed: Unparsed | null; files: () => void }) {
+// The selection bar's icons, by command.
+const BAR_ICONS: Record<string, ReactNode> = { deselect: DESELECT, 'select-more': SELECT_MORE, 'edit-text': EDIT_TEXT, 'bring-forward': FORWARD, 'send-back': BACK, delete: DELETE };
+
+export function ContextBar({ ctx, unparsed, files }: { ctx: Ctx; unparsed: Unparsed | null; files: () => void }) {
+  const editor = ctx.editor;
   const focus = useStore(editor.focus);
   const selection = useStore(editor.selection);
   const notice = useStore(editor.notice);
@@ -201,30 +211,22 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
       </>
     );
   } else if (ids.length) {
-    const rootOnly = ids.length === 1 && ids[0] === editor.doc?.root;
     body = (
       <>
         <span className="draw-label ds-mono">{ids.length > 1 ? `${ids.length} selected` : elementLabel(editor.doc, ids[0])}</span>
-        <button type="button" className="draw-key draw-ctx-btn" aria-label="Deselect" onClick={() => editor.deselect()}>
-          {DESELECT}
-        </button>
-        <button type="button" className="draw-key draw-ctx-btn" aria-label="Select more" aria-pressed={selectMore} onClick={() => editor.selectMore.set(!selectMore)}>
-          {SELECT_MORE}
-        </button>
-        {editor.canEditText() && (
-          <button type="button" className="draw-key draw-ctx-btn draw-edit-text" aria-label="Edit text" onClick={() => editor.editText()}>
-            {EDIT_TEXT}
+        {barCommands(ctx).map(({ command: c, disabled }) => (
+          <button
+            key={c.id}
+            type="button"
+            className={c.id === 'edit-text' ? 'draw-key draw-ctx-btn draw-edit-text' : 'draw-key draw-ctx-btn'}
+            aria-label={c.name}
+            aria-pressed={c.id === 'select-more' ? selectMore : undefined}
+            disabled={disabled}
+            onClick={() => c.run(ctx)}
+          >
+            {BAR_ICONS[c.id]}
           </button>
-        )}
-        <button type="button" className="draw-key draw-ctx-btn" aria-label="Bring forward" disabled={rootOnly} onClick={() => editor.forward()}>
-          {FORWARD}
-        </button>
-        <button type="button" className="draw-key draw-ctx-btn" aria-label="Send back" disabled={rootOnly} onClick={() => editor.back()}>
-          {BACK}
-        </button>
-        <button type="button" className="draw-key draw-ctx-btn" aria-label="Delete" disabled={rootOnly} onClick={() => editor.delete()}>
-          {DELETE}
-        </button>
+        ))}
         <button type="button" className="draw-key draw-ctx-btn" aria-label="More" aria-haspopup="dialog" onClick={() => setMore(true)}>
           {MORE}
         </button>
@@ -242,67 +244,40 @@ export function ContextBar({ editor, unparsed, files }: { editor: Editor; unpars
         </p>
       )}
       {body}
-      {more && <MoreSheet editor={editor} close={() => setMore(false)} />}
+      {more && <MoreSheet ctx={ctx} close={() => setMore(false)} />}
     </div>
   );
 }
 
-/** The More sheet: what doesn't fit on the bar, one 44 pt row each. */
-function MoreSheet({ editor, close }: { editor: Editor; close: () => void }) {
-  const selected = useStore(editor.selection).size;
-  const then = (act: () => void) => () => {
-    close();
-    act();
-  };
-  const row = (label: string, act: () => void) => (
-    <button key={label} type="button" className="ds-btn draw-more-row" onClick={then(act)}>
-      {label}
+/** The More sheet: what doesn't fit on the bar, one 44 pt row each (the registry's MORE). */
+function MoreSheet({ ctx, close }: { ctx: Ctx; close: () => void }) {
+  useStore(ctx.editor.selection);
+  useStore(ctx.editor.version);
+  const row = (c: Command) => (
+    <button
+      key={c.id}
+      type="button"
+      className={c.id === 'edit-source' ? 'ds-btn draw-action' : 'ds-btn draw-more-row'}
+      onClick={() => {
+        close();
+        c.run(ctx);
+      }}
+    >
+      {c.name}
     </button>
   );
   return (
     <Modal title="More" onClose={close} done mono={false}>
       <div className="draw-more">
-        {editor.canEditSource() && (
-          <button type="button" className="ds-btn draw-action" onClick={then(() => editor.openSource())}>
-            Edit source
-          </button>
-        )}
-        {row('Fill…', () => editor.openStyleSheet('fill'))}
-        {row('Stroke…', () => editor.openStyleSheet('stroke'))}
-        {row('Gloss', () => editor.toggleGloss())}
-        {row('Duplicate', () => editor.duplicate())}
-        {row('Group', () => editor.group())}
-        {row('Ungroup', () => editor.ungroup())}
-        {row('Select group', () => editor.selectGroup())}
-        {row('Select all', () => editor.selectAll())}
-        <p className="draw-subhead">Align</p>
-        <div className="draw-more-grid">
-          {row('Align left', () => editor.align('left'))}
-          {row('Align centre', () => editor.align('center'))}
-          {row('Align right', () => editor.align('right'))}
-          {row('Align top', () => editor.align('top'))}
-          {row('Align middle', () => editor.align('middle'))}
-          {row('Align bottom', () => editor.align('bottom'))}
-        </div>
-        <p className="draw-subhead">Distribute</p>
-        <div className="draw-more-grid">
-          {row('Distribute horizontally', () => editor.distribute('h'))}
-          {row('Distribute vertically', () => editor.distribute('v'))}
-        </div>
-        {(editor.canStrokeToPath() || editor.canTextToPath()) && (
-          <>
-            <p className="draw-subhead">Convert</p>
-            <div className="draw-more-grid">
-              {editor.canStrokeToPath() && row('Stroke to path', () => void editor.strokeToPath())}
-              {editor.canTextToPath() && row('Text to path', () => void editor.textToPath())}
-            </div>
-          </>
-        )}
-        {selected >= 2 && (
-          <>
-            <p className="draw-subhead">Combine</p>
-            <div className="draw-more-grid">{BOOLEAN_OPS.map((op) => row(BOOLEAN_LABELS[op], () => void editor.combine(op)))}</div>
-          </>
+        {moreSections(ctx).map((s) =>
+          s.head === null ? (
+            s.rows.map(row)
+          ) : (
+            <Fragment key={s.head}>
+              <p className="draw-subhead">{s.head}</p>
+              <div className="draw-more-grid">{s.rows.map(row)}</div>
+            </Fragment>
+          ),
         )}
       </div>
     </Modal>

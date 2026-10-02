@@ -1,8 +1,12 @@
 // The ToolRail (52pt, the bottom of the screen): the tools, then Undo and Redo, which follow the
-// session's history. Select, Node and Pen (P1-M3), Shapes (P1-M2) and Text (P1-M4) work; Insert
-// arrives later in P1 and is shown, disabled, so the rail doesn't reshuffle when it does. A tool is pressed
-// while it is on, and a tap turns it on or off (Select turns it off too); each is disabled with no
-// drawing, or a read-only one. While the Pen is on, Undo is its Undo point and Redo is off.
+// session's history. Select, Node and Pen (P1-M3), Shapes (P1-M2) and Text (P1-M4) are modes: a tool is
+// pressed while it is on, and a tap turns it on or off (Select turns it off too). Insert (P1-M5) isn't a
+// mode: a tap opens the Insert sheet (SVG pasted, typed or picked, put in as one group). Each is
+// disabled with no drawing, or a read-only one. While the Pen is on, Undo is its Undo point and Redo is off.
+//
+// P1-M5: on wide screens (media.ts WIDE) the rail is a column on the left, Undo and Redo at its foot
+// (app.css). While Apple Pencil's pen mode is on, the rail ends with Pencil, pressed: a tap leaves pen
+// mode, so a finger draws and a two-finger tap undoes again, until the Pencil's next touch or hover.
 
 import type { ReactNode } from 'react';
 import type { Editor } from '../editor.ts';
@@ -19,20 +23,16 @@ const SHAPES = icon(<><rect x="3" y="11" width="9" height="9" /><circle cx="16" 
 const NODE = icon(<><path d="M4 18C8 6 16 6 20 18" /><rect x="2.5" y="16.5" width="3" height="3" /><rect x="18.5" y="16.5" width="3" height="3" /><circle cx="12" cy="9" r="1.5" /></>);
 const PEN = icon(<><path d="M4 20l3-1 11-11-2-2L5 17z" /><path d="M14 6l4 4" /></>);
 const TEXT = icon(<><path d="M5 6V4h14v2" /><path d="M12 4v16" /><path d="M9 20h6" /></>);
-const AFTER: [string, ReactNode][] = [['Insert', icon(<><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M12 8v8M8 12h8" /></>)]];
-const later = ([name, svg]: [string, ReactNode]) => (
-  <button key={name} type="button" className="draw-tool" disabled aria-label={`${name} (coming in P1)`}>
-    {svg}
-    <span>{name}</span>
-  </button>
-);
+const INSERT = icon(<><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M12 8v8M8 12h8" /></>);
 const UNDO = icon(<path d="M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3" />);
 const REDO = icon(<path d="M15 14l5-5-5-5M20 9H10a6 6 0 000 12h3" />);
+const PENCIL = icon(<><path d="M5 19l1.5-5L16 4.5a2.1 2.1 0 013 3L9.5 17z" /><path d="M14 6.5l3 3" /><path d="M5 19l4.5-2" /></>);
 
 export function ToolRail({ editor }: { editor: Editor }) {
   const h = useStore(editor.history);
   const tool = useStore(editor.tool);
   const readOnly = useStore(editor.readOnly);
+  const penMode = useStore(editor.penMode);
   useStore(editor.version);
   return (
     <nav className="draw-rail" aria-label="Tools">
@@ -56,15 +56,24 @@ export function ToolRail({ editor }: { editor: Editor }) {
         {TEXT}
         <span>Text</span>
       </button>
-      {AFTER.map(later)}
-      <button type="button" className="draw-tool" disabled={!h.canUndo} aria-label={h.undoLabel ? `Undo ${h.undoLabel}` : 'Undo'} onClick={() => editor.undo()}>
+      <button type="button" className="draw-tool draw-insert-tool" aria-haspopup="dialog" disabled={!editor.doc || readOnly} onClick={() => editor.openInsert()}>
+        {INSERT}
+        <span>Insert</span>
+      </button>
+      <button type="button" className="draw-tool draw-undo" disabled={!h.canUndo} aria-label={h.undoLabel ? `Undo ${h.undoLabel}` : 'Undo'} onClick={() => editor.undo()}>
         {UNDO}
         <span>Undo</span>
       </button>
-      <button type="button" className="draw-tool" disabled={!h.canRedo} aria-label={h.redoLabel ? `Redo ${h.redoLabel}` : 'Redo'} onClick={() => editor.redo()}>
+      <button type="button" className="draw-tool draw-redo" disabled={!h.canRedo} aria-label={h.redoLabel ? `Redo ${h.redoLabel}` : 'Redo'} onClick={() => editor.redo()}>
         {REDO}
         <span>Redo</span>
       </button>
+      {penMode && (
+        <button type="button" className="draw-tool draw-pencil" aria-pressed="true" onClick={() => editor.leavePenMode()}>
+          {PENCIL}
+          <span>Pencil</span>
+        </button>
+      )}
     </nav>
   );
 }

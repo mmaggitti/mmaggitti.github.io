@@ -42,8 +42,10 @@
 //   (Title, Description, Metadata, an element's Title and Hidden, Remove) and one field session per
 //   focus (Field kind 'access'); typing a title where there is none makes it, in that one entry.
 
-import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
-import { parseFragment } from '../../../engine/model/fragment.ts';
+import { NS, attrValue, el, findAttr, parseDoc, serialize, serializeNode, serializeParts, type Doc, type ElementNode, type LeafNode, type NodeId } from '../../../engine/model/doc.ts';
+import { ContentError, parseFragment, replaceContent } from '../../../engine/model/fragment.ts';
+import { planInsert } from '../../../engine/model/insert.ts';
+import { shapeCount } from '../../../engine/export/raster.ts';
 import { buildRefIndex } from '../../../engine/model/refs.ts';
 import { opInsert, opRemove, opSetAttr, opSetAttrRaw, opSetLeafRaw, type ChangeSet, type Op } from '../../../engine/commands/ops.ts';
 import { REM_UNCONVERTIBLE } from '../../../engine/report/import-report.ts';
@@ -78,6 +80,7 @@ import { adoptDonut, detachGenerator, finishGenerators, generatorOf, type Genera
 import { donutCandidateFor, donutFor, donutParts, VALUE_MAX, VALUE_MIN, type Donut } from '../../../engine/generators/donut.ts';
 import { planShapeHandle, shapeHandleLabel, shapeHandles, takesShapeHandles } from '../../../engine/geometry/shape-handles.ts';
 import { insertMarkup } from '../../../engine/model/space.ts';
+import { replaceDrawing as replaceDrawingWith } from '../../../engine/model/replace.ts';
 import { INPUT_UI, SHAPE_LABELS, boardScale, drawMarkup, placeMarkup, shapeColour, type ShapeCtx, type ShapeKind } from './interact/shapes-tool.ts';
 import { cssSets, sheetSets, styleNamesId } from '../../../engine/geometry/css.ts';
 import { idsInUse, renameIdsIn } from '../../../engine/model/ids.ts';
@@ -231,7 +234,10 @@ export type Sheet =
   | { kind: 'number'; ref: TokenRef; token: NumberToken }
   | { kind: 'color'; ref: TokenRef; token: ColorToken }
   | { kind: 'text'; ref: TokenRef; token: TextToken }
-  | { kind: 'source'; node: NodeId; text: string }
+  /** Edit source: one element's markup; or (P1-M5) the whole drawing's content, the root's tags shown around the field (`whole`). */
+  | { kind: 'source'; node: NodeId; text: string; whole?: { start: string; end: string } }
+  /** The Insert tool's sheet (P1-M5): SVG pasted, typed or picked from Files, put into the drawing as one group. */
+  | { kind: 'insert' }
   /** The Colour sheet over the selection for a style property (Inspect's swatches, More's Fill… and Stroke…). */
   | { kind: 'style'; prop: string; ids: NodeId[]; text: string }
   /** The Text sheet's lines (P1-M4): one text's lines, one entry per visit; `select`: its text selected in the field (the Text tool's). */
@@ -351,6 +357,8 @@ export class Editor {
   readonly chosenNode: Store<string | null> = createStore<string | null>(null);
   /** The Text tool's font for new text (P1-M4: Archivo or Inter, platform/font-catalogue.ts TEXT_DEFAULTS): a device preference, never in the file. */
   readonly textFont: Store<string> = createStore<string>(TEXT_DEFAULTS[0]);
+  /** Apple Pencil's pen mode (P1-M5): latched by the Stage's first pen event, until the rail's Pencil button or a reload; fingers only navigate in it. */
+  readonly penMode: Store<boolean> = createStore(false);
   #shapes = 0; // shapes placed or drawn since the document opened: the colour cycle's n
   #detached: NodeId[] = []; // what the finish hook detached in the latest run (the notice, after a commit)
   #field: FieldSession | null = null; // an Inspect field being typed in: one entry while it has focus
@@ -360,6 +368,8 @@ export class Editor {
   #fontsDirty = false; // a change since the last font request may need another face (P1-M4)
   #faceDoc: Doc | null = null; // the document whose own faces are registered, and its <style> text's version then
   #faceVersion = -1;
+  #hoverAt: Point | null = null; // a hovering Pencil, host px (P1-M5): never a store, never in the file
+  #penNoticed = false; // pen mode's notice is said once a visit
 
   #ports: EditorPorts;
   #doc: Doc | null = null;
@@ -439,6 +449,7 @@ export class Editor {
    */
   open(input: string | Doc): OpenResult {
     if (!this.#ports.sinkReady()) return { ok: false, error: 'DOMPurify is unavailable, so nothing renders', ...NO_STATS };
+    this.#hoverAt = null; // a hover ends with the drawing it was over
     let doc: Doc;
     if (typeof input === 'string') {
       const parsed = parseDoc(input);
@@ -734,6 +745,7 @@ export class Editor {
       model.localGrid = { lines: lg.lines, axes: lg.axes, labels: lg.labels };
     }
     this.#gestureMarks(model, paper, measured);
+    if (this.#hoverAt && !this.#gesture) model.hover = this.#hoverMarks(this.#hoverAt, model);
     return model;
   }
 
@@ -771,25 +783,26 @@ export class Editor {
    */
   pointerDown(at: Point, hits: readonly NodeId[], mods: { add: boolean }): void {
     const doc = this.#doc;
+    this.#hoverAt = null; // any press ends a hover
     if (!doc || this.#live || this.#gesture || this.#nudge || this.#field) return;
     // The Pen (P1-M3): every one-finger gesture adds a point, closes or continues a path; it never
     // selects, moves or marquees, and no handle but the pen's own takes a press.
     if (this.tool.get() === 'pen') {
       if (!this.#writable() || !this.#pen) return;
       const took = pickHandle(this.#penHandles(true), at);
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: took?.id ?? null, handleAt: took?.at ?? null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: { take: (took?.id ?? null) as PenGesture['take'], p: null, f: null, drag: null, label: null }, text: false };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: took?.id ?? null, handleAt: took?.at ?? null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: { take: (took?.id ?? null) as PenGesture['take'], p: null, f: null, drag: null, label: null }, text: false, cam: this.#box && { ...this.#box } };
       return;
     }
     // The Text tool (P1-M4): a tap places SVG Lab's "Hello"; a drag places nothing.
     if (this.tool.get() === 'text') {
       if (!this.#writable()) return;
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: null, text: true };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: null, pen: null, text: true, cam: this.#box && { ...this.#box } };
       return;
     }
     // The Shapes tool: every one-finger gesture places or draws, never selects or moves.
     if (this.tool.get() === 'shapes') {
       if (!this.#writable()) return;
-      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null }, pen: null, text: false };
+      this.#gesture = { at0: at, at, target: null, onLocked: false, add: false, mode: 'pending', move: null, handle: null, handleAt: null, hd: null, snapLines: [], guide: null, gd: null, draw: { kind: this.shapeKind.get(), step: this.#rootStep(), targets: null, a: null, drag: null, id: null, tip: null }, pen: null, text: false, cam: this.#box && { ...this.#box } };
       return;
     }
     const all = this.#withThin(at, hits);
@@ -801,7 +814,7 @@ export class Editor {
     const pill = pickPill(model.guides, at);
     const picked = pill === null ? pickHandle(model.handles, at) : null;
     const onLocked = targets.length > 0 && isLocked(doc, targets[0]);
-    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null, pen: null, text: false };
+    this.#gesture = { at0: at, at, target, onLocked, add: mods.add || this.selectMore.get(), mode: 'pending', move: null, handle: picked?.id ?? null, handleAt: picked?.at ?? null, hd: null, snapLines: [], guide: pill, gd: null, draw: null, pen: null, text: false, cam: this.#box && { ...this.#box } };
   }
 
   /** The pointer moved past the slop (the first call starts the drag; `held`: after a hold). */
@@ -833,14 +846,14 @@ export class Editor {
     g.at = at;
     this.#gesture = null;
     if (g.text) {
-      if (g.mode === 'pending') this.#placeText(g.at0);
+      if (g.mode === 'pending') this.#placeText(this.#now(g, g.at0));
     } else if (g.pen) this.#penUp(g);
     else if (g.draw) this.#endDraw(g, true);
     else if (g.mode === 'pending') {
       // A tap on a node handle (P1-M3): a bend curves its segment, an anchor becomes the chosen node.
       // A tap on any other handle, or on a pill, does nothing. A tap on a ghost arc sets its flags.
       if (g.handle !== null && this.tool.get() === 'node') this.#tapNodeHandle(g.handle);
-      else if (g.handle === null && g.guide === null && !this.#tapGhost(g.at0)) this.#tap(g.target, g.add);
+      else if (g.handle === null && g.guide === null && !this.#tapGhost(this.#now(g, g.at0))) this.#tap(g.target, g.add);
     } else if (g.mode === 'move') this.#endMove(g, true);
     else if (g.mode === 'handle') this.#endHandle(g, true);
     else if (g.mode === 'guide') this.#endGuide(g, true);
@@ -1381,7 +1394,8 @@ export class Editor {
   // rounded to the snap step.
   #moveFrame(g: Gesture): void {
     const m = g.move!;
-    const [rx, ry] = applyM(m.rootInv, g.at.x - g.at0.x, g.at.y - g.at0.y);
+    const at = this.#then(g, g.at);
+    const [rx, ry] = applyM(m.rootInv, at.x - g.at0.x, at.y - g.at0.y);
     const s = this.#snapDelta(m, rx, ry);
     g.snapLines = s.lines;
     this.#applyMove(m, s.d);
@@ -1632,7 +1646,8 @@ export class Editor {
     const doc = this.#doc!;
     const opts = { ctx: this.geo, decimals: stepDecimals(hd.step) };
     let plan: () => Plan;
-    const f = { x: g.at.x + hd.grab.x, y: g.at.y + hd.grab.y }; // where the handle goes (the grab kept)
+    const at = this.#then(g, g.at); // in the view the press was made in (fingers may have moved it since)
+    const f = { x: at.x + hd.grab.x, y: at.y + hd.grab.y }; // where the handle goes (the grab kept)
     if (hd.donut) {
       // SVG Lab's boundary drag: the finger's angle as a fraction of a turn from the top, clockwise;
       // the two neighbouring values trade, each at least 1.
@@ -1686,13 +1701,13 @@ export class Editor {
       const to = this.#cornerPoint(g, hd, f);
       plan = () => planResize(doc, hd.id, { corner: hd.corner!, to, box: hd.box ?? undefined }, opts);
     } else if (hd.handle === 'rot') {
-      const turn = (Math.atan2(g.at.y - hd.pivot.y, g.at.x - hd.pivot.x) - Math.atan2(g.at0.y - hd.pivot.y, g.at0.x - hd.pivot.x)) * (180 / Math.PI);
+      const turn = (Math.atan2(at.y - hd.pivot.y, at.x - hd.pivot.x) - Math.atan2(g.at0.y - hd.pivot.y, g.at0.x - hd.pivot.x)) * (180 / Math.PI);
       const a = magneticAngle(hd.a0 + hd.flip * turn);
       hd.tip = `rotate(${fmt(a, 0)})`;
       plan = () => planRotate(doc, hd.id, a, { ctx: this.geo, box: hd.local });
     } else {
       const from = Math.hypot(g.at0.x - hd.pivot.x, g.at0.y - hd.pivot.y);
-      const k = scaleStep(from > 0 ? (hd.a0 * Math.hypot(g.at.x - hd.pivot.x, g.at.y - hd.pivot.y)) / from : hd.a0);
+      const k = scaleStep(from > 0 ? (hd.a0 * Math.hypot(at.x - hd.pivot.x, at.y - hd.pivot.y)) / from : hd.a0);
       hd.tip = `scale(${fmt(k, 2)})`;
       plan = () => planScale(doc, hd.id, k, opts);
     }
@@ -1839,6 +1854,10 @@ export class Editor {
   pickTool(tool: Tool): void {
     if (tool !== 'select' && (!this.#doc || this.readOnly.get())) return;
     if (this.#gesture) this.pointerCancel();
+    if (this.#hoverAt) {
+      this.#hoverAt = null; // a tool change ends a hover (what a press would take changed)
+      this.#show();
+    }
     if (this.tool.get() === tool) return;
     this.#endLines(); // a tool change ends a lines visit first (P1-M4)
     if (this.tool.get() === 'pen') this.#endPen(false);
@@ -2241,7 +2260,7 @@ export class Editor {
       if (pg.take === 'pen-start' && pen.anchors.length >= 3) pg.p = null; // a close, on the lift
       else if (pg.take !== null) pg.p = pen.anchors.at(-1)?.at ?? null;
       else {
-        pg.p = this.#penPoint(g.at0);
+        pg.p = this.#penPoint(this.#now(g, g.at0));
         if (pen.anchors.length) {
           pg.label = pen.id === null ? 'Draw path' : 'Add point';
           pg.drag = this.#drag(pg.label);
@@ -2288,7 +2307,7 @@ export class Editor {
     if (g.mode === 'pending') {
       if (pg.take === 'pen-end') return this.#continue();
       if (pg.take === 'pen-start') return; // a tap on the first point adds nothing
-      const p = this.#penPoint(g.at0);
+      const p = this.#penPoint(this.#now(g, g.at0));
       if (p) this.#addAnchor({ at: p, out: null });
       return;
     }
@@ -2723,7 +2742,7 @@ export class Editor {
       if (!this.#session) return;
       g.mode = 'draw';
       d.targets = this.#snapTargets([]);
-      d.a = this.#snapRoot(g.at0, d.targets, d.step).p;
+      d.a = this.#snapRoot(this.#now(g, g.at0), d.targets, d.step).p;
       d.drag = this.#drag(SHAPE_LABELS[d.kind]);
     }
     const drag = d.drag;
@@ -2754,7 +2773,7 @@ export class Editor {
     const d = g.draw!;
     if (g.mode === 'pending') {
       if (!commit) return;
-      const p = this.#snapRoot(g.at0, this.#snapTargets([]), d.step).p;
+      const p = this.#snapRoot(this.#now(g, g.at0), this.#snapTargets([]), d.step).p;
       let id: NodeId | null = null;
       if (this.#dispatch(SHAPE_LABELS[d.kind], (apply) => (id = this.#addShape(apply, d.kind, d.step, (c) => placeMarkup(d.kind, p, c))))) this.#placed(id!);
       return;
@@ -3367,6 +3386,29 @@ export class Editor {
     return ok ? null : this.notice.get();
   }
 
+  // ── Replace this one (P1-M5, the New sheet) ──────────────────────────────────────────────────
+
+  /**
+   * The open drawing's content becomes another file's (engine/model/replace.ts: the root's attributes
+   * as it writes them and everything inside it), in one entry named `label` that undo takes back byte
+   * for byte; Select is the tool, the selection empties, and the view fits the new artboard. False,
+   * with the notice saying why, when it can't be.
+   */
+  replaceDrawing(text: string, label: string): boolean {
+    const doc = this.#doc;
+    if (!doc || !this.#writable()) return false;
+    if (this.tool.get() !== 'select') this.pickTool('select');
+    if (!this.#dispatch(label, (apply) => replaceDrawingWith(doc, text, apply))) return false;
+    this.select([]);
+    this.fitToScreen();
+    return true;
+  }
+
+  /** The artboard (the root's viewBox, or its width and height, in user units), or null: what the Finish sheet sizes PNGs from. */
+  board(): Rect | null {
+    return this.#board && { ...this.#board };
+  }
+
   // ── Layers: hide, lock, rename ───────────────────────────────────────────────────────────────
 
   /** Hide an element (display="none", "Hide") or show it again (that attribute removed, "Show"). */
@@ -3579,7 +3621,7 @@ export class Editor {
   }
 
   #endMarquee(g: Gesture): void {
-    const r = rectOf(g.at0, g.at);
+    const r = rectOf(this.#now(g, g.at0), g.at);
     if (r.width < SLOP_PX || r.height < SLOP_PX) return;
     const inside = this.#leaves(r);
     const sel = this.selection.get();
@@ -3613,7 +3655,7 @@ export class Editor {
     const doc = this.#doc!;
     if (!g) return;
     if (g.mode === 'marquee') {
-      model.marquee = rectOf(g.at0, g.at);
+      model.marquee = rectOf(this.#now(g, g.at0), g.at);
       return;
     }
     model.snapLines = g.snapLines;
@@ -3941,6 +3983,87 @@ export class Editor {
     if (this.sheet.get()?.kind === 'source') this.sheet.set(null);
   }
 
+  // ── Edit the drawing's source, Insert, the empty state (P1-M5) ─────────────────────────────────
+
+  /** Is Edit the drawing's source offered: an open drawing that can be written. */
+  canEditDrawingSource(): boolean {
+    return !!this.#doc && !this.readOnly.get();
+  }
+
+  /** The source sheet on the root's whole content: its start tag above the field, its end tag below, everything between them in it. */
+  openDrawingSource(): void {
+    if (this.tool.get() === 'pen') this.#endPen(true);
+    this.#endLines();
+    const doc = this.#doc;
+    if (!doc || this.#live || !this.#writable()) return;
+    this.focus.set(null);
+    const p = serializeParts(doc, doc.root);
+    this.sheet.set({ kind: 'source', node: doc.root, text: p.content, whole: { start: p.start, end: p.end } });
+  }
+
+  /**
+   * Apply the drawing's content (engine/model/fragment.ts replaceContent): every child of the root
+   * replaced by what `text` parses to there, in ONE transaction ("Edit source") that undo takes back
+   * byte for byte, so the file is exactly the root's start tag, the text and its end tag, with what
+   * lies outside the root kept. Text that doesn't parse changes nothing and says where.
+   */
+  applyDrawingSource(text: string): SourceError | null {
+    const doc = this.#doc;
+    if (!doc) return { message: 'Nothing is open', at: 0, line: 1, column: 1 };
+    if (this.readOnly.get()) return { message: READ_ONLY, at: 0, line: 1, column: 1 };
+    if (!this.#session || this.#live || this.#nudge || this.#gesture) return { message: 'Finish the edit in progress first', at: 0, line: 1, column: 1 };
+    try {
+      this.#session.dispatch('Edit source', (apply) => replaceContent(doc, doc.root, text, apply));
+    } catch (e) {
+      if (!(e instanceof ContentError)) throw e;
+      return { message: e.message, at: e.at, ...lineColumn(text, e.at) };
+    }
+    this.#noteDetached();
+    this.sheet.set(null);
+    this.select([]);
+    return null;
+  }
+
+  /** The Insert sheet (the ToolRail's Insert): SVG to paste, type or pick, put in as one group. */
+  openInsert(): void {
+    if (this.tool.get() === 'pen') this.#endPen(true);
+    this.#endLines();
+    if (!this.#doc || this.#live || !this.#writable()) return;
+    this.focus.set(null);
+    this.sheet.set({ kind: 'insert' });
+  }
+
+  /**
+   * Insert SVG (engine/model/insert.ts planInsert) as one <g>, last in the root by the insertion rule,
+   * centred on the canvas, in ONE transaction ("Insert"); the <g> is selected, the tool kept and the
+   * sheet closed. A refusal (not SVG, not well-formed, past the drawing's limits) is the notice, and the
+   * sheet stays. What the insert holds that Draw doesn't draw is kept byte for byte and never drawn.
+   */
+  insert(text: string): boolean {
+    const doc = this.#doc;
+    const box = this.#box;
+    if (!doc || this.#live || !this.#writable()) return false;
+    if (this.#gesture) this.pointerCancel();
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    const inv = toHost && invert(toHost);
+    const [cx, cy] = inv ? applyM(inv, this.#size.width / 2, this.#size.height / 2) : [0, 0];
+    const plan = planInsert(doc, text, { x: cx, y: cy }, this.#board);
+    if ('refused' in plan) {
+      this.notice.set(plan.refused);
+      return false;
+    }
+    let g: NodeId | null = null;
+    if (!this.#dispatch('Insert', (apply) => (g = insertMarkup(doc, { last: doc.root }, plan.markup, apply)))) return false;
+    if (this.sheet.get()?.kind === 'insert') this.sheet.set(null);
+    this.select([g!]);
+    return true;
+  }
+
+  /** An open drawing with nothing the canvas draws as a shape (no shape, text, image or use, raster.ts shapeCount): the empty state's hint. */
+  isEmpty(): boolean {
+    return !!this.#doc && shapeCount(this.#doc) === 0;
+  }
+
   /** The artboard's larger side (the Number sheet's slider spans from minus it to twice it), or 100. */
   extent(): number {
     const b = this.#board;
@@ -4065,6 +4188,99 @@ export class Editor {
     this.#view = next;
     this.#fitted = false;
     this.#applyView();
+    // Fingers moved the view while the Pencil holds a drag (P1-M5): the frame again, so what it drags
+    // stays under the pen tip.
+    const g = this.#gesture;
+    if (g && (g.move || g.hd || g.gd || g.draw?.drag || g.pen?.drag)) this.pointerDrag(g.at);
+  }
+
+  // ── Apple Pencil (P1-M5): the remap, hover and pen mode ──────────────────────────────────────
+
+  // The pointer at `at` (host px now) in the host as the view was when the gesture's press was made:
+  // a pan or pinch since (fingers navigating while the Pencil holds a move or a handle) is taken out,
+  // so the gesture keeps its start in root units and what it drags stays under the pen tip.
+  #then(g: Gesture, at: Point): Point {
+    const a = g.cam;
+    const b = this.#box;
+    if (!a || !b || (a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height)) return at;
+    return { x: a.left + ((at.x - b.left) * a.width) / b.width, y: a.top + ((at.y - b.top) * a.height) / b.height };
+  }
+
+  // A point of the press's view in the host now (the frames that read the view now: the Pen, Shapes, a tap).
+  #now(g: Gesture, p: Point): Point {
+    const a = g.cam;
+    const b = this.#box;
+    if (!a || !b || (a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height)) return p;
+    return { x: b.left + ((p.x - a.left) * b.width) / a.width, y: b.top + ((p.y - a.top) * b.height) / a.height };
+  }
+
+  /**
+   * A hovering Pencil at `at` (host px), or none (null): the overlay lights the handle a press there
+   * would take and marks the point it would snap to. No store moves, nothing in the file changes and
+   * no history entry is made; a press, a tool change and an open end it.
+   */
+  hover(at: Point | null): void {
+    if (!at) {
+      if (!this.#hoverAt) return;
+      this.#hoverAt = null;
+      return this.#show();
+    }
+    if (!this.#doc || this.#gesture || this.#live) return;
+    this.#hoverAt = at;
+    this.#show();
+  }
+
+  // The hover's snap targets (#snapTargets), kept while nothing they depend on changes: the document
+  // and its version, the view, the selection, the tool, the snap preferences, the grid and the shapes
+  // left out. A hovering Pencil moves every frame, and gathering measures every shape in the drawing,
+  // so it is gathered on the first frame after a change, as a drag gathers its own once.
+  #hoverCache: { key: readonly unknown[]; targets: SnapTargets } | null = null;
+  #hoverTargets(moving: readonly NodeId[]): SnapTargets {
+    const doc = this.#doc!;
+    const key = [doc, doc.version, this.#box, this.#viewport, this.#M, this.#size, this.selection.get(), this.tool.get(), this.snap.get(), this.grid.get(), ...moving];
+    const c = this.#hoverCache;
+    if (c && c.key.length === key.length && c.key.every((v, i) => v === key[i])) return c.targets;
+    const targets = this.#snapTargets(moving);
+    this.#hoverCache = { key, targets };
+    return targets;
+  }
+
+  // What a press at `at` would take, as pointerDown picks it: a handle within 26 px (no guide's pill
+  // first), the Pen's own handles; and the point it would snap to: a move's targets for Select (the
+  // selection's own left out), a point's for the Shapes tool and the Pen. A snap is marked only where
+  // a target took it.
+  #hoverMarks(at: Point, model: OverlayModel): NonNullable<OverlayModel['hover']> {
+    const tool = this.tool.get();
+    let handle: string | null = null;
+    let snap: { p: Point; lines: Line[] } | null = null;
+    if (tool === 'pen') {
+      handle = pickHandle(this.#penHandles(true), at)?.id ?? null;
+      if (this.#pen) snap = this.#snapRoot(at, this.#hoverTargets(this.#pen.id !== null ? [this.#pen.id] : []), this.#penStep());
+    } else if (tool === 'shapes') {
+      snap = this.#snapRoot(at, this.#hoverTargets([]), this.#rootStep());
+    } else if (tool === 'select' || tool === 'node') {
+      handle = pickPill(model.guides, at) === null ? (pickHandle(model.handles, at)?.id ?? null) : null;
+    }
+    const box = this.#box;
+    const toHost = box && rootToHostMatrix(box, this.#viewport, this.#M);
+    // A move's step at this zoom (#openMove's), for the axis no target takes.
+    if (tool === 'select' && toHost) snap = this.#snapRoot(at, this.#hoverTargets([...this.selection.get()]), snapStep(Math.sqrt(Math.abs(toHost[0] * toHost[3] - toHost[1] * toHost[2]))));
+    const ring = snap && snap.lines.length && toHost ? applyM(toHost, snap.p.x, snap.p.y) : null;
+    return { handle, ring: ring && { x: ring[0], y: ring[1] }, lines: ring ? snap!.lines : [] };
+  }
+
+  /** The Stage's machine latched pen mode (a pen press or hover): the store, and once a visit the notice. */
+  enterPenMode(): void {
+    if (this.penMode.get()) return;
+    this.penMode.set(true);
+    if (this.#penNoticed) return;
+    this.#penNoticed = true;
+    this.notice.set(PEN_MODE_NOTICE);
+  }
+
+  /** The rail's Pencil button: leave pen mode, so fingers draw and a two-finger tap undoes again (the Stage's machine follows). */
+  leavePenMode(): void {
+    this.penMode.set(false);
   }
 
   /** Two fingers went down: pinches are measured from the view now. */
@@ -4113,6 +4329,10 @@ interface PenGesture {
   label: string | null;
 }
 export const PEN_NOTICE = 'Tap to add points, or drag to curve.';
+/** The empty state's hint (P1-M5): SVG Lab's words with the rail below, and with the rail on the left (media.ts WIDE). */
+export const EMPTY_HINT = { below: 'Add a shape below', left: 'Add a shape with the tools' } as const;
+/** Said once a visit, when the Pencil's first press or hover latches pen mode (P1-M5). */
+export const PEN_MODE_NOTICE = 'Apple Pencil draws; fingers move the view. Tap Pencil in the rail to draw with a finger.';
 /** The Pen's own history entries: any other ends the Pen first. */
 const PEN_LABELS: ReadonlySet<string> = new Set(['Draw path', 'Add point', 'Close path']);
 /** The notice when an edit makes a generated shape plain. */
@@ -4220,6 +4440,7 @@ interface Gesture {
   guide: number | null; // the guide whose pill the press took, by index
   gd: { drag: Drag; step: number; tip: string | null } | null; // a guide's drag
   snapLines: Line[]; // host px: the targets the last frame snapped to
+  cam: CameraBox | null; // the root's box when the pointer went down (fingers may move the view since: P1-M5)
 }
 // A handle drag: a corner (resize), the ring (rotate) or the diamond (scale), on one element.
 interface HandleDrag {

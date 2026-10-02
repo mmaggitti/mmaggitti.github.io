@@ -476,6 +476,22 @@ export function serializeNode(doc: Doc, id: NodeId): string {
   return w.text();
 }
 
+/**
+ * An element's source in three parts, exactly as serialize writes them: its start tag, everything inside
+ * it, and its end tag (P1-M5: Edit the drawing's source shows the root's this way). A self-closing
+ * element with nothing inside is all start tag.
+ */
+export function serializeParts(doc: Doc, id: NodeId): { start: string; content: string; end: string } {
+  const n = el(doc, id);
+  const whole = serializeNode(doc, id);
+  if (!n.children.length && n.selfClosing) return { start: whole, content: '', end: '' };
+  const w = writer(doc);
+  for (const c of n.children) w.emit(c);
+  const content = w.text();
+  const end = n.src?.endTag && !n.selfClosing ? doc.source.slice(n.src.endTag.start, n.src.endTag.end) : `</${n.qname}${n.endTail}>`;
+  return { start: whole.slice(0, whole.length - content.length - end.length), content, end };
+}
+
 function writer(doc: Doc): { emit: (id: NodeId) => void; text: () => string } {
   const memo = new Map<NodeId, boolean>();
   let out = '';

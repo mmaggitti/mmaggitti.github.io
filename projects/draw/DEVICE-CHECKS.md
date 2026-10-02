@@ -33,7 +33,7 @@ Open <https://mmaggitti.github.io/draw/> in Safari (a normal tab, not the Home S
 
 Signed: ______  Date: ______  Device / iOS: ______
 
-## P1 — Select, transform, shapes, colour, paths, text and accessibility
+## P1 — Select, transform, shapes, colour, paths, text, accessibility, finish, export, iPad and Create
 
 The sample drawing, and [the lab's house](https://mmaggitti.github.io/draw/#import=VZDdaoQwEIXvfYpherML6-ZnNd2WxIu-idgYA1kjSTDu2xfdou3AwOEM53wwMs4Glocbo8IhpemTkJzzNd-uPhjCKaUkzgZhtjp_-UUhBQqMbotNASANpNCOsffhoXCTrk36VFOo6bmAY4JP6-G_GbvW6RM7b10AMuguwaKwZBXCU2EpELL9ToNCfkcYtDVDUsg5Qm-dU_imP7pKtEh-CybvnsaPMHk7prgW3S-lAHopOYdNH8l30ddsT-7oF7nawX-47OByUYn69kpLYppCrp9qih8) (a group moved by translate, rotate and scale).
 To take the house's group: tap the roof, then More → Select group.
@@ -75,5 +75,18 @@ To take the house's group: tap the roof, then More → Select group.
 | 53 | The Access fields and the keyboard | Access tab: tap the Title field, the Description box and the Language field in turn; the page never zooms, each field stays in view above the keyboard (scroll the sheet if it must), and Done or Return keeps what you typed | ☐ |
 | 54 | The five tabs | The code sheet's tab row (Code, Layers, Inspect, Access, Support) fits across the screen with a shape selected, every tab easy to hit with your thumb, and the selection's name still shows (shortened if it must) | ☐ |
 | 55 | A text's two handles | On a text, the position handle and the centre handle sit close together; both move the text. Check that each is easy to hit, and that the pair isn't confusing | ☐ |
+| 56 | New from a quick start | Files → New…, then Icon, App icon and Wordmark in turn, each with New drawing: each opens as a new drawing you can draw on at once, and the drawing before is still in Files; then SVG Lab's Logo with Replace this one: the open drawing becomes the logo, keeping its name, and Undo brings it back | ☐ |
+| 57 | Finish's previews | A drawing with a thin line: Finish: the 16 and 32 px previews show its real pixels (blocky, not blurred), the big ones fit the screen, and the light, dark and checkerboard strips read clearly; with a long drawing name, the top bar slides sideways to reach Export while the page itself never moves sideways | ☐ |
+| 58 | PNG through the share sheet | Finish → Share (Icon set): the share sheet offers to save the images, and the saved PNGs open in Photos or Files with a transparent background where the drawing has none | ☐ |
+| 59 | A big PNG | A 3000 × 3000 artboard (the root's viewBox `0 0 3000 3000`), Finish → 3×, which asks for 9000 × 9000: the sheet says `<name>@3x.png is 8192 × 8192: this device makes PNGs up to 67,108,864 pixels.` (before iOS 18: `<name>@3x.png is 4096 × 4096: this device makes PNGs up to 16,777,216 pixels.`), and the shared file is that size | ☐ |
+| 60 | iPad layout | Landscape: the tools in a column on the left and the code beside the canvas; portrait: the tools on the left and the code under the canvas; neither cut by the screen's rounded corners or the home indicator. Draw beside another app in Split View at half width: the phone's layout, tools at the bottom | ☐ |
+| 61 | ⌘K | With a keyboard on the iPad, ⌘K opens Commands (if Safari takes ⌘K for itself, note it: the top bar's Commands button is the way in); type "dup", and Return duplicates the selection | ☐ |
+| 62 | Apple Pencil draws, fingers navigate | Draw and drag with the Pencil while panning with a finger: after the Pencil's first touch, a finger only moves the view, and a two-finger tap no longer undoes | ☐ |
+| 63 | Pencil hover | (A hover-capable iPad and Pencil.) Hold the Pencil just above a shape's corner handle: the handle lights up before you touch, and near a guide the snap ring shows where a press would land | ☐ |
+| 64 | The Pencil button | In pen mode the rail ends with Pencil, pressed: tap it, and a finger draws again and a two-finger tap undoes again; the Pencil's next touch brings pen mode, and the button, back | ☐ |
+| 65 | Open in Draw from SVG Lab | In SVG Lab on the phone, Open in Draw (under the code) opens the lesson in Draw in a new tab, with its import report; Draw's address bar no longer holds the link | ☐ |
+| 66 | Insert | Copy an icon's SVG from Notes, then the rail's Insert → paste in the field → Insert: it lands in the middle of the drawing as one group you can move, and Undo takes it out | ☐ |
+| 67 | Edit the whole drawing | The code panel's Edit with the iOS keyboard up: the field stays above the keyboard; change a number and Apply; a typo says where it is and changes nothing | ☐ |
+| 68 | The empty state | Files → New… → SVG Lab's Blank, then New drawing: "Add a shape below" sits in the middle of the canvas, and goes when you add a shape | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

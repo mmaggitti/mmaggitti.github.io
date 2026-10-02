@@ -1,8 +1,10 @@
 // Bytes in, SVG text out: what every way of opening a file shares (file picker, paste, drop, a
 // share link's #import fragment). The text then goes to the engine's parser and nowhere else.
 //
-// - .svgz: gzip is recognised by its magic bytes, not the file name, and inflated with a hard cap,
-//   so a small file cannot expand into gigabytes.
+// - .svgz: gzip is recognised by its magic bytes, not the file name. It and a #import link are
+//   inflated with a hard cap: the compressed bytes go in 4 KiB at a time, only as the output is
+//   read, and the output is counted as it comes. Deflate expands at most about 1,032 to 1, so a
+//   small file is refused a few megabytes past the cap instead of expanding into gigabytes first.
 // - Encoding: a byte order mark wins, then the XML declaration's encoding, then UTF-8. Bad bytes
 //   become U+FFFD rather than failing the open, and the result says so (lossy), since writing the
 //   text back can't restore them.
@@ -29,9 +31,26 @@ export class FileTooLargeError extends Error {}
 
 const isGzip = (b: Uint8Array) => b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b;
 
-/** Inflate with a byte cap: stops reading once the output passes `max`. */
+/** The compressed bytes a decompressor is given at a time: at most about 4 MB comes out of one. */
+export const INFLATE_SLICE = 4 * 1024;
+
+/**
+ * Inflate with a byte cap: stops reading once the output passes `max`. A decompressor inflates the
+ * whole of each chunk it is given before a byte of it can be counted, so the compressed bytes go in
+ * one small slice at a time, and only when the reader asks for more (a pull stream with no queue).
+ */
 async function inflate(bytes: Uint8Array, format: 'gzip' | 'deflate-raw', max: number): Promise<Uint8Array> {
-  const stream = new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new DecompressionStream(format));
+  let next = 0;
+  const slices = new ReadableStream<BufferSource>(
+    {
+      pull(c) {
+        if (next >= bytes.length) c.close();
+        else c.enqueue(bytes.slice(next, (next += INFLATE_SLICE))); // a copy: no slice shares the caller's buffer
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const stream = slices.pipeThrough(new DecompressionStream(format));
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;

@@ -326,3 +326,22 @@ test('the finish hook: its ops join the transaction and the drag frame, a throw 
   const plain = new Session(load());
   assert.ok(plain.doc);
 });
+
+test('the history keeps the last 500 entries, one per transaction: a 501st forgets the first, and undo goes back to the 1st edit’s result, never before it', () => {
+  const doc = load();
+  const s = new Session(doc);
+  const rect = find(doc, 'rect');
+  const after: string[] = [];
+  for (let i = 1; i <= 501; i++) {
+    s.dispatch(`edit ${i}`, (apply) => apply(opSetAttr(doc, rect.id, null, 'y', String(i))));
+    after.push(serialize(doc));
+  }
+  let undos = 0;
+  while (s.canUndo) {
+    s.undo();
+    undos++;
+  }
+  assert.equal(undos, 500, 'one undo per entry, 500 kept');
+  assert.equal(serialize(doc), after[0], 'the oldest entry left is the 2nd edit: undo stops at the 1st edit’s result');
+  assert.notEqual(serialize(doc), SRC);
+});

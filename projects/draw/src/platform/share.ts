@@ -2,6 +2,11 @@
 // iPad: Save to Files, AirDrop, Messages), otherwise a download. The file never leaves the device
 // through Draw itself. The download link is one the React panel renders (<a hidden>), so this module
 // creates no DOM (tools/check-sinks.mjs).
+//
+// Several files at once (P1-M5: Finish's PNGs): the files are made before the tap, and shareFiles
+// asks for the share sheet before anything is awaited, since WebKit's Navigator::share consumes the
+// tap's activation (which lasts 5 s) and refuses without it. One tap shares once. Where the browser
+// can't share files, the sheet offers each file's download, one tap each (downloadFile).
 
 export type Outcome = 'shared' | 'downloaded' | 'cancelled';
 
@@ -17,6 +22,46 @@ export async function shareOrDownload(link: HTMLAnchorElement, name: string, dat
       // NotAllowedError (no user activation) and friends: fall back to a download
     }
   }
+  download(link, file);
+  return 'downloaded';
+}
+
+/** Whether the browser's share sheet takes these files (nothing is read or shared). */
+export function canShareFiles(files: readonly File[]): boolean {
+  const nav = globalThis.navigator as Navigator | undefined;
+  try {
+    return !!nav?.canShare?.({ files: [...files] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Share several files in one share sheet, inside the tap: navigator.share is called first, with
+ * nothing awaited before it. 'shared'; 'cancelled' (the sheet was closed); or 'unshared' (no file
+ * sharing here, or it failed): the caller then offers each file's download.
+ */
+export async function shareFiles(files: readonly File[]): Promise<'shared' | 'cancelled' | 'unshared'> {
+  const nav = globalThis.navigator as Navigator | undefined;
+  const data = { files: [...files] };
+  let asked: Promise<void>;
+  try {
+    if (!nav?.canShare?.(data)) return 'unshared';
+    asked = nav.share(data);
+  } catch {
+    return 'unshared';
+  }
+  try {
+    await asked;
+    return 'shared';
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return 'cancelled';
+    return 'unshared';
+  }
+}
+
+/** Download one file through the panel's hidden link (one tap, one file). */
+export function downloadFile(link: HTMLAnchorElement, file: File): 'downloaded' {
   download(link, file);
   return 'downloaded';
 }

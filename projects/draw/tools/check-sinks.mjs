@@ -35,9 +35,11 @@ const BANS = [
   ['dom-text', /\b(createElement|createTextNode|createDocumentFragment)\s*\(|\.(textContent|nodeValue|innerText|outerText)\s*=(?!=)/,
     ['projects/draw/src/canvas/safe-sink.ts', 'projects/draw/src/canvas/overlay/', 'projects/draw/src/codeview/']],
   ['storage', /\b(localStorage|sessionStorage|indexedDB|caches)\b|navigator\.storage/, ['projects/draw/src/platform/']],
-  // Files, the clipboard, the share sheet, Web Locks and the URL: read and written only in
-  // platform/ (the picker's File is handed there; the importer takes bytes and text).
-  ['file-api', /\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\b|\.arrayBuffer\s*\(|navigator\.(clipboard|share|canShare|locks)\b|history\.(replaceState|pushState)\s*\(/, ['projects/draw/src/platform/']],
+  // Files, the clipboard, the share sheet, Web Locks, the URL and the streams that pack and unpack a
+  // file's bytes: read and written only in platform/ (the picker's File is handed there; the importer
+  // takes bytes and text). Navigator's clipboard, share sheet and locks by . or ?., by ['…'], or
+  // destructured from it; execCommand (the old copy) and the compression streams by name.
+  ['file-api', /\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker|execCommand|CompressionStream|DecompressionStream)\b|\.arrayBuffer\s*\(|\bnavigator\s*\??\.\s*(clipboard|share|canShare|locks)\b|\[\s*['"`](clipboard|share|canShare|locks)['"`]\s*\]|\{[^}]*\b(clipboard|share|canShare|locks)\b[^}]*\}\s*=\s*(?:[\w$]+\s*\.\s*)*navigator\b|history\.(replaceState|pushState)\s*\(/, ['projects/draw/src/platform/']],
   ['fetch', /\bfetch\s*\(|XMLHttpRequest|navigator\.sendBeacon|\bWebSocket\b|\bEventSource\b/, ['projects/draw/src/platform/', 'projects/draw/src/github/', 'projects/draw/src/export/']],
   ['password-field', /type\s*[=:]\s*["']password["']/, ['projects/draw/src/github/TokenForm.tsx']],
   // Registering a font face is a page-wide write (P1-M4): document.fonts reaches the app's own UI as
@@ -45,6 +47,12 @@ const BANS = [
   // names, this bans the name FontFace in any spelling (globalThis.FontFace, window['FontFace'], an
   // alias), and the document's fonts by . or ?., by ['fonts'], or destructured from it.
   ['font-face', /\bFontFace\b|\bdocument\s*\??\.\s*fonts\b|\[\s*['"`]fonts['"`]\s*\]|\{[^}]*\bfonts\b[^}]*\}\s*=\s*(?:[\w$]+\s*\.\s*)*document\b/, ['projects/draw/src/platform/']],
+  // Rasterizing (P1-M5) turns a drawing into pixels the page can read back, so it has one home,
+  // src/platform/ (raster.ts), as registering a font does: an image to decode, a canvas to draw it on,
+  // and the PNG read out of it. As the font-face rule does, this bans the names in any spelling
+  // (globalThis.…, ['…'], ?.(), an alias): the canvases, every way to draw on one or read one back,
+  // and an Image made by new (any path to it) or named as ['Image'].
+  ['raster', /\b(OffscreenCanvas|createImageBitmap|getContext|toBlob|toDataURL|convertToBlob|getImageData|transferToImageBitmap|transferControlToOffscreen|captureStream)\b|\bnew\s+(?:[\w$]+\s*\??\.\s*)*Image\b|\[\s*['"`]Image['"`]\s*\]/, ['projects/draw/src/platform/']],
 ];
 
 // The engine is DOM-free and dependency-free: node --test runs it, and any project may import it.
