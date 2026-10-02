@@ -3812,6 +3812,16 @@ const BREAKS = [
     file: 'projects/draw/tools/check-sinks.mjs', from: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker|execCommand|CompressionStream|DecompressionStream)\\b|\\.arrayBuffer\\s*\\(|\\bnavigator\\s*\\??\\.\\s*(clipboard|share|canShare|locks)\\b|\\[\\s*['\"`](clipboard|share|canShare|locks)['\"`]\\s*\\]|\\{[^}]*\\b(clipboard|share|canShare|locks)\\b[^}]*\\}\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)*navigator\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],", to: "  ['file-api', /\\b(clipboardData|dataTransfer|FileReader|createObjectURL|showOpenFilePicker|showSaveFilePicker)\\b|\\.arrayBuffer\\s*\\(|navigator\\.(clipboard|share|canShare|locks)\\b|history\\.(replaceState|pushState)\\s*\\(/, ['projects/draw/src/platform/']],",
     run: drawTests('check-sinks.test.ts'), expect: /✖ check-sinks keeps the share sheet, the clipboard, execCommand and the compression streams to src\/platform\//,
   },
+  {
+    id: 'B723', what: 'planInsert leaves an inserted <style> as written: its url(#…) and #id selectors keep an id it renamed, so they point at the drawing’s element',
+    file: 'engine/model/insert.ts', from: '  renameIdsInStyles(src, src.root, map, () => {});\n', to: '',
+    run: engineTests('model/insert.test.ts'), expect: /✖ a <style> the insert brings is kept, and a renamed id’s url\(#…\) and #id selectors in it follow/,
+  },
+  {
+    id: 'B724', what: 'Insert says only “Inserted.” when the file brings a <style>, whose rules reach the drawing’s own shapes',
+    file: 'projects/draw/src/workspace.ts', from: 'styles(report) > styles(before) ? INSERTED_STYLES : ', to: '',
+    run: drawTests('workspace.test.ts'), expect: /✖ Insert says what it did/,
+  },
 ];
 
 const args = process.argv.slice(2);

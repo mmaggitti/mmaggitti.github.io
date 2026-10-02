@@ -7,7 +7,10 @@
 //    <svg xmlns="http://www.w3.org/2000/svg">…</svg>. A file that isn't well-formed is refused with the
 //    parser's words and where (line and column); a root that isn't SVG's <svg> is refused.
 // 2. Every id it uses that the document already uses gets a fresh one (ids.ts freshId, as Duplicate's
-//    copies do), and every reference inside the inserted content follows it (renameIdsIn).
+//    copies do), and its references inside the inserted content follow it: in attributes (renameIdsIn)
+//    and in a <style> it brings (renameIdsInStyles: url(#…) and #id selectors). The <style> itself is
+//    kept, so the inserted art looks as it did; its rules apply to the whole drawing (the editor's
+//    caller says so).
 // 3. The markup is one <g> holding the inserted root's children as written. The <g> takes the root's
 //    attributes but its namespace declarations, id, width, height, x, y, viewBox, preserveAspectRatio,
 //    version and baseProfile (so a stroke icon's fill="none" stroke="currentColor" still reaches its
@@ -20,7 +23,7 @@
 //    and no size stays where its markup puts it.
 
 import { NS, el, parseDoc, serializeNode, type Attr, type Doc, type ElementNode } from './doc.ts';
-import { freshId, idsInUse, renameIdsIn } from './ids.ts';
+import { freshId, idsInUse, renameIdsIn, renameIdsInStyles } from './ids.ts';
 import { decodeAttr } from '../xml/entities.ts';
 import { parseLength, toUserUnits } from '../values/length.ts';
 import { parseViewBox } from '../values/viewbox.ts';
@@ -91,6 +94,7 @@ export function planInsert(doc: Doc, text: string, at: { x: number; y: number },
     map.set(id, to);
   }
   renameIdsIn(src, src.root, map, () => {});
+  renameIdsInStyles(src, src.root, map, () => {});
 
   // The <g>: the root's attributes it keeps, the namespace declarations its content needs, and the placement.
   let attrs = '';

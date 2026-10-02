@@ -9,7 +9,7 @@ import { DraftStore, memoryJournal, memoryKV, type Journal, type KV } from '../.
 import { encodeImport } from '../../src/platform/files.ts';
 import { SAVE_DELAY_MS } from '../../src/autosave.ts';
 import { READ_ONLY } from '../../src/editor.ts';
-import { BLANK, Workspace } from '../../src/workspace.ts';
+import { BLANK, INSERTED, INSERTED_NOT_DRAWN, INSERTED_STYLES, Workspace } from '../../src/workspace.ts';
 import { descendants, type ElementNode } from '../../../../engine/model/doc.ts';
 import { importReport } from '../../../../engine/report/import-report.ts';
 import { attributeRenders, elementRenders, urlAllowed } from '../../../../engine/policy/render-policy.ts';
@@ -644,4 +644,19 @@ test('Replace this one refuses where nothing can be written: a drawing another t
   assert.equal(ws.replaceFrom('lab-icon'), false);
   assert.ok(await ws.newFrom('lab-icon'), 'New drawing still opens');
   assert.equal(editor.source(), corpus('lab/create-icon.svg'));
+});
+
+test('Insert says what it did: Inserted., that the file’s own style rules reach the whole drawing when it brings a <style>, or that the import report lists what isn’t drawn', async () => {
+  const { ws, editor } = rig();
+  void ws.openSample();
+  await ws.boot('', () => {});
+  assert.ok(ws.insert('<circle cx="5" cy="5" r="2"/>'));
+  assert.equal(editor.notice.get(), INSERTED);
+  assert.ok(ws.insert('<svg xmlns="http://www.w3.org/2000/svg"><style>.st0{fill:#ff0000}</style><rect class="st0" width="4" height="4"/></svg>'));
+  assert.equal(editor.notice.get(), INSERTED_STYLES);
+  assert.equal(INSERTED_STYLES, 'Inserted. This file brings its own style rules. They also apply to shapes in the drawing with the same class names.');
+  assert.ok(ws.insert('<script>alert(1)</script>'));
+  assert.equal(editor.notice.get(), INSERTED_NOT_DRAWN);
+  assert.ok(ws.insert('<rect width="1" height="1"/>'));
+  assert.equal(editor.notice.get(), INSERTED, 'a <style> already in the drawing says nothing again');
 });

@@ -39,11 +39,28 @@ test('a file that isn’t well-formed is refused with the parser’s words, its 
   assert.ok('refused' in html && /Only SVG/.test(html.refused), JSON.stringify(html));
 });
 
-test('an id the drawing already uses gets a fresh one, and every reference inside the insert follows it; others stay', () => {
+test('an id the drawing already uses gets a fresh one, and its references in the insert’s attributes follow it (url(#…) in any attribute and in style="", href, ARIA id lists, SMIL begin and end); others stay', () => {
   const p = plan(`<svg xmlns="${SVG_NS}" viewBox="0 0 10 10"><defs><linearGradient id="a"/><clipPath id="c"><rect width="1" height="1"/></clipPath></defs><rect id="b" fill="url(#a)" clip-path="url(#c)" width="4" height="4"/><use href="#a"/></svg>`);
   assert.equal(p.renamed, 1);
   assert.ok(p.markup.includes('<linearGradient id="a-2"/>') && p.markup.includes('fill="url(#a-2)"') && p.markup.includes('href="#a-2"'), p.markup);
   assert.ok(p.markup.includes('id="c"') && p.markup.includes('url(#c)') && p.markup.includes('id="b"'), 'ids the drawing doesn’t use stay as written');
+  const doc = open(`<svg xmlns="${SVG_NS}" viewBox="0 0 100 100"><linearGradient id="g"/><text id="t">x</text><rect id="r" width="1" height="1"/></svg>`);
+  const q = plan(`<svg xmlns="${SVG_NS}" viewBox="0 0 24 24"><linearGradient id="g"/><text id="t">label</text><rect id="r" width="24" height="24" style="fill:url(#g)" aria-labelledby="t r"><animate id="an" attributeName="x" begin="r.click;t.end" end="t.begin" dur="1s"/></rect></svg>`, doc);
+  assert.equal(q.renamed, 3);
+  for (const want of ['id="g-2"', 'id="t-2"', 'id="r-2"', 'style="fill:url(#g-2)"', 'aria-labelledby="t-2 r-2"', 'begin="r-2.click;t-2.end"', 'end="t-2.begin"', 'id="an"']) assert.ok(q.markup.includes(want), `${want} in ${q.markup}`);
+});
+
+test('a <style> the insert brings is kept, and a renamed id’s url(#…) and #id selectors in it follow; strings, comments and colours stay as written', () => {
+  const doc = open(`<svg xmlns="${SVG_NS}" viewBox="0 0 100 100"><linearGradient id="g"/><rect id="r" class="st0" width="1" height="1"/><style>.st0{fill:#264653}</style></svg>`);
+  const css = `#r{fill:url(#g)} .k{stroke:url( "#g" )} .a #r:hover,:is(#g){fill:#g} .k:not(#r) { #g { opacity: .5 } } /* #r url(#g) */ [data-x="#r"]::after{content:"url(#g)"}`;
+  const p = plan(`<svg xmlns="${SVG_NS}" viewBox="0 0 24 24"><style>${css}</style><linearGradient id="g"/><rect id="r" class="k st0" width="24" height="24"/></svg>`, doc);
+  assert.equal(p.renamed, 2);
+  const want = `#r-2{fill:url(#g-2)} .k{stroke:url( "#g-2" )} .a #r-2:hover,:is(#g-2){fill:#g} .k:not(#r-2) { #g-2 { opacity: .5 } } /* #r url(#g) */ [data-x="#r"]::after{content:"url(#g)"}`;
+  assert.ok(p.markup.includes(`<style>${want}</style>`), p.markup);
+  const cdata = plan(`<svg xmlns="${SVG_NS}"><style><![CDATA[#r > rect{fill:url(#g)}]]></style><rect id="r"/></svg>`, doc);
+  assert.ok(cdata.markup.includes('<style><![CDATA[#r-2 > rect{fill:url(#g)}]]></style>'), `a CDATA section too, and only mapped ids: ${cdata.markup}`);
+  const escaped = plan(`<svg xmlns="${SVG_NS}"><style>#\\72 {fill:url(#\\67)} a&gt;#r{}</style><rect id="r"/><path id="g"/></svg>`, doc);
+  assert.ok(escaped.markup.includes('<style>#r-2{fill:url(#g-2)} a>#r-2{}</style>'), `an escaped id is read as CSS reads it, and text with a reference is written decoded and escaped: ${escaped.markup}`);
 });
 
 test('the <g> takes the root’s attributes but its namespace declarations, id, size, place, viewBox, preserveAspectRatio, version and baseProfile', () => {

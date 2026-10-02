@@ -9,12 +9,17 @@
 //   id reference, refs.ts's ARIA_IDREFS; SMIL begin and end "id.event" values). Only the id's own characters change, as
 //   undoable attribute ops, so references outside the subtree keep pointing at the originals.
 //   A value written with entity references is rewritten whole instead (escaped as setAttr does).
+// - renameIdsInStyles: the same map inside the subtree's <style> text (the Insert tool's, whose
+//   <style> applies to the whole drawing): url(#…) anywhere and #id selectors, read as CSS tokenizes
+//   them (policy/font-face-rules.ts), so a comment, a string or a colour never changes; a url("#…")
+//   is a URL, so its string does.
 
 import { NS, descendants, type Attr, type Doc, type ElementNode, type NodeId } from './doc.ts';
 import { ARIA_IDREFS, buildRefIndex } from './refs.ts';
-import { decodeAttr } from '../xml/entities.ts';
+import { decodeAttr, decodeText, escape } from '../xml/entities.ts';
 import { decodeFragment } from '../values/url.ts';
-import { opSetAttr, opSetAttrRaw, type Op } from '../commands/ops.ts';
+import { opSetAttr, opSetAttrRaw, opSetLeafRaw, type Op } from '../commands/ops.ts';
+import { cssTokenAt } from '../policy/font-face-rules.ts';
 
 /** Every id in use in the document (id and xml:id). */
 export function idsInUse(doc: Doc): Set<string> {
@@ -106,6 +111,140 @@ export function renameIdsIn(doc: Doc, root: NodeId, map: ReadonlyMap<string, str
       if (next === null) continue;
       if (a.raw.includes('&')) apply(opSetAttr(doc, n.id, a.ns, a.local, next));
       else apply(opSetAttrRaw(doc, n.id, a.ns, a.local, next));
+    }
+  }
+}
+
+// ── ids in a <style>'s text ─────────────────────────────────────────────────────────────────────
+
+// CSS escapes as the tokenizer reads them: hex (0, surrogates and out of range as U+FFFD, one
+// whitespace after it taken), a backslash and newline removed (a string's line continuation), any
+// other character itself.
+const CSS_ESCAPE = /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(\r\n|[\n\r\f])|([\s\S]))/g;
+const unescapeCss = (s: string): string =>
+  s.replace(CSS_ESCAPE, (_, hex?: string, nl?: string, ch?: string) => {
+    if (!hex) return nl ? '' : ch!;
+    const cp = parseInt(hex, 16);
+    return cp === 0 || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff ? '\uFFFD' : String.fromCodePoint(cp);
+  });
+
+// An id written as a CSS name: a letter, a digit, _, - or anything from U+0080 as it is, any other
+// character as a hex escape, and a digit where a name can't start (first, or after a first -)
+// escaped too, so it reads back as the same id in a selector, a url() or a string.
+function cssName(id: string): string {
+  let out = '';
+  let i = 0;
+  for (const ch of id) {
+    const cp = ch.codePointAt(0)!;
+    const digitFirst = /[0-9]/.test(ch) && (i === 0 || (i === 1 && id[0] === '-'));
+    out += (/[A-Za-z0-9_-]/.test(ch) || cp >= 0x80) && !digitFirst ? ch : `\\${cp.toString(16)} `;
+    i++;
+  }
+  return out;
+}
+// In a URL a % starts a percent escape, so the id's own % is written %25.
+const urlName = (id: string): string => cssName(id.replace(/%/g, '%25'));
+
+interface CssEdit {
+  start: number;
+  end: number;
+  text: string;
+}
+const isCssSpace = (c: string | undefined): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+
+// An unquoted url(#id) token from `start` to `end`: the id's characters, when it is mapped.
+function urlEdit(css: string, start: number, end: number, map: ReadonlyMap<string, string>): CssEdit | null {
+  let j = css.indexOf('(', start) + 1;
+  while (j < end && isCssSpace(css[j])) j++;
+  if (css[j] !== '#') return null;
+  let k = css[end - 1] === ')' ? end - 1 : end;
+  while (k > j && isCssSpace(css[k - 1])) k--;
+  const to = map.get(decodeFragment(unescapeCss(css.slice(j + 1, k))));
+  return to === undefined ? null : { start: j + 1, end: k, text: urlName(to) };
+}
+
+// A url("#id") whose url( ends at `from`: the id's characters inside its string, when it is mapped.
+function quotedUrlEdit(css: string, from: number, map: ReadonlyMap<string, string>): CssEdit | null {
+  let j = from;
+  while (j < css.length && isCssSpace(css[j])) j++;
+  if (j >= css.length) return null;
+  const tok = cssTokenAt(css, j);
+  if (tok.kind !== 'string' || tok.end - j < 2 || css[tok.end - 1] !== css[j]) return null;
+  let k = tok.end;
+  while (k < css.length && isCssSpace(css[k])) k++;
+  if (css[k] !== ')') return null;
+  const value = unescapeCss(css.slice(j + 1, tok.end - 1));
+  const to = value.startsWith('#') ? map.get(decodeFragment(value.slice(1))) : undefined;
+  return to === undefined ? null : { start: j + 1, end: tok.end - 1, text: `#${urlName(to)}` };
+}
+
+/**
+ * CSS text with mapped ids renamed: every url(#…) (quoted or not) and every #id in a rule's selector
+ * (a hash before the rule's {, at any nesting; one before a ; or a } is a value, a colour). Comments
+ * and other strings are left as written.
+ */
+export function renameIdsInCss(css: string, map: ReadonlyMap<string, string>): string {
+  if (!map.size || !css.includes('#')) return css;
+  const edits: CssEdit[] = [];
+  let selectors: CssEdit[] = []; // the hashes since the last {, } or ;: kept if a { follows
+  let depth = 0; // the ( and [ open since then (a function's too)
+  for (let i = 0; i < css.length; ) {
+    const tok = cssTokenAt(css, i);
+    if (tok.kind === 'hash') {
+      const to = map.get(unescapeCss(css.slice(i + 1, tok.end)));
+      if (to !== undefined) selectors.push({ start: i + 1, end: tok.end, text: cssName(to) });
+    } else if (tok.kind === 'url') {
+      const e = urlEdit(css, i, tok.end, map);
+      if (e) edits.push(e);
+    } else if (tok.kind === 'function') {
+      depth++;
+      if (css.slice(i, tok.end).toLowerCase() === 'url(') {
+        const e = quotedUrlEdit(css, tok.end, map);
+        if (e) edits.push(e);
+      }
+    } else if (tok.kind === 'open') {
+      if (tok.char !== '{') depth++;
+      else if (depth === 0) {
+        edits.push(...selectors);
+        selectors = [];
+      }
+    } else if (tok.kind === 'close') {
+      if (tok.char !== '}') depth = Math.max(0, depth - 1);
+      else if (depth === 0) selectors = [];
+    } else if (tok.kind === 'semi' && depth === 0) selectors = [];
+    i = tok.end;
+  }
+  if (!edits.length) return css;
+  edits.sort((a, b) => a.start - b.start);
+  let out = '';
+  let at = 0;
+  for (const e of edits) {
+    out += css.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  return out + css.slice(at);
+}
+
+/**
+ * Rename ids inside the <style> elements of the subtree at `root` (renameIdsInCss): a text or CDATA
+ * leaf that changes is written back whole (a text leaf as its decoded text, escaped), one op each,
+ * applied and handed to `apply`.
+ */
+export function renameIdsInStyles(doc: Doc, root: NodeId, map: ReadonlyMap<string, string>, apply: (op: Op) => void): void {
+  if (!map.size) return;
+  for (const n of [...descendants(doc, root)]) {
+    if (n.kind !== 'element' || n.ns !== NS.svg || n.local !== 'style') continue;
+    for (const c of n.children) {
+      const leaf = doc.nodes.get(c)!;
+      if (leaf.kind === 'text') {
+        const css = decodeText(leaf.raw, doc.entities);
+        const next = renameIdsInCss(css, map);
+        if (next !== css) apply(opSetLeafRaw(doc, c, escape(next, null)));
+      } else if (leaf.kind === 'cdata') {
+        const css = leaf.raw.slice('<![CDATA['.length, -']]>'.length);
+        const next = renameIdsInCss(css, map);
+        if (next !== css) apply(opSetLeafRaw(doc, c, `<![CDATA[${next}]]>`));
+      }
     }
   }
 }

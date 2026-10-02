@@ -207,3 +207,6 @@ export function canvasStyleTexts(leaves: readonly string[]): string[] | null {
   const joined = leaves.join('');
   return withoutFontFaces(joined) === joined ? [...leaves] : null;
 }
+
+/** The tokenizer above, for other readers of a <style>'s text (model/ids.ts renames ids in one). */
+export { tokenAt as cssTokenAt, type Token as CssToken };
