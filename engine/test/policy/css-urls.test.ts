@@ -137,11 +137,13 @@ let seed = 7;
 const B64 = Array.from({ length: 31500 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'[(seed = (seed * 1103515245 + 12345) % 2147483648) % 64]).join('');
 const sheet = (n: number) => Array.from({ length: n }, (_, i) => `@font-face{font-family:F${i};src:url(data:font/woff2;base64,${B64}) format("woff2")}`).join('\n');
 
-// Measured in node: about 10 and 26 ms over 25 and 100 faces; read to the end, 100 faces took about
-// 970 ms (320 cssAllowed, 650 cssUrlsLocal), and 400 faces 17 s.
-test('the canvas’s CSS guards take linear time: cssAllowed and cssUrlsLocal over a <style> of 100 data: faces (3.2 MB) cost under 6× what 25 cost', () => {
+// Measured in node: about 8 and 33 ms over 25 and 100 faces (×4); read to the end, 100 faces took about
+// 970 ms (320 cssAllowed, 650 cssUrlsLocal), and 400 faces 17 s. A run this short can double on a busy
+// shared runner (CI once measured 7 and 55 ms), so each run times five calls and the bound is 8×: the
+// quadratic reading costs 16× the time for 4× the work, and over five calls about 4.9 s, 6× the limit.
+test('the canvas’s CSS guards take linear time: cssAllowed and cssUrlsLocal over a <style> of 100 data: faces (3.2 MB) cost under 8× what 25 cost', () => {
   const small = sheet(25);
   const big = sheet(100);
   const guards = (css: string) => () => assert.ok(cssAllowed(css) && cssUrlsLocal(css), 'test setup: the canvas draws the sheet');
-  linear('cssAllowed and cssUrlsLocal', guards(small), guards(big), { limit: 150 });
+  linear('cssAllowed and cssUrlsLocal', guards(small), guards(big), { limit: 800, reps: 5, most: 8 });
 });
