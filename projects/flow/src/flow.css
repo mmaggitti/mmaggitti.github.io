@@ -71,23 +71,26 @@ body { overflow: hidden; overscroll-behavior: none; }
 }
 .fnode.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); }
 
-/* Handles: a visible dot, and a finger-sized hit area around it. */
+/* Handles: a big dot, and a finger-sized touch area that reaches OUT of the node from it. Centred
+   on the dot, the touch areas of a node's two dots would meet in its middle and a finger there
+   would start a connection instead of moving the node. */
 .react-flow__handle.fhandle {
-  width: 0.875rem;
-  height: 0.875rem;
-  border: 2px solid var(--surface);
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 3px solid var(--surface);
   background: var(--accent);
 }
 .react-flow__handle.fhandle::after {
   content: "";
   position: absolute;
   left: 50%;
-  top: 50%;
-  width: var(--tap-min);
-  height: var(--tap-min);
-  transform: translate(-50%, -50%);
+  width: max(var(--tap-min), 4rem);
+  height: max(var(--tap-min), 4rem);
+  transform: translateX(-50%);
   border-radius: 50%;
 }
+.react-flow__handle-top.fhandle::after { bottom: -3px; }
+.react-flow__handle-bottom.fhandle::after { top: -3px; }
 
 /* ── Sheets and bar ─────────────────────────────────────────────────────── */
 

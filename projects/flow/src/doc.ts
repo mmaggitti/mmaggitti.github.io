@@ -73,11 +73,7 @@ export function starter(): Doc {
       node('n4', 'io', 150, 360, 'Ship it'),
       node('n5', 'note', -60, 470, 'Tap a node, then Edit. Drag from a dot to another dot to connect.'),
     ],
-    edges: [
-      { id: 'e1', source: 'n1', target: 'n2' },
-      { id: 'e2', source: 'n2', target: 'n3' },
-      { id: 'e3', source: 'n3', target: 'n4' },
-    ],
+    edges: [],
   };
 }
 

@@ -238,7 +238,7 @@ function Playground() {
           onNodeDoubleClick={(_, node) => openEdit(node)}
           deleteKeyCode={['Backspace', 'Delete']}
           zoomOnDoubleClick={false}
-          connectionRadius={32}
+          connectionRadius={48}
           minZoom={0.2}
           maxZoom={2}
           fitView
