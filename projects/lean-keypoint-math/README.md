@@ -62,7 +62,7 @@ You need [elan](https://github.com/leanprover/elan). It installs the Lean versio
 `lean-toolchain` names.
 
 ```bash
-cd lean/keypoint-math
+cd projects/lean-keypoint-math
 lake exe cache get    # download prebuilt Mathlib (several GB)
 lake build            # check every proof
 ```

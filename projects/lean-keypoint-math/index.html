@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="The math behind OpenCV's SIFT, checked by Lean 4 and Mathlib.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ds/ds.css">
+  <title>Keypoint math in Lean</title>
+  <style>
+    .note { margin: var(--space-5) 0 0; }
+    .note a { display: inline-flex; align-items: center; min-height: var(--tap-min); }
+  </style>
+</head>
+<body>
+  <div class="ds-app">
+    <main class="ds-page">
+      <h1 class="ds-title">Keypoint math in Lean</h1>
+      <p class="ds-sub">The math behind OpenCV 4.12's SIFT, checked by Lean 4 and Mathlib.</p>
+
+      <dl class="ds-list">
+        <div class="ds-row"><dt>Theorems</dt><dd class="ds-num">104</dd></div>
+        <div class="ds-row"><dt>Gaps (<span class="ds-mono">sorry</span>)</dt><dd class="ds-num">0</dd></div>
+        <div class="ds-row"><dt>Axioms</dt><dd>Lean's standard three</dd></div>
+        <div class="ds-row"><dt>Numbers</dt><dd>Exact reals, no float</dd></div>
+      </dl>
+
+      <h2 class="ds-heading">What is proved</h2>
+      <ul class="ds-cards">
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/ScaleSpace.lean">
+          <span class="ds-card-title">1 · Scale space</span>
+          <span class="ds-card-text">The per-layer blurs stack to exactly σ₀kⁱ. Each octave starts at σ₀ again.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/DoG.lean">
+          <span class="ds-card-title">2 · DoG ≈ σ²∇²G</span>
+          <span class="ds-card-text">The DoG over k − 1 tends to σ²∇²G. A bright point is a DoG minimum.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/Extrema.lean">
+          <span class="ds-card-title">3 · Extrema</span>
+          <span class="ds-card-text">The 26-neighbour test is non-strict and checks the sign.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/SubpixelFit.lean">
+          <span class="ds-card-title">4–5 · Sub-pixel fit and contrast</span>
+          <span class="ds-card-text">The offset is the model's only stationary point. The contrast is its value there.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/EdgeTest.lean">
+          <span class="ds-card-title">6 · Edge test</span>
+          <span class="ds-card-text">A point stays when both curvatures have the same sign and differ by less than 10×.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/OrientationPeak.lean">
+          <span class="ds-card-title">7 · Orientation peak</span>
+          <span class="ds-card-text">The parabola offset is the peak, within half a bin.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/Descriptor.lean">
+          <span class="ds-card-title">8 · Descriptor bins</span>
+          <span class="ds-card-text">OpenCV's splits are trilinear weights. They sum to 1.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/Normalization.lean">
+          <span class="ds-card-title">9 · Normalization</span>
+          <span class="ds-card-text">One clip at 0.2‖v‖ equals Lowe's normalize, clip, normalize.</span>
+        </a></li>
+        <li><a class="ds-card" href="https://github.com/mmaggitti/mmaggitti.github.io/blob/main/projects/lean-keypoint-math/KeypointMath/SIFT/Constants.lean">
+          <span class="ds-card-title">Constants</span>
+          <span class="ds-card-text">The default contrast threshold is 1/75, under half of Lowe's 0.03.</span>
+        </a></li>
+      </ul>
+
+      <p class="ds-muted ds-small note">Each file lists what it does not model. SURF, ORB, BRISK and AKAZE are not started.<br>
+        <a href="https://github.com/mmaggitti/mmaggitti.github.io/tree/main/projects/lean-keypoint-math">Source and build steps on GitHub</a></p>
+    </main>
+  </div>
+</body>
+</html>
