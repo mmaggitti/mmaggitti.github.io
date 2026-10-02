@@ -80,7 +80,7 @@ for (const name of names) {
 // first: the order of their first commits in this repo (lean-keypoint-math counts from its first
 // commit under lean/keypoint-math, before it moved). Add a new project's name at the end; a name
 // missing here sorts after all of these.
-const CREATED = ['hello', 'studio', 'svg-lab', 'draw', 'cs-probe', 'tetons', 'cad-kernel', 'lean-keypoint-math', 'flow'];
+const CREATED = ['hello', 'studio', 'svg-lab', 'draw', 'cs-probe', 'tetons', 'cad-kernel', 'lean-keypoint-math', 'flow', 'cowrite'];
 const rank = (name) => (CREATED.includes(name) ? CREATED.indexOf(name) : CREATED.length);
 cards.sort((a, b) => rank(a.name) - rank(b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 

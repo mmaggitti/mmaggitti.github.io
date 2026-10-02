@@ -71,6 +71,7 @@ jobs:
         with:
           workspaces: |
             projects/cs-probe -> target
+            projects/cowrite -> target
 
       - name: Build every project and the launcher
         run: npm run build

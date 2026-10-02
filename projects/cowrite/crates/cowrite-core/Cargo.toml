@@ -1,0 +1,15 @@
+[package]
+name = "cowrite-core"
+description = "Co-write: the domain core. Pure Rust: no I/O, no platform, no binding."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# One dependency, by Core & Seams ADR-014: the CRDT engine. No platform features here; the
+# -wasm crate adds Automerge's `wasm` feature (the browser's random source).
+[dependencies]
+automerge = { workspace = true }
+
+[lints]
+workspace = true

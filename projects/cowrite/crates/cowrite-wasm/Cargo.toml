@@ -1,0 +1,19 @@
+[package]
+name = "cowrite-wasm"
+description = "Co-write: the WASM binding over the core (wasm-bindgen, pinned exactly)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cowrite-core = { workspace = true }
+wasm-bindgen = { workspace = true }
+# Only the binding turns on the browser feature (getrandom's JS backend); see ADR-014.
+automerge = { workspace = true, features = ["wasm"] }
+
+[lints]
+workspace = true

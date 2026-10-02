@@ -1,0 +1,130 @@
+/* Co-write's own styles, on top of Core & Seams. rem everywhere (the site's check-units). */
+
+/* An author's run: a tint behind the letters and a line under them, in the author's color. */
+.cw-run {
+  border-radius: 0.1875rem;
+  background: color-mix(in srgb, var(--author, transparent) 28%, transparent);
+  box-shadow: inset 0 -0.125rem 0 var(--author, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cw-run { background: color-mix(in srgb, var(--author, transparent) 38%, transparent); }
+}
+:root[data-theme="dark"] .cw-run { background: color-mix(in srgb, var(--author, transparent) 38%, transparent); }
+
+/* The editor: a one-cell grid holding the mirror (in flow, so it sets the height) and the textarea
+   over it. Both share every metric that decides where a letter lands. */
+.cw-editor {
+  display: grid;
+  margin-top: var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.cw-editor:focus-within { border-color: var(--accent); }
+.cw-mirror,
+.cw-area {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60svh;
+  margin: 0;
+  padding: var(--space-4);
+  border: 0;
+  font-family: var(--font-ui);
+  font-weight: normal;
+  letter-spacing: normal;
+  line-height: var(--leading);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 4;
+  text-align: start;
+}
+/* The 16px field floor (iOS zooms into smaller fields); the mirror must match it exactly. */
+.cw-mirror,
+.cw-area { font-size: max(var(--field-text), var(--text-md)); }
+.cw-mirror {
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+.cw-area {
+  overflow: hidden;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--ink);
+  outline: none;
+}
+.cw-area::placeholder { color: var(--muted); }
+.cw-editor--plain .cw-mirror .cw-run { background: none; box-shadow: none; }
+
+.cw-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+.cw-legend .cw-run { padding: 0 var(--space-1); }
+
+.cw-swatches { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cw-swatch {
+  width: max(var(--tap-min), 2.75rem);
+  height: max(var(--tap-min), 2.75rem);
+  border: 0.125rem solid transparent;
+  border-radius: 50%;
+  background: var(--author);
+  box-shadow: inset 0 0 0 0.1875rem var(--surface);
+  touch-action: manipulation;
+  cursor: pointer;
+}
+.cw-swatch[aria-checked="true"] { border-color: var(--ink); }
+.cw-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.cw-preview { margin: 0; }
+.cw-preview .cw-run { padding: 0 var(--space-1); }
+
+.cw-me {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.cw-me .cw-run { padding: 0 var(--space-1); }
+
+.cw-docs > li + li { border-top: var(--hairline) solid var(--border); }
+.cw-doc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+.cw-doc__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cw-docpage { padding-top: var(--space-4); }
+
+.cw-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--accent-softest);
+  overflow-wrap: anywhere;
+}

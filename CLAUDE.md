@@ -34,6 +34,8 @@ projects/studio/          the live-DOM studio, a tool rather than a mini project
 projects/svg-lab/         Mark's SVG Lab (static, one file); vendors DOMPurify and its fonts (see its e2e)
 projects/draw/            Draw, the SVG editor (Vite + React + TS); on the launcher, never in Studio's picker (see Draw)
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
+projects/cowrite/         Co-write: a live shared document; Automerge (Rust) in the core, an encrypted envelope
+                          over the public relay (Core & Seams ADR-014); unlisted until Mark's devices sign it off
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert (see Draw)

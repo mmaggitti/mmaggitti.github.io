@@ -1,0 +1,15 @@
+{
+  "name": "Co-write",
+  "short_name": "Co-write",
+  "description": "A live document you share with a link: everyone edits at once, each person's writing tinted in their color, end-to-end encrypted.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FBF9F4",
+  "theme_color": "#FBF9F4",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

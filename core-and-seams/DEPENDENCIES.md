@@ -35,6 +35,7 @@ Status: **adopted** (in use), **planned** (named by the approved plan, not yet a
 | `tauri`, `tauri-build` | `=2.12.0`, `=2.7.0` | adopted (S3; built on the Mac in S6) | `src-tauri/` | The native shell (platform) | Fails: platform | Tauri 3 stable |
 | `tauri-plugin-dialog` | `=2.8.0` | adopted (S3; built in S6) | `src-tauri/` | Native file pickers for the files seam | Fails: platform bindings | The files seam gets a native Swift plugin |
 | `objc2` | `=0.6.4` | adopted (S3; built in S6), iOS only | `src-tauri/` | The iOS scroll-view inset fix (the second full-screen fix) | Fails: safe Obj-C messaging | wry sets `contentInsetAdjustmentBehavior` itself |
+| `automerge` | `=0.12.0`, features `utf16-indexing` (core); `wasm` added by the `-wasm` crate only | adopted (cowrite) | `cowrite-core` (ADR-014), `cowrite-wasm` | The CRDT engine for live, mergeable documents. Brings `hexane` `1.0.0-alpha.5` (a pre-release, by the same authors) transitively; the `wasm` feature brings `getrandom`'s browser backend, `js-sys` and `web-sys` | Fails: a CRDT with a columnar format and a sync protocol | Automerge 1.0, or `hexane` leaves alpha, or ADR-014's trigger |
 
 ## npm packages
 
@@ -46,6 +47,7 @@ Status: **adopted** (in use), **planned** (named by the approved plan, not yet a
 | `@types/react`, `@types/react-dom` | `19.3.0` | **dev** (S3) | `web/` type checking | React's types; the React packages ship none | Fails: the whole JSX and DOM type surface | React ships its own types, or React leaves (ADR-004) |
 | `three` | exact, 0.186.x | planned (S5) | renderer seam | Default renderer: WebGPU with WebGL2 fallback, picking, clipping | Fails: two GPU backends | A second renderer ships |
 | `binaryen` | `132.0.0` | **dev** (S3) | `build.mjs` | `wasm-opt` for size (about 50% smaller measured) | Fails: an optimiser | wasm-bindgen gains an equivalent pass |
+| `@automerge/automerge` | `3.5.0` | **dev** (cowrite) | `projects/cowrite/test/` only | The e2e's stand-in relay: the same Automerge, server side, so CI never touches the public relay | Fails: it is the engine itself | The e2e runs a real relay instead |
 | `@tauri-apps/cli` | exact, 2.12.x | planned **dev** (S3/S6) | Tauri builds | Tauri's CLI | Fails: platform | Tauri 3 stable |
 
 ## GitHub Actions (site CI)

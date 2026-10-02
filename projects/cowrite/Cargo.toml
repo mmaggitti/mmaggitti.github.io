@@ -1,0 +1,38 @@
+# Co-write — the Rust workspace (Core & Seams DOCTRINE §1).
+#   crates/cowrite-core   pure Rust: the domain. No I/O, no platform, no binding.
+#   crates/cowrite-wasm   the WASM binding (wasm-bindgen): typed arrays in, typed arrays out.
+#   crates/cowrite-cli    a second consumer of the core, so the core stays honest.
+# src-tauri/ is its own package, outside this workspace: `cargo test` never builds Tauri.
+# Every dependency is pinned with "=" and listed in Core & Seams' DEPENDENCIES.md (checked in CI).
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+cowrite-core = { path = "crates/cowrite-core" }
+wasm-bindgen = "=0.2.129"
+automerge = { version = "=0.12.0", default-features = false, features = ["utf16-indexing"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+# The WASM build: small, and a panic is a trap the host recovers from (DOCTRINE §1).
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
