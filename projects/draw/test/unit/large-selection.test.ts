@@ -32,7 +32,8 @@ function manySelected(n: number, booleans?: Libraries): Editor {
 // Each command, what it records, how far its cost over 4,000 shapes may grow against 1,000, and a
 // limit over 4,000 (ms) where one separates it from the quadratic code by 5× or more. Measured in
 // node: linear costs 3.8× to 4.2× (Duplicate 5.5× and Delete 5.1×: their inserts and removals shift
-// arrays and allocate, so they get 8×); the quadratic code cost 7.7× (Group) to about 16×, and over
+// arrays and allocate, so they get 8×, as does a held arrow, whose writes allocate per shape and which
+// measured 6.2× once on a loaded CI runner); the quadratic code cost 7.7× (Group) to about 16×, and over
 // 4,000 shapes a drag took about 30 s, Align about 280 s, Duplicate minutes and Delete 570 ms.
 const LARGE: [string, string, (e: Editor) => void, number, number | null][] = [
   ['a drag of them all', 'Move', (e) => {
@@ -46,14 +47,14 @@ const LARGE: [string, string, (e: Editor) => void, number, number | null][] = [
   ['a held arrow', 'Nudge', (e) => {
     for (let i = 0; i < 3; i++) e.nudge(1, 0);
     e.nudgeEnd();
-  }, 6, 4000],
+  }, 8, 4000],
   ['Align left', 'Align left', (e) => e.align('left'), 6, 5000],
   ['Duplicate', 'Duplicate', (e) => e.duplicate(), 8, 10000],
   ['Delete', 'Delete', (e) => e.delete(), 8, 100],
   ['Group', 'Group', (e) => e.group(), 6, null],
 ];
 
-test('a command over a large selection takes linear time: a drag, a held arrow, Align, Duplicate, Delete and Group over 4,000 shapes cost about 4× what they cost over 1,000 (under 6×, or 8× for Duplicate and Delete)', () => {
+test('a command over a large selection takes linear time: a drag, a held arrow, Align, Duplicate, Delete and Group over 4,000 shapes cost about 4× what they cost over 1,000 (under 6×, or 8× for a held arrow, Duplicate and Delete)', () => {
   const cost = (n: number, label: string, act: (e: Editor) => void): number => {
     const e = manySelected(n);
     const t = performance.now();
