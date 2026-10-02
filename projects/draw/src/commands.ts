@@ -52,6 +52,8 @@ export interface Command {
   palette?: false;
   /** Whether it applies now: the palette lists only these; a key runs only these; the bar disables the rest. */
   can(ctx: Ctx): boolean;
+  /** Whether its key runs it now, where that differs from `can`: Delete's key runs on the root alone, so the editor says why it can't. */
+  keyCan?(ctx: Ctx): boolean;
   /** Run it. False: it didn't take the key (Enter outside the Pen), so the key isn't prevented. */
   run(ctx: Ctx): boolean | void;
 }
@@ -88,7 +90,7 @@ export const COMMANDS: readonly Command[] = [
   // Edit
   { id: 'undo', name: 'Undo', group: 'Edit', keys: ['Mod+Z'], keysIn: 'code', can: (c) => c.editor.history.get().canUndo, run: (c) => c.editor.undo() },
   { id: 'redo', name: 'Redo', group: 'Edit', keys: ['Shift+Mod+Z', 'Mod+Y'], keysIn: 'code', can: (c) => c.editor.history.get().canRedo, run: (c) => c.editor.redo() },
-  { id: 'delete', name: 'Delete', group: 'Edit', keys: ['Delete', 'Backspace'], keysIn: 'canvas', bar: true, can: someNotRoot, run: (c) => c.editor.delete() },
+  { id: 'delete', name: 'Delete', group: 'Edit', keys: ['Delete', 'Backspace'], keysIn: 'canvas', bar: true, can: someNotRoot, keyCan: some, run: (c) => c.editor.delete() },
   { id: 'duplicate', name: 'Duplicate', group: 'Edit', more: true, can: someNotRoot, run: (c) => c.editor.duplicate() },
   { id: 'edit-text', name: 'Edit text', group: 'Edit', bar: true, shown: (c) => c.editor.canEditText(), can: (c) => c.editor.canEditText(), run: (c) => c.editor.editText() },
   { id: 'edit-source', name: 'Edit source', group: 'Edit', more: true, shown: (c) => c.editor.canEditSource(), can: (c) => c.editor.canEditSource(), run: (c) => c.editor.openSource() },

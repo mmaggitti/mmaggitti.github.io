@@ -66,7 +66,7 @@ export class Keys {
       return;
     }
     const c = commandForKey(e, where);
-    if (!c || !c.can(this.#ctx)) return;
+    if (!c || !(c.keyCan ?? c.can)(this.#ctx)) return;
     if (c.run(this.#ctx) !== false) e.preventDefault();
   }
 

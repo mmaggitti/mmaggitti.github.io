@@ -3873,6 +3873,11 @@ const BREAKS = [
     file: 'projects/draw/tools/check-bundle.mjs', from: '|\\beval\\s*\\)\\s*\\(|\\beval\\s*\\?\\.\\s*\\(|', to: '|',
     run: drawTests('check-bundle.test.ts'), expect: /✖ check-bundle: each pattern planted in a chunk fails the build/,
   },
+  {
+    id: 'B734', what: 'Delete or ⌫ with only the root selected does nothing (no word that the root can’t be deleted)',
+    file: 'projects/draw/src/commands.ts', from: 'can: someNotRoot, keyCan: some, run: (c) => c.editor.delete() },', to: 'can: someNotRoot, run: (c) => c.editor.delete() },',
+    run: drawTests('keys.test.ts'), expect: /✖ Delete or ⌫ with only the root selected says the root can’t be deleted/,
+  },
 ];
 
 const args = process.argv.slice(2);
