@@ -4,7 +4,7 @@
 // rasterize: the PNG copy (engine/export/png-source.ts: no <foreignObject>, the root sized to the file)
 // as a data: SVG image, as SVG Lab's makeBitmap loads one (an SVG image runs no script and loads
 // nothing), decoded, then drawn at w × h on a transparent OffscreenCanvas (a PNG keeps its alpha) and
-// encoded. It never throws; it says why there is no PNG:
+// encoded, and the canvas's buffer let go at once. It never throws; it says why there is no PNG:
 // - 'too-large': past the device's canvas area (no context; WebKit's convertToBlob rejects with an
 //   EncodingError, CanvasBase::validateArea having refused the buffer), or nothing came out;
 // - 'tainted': the canvas can't be read back (SecurityError), which the copy is made to avoid;
@@ -17,8 +17,8 @@ const named = (e: unknown, name: string): boolean => !!e && typeof e === 'object
 
 export async function rasterize(svg: string, w: number, h: number): Promise<Rastered> {
   const img = new Image();
-  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   try {
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
     await img.decode();
   } catch {
     return 'failed';
@@ -29,9 +29,9 @@ export async function rasterize(svg: string, w: number, h: number): Promise<Rast
   } catch {
     return 'too-large';
   }
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return 'too-large';
   try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return 'too-large';
     ctx.drawImage(img, 0, 0, w, h);
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     return blob.size ? blob : 'too-large';
@@ -39,6 +39,11 @@ export async function rasterize(svg: string, w: number, h: number): Promise<Rast
     if (named(e, 'EncodingError')) return 'too-large';
     if (named(e, 'SecurityError')) return 'tainted';
     return 'failed';
+  } finally {
+    // Up to 8192² × 4 bytes, let go now rather than when it is collected, so the next file's canvas
+    // isn't refused for the memory this one still holds.
+    canvas.width = 0;
+    canvas.height = 0;
   }
 }
 

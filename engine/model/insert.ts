@@ -131,7 +131,7 @@ export function planInsert(doc: Doc, text: string, at: { x: number; y: number },
   const placement = place(src, root, at, board);
   const own = root.attrs.find((x) => x.ns === null && x.local === 'transform');
   const transform = [placement, own ? decodeAttr(own.raw, src.entities).trim() : ''].filter(Boolean).join(' ');
-  if (transform) attrs += ` transform="${transform.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`;
+  if (transform) attrs += ` transform="${asWritten(transform, '"')}"`;
   const inner = root.children.map((c) => serializeNode(src, c)).join('');
   return { markup: `<g${attrs}>${inner}</g>`, renamed: map.size };
 }

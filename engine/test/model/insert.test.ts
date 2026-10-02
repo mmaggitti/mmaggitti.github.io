@@ -102,6 +102,14 @@ test('placement: a 24 × 24 viewBox at its own size, centred; a 2000 × 2000 one
   assert.ok(moved.markup.startsWith('<g transform="translate(45 45) rotate(5)">'), `a root's own transform comes after the placement: ${moved.markup}`);
 });
 
+test('the root’s own transform goes on the <g> escaped for its quotes, a < in it too, so the <g> reads back', () => {
+  const doc = open(DOC);
+  const p = plan(`<svg xmlns="${SVG_NS}" viewBox="0 0 10 10" transform="rotate(5) &lt;x &quot;y&amp;"><rect width="10" height="10"/></svg>`, doc);
+  assert.ok(p.markup.startsWith('<g transform="translate(45 45) rotate(5) &lt;x &quot;y&amp;">'), p.markup);
+  new Session(doc).dispatch('Insert', (apply) => insertMarkup(doc, { last: doc.root }, p.markup, apply));
+  assert.ok(parseDoc(serialize(doc)).ok);
+});
+
 test('the plan inserts as one transaction that undo takes back, within what the drawing has left of its limits', () => {
   const doc = open(DOC);
   const s = new Session(doc);

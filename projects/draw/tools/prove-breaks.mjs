@@ -3878,6 +3878,21 @@ const BREAKS = [
     file: 'projects/draw/src/commands.ts', from: 'can: someNotRoot, keyCan: some, run: (c) => c.editor.delete() },', to: 'can: someNotRoot, run: (c) => c.editor.delete() },',
     run: drawTests('keys.test.ts'), expect: /✖ Delete or ⌫ with only the root selected says the root can’t be deleted/,
   },
+  {
+    id: 'B735', what: 'planInsert writes the root’s transform back escaping only & and ", so a < in it makes a <g> that can’t be read',
+    file: 'engine/model/insert.ts', from: "attrs += ` transform=\"${asWritten(transform, '\"')}\"`;", to: "attrs += ` transform=\"${transform.replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}\"`;",
+    run: engineTests('model/insert.test.ts'), expect: /✖ the root’s own transform goes on the <g> escaped for its quotes/,
+  },
+  {
+    id: 'B736', what: 'rasterize keeps the canvas’s buffer after the PNG is out (up to 8192² × 4 bytes until it is collected)',
+    file: 'projects/draw/src/platform/raster.ts', from: '    canvas.width = 0;\n    canvas.height = 0;\n', to: '',
+    run: drawTests('raster.test.ts'), expect: /✖ rasterize lets go of the canvas once the PNG is out[\s\S]*the canvas’s buffer is let go/,
+  },
+  {
+    id: 'B737', what: 'rasterize encodes the SVG outside its try, so text it can’t encode throws instead of saying “failed”',
+    file: 'projects/draw/src/platform/raster.ts', from: '  const img = new Image();\n  try {\n    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n', to: '  const img = new Image();\n  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;\n  try {\n',
+    run: drawTests('raster.test.ts'), expect: /✖ rasterize lets go of the canvas once the PNG is out[\s\S]*URIError/,
+  },
 ];
 
 const args = process.argv.slice(2);
