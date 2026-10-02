@@ -8141,7 +8141,8 @@ const paletteFieldFocused = (page) => page.evaluate(() => document.activeElement
 // opens Commands with its field focused, "dup" leaves Duplicate first, and Return runs it (one
 // "Duplicate" entry: two circles) and closes it; with "arrange" typed, ↓ and ↑ move the active row
 // (↑ stops at the first) and Return runs the active one (Group); the Commands button opens it with the field not
-// focused, and a tap on Bring forward runs it; Escape closes it; ⌘Z undoes on the canvas and with the
+// focused, and a tap on Bring forward runs it; Escape closes it, and so does Return on its Done (which
+// runs nothing); ⌘Z undoes on the canvas and with the
 // focus in the code view; ⇧⌘Z and ⌘Y redo; Delete deletes; and with the focus in a field (Files' paste
 // field, or the palette's own) ⌘K, Delete and ⌘Z do nothing to the drawing.
 async function commandsRunFromTheBarMoreKeysAndPalette(browser, origin) {
@@ -8215,6 +8216,14 @@ async function commandsRunFromTheBarMoreKeysAndPalette(browser, origin) {
     await page.keyboard.press('Escape');
     await page.locator('.draw-modal').waitFor({ state: 'detached' });
     must(!(await paletteOpen(page)), 'Escape did not close the palette');
+    // Return with the focus on Done is Done's own click: it closes the palette and runs nothing.
+    await page.keyboard.press('Meta+k');
+    await until('⌘K opens Commands again', () => paletteOpen(page));
+    const unrun = { file: await source(page), undo: await undoLabel(page) };
+    await page.locator('.draw-modal-done').focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.draw-modal').waitFor({ state: 'detached' });
+    must(!(await paletteOpen(page)) && await source(page) === unrun.file && await undoLabel(page) === unrun.undo, `Return on Done: the palette is ${(await paletteOpen(page)) ? 'open' : 'closed'}, ${await undoLabel(page)} (was ${unrun.undo}), the file ${(await source(page)) === unrun.file ? 'unchanged' : 'changed'}`);
     // ⌘Z in the code view, ⇧⌘Z and ⌘Y.
     await showCode(page);
     await page.locator('.draw-code .cv-number').first().focus();

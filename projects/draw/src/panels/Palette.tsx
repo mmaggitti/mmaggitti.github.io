@@ -45,8 +45,8 @@ function PaletteSheet({ ctx, focus, close }: { ctx: Ctx; focus: boolean; close: 
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         setActive(Math.max(0, Math.min(rows.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1))));
-      } else if (e.key === 'Enter' && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target as Element | null)?.closest?.('.draw-palette-row')) {
-        // (Return on a focused row is that row's own click.)
+      } else if (e.key === 'Enter' && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target as Element | null)?.closest?.('button')) {
+        // (Return on a focused button is that button's own click: a row runs, Done closes.)
         e.preventDefault();
         if (rows[at]) run(rows[at]);
       }
