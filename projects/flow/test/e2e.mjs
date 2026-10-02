@@ -149,21 +149,29 @@ async function boxes(page) {
 }
 
 // No two nodes overlap, every edge's source sits wholly above its target, and all are on screen.
+// Retried until it holds (React Flow fits the view a frame or two after the nodes move), and on
+// timeout it reports the last thing that was wrong.
 async function layered(page, canvas, when) {
+  let problem;
+  await waitFor(async () => (problem = await layoutProblem(page, canvas)) === null, () => `${when}: ${problem}`);
+}
+
+async function layoutProblem(page, canvas) {
   const b = await boxes(page);
   const ids = Object.keys(b);
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
       const [p, q] = [b[ids[i]], b[ids[j]]];
       const apart = p.x + p.width <= q.x + TOLERANCE || q.x + q.width <= p.x + TOLERANCE || p.y + p.height <= q.y + TOLERANCE || q.y + q.height <= p.y + TOLERANCE;
-      must(apart, `${when}: ${ids[i]} ${fmt(p)} overlaps ${ids[j]} ${fmt(q)}`);
+      if (!apart) return `${ids[i]} ${fmt(p)} overlaps ${ids[j]} ${fmt(q)}`;
     }
   }
   const edges = await page.evaluate(() => JSON.parse(localStorage.getItem('flow:doc') ?? '{"edges":[]}').edges);
   for (const e of edges) {
-    must(b[e.source].y + b[e.source].height <= b[e.target].y + TOLERANCE, `${when}: edge ${e.source}→${e.target} doesn't run downward`);
+    if (b[e.source].y + b[e.source].height > b[e.target].y + TOLERANCE) return `edge ${e.source}→${e.target} doesn't run downward`;
   }
-  for (const id of ids) within(b[id], canvas, `${when} ${id}`);
+  for (const id of ids) if (!isWithin(b[id], canvas)) return `${id} ${fmt(b[id])} is not inside the canvas ${fmt(canvas)}`;
+  return null;
 }
 
 async function inside(locator, canvas, what) {
@@ -172,10 +180,6 @@ async function inside(locator, canvas, what) {
     box = await locator.boundingBox();
     return box && isWithin(box, canvas);
   }, () => `${what}: ${fmt(box)} is not inside the canvas ${fmt(canvas)}`);
-}
-
-function within(box, canvas, what) {
-  must(isWithin(box, canvas), `${what}: ${fmt(box)} is not inside the canvas ${fmt(canvas)}`);
 }
 
 function isWithin(box, c) {

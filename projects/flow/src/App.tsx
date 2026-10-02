@@ -45,7 +45,6 @@ function Playground() {
   const rf = useReactFlow<FlowNode, Edge>();
   const canvas = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const fitPending = useRef(false);
   const dragStart = useRef<Doc | null>(null);
 
   const doc = useRef<Doc>({ nodes, edges });
@@ -68,15 +67,8 @@ function Playground() {
     return () => window.removeEventListener('pagehide', flush);
   }, []);
 
-  // A fit asked for by a change runs after React Flow has the new nodes.
-  const fitSoon = () => {
-    fitPending.current = true;
-  };
-  useEffect(() => {
-    if (!fitPending.current) return;
-    fitPending.current = false;
-    void rf.fitView({ ...FIT, duration: reducedMotion() ? 0 : 300 });
-  }, [nodes, rf]);
+  // React Flow queues a fit until it has the new nodes, so this can follow a setNodes directly.
+  const fit = () => void rf.fitView({ ...FIT, duration: reducedMotion() ? 0 : 300 });
 
   // Desktop keys; the bar does the same on a phone.
   useEffect(() => {
@@ -190,7 +182,7 @@ function Playground() {
     if (!nodes.length) return;
     record();
     setNodes(tidy(nodes, edges));
-    fitSoon();
+    fit();
   };
 
   const onImport = async (file: File | undefined) => {
@@ -199,7 +191,7 @@ function Playground() {
       const next = parseDoc(await file.text());
       record();
       apply(next);
-      fitSoon();
+      fit();
       setStatus(`Imported ${next.nodes.length} nodes`);
     } catch (err) {
       setStatus(`Couldn't import: ${err instanceof Error ? err.message : 'unreadable file'}`);
@@ -279,7 +271,7 @@ function Playground() {
             <button type="button" className="ds-btn" onClick={() => fileInput.current?.click()}>
               Import JSON
             </button>
-            <button type="button" className="ds-btn" onClick={() => (void rf.fitView({ ...FIT, duration: reducedMotion() ? 0 : 300 }), setSheet(null))}>
+            <button type="button" className="ds-btn" onClick={() => (fit(), setSheet(null))}>
               Fit to screen
             </button>
             <button type="button" className="ds-btn" onClick={onClear}>
