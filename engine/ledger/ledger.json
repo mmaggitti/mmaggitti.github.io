@@ -1323,7 +1323,7 @@
 {"id":"feature:artboards","kind":"feature","name":"nested viewports and views as artboards","group":"P2","phase":2,"status":"planned"},
 {"id":"feature:palettes-templates","kind":"feature","name":"palettes and templates","group":"P2","phase":2,"status":"planned"},
 {"id":"feature:font-upload","kind":"feature","name":"your own fonts","group":"P2","phase":2,"status":"planned"},
-{"id":"feature:launcher-listing","kind":"feature","name":"Draw listed in the launcher (Release 1)","group":"P2","phase":2,"status":"planned"},
+{"id":"feature:launcher-listing","kind":"feature","name":"Draw listed in the launcher (Release 1)","group":"P2","phase":2,"status":"done","note":"Draw has a card on the launcher, made from its page’s title and description. The Studio’s page picker never offers it: an editor that will hold a GitHub token must not run inside another page’s frame.","tests":["projects/draw/test/e2e.mjs#listedButNeverFramed"]},
 {"id":"feature:served-profile-before-save","kind":"feature","name":"the library save runs the served profile on every .svg before it commits","group":"P2","phase":2,"status":"planned","note":"Moved from feature:served-profile at the P0 exit: the library save arrives in P2 (feature:library-publish)."},
 {"id":"feature:markers","kind":"feature","name":"markers","group":"P3","phase":3,"status":"planned"},
 {"id":"feature:connectors","kind":"feature","name":"connectors bound to shapes","group":"P3","phase":3,"status":"planned"},

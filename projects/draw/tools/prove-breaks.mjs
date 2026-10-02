@@ -86,9 +86,9 @@ const BREAKS = [
     run: ['node', ['tools/check-sinks.mjs'], DRAW], expect: /allow-same-origin/,
   },
   {
-    id: 'B5', what: 'Draw loses its unlisted marker', slow: true,
-    file: 'projects/draw/index.html', from: '<meta name="launcher" content="unlisted">', to: '',
-    run: SITE_E2E, expect: /launcher lists Draw/,
+    id: 'B5', what: 'Draw is marked unlisted, so the launcher leaves it out (the launcher is built with the site, so this break runs the site build)', slow: true,
+    file: 'projects/draw/index.html', from: '<title>Draw</title>', to: '<meta name="launcher" content="unlisted">\n  <title>Draw</title>',
+    run: SITE_E2E, expect: /launcher doesn't list Draw/,
   },
   {
     id: 'B6', what: 'the ledger and the served profile disagree on the version',

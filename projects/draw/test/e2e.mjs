@@ -182,7 +182,7 @@ export default async function run({ browser, origin, engine = browser.browserTyp
     }
   };
   await check(cspIsFirstAndEnforced);
-  await check(unlistedAndNeverFramed);
+  await check(listedButNeverFramed);
   await check(libraryIndexServed);
   for (const height of [956, 796]) await check(phoneRules, height);
   await check(sampleRenders);
@@ -366,13 +366,13 @@ async function cspIsFirstAndEnforced(browser, origin) {
   });
 }
 
-// Draw is live for testing but not on the launcher, and never offered to the Studio's frame picker
-// (an editor that will hold a GitHub token must not run inside another page's frame).
-async function unlistedAndNeverFramed(browser, origin) {
+// Draw has a card on the launcher, and is never offered to the Studio's frame picker (an editor that
+// will hold a GitHub token must not run inside another page's frame).
+async function listedButNeverFramed(browser, origin) {
   await withPage(browser, origin, 956, async (page) => {
     const launcher = await page.evaluate(async () => (await fetch('/')).text());
     // The launcher links relatively (href="draw/"); match any spelling of the link.
-    must(!/href="(?:\.?\/)?draw\/?"/.test(launcher), 'the launcher lists Draw before its release');
+    must(/href="(?:\.?\/)?draw\/?"/.test(launcher), "the launcher doesn't list Draw");
     must(/href="(?:\.?\/)?hello\/?"/.test(launcher), 'test setup: the launcher link pattern no longer matches a listed project');
     const pages = await page.evaluate(async () => (await fetch('/pages.json')).json());
     must(!pages.some((p) => p.path === '/draw/'), 'pages.json offers /draw/ to the Studio picker');
