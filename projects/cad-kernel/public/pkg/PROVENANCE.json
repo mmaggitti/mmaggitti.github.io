@@ -4,31 +4,31 @@
   "name": "cad-kernel",
   "version": "0.1.0",
   "standard": "geometry kernel standard 0.3",
-  "tier": 4
+  "tier": 5
  },
- "commit": "8de2237e92fe94bb0f6101f42beec4c54dd9916e",
+ "commit": "09b2b36ae94f4878e251423ef664f00a953e01ae",
  "build": {
   "target": "wasm32-unknown-unknown",
   "profile": "wasm",
-  "rustc": "1.94.1",
-  "rustcCommit": "e408947bfd200af42db322daf0fadfe7e26d3bd1",
+  "rustc": "1.97.0",
+  "rustcCommit": "2d8144b7880597b6e6d3dfd63a9a9efae3f533d3",
   "wasmBindgen": "0.2.129",
   "pathsRemapped": true
  },
  "files": {
   "cadk_wasm_bg.wasm": {
-   "bytes": 3711900,
-   "gzipBytes": 1120580,
-   "sha256": "4d7fcb9591bf00fb45a6e45416bf13d59dc66157dfd2f5fe9558f0d0b64e54d3"
+   "bytes": 5420225,
+   "gzipBytes": 1252230,
+   "sha256": "34a12d8e03e82ea78adfec479e0e5b6ca4c8c6bac8e7687346b03ef969632487"
   },
   "cadk_wasm.js": {
-   "bytes": 37445,
-   "sha256": "bc5b9dac64ff2af734633b4a0346bcdee4d1a4350ff3bd9df6d604f5681766e2"
+   "bytes": 39187,
+   "sha256": "11379b63060a01c7f5a5965bbef4b9b271c28f530458dc82781620c605bed57a"
   }
  },
  "conformance": {
-  "requirementsPassing": 65,
-  "throughTier": 4,
+  "requirementsPassing": 79,
+  "throughTier": 5,
   "determinismDigest": "eeb97372a1b9f1b50b0e22fd7defba85c2f9a63aec92499179263cd954e1329c",
   "engineTier": 5
  },

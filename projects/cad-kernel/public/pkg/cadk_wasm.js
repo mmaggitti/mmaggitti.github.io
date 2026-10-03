@@ -212,6 +212,33 @@ export class Rebuilt {
         return v2;
     }
     /**
+     * Every input value of the package that can't be used, each as a message saying where it is,
+     * what's wrong and what it fails, as the command line prints them: an expression that doesn't
+     * parse, names a parameter that isn't there, or whose value can't be had (the wrong quantity
+     * for its field), and a value of the wrong kind for its field (text where a length goes, a
+     * number where a boolean goes, a vector of the wrong length); one that nothing reads included,
+     * which no result file has room for; and, as unsupported, a form this Rebuilder doesn't
+     * implement (Mark's ruling, 2026-10-03, round X6). Each fails only what reads it, and the
+     * parts' and assemblies' own messages in `summary` name those that fail theirs (Mark's
+     * rulings, 2026-10-01 and 2026-10-02). JSON: an array for the configuration rebuilt, or
+     * `{configuration: [...]}` for every one (`rebuildPackage(…, 'all')`); empty when every
+     * value can be used. The name is the binding's since round X, when only expressions were
+     * listed; it is to be renamed at the next breaking change (Mark, 2026-10-02).
+     * @returns {string}
+     */
+    get expressions() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rebuilt_expressions(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Paths of the result files, sorted.
      * @returns {string[]}
      */
@@ -761,7 +788,9 @@ export function probeDigest() {
 /**
  * Rebuild a package's results (K4.6) from its files: a JSON object of path → text holding
  * `manifest.json` and the files it lists. `configurations` is a configuration's ID, or `all`
- * for every configuration the package declares; without it, the default configuration.
+ * for every configuration the package declares; without it, the default configuration. The
+ * files hold, too, the results of each part an instance counts in another configuration, in
+ * that one, as rebuilding it writes them; `summary` keeps to the configurations asked for.
  * @param {string} files_json
  * @param {string | null} [configurations]
  * @returns {Rebuilt}
