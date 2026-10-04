@@ -6,7 +6,7 @@
   "standard": "geometry kernel standard 0.3",
   "tier": 5
  },
- "commit": "09b2b36ae94f4878e251423ef664f00a953e01ae",
+ "commit": "943b760195e95d118b59e4afb30082bce8329d20",
  "build": {
   "target": "wasm32-unknown-unknown",
   "profile": "wasm",
@@ -17,9 +17,9 @@
  },
  "files": {
   "cadk_wasm_bg.wasm": {
-   "bytes": 5420225,
-   "gzipBytes": 1252230,
-   "sha256": "34a12d8e03e82ea78adfec479e0e5b6ca4c8c6bac8e7687346b03ef969632487"
+   "bytes": 5530670,
+   "gzipBytes": 1277863,
+   "sha256": "47259f0901a70a8025a982edbbb92730970ef0ede942b8e3bfc80ff5f36a1f27"
   },
   "cadk_wasm.js": {
    "bytes": 39187,
