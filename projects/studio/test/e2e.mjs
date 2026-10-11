@@ -138,7 +138,7 @@ export default async function run({ browser, origin }) {
     await page.locator('.studio-select').tap(); // Select off
     await page.locator('.studio-page').selectOption('/');
     view = page.frameLocator('iframe.studio-frame');
-    await view.locator('.ds-card', { hasText: 'Hello' }).tap();
+    await view.locator('.launch-card', { hasText: 'Hello' }).tap();
     await page.waitForFunction(() => location.search === `?page=${encodeURIComponent('/hello/')}`);
     await page.locator('.studio-page').selectOption('/');
     await waitFor(

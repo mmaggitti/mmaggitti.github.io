@@ -61,7 +61,8 @@ A project is one of two kinds:
   `BASE_PATH=/<name>/`. Vite must use `base: process.env.BASE_PATH ?? "/"` or every asset 404s.
   Commit `package-lock.json`.
 
-The launcher card takes the project's `<title>` and `<meta name="description">`, so set both.
+The launcher card shows one word: the project's `<meta name="launcher-label" content="…">`
+(else its `<title>`), so set it. Still set `<title>` and `<meta name="description">` for the page itself.
 Cards run oldest first, in the order of the `CREATED` list in `scripts/build-site.mjs`: add a new
 project's name at the end of it.
 

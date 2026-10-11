@@ -100,6 +100,21 @@ for (const pg of pages) {
       // so innerWidth-based overflow always reads 0.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (overflow > 0) problems.push(`scrolls sideways by ${overflow}px`);
+      // The launcher: one word per card, the cards evenly spaced, and all of them on the first screen.
+      if (pg.path === '/') {
+        const cards = await page.evaluate(() =>
+          [...document.querySelectorAll('.launch-card')].map((a) => {
+            const r = a.getBoundingClientRect();
+            return { text: a.textContent.trim(), top: r.top, bottom: r.bottom };
+          }),
+        );
+        if (cards.length < 2) problems.push(`launcher shows ${cards.length} card(s)`);
+        for (const c of cards) if (!/^\S+$/.test(c.text)) problems.push(`launcher card "${c.text}" isn't one word`);
+        const gaps = cards.slice(1).map((c, k) => c.top - cards[k].bottom);
+        if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 1) problems.push(`launcher gaps differ: ${gaps.map((g) => g.toFixed(1)).join(', ')}`);
+        const h = await page.evaluate(() => document.documentElement.clientHeight);
+        if (cards.some((c) => c.bottom > h)) problems.push(`launcher cards run past the first screen (${h}px)`);
+      }
       if (i === 0) await page.screenshot({ path: join(SHOTS, `${pg.name}.png`) });
     } catch (e) {
       problems.push(`load failed: ${e.message.split('\n')[0]}`);
