@@ -3,7 +3,11 @@
 //
 // The page is the built app only: its source lives in Mark's vault. This walks a first study day
 // into the second, then checks the Map tree: every card drawn inside the frame, the legend agreeing
-// with the drawn colours, and a tap on a rectangle opening that card.
+// with the drawn colours, and a tap on a rectangle opening that card. Then the Map's JSON view: View
+// JSON from that card lands on its node, search opens the path to a node, and Save hands over the
+// deck file, canonical and without progress.
+
+import { readFileSync } from 'node:fs';
 
 const CARDS = 1296;
 const SETTLE = 400; // ms: the app ignores taps for 350 ms after a card appears (double-tap guard)
@@ -14,6 +18,7 @@ export default async function run({ browser, origin }) {
     deviceScaleFactor: 1,
     isMobile: true,
     hasTouch: true,
+    acceptDownloads: true, // Save, where there's no share sheet, is a download
   });
   const page = await context.newPage();
   const errors = [];
@@ -93,7 +98,48 @@ export default async function run({ browser, origin }) {
       must(b && b.height >= 44 && b.width >= 44, `${name} is under 44pt: ${JSON.stringify(b)}`);
     }
 
-    // 6. Progress is kept under this project's own name on the shared origin.
+    // 6. View JSON on the tapped card opens the Map's JSON view at that node, on screen.
+    const tappedId = await page.locator('.pm-tree-card .ds-mono').innerText();
+    const vj = await button('View JSON').boundingBox();
+    must(vj && vj.height >= 44, `View JSON is under 44pt: ${JSON.stringify(vj)}`);
+    await tap('View JSON');
+    must((await button('JSON').getAttribute('aria-pressed')) === 'true', 'View JSON did not switch the Map to JSON');
+    const landed = page.locator('[aria-current="true"]');
+    await landed.waitFor();
+    must((await landed.getAttribute('data-node')) === tappedId, `View JSON landed on ${await landed.getAttribute('data-node')}, not ${tappedId}`);
+    const lb = await landed.boundingBox();
+    must(lb && lb.y >= 0 && lb.y + lb.height <= 956, `the landed row is off screen: ${JSON.stringify(lb)}`);
+
+    // 7. Search by id: one hit, the path to it opened, its fields shown as the file writes them, and
+    //    only what's open drawn (the deck has 1,296 nodes; the widest family 21 children).
+    const search = page.locator('.pm-json-search');
+    await search.fill('pet.1.c');
+    const hits = page.locator('.pm-json-hit');
+    must((await hits.count()) === 1, `search pet.1.c: ${await hits.count()} hits`);
+    await hits.first().tap();
+    must((await page.locator('[data-node="pet.1.c"]').getAttribute('aria-current')) === 'true', 'pet.1.c is not the current row');
+    const fields = await page.locator('[aria-current="true"] + .pm-json-fields').innerText();
+    must(fields.includes('"id": "pet.1.c"'), `pet.1.c's fields: ${fields.slice(0, 80)}`);
+    const drawn = await page.locator('.pm-json-row').count();
+    must(drawn < 150, `${drawn} rows drawn: the view should draw only what's open`);
+    await search.fill('nuc.1');                    // its source holds a 45-character unbroken token
+    await hits.first().tap();
+    await noSideways(page, 'json view');
+
+    // 8. Save hands over the whole deck file: canonical, all 1,296 nodes, no progress.
+    await page.evaluate(() => { navigator.canShare = () => false; });
+    const [download] = await Promise.all([page.waitForEvent('download'), button('Save pe-map-cards.json').tap()]);
+    must(download.suggestedFilename() === 'pe-map-cards.json', `saved as ${download.suggestedFilename()}`);
+    const text = readFileSync(await download.path(), 'utf8');
+    const deck = JSON.parse(text);
+    must(JSON.stringify(deck, null, 2) + '\n' === text, 'the saved file is not in canonical form');
+    let nodes = 0;
+    const walk = (n) => { for (const c of n.children ?? []) { nodes++; walk(c); } };
+    walk(deck);
+    must(nodes === CARDS, `the saved file holds ${nodes} nodes, not ${CARDS}`);
+    must(!text.includes('"progress"'), 'the saved file carries progress');
+
+    // 9. Progress is kept under this project's own name on the shared origin.
     const names = await page.evaluate(async () => (indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : null));
     if (names) must(names.length > 0 && names.every((n) => n === 'pe-map'), `IndexedDB databases: ${JSON.stringify(names)}`);
 
