@@ -1,4 +1,4 @@
-# TOUR
+# Tour
 
 A to-scale 3D model of a cryogenic air separation unit, with a 12-stage guided tour of how it makes
 oxygen, nitrogen and argon from air. Served at https://mmaggitti.github.io/tour/.

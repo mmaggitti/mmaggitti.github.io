@@ -1,4 +1,4 @@
-// TOUR end-to-end test, run by the site's scripts/smoke-test.mjs against the built site (Chromium
+// Tour end-to-end test, run by the site's scripts/smoke-test.mjs against the built site (Chromium
 // in cloud sessions, WebKit in CI). Every check runs; the test throws once, listing all failures,
 // so one CI run shows everything WebKit disagrees with.
 //

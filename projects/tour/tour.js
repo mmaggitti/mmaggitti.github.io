@@ -1,4 +1,4 @@
-// TOUR: a to-scale 3D model of a cryogenic air separation unit, with a 12-stage guided tour.
+// Tour: a to-scale 3D model of a cryogenic air separation unit, with a 12-stage guided tour.
 //
 // The plant is model.json (written by tools/export_model.py from tools/asu_scene.py): meters, Y up,
 // X along the plant, Z toward the viewer. This file draws it and steps through it.
