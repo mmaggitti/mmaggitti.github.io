@@ -1,0 +1,1899 @@
+{
+ "units": "meters; Y up, X along the plant, Z toward the viewer",
+ "boxes": [
+  {
+   "name": "Intake filter house",
+   "style": "eq",
+   "stage": 1,
+   "min": [
+    4.0,
+    0.0,
+    -8.0
+   ],
+   "max": [
+    10.0,
+    8.0,
+    -2.0
+   ]
+  },
+  {
+   "name": "Compressor building",
+   "style": "bld",
+   "stage": 1,
+   "min": [
+    12.0,
+    0.0,
+    -12.0
+   ],
+   "max": [
+    34.0,
+    12.0,
+    0.0
+   ]
+  },
+  {
+   "name": "Motor",
+   "style": "eq",
+   "stage": 1,
+   "min": [
+    13.0,
+    0.8,
+    -7.5
+   ],
+   "max": [
+    17.5,
+    4.8,
+    -3.5
+   ]
+  },
+  {
+   "name": "Compressor casing",
+   "style": "eq",
+   "stage": 1,
+   "min": [
+    20.5,
+    0.5,
+    -7.0
+   ],
+   "max": [
+    27.3,
+    4.5,
+    -4.0
+   ]
+  },
+  {
+   "name": "Booster building",
+   "style": "bld",
+   "stage": 4,
+   "min": [
+    68.6,
+    0.0,
+    -10.0
+   ],
+   "max": [
+    80.0,
+    12.0,
+    0.0
+   ]
+  },
+  {
+   "name": "Booster air compressor",
+   "style": "eq",
+   "stage": 4,
+   "min": [
+    69.6,
+    0.0,
+    -7.0
+   ],
+   "max": [
+    74.4,
+    5.8,
+    -3.0
+   ]
+  },
+  {
+   "name": "N2 recycle compressor",
+   "style": "eq",
+   "stage": 4,
+   "min": [
+    75.4,
+    0.0,
+    -7.0
+   ],
+   "max": [
+    79.4,
+    5.8,
+    -3.0
+   ]
+  },
+  {
+   "name": "Regen gas heater",
+   "style": "eq",
+   "stage": 3,
+   "min": [
+    51.9,
+    23.4,
+    -6.0
+   ],
+   "max": [
+    53.7,
+    26.0,
+    -5.0
+   ]
+  },
+  {
+   "name": "Main heat exchanger",
+   "style": "mhe",
+   "stage": 5,
+   "min": [
+    84.5,
+    4.0,
+    -8.0
+   ],
+   "max": [
+    93.0,
+    17.0,
+    -4.0
+   ]
+  },
+  {
+   "name": "Air expander",
+   "style": "eq",
+   "stage": 6,
+   "min": [
+    96.5,
+    9.0,
+    -7.5
+   ],
+   "max": [
+    100.0,
+    12.0,
+    -4.5
+   ]
+  },
+  {
+   "name": "N2 expander",
+   "style": "eq",
+   "stage": 6,
+   "min": [
+    96.5,
+    4.0,
+    -7.5
+   ],
+   "max": [
+    100.0,
+    7.0,
+    -4.5
+   ]
+  },
+  {
+   "name": "Condenser-reboiler",
+   "style": "cond",
+   "stage": 8,
+   "min": [
+    104.5,
+    16.4,
+    -8.3
+   ],
+   "max": [
+    109.1,
+    18.8,
+    -3.7
+   ]
+  },
+  {
+   "name": "Subcooler",
+   "style": "eq",
+   "stage": 9,
+   "min": [
+    103.2,
+    34.0,
+    -6.5
+   ],
+   "max": [
+    104.0,
+    37.0,
+    -5.5
+   ]
+  },
+  {
+   "name": "Argon condenser",
+   "style": "cond",
+   "stage": 10,
+   "min": [
+    115.5,
+    33.6,
+    -7.3
+   ],
+   "max": [
+    118.0,
+    36.4,
+    -4.7
+   ]
+  },
+  {
+   "name": "Exchanger cold box",
+   "style": "cold",
+   "stage": 5,
+   "min": [
+    83.0,
+    0.0,
+    -10.0
+   ],
+   "max": [
+    95.0,
+    20.0,
+    -2.0
+   ]
+  },
+  {
+   "name": "Column cold box",
+   "style": "cold",
+   "stage": 7,
+   "min": [
+    103.0,
+    0.0,
+    -10.0
+   ],
+   "max": [
+    112.4,
+    60.0,
+    -2.0
+   ]
+  },
+  {
+   "name": "Argon cold box",
+   "style": "cold",
+   "stage": 10,
+   "min": [
+    114.0,
+    0.0,
+    -9.0
+   ],
+   "max": [
+    122.0,
+    45.0,
+    -3.0
+   ]
+  }
+ ],
+ "cyls": [
+  {
+   "name": "Intercooler 1",
+   "stage": 1,
+   "cx": 29.1,
+   "cz": -5.5,
+   "r": 0.6,
+   "top": 5.8,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 5.8,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "Intercooler 2",
+   "stage": 1,
+   "cx": 31.9,
+   "cz": -5.5,
+   "r": 0.6,
+   "top": 5.8,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 5.8,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "Aftercooler",
+   "stage": 2,
+   "cx": 38.5,
+   "cz": -5.5,
+   "r": 1.5,
+   "top": 16.0,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 16.0,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "Vent stack",
+   "stage": 3,
+   "cx": 48.0,
+   "cz": -5.5,
+   "r": 0.3,
+   "top": 15.0,
+   "bot": 1.5,
+   "bands": [
+    {
+     "top": 15.0,
+     "bot": 1.5,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "Adsorber A",
+   "stage": 3,
+   "cx": 52.8,
+   "cz": -5.5,
+   "r": 2.0,
+   "top": 8.0,
+   "bot": 2.0,
+   "bands": [
+    {
+     "top": 8.0,
+     "bot": 2.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "Adsorber B",
+   "stage": 3,
+   "cx": 58.8,
+   "cz": -5.5,
+   "r": 2.0,
+   "top": 8.0,
+   "bot": 2.0,
+   "bands": [
+    {
+     "top": 8.0,
+     "bot": 2.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "LOX pump",
+   "stage": 11,
+   "cx": 102.0,
+   "cz": -6.0,
+   "r": 0.8,
+   "top": 3.1,
+   "bot": 1.5,
+   "bands": [
+    {
+     "top": 3.1,
+     "bot": 1.5,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "LP column",
+   "stage": 9,
+   "cx": 106.8,
+   "cz": -6.0,
+   "r": 2.3,
+   "top": 55.0,
+   "bot": 18.8,
+   "bands": [
+    {
+     "top": 55.0,
+     "bot": 38.0,
+     "color": "#C9C2B6"
+    },
+    {
+     "top": 38.0,
+     "bot": 32.0,
+     "color": "#B9C7C0"
+    },
+    {
+     "top": 32.0,
+     "bot": 27.5,
+     "color": "#AE93CB"
+    },
+    {
+     "top": 27.5,
+     "bot": 18.8,
+     "color": "#79B7A3"
+    }
+   ]
+  },
+  {
+   "name": "HP column",
+   "stage": 7,
+   "cx": 106.8,
+   "cz": -6.0,
+   "r": 2.0,
+   "top": 16.4,
+   "bot": 2.0,
+   "bands": [
+    {
+     "top": 16.4,
+     "bot": 12.0,
+     "color": "#C9C2B6"
+    },
+    {
+     "top": 12.0,
+     "bot": 6.0,
+     "color": "#B9C7C0"
+    },
+    {
+     "top": 6.0,
+     "bot": 2.0,
+     "color": "#9FC9BA"
+    }
+   ]
+  },
+  {
+   "name": "Crude argon column",
+   "stage": 10,
+   "cx": 116.75,
+   "cz": -6.0,
+   "r": 1.25,
+   "top": 33.6,
+   "bot": 3.0,
+   "bands": [
+    {
+     "top": 33.6,
+     "bot": 18.0,
+     "color": "#AE93CB"
+    },
+    {
+     "top": 18.0,
+     "bot": 3.0,
+     "color": "#79B7A3"
+    }
+   ]
+  },
+  {
+   "name": "Pure argon column",
+   "stage": 10,
+   "cx": 119.8,
+   "cz": -6.0,
+   "r": 0.6,
+   "top": 12.0,
+   "bot": 3.0,
+   "bands": [
+    {
+     "top": 12.0,
+     "bot": 3.0,
+     "color": "#AE93CB"
+    }
+   ]
+  },
+  {
+   "name": "LAR tank",
+   "stage": 11,
+   "cx": 133.0,
+   "cz": -6.0,
+   "r": 3.0,
+   "top": 12.0,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 12.0,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "LOX tank",
+   "stage": 11,
+   "cx": 144.0,
+   "cz": -6.0,
+   "r": 5.0,
+   "top": 20.0,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 20.0,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  },
+  {
+   "name": "LIN tank",
+   "stage": 11,
+   "cx": 156.5,
+   "cz": -6.0,
+   "r": 4.5,
+   "top": 18.0,
+   "bot": 0.0,
+   "bands": [
+    {
+     "top": 18.0,
+     "bot": 0.0,
+     "color": "#E9E3D8"
+    }
+   ]
+  }
+ ],
+ "pipes": [
+  {
+   "name": "intake",
+   "stage": 1,
+   "t": "amb",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     10.0,
+     7.5,
+     -5.0
+    ],
+    [
+     21.0,
+     7.5,
+     -5.0
+    ],
+    [
+     21.0,
+     4.7,
+     -5.0
+    ]
+   ]
+  },
+  {
+   "name": "MAC discharge",
+   "stage": 1,
+   "t": "hot",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     31.9,
+     5.8,
+     -5.5
+    ],
+    [
+     31.9,
+     9.5,
+     -5.5
+    ],
+    [
+     35.5,
+     9.5,
+     -5.5
+    ],
+    [
+     35.5,
+     2.0,
+     -5.5
+    ],
+    [
+     37.0,
+     2.0,
+     -5.5
+    ]
+   ]
+  },
+  {
+   "name": "to adsorber",
+   "stage": 2,
+   "t": "chill",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     38.5,
+     16.0,
+     -5.5
+    ],
+    [
+     38.5,
+     17.5,
+     -5.5
+    ],
+    [
+     41.0,
+     17.5,
+     -5.5
+    ],
+    [
+     41.0,
+     0.6,
+     -5.5
+    ],
+    [
+     58.8,
+     0.6,
+     -5.5
+    ],
+    [
+     58.8,
+     2.0,
+     -5.5
+    ]
+   ]
+  },
+  {
+   "name": "main air",
+   "stage": 3,
+   "t": "chill",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     59.8,
+     8.0,
+     -5.5
+    ],
+    [
+     59.8,
+     34.0,
+     -5.5
+    ],
+    [
+     59.8,
+     34.0,
+     -11.5
+    ],
+    [
+     89.6,
+     34.0,
+     -11.5
+    ],
+    [
+     89.6,
+     34.0,
+     -6.0
+    ],
+    [
+     89.6,
+     17.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "booster suction",
+   "stage": 4,
+   "t": "chill",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     70.5,
+     34.0,
+     -11.5
+    ],
+    [
+     70.5,
+     34.0,
+     -5.0
+    ],
+    [
+     70.5,
+     5.8,
+     -5.0
+    ]
+   ]
+  },
+  {
+   "name": "booster air",
+   "stage": 4,
+   "t": "amb",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     73.5,
+     5.8,
+     -5.0
+    ],
+    [
+     73.5,
+     32.0,
+     -5.0
+    ],
+    [
+     73.5,
+     32.0,
+     -12.0
+    ],
+    [
+     87.9,
+     32.0,
+     -12.0
+    ],
+    [
+     87.9,
+     32.0,
+     -6.0
+    ],
+    [
+     87.9,
+     17.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "recycle supply",
+   "stage": 4,
+   "t": "amb",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     76.2,
+     5.8,
+     -5.0
+    ],
+    [
+     76.2,
+     30.0,
+     -5.0
+    ],
+    [
+     76.2,
+     30.0,
+     -12.5
+    ],
+    [
+     86.2,
+     30.0,
+     -12.5
+    ],
+    [
+     86.2,
+     30.0,
+     -6.0
+    ],
+    [
+     86.2,
+     17.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "recycle return",
+   "stage": 4,
+   "t": "amb",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     84.5,
+     17.0,
+     -6.0
+    ],
+    [
+     84.5,
+     28.0,
+     -6.0
+    ],
+    [
+     84.5,
+     28.0,
+     -13.0
+    ],
+    [
+     78.6,
+     28.0,
+     -13.0
+    ],
+    [
+     78.6,
+     28.0,
+     -5.0
+    ],
+    [
+     78.6,
+     5.8,
+     -5.0
+    ]
+   ]
+  },
+  {
+   "name": "waste N2",
+   "stage": 3,
+   "t": "amb",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     91.5,
+     17.0,
+     -6.0
+    ],
+    [
+     91.5,
+     38.0,
+     -6.0
+    ],
+    [
+     91.5,
+     38.0,
+     -13.5
+    ],
+    [
+     52.8,
+     38.0,
+     -13.5
+    ],
+    [
+     52.8,
+     38.0,
+     -5.5
+    ],
+    [
+     52.8,
+     26.0,
+     -5.5
+    ]
+   ]
+  },
+  {
+   "name": "regen gas",
+   "stage": 3,
+   "t": "hot",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     52.8,
+     23.4,
+     -5.5
+    ],
+    [
+     52.8,
+     8.0,
+     -5.5
+    ]
+   ]
+  },
+  {
+   "name": "vent",
+   "stage": 3,
+   "t": "amb",
+   "k": "gas",
+   "end": true,
+   "r": 0.22,
+   "pts": [
+    [
+     50.8,
+     2.5,
+     -5.5
+    ],
+    [
+     48.0,
+     2.5,
+     -5.5
+    ],
+    [
+     48.0,
+     14.8,
+     -5.5
+    ]
+   ]
+  },
+  {
+   "name": "pipeline",
+   "stage": 11,
+   "t": "amb",
+   "k": "gas",
+   "end": true,
+   "r": 0.22,
+   "pts": [
+    [
+     92.5,
+     17.0,
+     -6.0
+    ],
+    [
+     92.5,
+     67.0,
+     -6.0
+    ],
+    [
+     92.5,
+     67.0,
+     -14.0
+    ],
+    [
+     162.8,
+     67.0,
+     -14.0
+    ]
+   ]
+  },
+  {
+   "name": "air to HP",
+   "stage": 7,
+   "t": "cryo",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     92.8,
+     4.0,
+     -6.0
+    ],
+    [
+     92.8,
+     0.8,
+     -6.0
+    ],
+    [
+     106.8,
+     0.8,
+     -6.0
+    ],
+    [
+     106.8,
+     2.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "air to expander",
+   "stage": 6,
+   "t": "cool",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     93.0,
+     10.5,
+     -6.0
+    ],
+    [
+     96.5,
+     10.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "expander to LP",
+   "stage": 6,
+   "t": "cryo",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     100.0,
+     10.5,
+     -6.0
+    ],
+    [
+     101.5,
+     10.5,
+     -6.0
+    ],
+    [
+     101.5,
+     20.0,
+     -6.0
+    ],
+    [
+     104.5,
+     20.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "N2 to expander",
+   "stage": 6,
+   "t": "cool",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     93.0,
+     5.5,
+     -6.0
+    ],
+    [
+     96.5,
+     5.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "N2 from expander",
+   "stage": 6,
+   "t": "cryo",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     100.0,
+     5.5,
+     -6.0
+    ],
+    [
+     101.0,
+     5.5,
+     -6.0
+    ],
+    [
+     101.0,
+     8.2,
+     -6.0
+    ],
+    [
+     93.0,
+     8.2,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "LOX suction",
+   "stage": 11,
+   "t": "cryo",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     104.5,
+     17.0,
+     -6.0
+    ],
+    [
+     102.0,
+     17.0,
+     -6.0
+    ],
+    [
+     102.0,
+     3.1,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "pumped LOX",
+   "stage": 11,
+   "t": "cryo",
+   "k": "hp",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     101.2,
+     2.3,
+     -6.0
+    ],
+    [
+     93.0,
+     2.3,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "reflux",
+   "stage": 9,
+   "t": "deep",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     104.5,
+     18.8,
+     -6.0
+    ],
+    [
+     103.6,
+     18.8,
+     -6.0
+    ],
+    [
+     103.6,
+     54.5,
+     -6.0
+    ],
+    [
+     104.5,
+     54.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "rich liquid",
+   "stage": 7,
+   "t": "cryo",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     108.8,
+     2.8,
+     -6.0
+    ],
+    [
+     111.5,
+     2.8,
+     -6.0
+    ],
+    [
+     111.5,
+     35.0,
+     -6.0
+    ],
+    [
+     109.1,
+     35.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "argon draw",
+   "stage": 10,
+   "t": "cryo",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     109.1,
+     30.0,
+     -6.0
+    ],
+    [
+     114.8,
+     30.0,
+     -6.0
+    ],
+    [
+     114.8,
+     3.5,
+     -6.0
+    ],
+    [
+     115.5,
+     3.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "GAN",
+   "stage": 9,
+   "t": "deep",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     107.3,
+     55.0,
+     -6.0
+    ],
+    [
+     107.3,
+     58.5,
+     -6.0
+    ],
+    [
+     97.5,
+     58.5,
+     -6.0
+    ],
+    [
+     97.5,
+     17.0,
+     -6.0
+    ],
+    [
+     93.0,
+     17.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "waste N2 cold",
+   "stage": 9,
+   "t": "deep",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     105.8,
+     55.0,
+     -6.0
+    ],
+    [
+     105.8,
+     57.0,
+     -6.0
+    ],
+    [
+     96.0,
+     57.0,
+     -6.0
+    ],
+    [
+     96.0,
+     18.5,
+     -6.0
+    ],
+    [
+     93.0,
+     18.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "LIN",
+   "stage": 11,
+   "t": "deep",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     109.1,
+     53.8,
+     -6.0
+    ],
+    [
+     109.9,
+     53.8,
+     -6.0
+    ],
+    [
+     109.9,
+     65.0,
+     -6.0
+    ],
+    [
+     109.9,
+     65.0,
+     -11.0
+    ],
+    [
+     156.5,
+     65.0,
+     -11.0
+    ],
+    [
+     156.5,
+     65.0,
+     -6.0
+    ],
+    [
+     156.5,
+     18.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "LOX",
+   "stage": 11,
+   "t": "cryo",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     109.1,
+     17.0,
+     -6.0
+    ],
+    [
+     110.7,
+     17.0,
+     -6.0
+    ],
+    [
+     110.7,
+     63.0,
+     -6.0
+    ],
+    [
+     110.7,
+     63.0,
+     -10.5
+    ],
+    [
+     144.0,
+     63.0,
+     -10.5
+    ],
+    [
+     144.0,
+     63.0,
+     -6.0
+    ],
+    [
+     144.0,
+     20.0,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "Ne/He",
+   "stage": 9,
+   "t": "cryo",
+   "k": "gas",
+   "end": true,
+   "r": 0.14,
+   "pts": [
+    [
+     103.0,
+     25.9,
+     -6.0
+    ],
+    [
+     100.4,
+     25.9,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "Kr/Xe",
+   "stage": 9,
+   "t": "cryo",
+   "k": "liq",
+   "end": true,
+   "r": 0.14,
+   "pts": [
+    [
+     103.0,
+     23.1,
+     -6.0
+    ],
+    [
+     100.4,
+     23.1,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "crude to pure",
+   "stage": 10,
+   "t": "cryo",
+   "k": "gas",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     118.0,
+     35.8,
+     -6.0
+    ],
+    [
+     121.2,
+     35.8,
+     -6.0
+    ],
+    [
+     121.2,
+     7.5,
+     -6.0
+    ],
+    [
+     120.4,
+     7.5,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "pure Ar N2 vent",
+   "stage": 10,
+   "t": "deep",
+   "k": "gas",
+   "end": true,
+   "r": 0.14,
+   "pts": [
+    [
+     119.8,
+     12.0,
+     -6.0
+    ],
+    [
+     119.8,
+     13.2,
+     -6.0
+    ]
+   ]
+  },
+  {
+   "name": "LAR",
+   "stage": 11,
+   "t": "cryo",
+   "k": "liq",
+   "end": false,
+   "r": 0.22,
+   "pts": [
+    [
+     119.8,
+     3.0,
+     -6.0
+    ],
+    [
+     119.8,
+     1.5,
+     -6.0
+    ],
+    [
+     130.0,
+     1.5,
+     -6.0
+    ]
+   ]
+  }
+ ],
+ "tie": [
+  [
+   111.5,
+   34.2,
+   -6.0
+  ],
+  [
+   115.5,
+   34.2,
+   -6.0
+  ]
+ ],
+ "tieStage": 10,
+ "labels": [
+  {
+   "t": "Intake filter",
+   "p": [
+    7.0,
+    8.0,
+    -5.0
+   ],
+   "stage": 1
+  },
+  {
+   "t": "Main air compressor",
+   "p": [
+    23.0,
+    12.0,
+    -6.0
+   ],
+   "stage": 1
+  },
+  {
+   "t": "Aftercooler",
+   "p": [
+    38.5,
+    16.0,
+    -5.5
+   ],
+   "stage": 2
+  },
+  {
+   "t": "Adsorbers",
+   "p": [
+    55.8,
+    8.0,
+    -5.5
+   ],
+   "stage": 3
+  },
+  {
+   "t": "Vent",
+   "p": [
+    48.0,
+    15.5,
+    -5.5
+   ],
+   "stage": 3
+  },
+  {
+   "t": "Booster + N₂ recycle compressors",
+   "p": [
+    74.3,
+    12.0,
+    -5.0
+   ],
+   "stage": 4
+  },
+  {
+   "t": "Exchanger cold box · 20 m",
+   "p": [
+    89.0,
+    20.0,
+    -6.0
+   ],
+   "stage": 5
+  },
+  {
+   "t": "Expanders",
+   "p": [
+    98.2,
+    12.0,
+    -6.0
+   ],
+   "stage": 6
+  },
+  {
+   "t": "Column cold box · 60 m",
+   "p": [
+    107.7,
+    60.0,
+    -6.0
+   ],
+   "stage": 7
+  },
+  {
+   "t": "Argon cold box · 45 m",
+   "p": [
+    118.0,
+    45.0,
+    -6.0
+   ],
+   "stage": 10
+  },
+  {
+   "t": "LAR",
+   "p": [
+    133.0,
+    12.0,
+    -6.0
+   ],
+   "stage": 11
+  },
+  {
+   "t": "LOX",
+   "p": [
+    144.0,
+    20.0,
+    -6.0
+   ],
+   "stage": 11
+  },
+  {
+   "t": "LIN",
+   "p": [
+    156.5,
+    18.0,
+    -6.0
+   ],
+   "stage": 11
+  },
+  {
+   "t": "GOX / GAN pipeline",
+   "p": [
+    160.0,
+    67.0,
+    -14.0
+   ],
+   "stage": 11
+  },
+  {
+   "t": "Regen gas heater",
+   "p": [
+    52.8,
+    26.0,
+    -5.5
+   ],
+   "stage": 3
+  }
+ ],
+ "tour": [
+  {
+   "t": "Overview",
+   "l": [
+    "An air separation unit makes oxygen, nitrogen and argon from air. It compresses the air, cools it to about −175 °C and distills it.",
+    "Everything is to scale: the column cold box is 60 m tall. Dashes move with each stream. Color shows stream temperature. Bands show composition.",
+    "Step through it with Next and Back, or the arrow keys."
+   ],
+   "box": [
+    [
+     0,
+     0,
+     -16
+    ],
+    [
+     164,
+     68,
+     0
+    ]
+   ],
+   "all": true
+  },
+  {
+   "t": "Intake and compression",
+   "l": [
+    "The filter house removes dust. A 2 500 t/d oxygen plant draws about 350 000 Nm³/h of air.",
+    "The main air compressor raises the air to 5.5 bar in three intercooled stages. The air leaves at about 90 °C.",
+    "This compressor uses nearly all of the plant's power — about 20 MW."
+   ],
+   "box": [
+    [
+     3.0,
+     0.0,
+     -13.0
+    ],
+    [
+     35.0,
+     13.0,
+     0.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Aftercooling",
+   "l": [
+    "The direct-contact aftercooler washes the compressed air with chilled water in a 16 m packed tower.",
+    "The air leaves at about 10 °C. Most of its water vapor condenses out here.",
+    "Dry waste nitrogen chills the water in an evaporative cooler (not drawn)."
+   ],
+   "box": [
+    [
+     34.0,
+     0.0,
+     -8.0
+    ],
+    [
+     44.0,
+     18.0,
+     -3.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Pre-purification",
+   "l": [
+    "Two adsorber beds of alumina and 13X zeolite remove the last water, CO₂, N₂O and hydrocarbons.",
+    "One bed adsorbs while the other regenerates with heated waste nitrogen. The beds swap every few hours.",
+    "This step is essential. Water and CO₂ would freeze in the cold box. Hydrocarbons would build up in the liquid oxygen."
+   ],
+   "box": [
+    [
+     46.0,
+     0.0,
+     -14.0
+    ],
+    [
+     65.0,
+     39.0,
+     -3.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Booster and recycle compressors",
+   "l": [
+    "A booster compressor raises part of the air to 40–60 bar. This air later vaporizes the pumped liquid oxygen.",
+    "A nitrogen recycle compressor drives the liquefier loop that makes liquid product for the tanks.",
+    "Both streams reach the exchanger box through the overhead pipe rack."
+   ],
+   "box": [
+    [
+     64.0,
+     0.0,
+     -14.0
+    ],
+    [
+     96.0,
+     35.0,
+     0.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Main heat exchanger",
+   "l": [
+    "The brazed-aluminum plate-fin exchanger cools the incoming air from 10 °C to about −173 °C.",
+    "Cold product streams flow the other way and take up the heat. The temperature approach is only 1–3 K.",
+    "This recovers almost all of the cold in the products. The box around it is filled with perlite insulation."
+   ],
+   "box": [
+    [
+     82.0,
+     0.0,
+     -14.0
+    ],
+    [
+     103.0,
+     39.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Expanders — the refrigeration",
+   "l": [
+    "Turboexpanders expand part of the air and part of the recycle nitrogen. Each does work on a brake or generator.",
+    "Expansion with work extraction cools the gas far more than a throttle valve. This was Claude's 1902 improvement on Linde's cycle.",
+    "The refrigeration offsets heat leak into the cold boxes. The expanded air feeds the low-pressure column."
+   ],
+   "box": [
+    [
+     90.0,
+     0.0,
+     -10.0
+    ],
+    [
+     113.0,
+     22.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "High-pressure column",
+   "l": [
+    "Air enters the bottom of the high-pressure column at 5.5 bar and −173 °C.",
+    "Rising vapor gets richer in nitrogen. Falling liquid gets richer in oxygen.",
+    "Near-pure nitrogen vapor collects at the top. Rich liquid with 35–40 % oxygen collects at the bottom."
+   ],
+   "box": [
+    [
+     98.0,
+     0.0,
+     -10.0
+    ],
+    [
+     114.0,
+     20.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Condenser–reboiler",
+   "l": [
+    "One exchanger links the two columns. Nitrogen at 5.5 bar condenses at about −178 °C on one side.",
+    "Oxygen at 1.4 bar boils at about −180 °C on the other side. This 2 K difference drives both columns.",
+    "Condensing nitrogen makes liquid reflux for both columns. Boiling oxygen makes the vapor for the upper column."
+   ],
+   "box": [
+    [
+     100.0,
+     10.0,
+     -10.0
+    ],
+    [
+     113.0,
+     26.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Low-pressure column",
+   "l": [
+    "The low-pressure column makes the final split at 1.4 bar. Rich liquid and subcooled reflux enter through throttle valves.",
+    "Pure nitrogen leaves the top at −193 °C. Oxygen of 99.5 % or better collects in the sump.",
+    "Argon boils between the two and peaks mid-column at about 10 %. Neon and helium collect in the condenser, krypton and xenon in the sump."
+   ],
+   "box": [
+    [
+     93.0,
+     16.0,
+     -10.0
+    ],
+    [
+     114.0,
+     62.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Argon recovery",
+   "l": [
+    "A vapor side-draw from the argon belly feeds the crude argon column. Rich liquid cools its condenser.",
+    "About 200 packed stages take the oxygen down to 1 ppm. No hydrogen deoxo step is needed.",
+    "A small pure argon column strips the nitrogen. Liquid argon goes to storage."
+   ],
+   "box": [
+    [
+     108.0,
+     0.0,
+     -10.0
+    ],
+    [
+     124.0,
+     47.0,
+     -2.0
+    ]
+   ],
+   "all": false
+  },
+  {
+   "t": "Products",
+   "l": [
+    "Gaseous oxygen and nitrogen warm to ambient in the main exchanger and leave by pipeline to the users next door.",
+    "For high-pressure oxygen the plant pumps liquid oxygen to 30–80 bar and vaporizes it against booster air. No oxygen gas compressor is needed.",
+    "Liquid oxygen, nitrogen and argon go to storage tanks for truck delivery. Next returns to the overview."
+   ],
+   "box": [
+    [
+     100.0,
+     0.0,
+     -16.0
+    ],
+    [
+     164.0,
+     26.0,
+     0.0
+    ]
+   ],
+   "all": false
+  }
+ ],
+ "T": {
+  "hot": "#C4573A",
+  "amb": "#D08F4B",
+  "chill": "#C4AC5E",
+  "cool": "#86AFC9",
+  "cryo": "#4F86BE",
+  "deep": "#2F5E9E"
+ },
+ "C": {
+  "n2": "#C9C2B6",
+  "o2": "#79B7A3",
+  "ar": "#AE93CB"
+ },
+ "colors": {
+  "eq": "#E9E3D8",
+  "edge": "#8A8275",
+  "box": "#EDF0F3",
+  "boxEdge": "#6E7C8C",
+  "bld": "#F1ECE2",
+  "cond": "#D9D2C6",
+  "mheTop": "#EAC9A4",
+  "mheBot": "#B3CBE6"
+ },
+ "extent": {
+  "x": [
+   0,
+   164
+  ],
+  "y": [
+   0,
+   68
+  ],
+  "z": [
+   -16,
+   0
+  ]
+ }
+}

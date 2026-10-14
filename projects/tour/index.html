@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve to real values. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="A to-scale 3D model of a cryogenic air separation unit, with a 12-stage tour of how it makes oxygen, nitrogen and argon from air.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ds/ds.css">
+  <title>TOUR — air separation unit</title>
+  <meta name="launcher-label" content="TOUR">
+  <style>
+    /* A full-screen 3D view. The header sits on top and the controls sit in the thumb zone; tour.js
+       centres the camera's picture in the gap between them. */
+    :root {
+      --tour-ground: #ECE7DC;
+      --tour-glass: color-mix(in srgb, var(--bg) 86%, transparent);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --tour-ground: #1A1A1C; }
+    }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+
+    #view { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+    #labels { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+    .lbl {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      padding: 0 var(--space-1);
+      border-radius: var(--radius-sm);
+      background: var(--tour-glass);
+      color: var(--text-muted);
+      font-size: var(--text-sm);
+      white-space: nowrap;
+    }
+    .lbl.big { color: var(--text); }
+
+    .bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      z-index: 1;
+      background: var(--tour-glass);
+      -webkit-backdrop-filter: blur(0.5rem);
+      backdrop-filter: blur(0.5rem);
+    }
+    .bar-top {
+      top: 0;
+      padding: calc(var(--space-2) + env(safe-area-inset-top)) calc(var(--space-4) + env(safe-area-inset-right)) var(--space-3) calc(var(--space-4) + env(safe-area-inset-left));
+      border-bottom: 1px solid var(--line);
+    }
+    .bar-bottom {
+      bottom: 0;
+      padding: var(--space-3) calc(var(--space-4) + env(safe-area-inset-right)) calc(var(--space-3) + env(safe-area-inset-bottom)) calc(var(--space-4) + env(safe-area-inset-left));
+      border-top: 1px solid var(--line);
+    }
+    .stack { display: flex; flex-direction: column; gap: var(--space-2); }
+    .inner { max-width: var(--measure); margin: 0 auto; }
+
+    .head { display: flex; align-items: center; gap: var(--space-3); }
+    .head h1 { margin: 0; font-size: var(--text-lg); line-height: var(--leading-tight); letter-spacing: 0.06em; }
+    .head .ds-muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+    .head .ds-btn { flex: none; min-height: max(var(--tap-min), var(--control-h-sm)); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
+    .legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+    .sw { display: inline-block; width: var(--space-4); height: var(--space-2); border-radius: 2px; }
+    .hint { margin: 0; }
+
+    #info { margin: 0; font-size: var(--text-sm); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row { display: flex; gap: var(--space-3); }
+    .row .ds-btn.narrow { flex: 0 0 auto; }
+    .tour-head { display: flex; align-items: baseline; gap: var(--space-3); }
+    .tour-head h2 { flex: 1; margin: 0; font-size: var(--text-lg); line-height: var(--leading-tight); }
+    .tour-text p { margin: 0 0 var(--space-1); }
+    .tour-text p:last-child { margin-bottom: 0; }
+    .dots { display: flex; gap: var(--space-2); align-items: center; }
+    .dot { width: var(--space-2); height: var(--space-2); border-radius: 50%; background: var(--line); }
+    .dot.on { background: var(--text); }
+  </style>
+  <!-- three.js is vendored (the site serves no CDN scripts); OrbitControls imports it as "three". -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <canvas id="view" aria-label="3D model of an air separation unit"></canvas>
+  <div id="labels" aria-hidden="true"></div>
+
+  <header class="bar bar-top" id="top">
+    <div class="inner stack">
+      <div class="head">
+        <h1>TOUR</h1>
+        <span class="ds-muted">Air separation unit, to scale</span>
+        <button class="ds-btn" id="layersBtn" type="button" aria-expanded="false" aria-controls="layers">Layers</button>
+      </div>
+      <div class="ds-seg" id="views" role="group" aria-label="View">
+        <button type="button" data-view="iso" aria-pressed="true">Iso</button>
+        <button type="button" data-view="front" aria-pressed="false">Front</button>
+        <button type="button" data-view="plan" aria-pressed="false">Plan</button>
+        <button type="button" data-view="columns" aria-pressed="false">Columns</button>
+        <button type="button" data-view="warm" aria-pressed="false">Warm end</button>
+      </div>
+      <div class="stack" id="layers" hidden>
+        <div class="ds-seg" role="group" aria-label="Show">
+          <button type="button" data-layer="flow" aria-pressed="true">Flow</button>
+          <button type="button" data-layer="pipes" aria-pressed="true">Pipes</button>
+          <button type="button" data-layer="boxes" aria-pressed="true">Boxes</button>
+          <button type="button" data-layer="labels" aria-pressed="true">Labels</button>
+          <button type="button" data-layer="grid" aria-pressed="true">Grid</button>
+        </div>
+        <p class="legend" aria-label="Stream temperature">
+          <span><i class="sw" style="background:#C4573A"></i>+90 °C</span>
+          <span><i class="sw" style="background:#D08F4B"></i>+20 °C</span>
+          <span><i class="sw" style="background:#C4AC5E"></i>+10 °C</span>
+          <span><i class="sw" style="background:#86AFC9"></i>−100 °C</span>
+          <span><i class="sw" style="background:#4F86BE"></i>−175 °C</span>
+          <span><i class="sw" style="background:#2F5E9E"></i>−193 °C</span>
+        </p>
+        <p class="legend" aria-label="Composition bands">
+          <span><i class="sw" style="background:#C9C2B6"></i>N₂</span>
+          <span><i class="sw" style="background:#79B7A3"></i>O₂</span>
+          <span><i class="sw" style="background:#AE93CB"></i>Ar</span>
+          <span>Dashes move with the flow: gas fast, liquid slow.</span>
+        </p>
+        <p class="ds-muted ds-small hint">Drag to orbit. Pinch to zoom. Drag with two fingers to pan. Tap a part for its size.</p>
+      </div>
+    </div>
+  </header>
+
+  <section class="bar bar-bottom" id="bottom" aria-label="Tour">
+    <div class="inner stack">
+      <p id="info" role="status">Tap a part for its size.</p>
+      <div class="row" id="idle">
+        <button class="ds-btn ds-btn--primary" id="tourBtn" type="button">Start tour</button>
+      </div>
+      <div class="stack" id="tour" hidden>
+        <div class="tour-head">
+          <h2 id="tTitle"></h2>
+          <span class="ds-muted ds-small ds-num" id="tCount"></span>
+        </div>
+        <div class="tour-text" id="tText" aria-live="polite"></div>
+        <div class="dots" id="tDots" aria-hidden="true"></div>
+        <div class="row">
+          <button class="ds-btn" id="tBack" type="button">Back</button>
+          <button class="ds-btn ds-btn--primary" id="tNext" type="button">Next</button>
+          <button class="ds-btn narrow" id="tExit" type="button">Exit</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="tour.js"></script>
+</body>
+</html>
