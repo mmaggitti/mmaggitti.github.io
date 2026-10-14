@@ -592,6 +592,7 @@ function start(MODEL) {
     controls.update();
     renderer.render(scene, camera);
     placeLabels();
+    if (!root.dataset.state) root.dataset.state = 'ready'; // only once a frame has really drawn
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -639,5 +640,4 @@ function start(MODEL) {
     // True when every faded material is back to how it was built.
     restored: () => staged.every((e) => mats(e.obj).every((m) => m.opacity === m.userData.baseOpacity && m.transparent === m.userData.baseTransparent)),
   };
-  root.dataset.state = 'ready';
 }
