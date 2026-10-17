@@ -17,7 +17,8 @@ import { solve, type RestLayout } from '../core/layout.ts';
 import { indexDoc, type TreeIndex } from '../core/tree.ts';
 import { kindOf } from '../core/kinds.ts';
 import { tierOf, type Tier } from '../core/lod.ts';
-import { appTitle, crumbs, neighbours, parentFrame, type Crumb } from '../core/nav.ts';
+import { appTitle, crumbs, framePath, frames, neighbours, parentFrame, type Crumb } from '../core/nav.ts';
+import { snap, type Candidate } from '../core/snap.ts';
 import { canGo } from '../core/history.ts';
 import { goHistory, selectTab, setFrame, toggleOverview } from '../core/ops.ts';
 import { apply, between, fit, invert, lerpRect, step, IDENTITY, type Sim, type SpringState } from '../core/motion.ts';
@@ -93,6 +94,16 @@ export interface WorkspaceHandle {
   view: Store<ViewState>;
   /** The current rest layout (for tests and input). */
   layout(): RestLayout;
+  /** Two-finger (or trackpad) camera gestures, in client coordinates. */
+  camera: {
+    start(x: number, y: number): void;
+    move(x: number, y: number, scale: number): void;
+    /** vx, vy: finger velocity in px per ms. */
+    end(x: number, y: number, scale: number, vx: number, vy: number): void;
+    readonly active: boolean;
+  };
+  /** One level in, toward a point (client coordinates). */
+  stepIn(x: number, y: number): void;
   destroy(): void;
 }
 
@@ -360,15 +371,18 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   }
 
   /** Commit a new document: re-solve, then animate from what's on screen now to the new rest. */
-  function commit(next: LayoutDoc, animate = true) {
-    if (next === doc) return;
+  function commit(next: LayoutDoc, animate = true, force = false) {
+    if (next === doc && !force) return;
     const prevRest = rest;
     const fromItems = currentItems();
+    const changed = next !== doc;
     doc = next;
-    idx = indexDoc(doc);
-    sync();
-    rest = solve(doc, doc.nav.frame, viewport, m, idx);
-    opts.onChange?.(doc);
+    if (changed) {
+      idx = indexDoc(doc);
+      sync();
+      rest = solve(doc, doc.nav.frame, viewport, m, idx);
+      opts.onChange?.(doc);
+    }
     if (!animate || reduced()) {
       cancelAnimationFrame(raf);
       anim = null;
@@ -500,6 +514,91 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   });
   ro.observe(host);
 
+  // ------------------------------------------------------------------ camera gestures
+  // While fingers are down the whole picture follows them: one transform on the layer, no layout.
+  // On release, snap() picks a frame and an ordinary transition carries on from the current camera.
+  let gesture: { anchor: { x: number; y: number }; last: { x: number; y: number; scale: number } } | null = null;
+
+  function local(x: number, y: number) {
+    const b = host.getBoundingClientRect();
+    return { x: x - b.left, y: y - b.top };
+  }
+
+  function cameraStart(x: number, y: number) {
+    if (anim) {
+      // Finish any transition first: gestures start from a rest layout.
+      cancelAnimationFrame(raf);
+      anim = null;
+      settle();
+    }
+    const p = local(x, y);
+    gesture = { anchor: { x: (p.x - sim.x) / sim.k, y: (p.y - sim.y) / sim.k }, last: { ...p, scale: 1 } };
+    setAttr(host, 'data-fx-gesture', '');
+    setAttr(host, 'data-fx-settled', null);
+  }
+
+  function cameraMove(x: number, y: number, scale: number) {
+    if (!gesture) return;
+    const p = local(x, y);
+    const k = Math.min(Math.max(scale, 0.05), 60);
+    gesture.last = { ...p, scale: k };
+    drawLayer({ k, x: p.x - k * gesture.anchor.x, y: p.y - k * gesture.anchor.y });
+  }
+
+  function cameraEnd(x: number, y: number, scale: number, vx: number, vy: number) {
+    if (!gesture) return;
+    cameraMove(x, y, scale);
+    const g = gesture;
+    gesture = null;
+    setAttr(host, 'data-fx-gesture', null);
+    const V: Rect = { x: 0, y: 0, w: viewport.w, h: viewport.h };
+    const view = invert(sim, V);
+    const focal = { x: (g.last.x - sim.x) / sim.k, y: (g.last.y - sim.y) / sim.k };
+    const target = snap(candidates(doc.nav.frame), { scale: g.last.scale, focal, view, vx: -vx / sim.k, vy: -vy / sim.k });
+    if (target === doc.nav.frame) commit(doc, true, true);
+    else commit(setFrame(doc, target));
+  }
+
+  /** Snap candidates around the current frame, with their rest boxes. */
+  function candidates(frame: string | null): Candidate[] {
+    const out: Candidate[] = [];
+    const boxOf = (f: string | null) => (f === null ? (doc.root ? rest.nodes.get(doc.root.id) : undefined) : rest.nodes.get(f));
+    const self = boxOf(frame);
+    if (self) out.push({ id: frame, box: self, relation: 'self' });
+    const up = framePath(doc, idx, frame).slice(0, -1);
+    up.forEach((f, i) => {
+      const b = boxOf(f);
+      if (b) out.push({ id: f, box: b, relation: 'ancestor', levels: up.length - i });
+    });
+    for (const f of frames(doc, idx)) {
+      if (f === frame) continue;
+      const path = framePath(doc, idx, f);
+      const b = rest.nodes.get(f);
+      const at = path.indexOf(frame);
+      if (b && at >= 0 && at < path.length - 1) out.push({ id: f, box: b, relation: 'descendant', levels: path.length - 1 - at });
+    }
+    const n = neighbours(idx, frame);
+    if (n.count > 1 && frame !== null) {
+      const owner = idx.owner.get(frame);
+      const split = owner?.type === 'split' ? idx.nodes.get(owner.id) : undefined;
+      if (split?.kind === 'split') for (const c of split.children) {
+        const b = rest.nodes.get(c.id);
+        if (c.id !== frame && b) out.push({ id: c.id, box: b, relation: 'page' });
+      }
+    }
+    return out;
+  }
+
+  /** The frame one level inside `frame` that contains a point (rest coordinates). */
+  function childToward(frame: string | null, p: { x: number; y: number }): string | null {
+    for (const f of frames(doc, idx)) {
+      const b = rest.nodes.get(f);
+      if (!b || p.x < b.x || p.y < b.y || p.x > b.x + b.w || p.y > b.y + b.h) continue;
+      if (parentFrame(doc, idx, f) === frame) return f;
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------------ handle
   const handle: WorkspaceHandle = {
     element: host,
@@ -535,6 +634,19 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     surfaces,
     view,
     layout: () => rest,
+    camera: {
+      start: cameraStart,
+      move: cameraMove,
+      end: cameraEnd,
+      get active() {
+        return gesture !== null;
+      },
+    },
+    stepIn(x, y) {
+      const p = local(x, y);
+      const target = childToward(doc.nav.frame, invert(sim, { ...p, w: 0, h: 0 }));
+      if (target) handle.frame(target);
+    },
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);

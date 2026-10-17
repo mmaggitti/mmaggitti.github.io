@@ -35,9 +35,8 @@ body {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
+  /* Not a scroller: a native scroll would claim the bar's swipe. TopBar keeps the end in view. */
+  overflow: hidden;
 }
 .fx-crumbs li {
   display: flex;
@@ -105,10 +104,72 @@ body {
 }
 
 /* ---------------------------------------------------------------- the workspace */
-.fx-host {
+.fx-stage {
   position: relative;
   flex: 1 1 0;
   min-height: 0;
+}
+.fx-host {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+/* Content keeps native scrolling; everything else is the workspace's to handle. */
+.fx-content,
+.fx-content * {
+  touch-action: pan-x pan-y;
+}
+.fx-topbar,
+.fx-topbar * {
+  touch-action: none;
+}
+/* History edge strips: only where fingers are, so a mouse never loses the edges. */
+.fx-edge {
+  display: none;
+}
+@media (any-pointer: coarse) {
+  .fx-edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    width: 1.25rem;
+    touch-action: none;
+    --fx-edge: 0;
+  }
+}
+.fx-edge[data-side='left'] {
+  left: 0;
+}
+.fx-edge[data-side='right'] {
+  right: 0;
+  justify-content: flex-end;
+}
+.fx-edge span {
+  display: grid;
+  place-items: center;
+  width: max(var(--tap-min), 3rem);
+  height: max(var(--tap-min), 3rem);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--text);
+  font-size: var(--text-lg);
+  opacity: var(--fx-edge);
+  pointer-events: none;
+  flex: 0 0 auto;
+}
+.fx-edge[data-side='left'] span {
+  transform: translateX(calc(-100% + var(--fx-edge) * 150%));
+}
+.fx-edge[data-side='right'] span {
+  transform: translateX(calc(100% - var(--fx-edge) * 150%));
+}
+/* While the camera moves, content takes no input. */
+.fx-viewport[data-fx-gesture] .fx-surface {
+  pointer-events: none;
 }
 .fx-viewport {
   overflow: hidden;

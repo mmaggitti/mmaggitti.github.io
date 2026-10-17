@@ -28,7 +28,21 @@ take, delete the icon and add it again.)
 | 12 | Motion | Zooms are smooth, with no blank frames, including from the overview to Garden list | ☐ |
 | 13 | Reduced motion | Settings → Accessibility → Motion → Reduce Motion on: framing jumps instead of animating | ☐ |
 
-Rows for pinch, two-finger pan, double-tap, top-bar swipes and edge-swipe history arrive with
-P0-M2.
+### P0-M2 — gestures
+
+Row 2 matters most here: CI can't prove it. With every one of Fractal's three zoom defences
+removed on purpose, Chromium's phone emulation still never zoomed the page, so only a real iPhone
+shows whether the page stays put.
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 14 | Pinch keeps its point | At the overview, pinch out on Long list: the list grows under your fingers and settles framed | ☐ |
+| 15 | Two fingers on a list | Put two fingers on Long list's items and pinch: the workspace zooms and the list doesn't scroll. One finger still scrolls it | ☐ |
+| 16 | Pinch out | Framed on Garden list, pinch in a little: it settles one level out (Garden); pinch in hard: further | ☐ |
+| 17 | Two-finger pan | Framed on Long list, drag two fingers left past a quarter width: Note becomes framed; a short drag springs back | ☐ |
+| 18 | Double-tap | Double-tap a tab bar: that panel is framed; double-tap it again: one level out | ☐ |
+| 19 | Top-bar swipe | Framed on Note, swipe right across the top bar: Long list | ☐ |
+| 20 | Edge swipes | Frame Garden, then Garden list; swipe in from the left edge: back to Garden; from the right edge: forward again. The chevron follows your finger | ☐ |
+| 21 | Edges and content | Near the left edge of a framed list, scrolling and tapping still work (only a sideways swipe from the very edge is history) | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

@@ -1,16 +1,21 @@
-import { useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import type { WorkspaceHandle } from '../runtime/workspace.ts';
 
 /** The breadcrumb and the neighbour buttons. */
 export function TopBar({ ws }: { ws: WorkspaceHandle }) {
   const v = useSyncExternalStore(ws.view.subscribe, ws.view.get);
   const last = v.crumbs.length - 1;
+  const list = useRef<HTMLOListElement>(null);
+  // Keep the current level in view when the trail is longer than the bar.
+  useLayoutEffect(() => {
+    if (list.current) list.current.scrollLeft = list.current.scrollWidth;
+  }, [v.crumbs]);
   return (
     <nav className="fx-topbar" aria-label="Where you are">
       <button type="button" className="fx-bar-btn" aria-label="Previous panel" disabled={!v.prev} onClick={() => ws.neighbour(-1)}>
         ‹
       </button>
-      <ol className="fx-crumbs">
+      <ol className="fx-crumbs" ref={list}>
         {v.crumbs.map((c, i) => (
           <li key={`${c.frame}`}>
             {i === last ? (

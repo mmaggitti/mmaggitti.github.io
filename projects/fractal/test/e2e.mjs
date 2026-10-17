@@ -9,7 +9,8 @@
 const TOL = 1; // px
 const GAP = 6; // 0.5rem at the site's 75% scale
 
-export default async function run({ browser, origin }) {
+export default async function run({ browser, origin, engine }) {
+  const chromium = engine !== 'webkit';
   const failures = [];
   const check = async (name, fn, opts = {}) => {
     const context = await browser.newContext({
@@ -129,6 +130,92 @@ export default async function run({ browser, origin }) {
     must((await ta.inputValue()) === 'kept across zooms', 'the typed text was lost');
   });
 
+
+  await check('a pinch over a scrolling list frames the panel under the fingers; the page never zooms', async (page) => {
+    const c = await centre(page, '[data-panel="p-list"]');
+    const scroller = '[data-content="list"] .probe-list';
+    await twoFingers(page, chromium, { x: c.x - 25, y: c.y }, { x: c.x + 25, y: c.y }, { x: c.x - 110, y: c.y }, { x: c.x + 110, y: c.y }, 12);
+    await settled(page);
+    await framed(page, 'p-list');
+    const r = await page.evaluate((s) => ({ zoom: window.visualViewport.scale, top: document.querySelector(s).scrollTop }), scroller);
+    must(r.zoom === 1, `the page zoomed to ${r.zoom}`);
+    must(r.top === 0, `the list scrolled to ${r.top} under the pinch`);
+    const prevented = await page.evaluate(() => ['gesturestart', 'gesturechange'].map((type) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      document.querySelector('.fx-content').dispatchEvent(e);
+      return e.defaultPrevented;
+    }));
+    must(prevented.every(Boolean), `Safari's gesture events are not cancelled (${prevented})`);
+  });
+
+  await check('a two-finger pan moves to the next page; a pinch out steps out', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-list'));
+    await settled(page);
+    await twoFingers(page, chromium, { x: 300, y: 400 }, { x: 300, y: 520 }, { x: 80, y: 400 }, { x: 80, y: 520 }, 12);
+    await settled(page);
+    await framed(page, 'p-field');
+    await twoFingers(page, chromium, { x: 120, y: 400 }, { x: 320, y: 400 }, { x: 170, y: 400 }, { x: 270, y: 400 }, 12);
+    await settled(page);
+    const f = await page.locator('.fx-frame[data-framed]').count();
+    const crumbs = await page.locator('.fx-crumbs li').count();
+    must(crumbs === 2 && f === 0, `after pinching out: ${crumbs} crumbs, ${f} framed panels (expected the row, one level up)`);
+  });
+
+  await check('a swipe across the top bar flips to the neighbour', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-field'));
+    await settled(page);
+    const bar = await rect(page, '.fx-topbar');
+    const y = bar.y + bar.h / 2;
+    await oneFinger(page, chromium, { x: 120, y }, { x: 320, y }, 10);
+    await settled(page);
+    await framed(page, 'p-list');
+  });
+
+  await check('a double-tap on a tab bar frames the panel', async (page) => {
+    const tab = await centre(page, '[data-panel="p-list"] .fx-tab');
+    await page.touchscreen.tap(tab.x, tab.y);
+    await page.waitForTimeout(60);
+    await page.touchscreen.tap(tab.x, tab.y);
+    await settled(page);
+    await framed(page, 'p-list');
+  });
+
+  await check('an edge swipe goes back and forward through history', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-garden'));
+    await settled(page);
+    await page.evaluate(() => window.__fractal.frame('p-garden-list'));
+    await settled(page);
+    const vp = await rect(page, '.fx-viewport');
+    const y = vp.y + vp.h / 2;
+    await oneFinger(page, chromium, { x: vp.x + 4, y }, { x: vp.x + 250, y }, 12);
+    await settled(page);
+    await framed(page, 'p-garden');
+    await oneFinger(page, chromium, { x: vp.x + vp.w - 4, y }, { x: vp.x + vp.w - 250, y }, 12);
+    await settled(page);
+    await framed(page, 'p-garden-list');
+  });
+
+  await check('Esc steps out; a trackpad pinch zooms in and snaps', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-garden'));
+    await settled(page);
+    await page.keyboard.press('Escape');
+    await settled(page);
+    await framed(page, 'p-home');
+    await page.keyboard.press('Escape');
+    await settled(page);
+    const c = await centre(page, '[data-panel="p-list"]');
+    await page.evaluate(([x, y]) => {
+      for (let i = 0; i < 20; i++) {
+        const e = new WheelEvent('wheel', { clientX: x, clientY: y, deltaY: -6, ctrlKey: true, bubbles: true, cancelable: true });
+        document.elementFromPoint(x, y).dispatchEvent(e);
+        if (!e.defaultPrevented) throw new Error('a ctrl-wheel reached the browser (page zoom)');
+      }
+    }, [c.x, c.y]);
+    await page.waitForTimeout(250);
+    await settled(page);
+    await framed(page, 'p-list');
+  });
+
   await check('an animated framing settles exactly on the workspace', async (page) => {
     await page.locator('[data-panel="p-garden"] .fx-zoom').tap();
     await settled(page);
@@ -149,6 +236,62 @@ export default async function run({ browser, origin }) {
 
 async function settled(page) {
   await page.waitForSelector('[data-fx-settled]', { state: 'attached', timeout: 5000 });
+}
+
+
+async function centre(page, selector) {
+  const r = await rect(page, selector);
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+}
+
+// Touch input: Chromium gets real touches (CDP), which is what the browser's own scrolling and
+// zooming react to; WebKit can't synthesize multi-touch, so it gets the same Pointer Events
+// dispatched on whatever is under each finger (Draw's twoFingers pattern).
+async function twoFingers(page, chromium, a0, b0, a1, b1, steps) {
+  const at = (p, q, k) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+  if (chromium) {
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (a, b) => [{ x: a.x, y: a.y, id: 1 }, { x: b.x, y: b.y, id: 2 }];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch(a0, b0) });
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: touch(at(a0, a1, i / steps), at(b0, b1, i / steps)) });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else await synthetic(page, [[a0, a1], [b0, b1]], steps);
+  await page.waitForTimeout(50);
+}
+
+async function oneFinger(page, chromium, a0, a1, steps) {
+  const at = (p, q, k) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+  if (chromium) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a0.x, y: a0.y, id: 1 }] });
+    for (let i = 1; i <= steps; i++) {
+      const p = at(a0, a1, i / steps);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: p.y, id: 1 }] });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else await synthetic(page, [[a0, a1]], steps);
+  await page.waitForTimeout(50);
+}
+
+async function synthetic(page, fingers, steps) {
+  await page.evaluate(async ({ fingers, steps }) => {
+    const at = (p, q, k) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+    const targets = fingers.map(([a]) => document.elementFromPoint(a.x, a.y) ?? document.body);
+    const fire = (type, i, p) =>
+      targets[i].dispatchEvent(new PointerEvent(type, { pointerId: i + 1, pointerType: 'touch', isPrimary: i === 0, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+    fingers.forEach(([a], i) => fire('pointerdown', i, a));
+    for (let s = 1; s <= steps; s++) {
+      fingers.forEach(([a, b], i) => fire('pointermove', i, at(a, b, s / steps)));
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    fingers.forEach(([, b], i) => fire('pointerup', i, b));
+  }, { fingers, steps });
 }
 
 async function rect(page, selector) {

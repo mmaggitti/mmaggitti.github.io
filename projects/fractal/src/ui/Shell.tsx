@@ -4,6 +4,7 @@ import type { LayoutDoc } from '../core/types.ts';
 import { appTitle } from '../core/nav.ts';
 import { appsIn } from '../core/tree.ts';
 import { createWorkspace, type Surface, type WorkspaceHandle } from '../runtime/workspace.ts';
+import { attachInput } from '../runtime/input.ts';
 import { layoutSaver } from '../platform/storage.ts';
 import { ContainerBand, ProbeCounter, ProbeField, ProbeList } from '../apps/Probe.tsx';
 import { TopBar } from './TopBar.tsx';
@@ -18,6 +19,8 @@ declare global {
 
 export function Shell({ initial }: { initial: LayoutDoc }) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const appRef = useRef<HTMLDivElement>(null);
+  const edgeRefs = { left: useRef<HTMLDivElement>(null), right: useRef<HTMLDivElement>(null) };
   const [ws, setWs] = useState<WorkspaceHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,22 +28,39 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
     const save = layoutSaver(setError);
     const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save });
     window.__fractal = w;
+    const detach = attachInput({
+      app: appRef.current!,
+      ws: w,
+      onEdge(side, amount) {
+        const e = edgeRefs[side].current;
+        if (e) e.style.setProperty('--fx-edge', String(amount));
+      },
+    });
     setWs(w);
     return () => {
+      detach();
       w.destroy();
       if (window.__fractal === w) delete window.__fractal;
     };
   }, [initial]);
 
   return (
-    <div className="fx-app">
+    <div className="fx-app" ref={appRef}>
       {ws ? <TopBar ws={ws} /> : <div className="fx-topbar" />}
       {error && (
         <p className="fx-error" role="alert">
           {error}
         </p>
       )}
-      <div className="fx-host" ref={viewportRef} />
+      <div className="fx-stage">
+        <div className="fx-host" ref={viewportRef} />
+        <div className="fx-edge" data-side="left" ref={edgeRefs.left} aria-hidden="true">
+          <span>‹</span>
+        </div>
+        <div className="fx-edge" data-side="right" ref={edgeRefs.right} aria-hidden="true">
+          <span>›</span>
+        </div>
+      </div>
       {ws ? <BottomBar ws={ws} /> : <div className="fx-bottombar" />}
       {ws && <Portals ws={ws} />}
     </div>
