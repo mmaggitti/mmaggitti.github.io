@@ -1,0 +1,24 @@
+{
+  "name": "fractal",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node tools/check-core.mjs && tsc --noEmit && npm run test:unit && vite build",
+    "test:unit": "node --test --test-reporter=dot \"test/unit/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "icons": "node tools/make-icons.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}

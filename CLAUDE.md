@@ -36,6 +36,7 @@ projects/draw/            Draw, the SVG editor (Vite + React + TS); on the launc
 projects/cs-probe/        Core & Seams' reference app (Rust core → WASM + TS); unlisted; proves Rust CI
 projects/cowrite/         Co-write: a live shared document; Automerge (Rust) in the core, an encrypted envelope
                           over the public relay (Core & Seams ADR-014); unlisted until Mark's devices sign it off
+projects/fractal/         Fractal: apps inside apps, one zoomable docking workspace (Vite + React + TS; see Fractal)
 engine/                   Draw's SVG engine: DOM-free, dependency-free TS, tested with node --test
 scripts/lib/              rules shared by CI and Draw: public-rules (the guard), svg-profile (served SVG)
 scripts/check-library.mjs every served .svg is inert (see Draw)
@@ -209,6 +210,25 @@ editor, not a page to inspect, and the Studio's tree doesn't follow its shadow-r
 - **The phase gate:** `meta.currentPhase` in the ledger is the phase in progress; every row of an
   earlier phase must be done or superseded. P0 closed on 2026-09-29 and P1 on 2026-10-02
   (`currentPhase` 2, which stays until the roadmap after P1 is re-planned).
+
+## Fractal (`projects/fractal/`, at `/fractal/`)
+
+Mark's phone-first workspace of apps that live inside apps: splits, tab groups and docking at every
+nesting level, and a camera that zooms through the levels. Inspired by Trellis
+(github.com/DanFessler/trellis), whose license is non-commercial: **re-implement its ideas, never
+copy its code.** The approved plan (phases P0–P4) is the vault's
+`_audit/2026-10-17 approved-plan fractal.md`; each phase opens with its own short plan.
+
+- **One tree, one camera, one gesture arbiter, one flat render layer for every level.** Nesting
+  workspaces breaks pinch, Esc, cross-level drags and drop geometry (measured on Trellis).
+- **`src/core/` is DOM-free and dependency-free** (erasable TS, `.ts` imports) and runs under
+  `node --test`. React stays out of `src/core` and `src/runtime`; storage APIs live only in
+  `src/platform`. `tools/check-core.mjs` enforces all three, plus no HTML sinks anywhere, as the
+  first step of `npm run build`.
+- **App content is mounted once and never reparented**; moving, tabbing and zooming only position it.
+- **Installed as a Home Screen app** (manifest + apple-touch-icon). Its storage is separate from
+  Safari's. After changing `public/icon.svg`, run `npm run icons` and commit the PNGs.
+- **Device checks:** `projects/fractal/DEVICE-CHECKS.md`, signed by Mark per phase.
 
 ## Cloud-container limits
 

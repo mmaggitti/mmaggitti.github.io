@@ -1,0 +1,301 @@
+/* Fractal: the shell, the workspace layer and the Probe apps. rem only (check-units); taps keep
+   the 44pt floor with max(var(--tap-min), …). Positions and sizes inside the layer are set from JS. */
+
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.fx-app {
+  display: flex;
+  flex-direction: column;
+  height: 100svh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+/* ---------------------------------------------------------------- bars */
+.fx-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: max(var(--tap-min), 3.5rem);
+  padding: 0 var(--space-1);
+}
+.fx-crumbs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.fx-crumbs li {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.fx-crumbs li + li::before {
+  content: '›';
+  color: var(--text-muted);
+  margin-right: var(--space-1);
+}
+.fx-crumb {
+  min-height: var(--tap-min);
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  touch-action: manipulation;
+}
+.fx-crumb--here {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+  font-weight: 600;
+}
+.fx-bar-btn {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-size: var(--text-lg);
+  touch-action: manipulation;
+}
+.fx-bar-btn:disabled {
+  color: var(--line);
+}
+.fx-page {
+  white-space: nowrap;
+}
+.fx-bottombar {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+}
+.fx-sheet {
+  position: fixed;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: calc(var(--control-h) + var(--space-6) + env(safe-area-inset-bottom));
+  z-index: 10;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), 0 0.5rem 2rem rgb(0 0 0 / 0.2);
+}
+.fx-error {
+  margin: 0 var(--space-2);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- the workspace */
+.fx-host {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.fx-viewport {
+  overflow: hidden;
+  contain: strict;
+}
+.fx-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+.fx-frame,
+.fx-surface,
+.fx-dock {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  transform-origin: 0 0;
+  visibility: hidden;
+}
+.fx-frame {
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.fx-frame[data-tier='live'],
+.fx-frame[data-tier='scaled'] {
+  cursor: default;
+}
+.fx-frame[data-tier='scaled'] {
+  cursor: zoom-in;
+}
+.fx-tabbar {
+  display: flex;
+  align-items: stretch;
+  /* A shadow, not a border: a border would take a pixel from the 44px tap height. */
+  box-shadow: inset 0 -1px 0 var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fx-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.fx-tab {
+  flex: 0 0 auto;
+  max-width: 14rem;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+}
+.fx-tab[aria-selected='true'] {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.fx-zoom {
+  flex: 0 0 auto;
+  width: max(var(--tap-min), 3rem);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+  touch-action: manipulation;
+}
+.fx-tile {
+  display: none;
+}
+.fx-frame[data-tier='tile'] .fx-tabbar {
+  display: none;
+}
+.fx-frame[data-tier='tile'] .fx-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 100%;
+  cursor: zoom-in;
+}
+.fx-tile-glyph {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--accent);
+}
+.fx-tile-name {
+  max-width: 90%;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-surface {
+  overflow: hidden;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.fx-surface[data-tier='scaled'],
+.fx-surface[data-tier='tile'] {
+  pointer-events: none;
+}
+.fx-content {
+  transform-origin: 0 0;
+  container-type: size;
+  overflow: hidden;
+  background: var(--surface);
+}
+.fx-dock {
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 80%, var(--line));
+}
+
+/* ---------------------------------------------------------------- Probe apps */
+.probe {
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--space-3);
+}
+.probe-list {
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+.probe-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.probe-list li {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-md);
+}
+.probe-field label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  height: 100%;
+}
+.probe-field textarea {
+  flex: 1;
+  resize: none;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+}
+.probe-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.probe-count {
+  line-height: 1;
+}
+.probe-counter .ds-btn {
+  flex: 0 0 auto;
+}
+.band {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+}
+.band strong {
+  font-size: var(--text-md);
+}

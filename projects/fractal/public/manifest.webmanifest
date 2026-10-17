@@ -1,0 +1,16 @@
+{
+  "name": "Fractal",
+  "short_name": "Fractal",
+  "description": "Apps inside apps: a workspace you zoom through.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F6F4EE",
+  "theme_color": "#F6F4EE",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
