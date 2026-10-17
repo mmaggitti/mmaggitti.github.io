@@ -77,7 +77,7 @@ export default async function run({ browser, origin, engine }) {
       must(inside(k, g.dock), `nested panel ${fmt(k)} is outside the dock ${fmt(g.dock)}`);
       must(k.y >= g.band.y + g.band.h - TOL, `nested panel ${fmt(k)} overlaps the band ${fmt(g.band)}`);
     }
-    const crumbs = await page.locator('.fx-crumbs li').allInnerTexts();
+    const crumbs = (await page.locator('.fx-crumbs li').allTextContents()).map((t) => t.trim()); // not innerText: WebKit's includes the ::before separators
     must(crumbs.join('/') === 'Home/Desk/Garden', `crumbs read ${crumbs.join(' › ')}`);
   });
 
