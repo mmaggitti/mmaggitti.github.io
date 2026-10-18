@@ -20,7 +20,9 @@ export function sanitize(input: unknown): LayoutDoc | null {
 }
 
 function sanitizeOrThrow(input: unknown): LayoutDoc | null {
-  if (!isObj(input) || input.schema !== 1 || !isObj(input.apps)) return null;
+  // Schema 1 held P0's demo apps (list, field, counter), since replaced by blocks: nothing in it is
+  // worth migrating, so it falls back to the first-launch layout.
+  if (!isObj(input) || input.schema !== 2 || !isObj(input.apps)) return null;
   const rawApps = input.apps;
   const apps: Record<string, AppRecord> = {};
   const ids = new Set<string>();
@@ -95,7 +97,7 @@ function sanitizeOrThrow(input: unknown): LayoutDoc | null {
     }
   }
 
-  let doc: LayoutDoc = normalizeDoc({ schema: 1, root, apps, nav: { frame: null, visits: [], index: -1, overviewReturn: null } });
+  let doc: LayoutDoc = normalizeDoc({ schema: 2, root, apps, nav: { frame: null, visits: [], index: -1, overviewReturn: null } });
   const idx = indexDoc(doc);
   const nav = isObj(input.nav) ? input.nav : {};
   const visit = (v: unknown): Visit | null => {

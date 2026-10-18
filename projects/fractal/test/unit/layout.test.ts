@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { solve, distribute, type Box, type RestLayout } from '../../src/core/layout.ts';
 import { metrics } from '../../src/core/metrics.ts';
-import { probeLayout } from '../../src/core/defaults.ts';
+import { defaultLayout } from '../../src/core/defaults.ts';
 import { indexDoc } from '../../src/core/tree.ts';
 import { frames } from '../../src/core/nav.ts';
 import { kindOf } from '../../src/core/kinds.ts';
@@ -35,23 +35,23 @@ test('LAYOUT-01 the framed node fills the viewport, for every frame of many rand
 });
 
 test('LAYOUT-02 the framed node\'s siblings become viewport-sized pages, in order, a gap apart', () => {
-  const doc = probeLayout();
-  const l = solve(doc, 'p-list', PHONE, m);
-  const list = l.nodes.get('p-list')!;
-  const field = l.nodes.get('p-field')!;
-  assert.ok(sameBox(list, { x: 0, y: 0, ...PHONE }));
-  assert.ok(sameBox(field, { x: PHONE.w + m.gap, y: 0, ...PHONE }));
+  const doc = defaultLayout();
+  const l = solve(doc, 'p-sky', PHONE, m);
+  const sky = l.nodes.get('p-sky')!;
+  const amber = l.nodes.get('p-amber')!;
+  assert.ok(sameBox(sky, { x: 0, y: 0, ...PHONE }));
+  assert.ok(sameBox(amber, { x: PHONE.w + m.gap, y: 0, ...PHONE }));
   assert.equal(l.splits.get('mid')!.pager, true);
 });
 
 test('LAYOUT-03 tab bars are 44px and a host band is exactly its rem size at full scale', () => {
-  const doc = probeLayout();
-  const l = solve(doc, 'p-garden', PHONE, m);
-  const p = l.panels.get('p-garden')!;
+  const doc = defaultLayout();
+  const l = solve(doc, 'p-group-b', PHONE, m);
+  const p = l.panels.get('p-group-b')!;
   assert.equal(p.s, 1);
   assert.equal(p.tabbar.h, 44);
-  const garden = l.apps.get('garden')!;
-  assert.equal(garden.surface.h, kindOf('container').bandRem * 12);
+  const groupB = l.apps.get('group-b')!;
+  assert.equal(groupB.surface.h, kindOf('container').bandRem * 12);
 });
 
 test('LAYOUT-04 children tile their parent and stay inside their host\'s dock area', () => {
@@ -73,48 +73,48 @@ test('LAYOUT-04 children tile their parent and stay inside their host\'s dock ar
 });
 
 test('LAYOUT-05 a framed node inside a host sits in the dock, with the band and tab bar above the screen', () => {
-  const doc = probeLayout();
-  const l = solve(doc, 'p-garden-list', PHONE, m);
-  const garden = l.apps.get('garden')!;
-  assert.ok(garden.surface.y + garden.surface.h <= 0.5, 'the band is above the viewport');
-  assert.ok(inside(l.nodes.get('p-garden-list')!, garden.dock!));
+  const doc = defaultLayout();
+  const l = solve(doc, 'p-teal', PHONE, m);
+  const groupB = l.apps.get('group-b')!;
+  assert.ok(groupB.surface.y + groupB.surface.h <= 0.5, 'the band is above the viewport');
+  assert.ok(inside(l.nodes.get('p-teal')!, groupB.dock!));
 });
 
 test('LAYOUT-06 cramped groups draw smaller, and scales multiply down the levels', () => {
-  const doc = probeLayout();
+  const doc = defaultLayout();
   // At phone size the minimums fit: chrome stays true size and only content draws scaled.
   const phone = solve(doc, null, PHONE, m);
-  assert.equal(phone.panels.get('p-garden-list')!.s, 1);
-  assert.ok(phone.apps.get('garden-list')!.content.scale < 1, 'deep content is a miniature at the overview');
+  assert.equal(phone.panels.get('p-teal')!.s, 1);
+  assert.ok(phone.apps.get('teal')!.content.scale < 1, 'deep content is a miniature at the overview');
   // In a tiny viewport they don't: the groups scale, and nested scales multiply.
   const tiny = solve(doc, null, { w: 200, h: 260 }, m);
-  const outer = tiny.panels.get('p-home')!.s;
-  const inner = tiny.panels.get('p-garden-list')!.s;
+  const outer = tiny.panels.get('p-group-a')!.s;
+  const inner = tiny.panels.get('p-teal')!.s;
   assert.ok(outer < 1 && inner < 1, `outer ${outer} inner ${inner}`);
   assert.ok(inner <= outer + 1e-9);
 });
 
 test('LAYOUT-07 tabs that are not selected get no boxes, nor do their docks', () => {
-  const doc = probeLayout();
+  const doc = defaultLayout();
   const l = solve(doc, null, PHONE, m);
-  assert.ok(l.apps.has('field'));
-  assert.ok(!l.apps.has('counter2'));
+  assert.ok(l.apps.has('amber'));
+  assert.ok(!l.apps.has('rose'));
 });
 
 test('LAYOUT-08 the solve is deterministic and never changes the document', () => {
-  const doc = probeLayout();
+  const doc = defaultLayout();
   const before = JSON.stringify(doc);
-  const a = solve(doc, 'p-garden', PHONE, m);
-  const b = solve(doc, 'p-garden', PHONE, m);
+  const a = solve(doc, 'p-group-b', PHONE, m);
+  const b = solve(doc, 'p-group-b', PHONE, m);
   assert.deepEqual([...a.nodes], [...b.nodes]);
   assert.equal(JSON.stringify(doc), before);
 });
 
 test('LAYOUT-09 framing a sibling is a pure translation of everything', () => {
-  const doc = probeLayout();
-  const a = solve(doc, 'p-list', PHONE, m);
-  const b = solve(doc, 'p-field', PHONE, m);
-  const dx = a.nodes.get('p-list')!.x - b.nodes.get('p-list')!.x;
+  const doc = defaultLayout();
+  const a = solve(doc, 'p-sky', PHONE, m);
+  const b = solve(doc, 'p-amber', PHONE, m);
+  const dx = a.nodes.get('p-sky')!.x - b.nodes.get('p-sky')!.x;
   for (const [id, box] of a.nodes) {
     const other = b.nodes.get(id)!;
     assert.ok(near(box.x - other.x, dx) && near(box.y, other.y) && near(box.w, other.w) && near(box.h, other.h), id);
@@ -122,7 +122,7 @@ test('LAYOUT-09 framing a sibling is a pure translation of everything', () => {
 });
 
 test('LAYOUT-10 content smaller than its comfortable size lays out at that size and draws scaled', () => {
-  const doc = probeLayout();
+  const doc = defaultLayout();
   const l = solve(doc, null, PHONE, m);
   for (const app of l.apps.values()) {
     const s = app.content.scale;
@@ -139,6 +139,6 @@ test('LAYOUT-11 distribute shares by weight, never below a minimum', () => {
 });
 
 test('LAYOUT-12 an empty document lays out nothing', () => {
-  const doc: LayoutDoc = { schema: 1, root: null, apps: {}, nav: { frame: null, visits: [], index: -1 } };
+  const doc: LayoutDoc = { schema: 2, root: null, apps: {}, nav: { frame: null, visits: [], index: -1 } };
   assert.equal(solve(doc, null, PHONE, m).nodes.size, 0);
 });

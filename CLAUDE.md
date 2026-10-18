@@ -226,6 +226,8 @@ copy its code.** The approved plan (phases P0–P4) is the vault's
   `src/platform`. `tools/check-core.mjs` enforces all three, plus no HTML sinks anywhere, as the
   first step of `npm run build`.
 - **App content is mounted once and never reparented**; moving, tabbing and zooming only position it.
+- **The apps are blank coloured blocks for now** (Mark, 2026-10-18): the workspace's own concepts
+  come first. A block is kind `block` with an OKLCH `hue` in its params; groups are `container`s.
 - **Installed as a Home Screen app** (manifest + apple-touch-icon). Its storage is separate from
   Safari's. After changing `public/icon.svg`, run `npm run icons` and commit the PNGs.
 - **Device checks:** `projects/fractal/DEVICE-CHECKS.md`, signed by Mark per phase.

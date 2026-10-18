@@ -16,7 +16,6 @@ export function randomDoc(seed: number): LayoutDoc {
   const r = rng(seed);
   let n = 0;
   const apps: Record<string, AppRecord> = {};
-  const leafKinds = ['list', 'field', 'counter'];
   const node = (depth: number, hostDepth: number): Node => {
     const id = `n${n++}`;
     if (depth < 3 && r() < 0.55) {
@@ -33,12 +32,12 @@ export function randomDoc(seed: number): LayoutDoc {
       if (hostDepth < 2 && r() < 0.3) {
         apps[app] = { kind: 'container', title: `Host ${app}`, params: {}, dock: node(0, hostDepth + 1) };
       } else {
-        apps[app] = { kind: leafKinds[Math.floor(r() * 3)], title: `App ${app}`, params: {} };
+        apps[app] = { kind: 'block', title: `App ${app}`, params: { hue: Math.floor(r() * 360) } };
       }
       tabs.push(app);
     }
     return { kind: 'panel', id, tabs, selected: tabs[Math.floor(r() * tabs.length)] };
   };
   const root = node(0, 0);
-  return normalizeDoc({ schema: 1, root, apps, nav: { frame: null, visits: [], index: -1 } });
+  return normalizeDoc({ schema: 2, root, apps, nav: { frame: null, visits: [], index: -1 } });
 }

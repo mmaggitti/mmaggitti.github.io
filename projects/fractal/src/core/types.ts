@@ -56,7 +56,7 @@ export interface NavState {
 }
 
 export interface LayoutDoc {
-  schema: 1;
+  schema: 2;
   root: Node | null;
   apps: Record<string, AppRecord>;
   nav: NavState;

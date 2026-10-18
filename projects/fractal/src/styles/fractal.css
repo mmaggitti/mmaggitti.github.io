@@ -1,4 +1,4 @@
-/* Fractal: the shell, the workspace layer and the Probe apps. rem only (check-units); taps keep
+/* Fractal: the shell, the workspace layer and the placeholder blocks. rem only (check-units); taps keep
    the 44pt floor with max(var(--tap-min), …). Positions and sizes inside the layer are set from JS. */
 
 html,
@@ -300,61 +300,42 @@ body {
   background: color-mix(in srgb, var(--bg) 80%, var(--line));
 }
 
-/* ---------------------------------------------------------------- Probe apps */
-.probe {
+/* ---------------------------------------------------------------- placeholder blocks */
+/* A block is one OKLCH hue (--hue, from its params) at a fixed lightness, so every colour reads the
+   same weight; dark mode drops the lightness. A tile of a block takes the same fill. */
+.block,
+.fx-tile[data-hue] {
+  background: oklch(0.86 0.09 var(--hue));
+  color: oklch(0.32 0.08 var(--hue));
+}
+@media (prefers-color-scheme: dark) {
+  .block,
+  .fx-tile[data-hue] {
+    background: oklch(0.42 0.09 var(--hue));
+    color: oklch(0.94 0.03 var(--hue));
+  }
+}
+.block {
+  display: grid;
+  place-items: center;
   box-sizing: border-box;
   height: 100%;
   padding: var(--space-3);
 }
-.probe-list {
-  padding: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
+.block-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
 }
-.probe-list ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.probe-list li {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--line);
-  font-size: var(--text-md);
-}
-.probe-field label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  height: 100%;
-}
-.probe-field textarea {
-  flex: 1;
-  resize: none;
-  padding: var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-}
-.probe-counter {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-.probe-count {
-  line-height: 1;
-}
-.probe-counter .ds-btn {
-  flex: 0 0 auto;
+.fx-tile[data-hue] .fx-tile-glyph,
+.fx-tile[data-hue] .fx-tile-name {
+  color: inherit;
 }
 .band {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--space-1);
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  margin: 0;
   padding: 0 var(--space-3);
 }
 .band strong {

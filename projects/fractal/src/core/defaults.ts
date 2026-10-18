@@ -1,5 +1,5 @@
-// The first-launch layout. P0 uses Probe apps (a long list, a field, a counter) inside Containers,
-// three levels deep, so every navigation gesture has something to work on.
+// The first-launch layout: blank coloured blocks inside two groups, three levels deep, so every
+// navigation gesture has something to work on and nothing else competes for attention.
 
 import type { AppRecord, LayoutDoc, Node, Panel } from './types.ts';
 import { setFrame } from './ops.ts';
@@ -23,37 +23,35 @@ function normalized(w: number[]) {
   const s = w.reduce((a, b) => a + b, 0);
   return w.map((v) => v / s);
 }
+const block = (title: string, hue: number): AppRecord => ({ kind: 'block', title, params: { hue } });
 
-export function probeLayout(): LayoutDoc {
+export function defaultLayout(): LayoutDoc {
   const apps: Record<string, AppRecord> = {
-    home: {
+    'group-a': {
       kind: 'container',
-      title: 'Desk',
+      title: 'Group A',
       params: {},
-      dock: row('home-row', [
-        panel('p-garden', 'garden'),
-        col('home-col', [panel('p-home-list', 'home-list'), panel('p-home-field', 'home-field')]),
-      ]),
+      dock: row('a-row', [panel('p-group-b', 'group-b'), col('a-col', [panel('p-coral', 'coral'), panel('p-lime', 'lime')])]),
     },
-    garden: {
+    'group-b': {
       kind: 'container',
-      title: 'Garden',
+      title: 'Group B',
       params: {},
-      dock: row('garden-row', [panel('p-garden-list', 'garden-list'), panel('p-garden-counter', 'garden-counter')]),
+      dock: row('b-row', [panel('p-teal', 'teal'), panel('p-indigo', 'indigo')]),
     },
-    'home-list': { kind: 'list', title: 'Desk list', params: { seed: 2 } },
-    'home-field': { kind: 'field', title: 'Desk note', params: {} },
-    'garden-list': { kind: 'list', title: 'Garden list', params: { seed: 3 } },
-    'garden-counter': { kind: 'counter', title: 'Garden count', params: {} },
-    list: { kind: 'list', title: 'Long list', params: { seed: 1 } },
-    field: { kind: 'field', title: 'Note', params: {} },
-    counter: { kind: 'counter', title: 'Counter', params: {} },
-    counter2: { kind: 'counter', title: 'Tally', params: {} },
+    coral: block('Coral', 30),
+    lime: block('Lime', 130),
+    teal: block('Teal', 185),
+    indigo: block('Indigo', 275),
+    sky: block('Sky', 230),
+    amber: block('Amber', 75),
+    rose: block('Rose', 355),
+    violet: block('Violet', 305),
   };
   const root = col('root', [
-    panel('p-home', 'home'),
-    row('mid', [panel('p-list', 'list'), panel('p-field', 'field', 'counter2')]),
-    panel('p-counter', 'counter'),
+    panel('p-group-a', 'group-a'),
+    row('mid', [panel('p-sky', 'sky'), panel('p-amber', 'amber', 'rose')]),
+    panel('p-violet', 'violet'),
   ], [3, 2, 1]);
-  return setFrame({ schema: 1, root, apps, nav: { frame: null, visits: [], index: -1, overviewReturn: null } }, null);
+  return setFrame({ schema: 2, root, apps, nav: { frame: null, visits: [], index: -1, overviewReturn: null } }, null);
 }

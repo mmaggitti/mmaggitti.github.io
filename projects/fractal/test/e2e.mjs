@@ -57,19 +57,19 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('the zoom button frames a nested host; it fills the workspace and its apps sit in its dock', async (page) => {
-    await page.locator('[data-panel="p-garden"] .fx-zoom').tap();
+    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
     await settled(page);
-    await framed(page, 'p-garden');
+    await framed(page, 'p-group-b');
     const g = await page.evaluate(() => {
       const box = (s) => {
         const r = document.querySelector(s).getBoundingClientRect();
         return { x: r.x, y: r.y, w: r.width, h: r.height };
       };
       return {
-        tabbar: box('[data-panel="p-garden"] .fx-tabbar'),
-        band: box('[data-app="garden"]'),
-        dock: box('[data-dock="garden"]'),
-        kids: [box('[data-panel="p-garden-list"]'), box('[data-panel="p-garden-counter"]')],
+        tabbar: box('[data-panel="p-group-b"] .fx-tabbar'),
+        band: box('[data-app="group-b"]'),
+        dock: box('[data-dock="group-b"]'),
+        kids: [box('[data-panel="p-teal"]'), box('[data-panel="p-indigo"]')],
       };
     });
     must(Math.abs(g.tabbar.h - 44) <= TOL, `tab bar is ${g.tabbar.h}px tall`);
@@ -78,20 +78,20 @@ export default async function run({ browser, origin, engine }) {
       must(k.y >= g.band.y + g.band.h - TOL, `nested panel ${fmt(k)} overlaps the band ${fmt(g.band)}`);
     }
     const crumbs = (await page.locator('.fx-crumbs li').allTextContents()).map((t) => t.trim()); // not innerText: WebKit's includes the ::before separators
-    must(crumbs.join('/') === 'Home/Desk/Garden', `crumbs read ${crumbs.join(' › ')}`);
+    must(crumbs.join('/') === 'Home/Group A/Group B', `crumbs read ${crumbs.join(' › ')}`);
   });
 
   await check('Back steps out one level, through the host, to the overview', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-garden-list'));
+    await page.evaluate(() => window.__fractal.frame('p-teal'));
     await settled(page);
-    await framed(page, 'p-garden-list');
+    await framed(page, 'p-teal');
     const back = page.locator('.fx-bottombar').getByRole('button', { name: 'Back', exact: true });
     await back.tap();
     await settled(page);
-    await framed(page, 'p-garden');
+    await framed(page, 'p-group-b');
     await back.tap();
     await settled(page);
-    await framed(page, 'p-home');
+    await framed(page, 'p-group-a');
     await back.tap();
     await settled(page);
     const any = await page.locator('.fx-frame[data-framed]').count();
@@ -100,46 +100,44 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('neighbours are pages one workspace width apart, reached with ›', async (page) => {
-    await page.locator('[data-panel="p-list"] .fx-zoom').tap();
+    await page.locator('[data-panel="p-sky"] .fx-zoom').tap();
     await settled(page);
-    await framed(page, 'p-list');
+    await framed(page, 'p-sky');
     const vp = await rect(page, '.fx-viewport');
-    const next = await rect(page, '[data-panel="p-field"]');
+    const next = await rect(page, '[data-panel="p-amber"]');
     must(Math.abs(next.x - (vp.x + vp.w + GAP)) <= TOL && Math.abs(next.w - vp.w) <= TOL, `next page is at ${fmt(next)}, viewport ${fmt(vp)}`);
     await page.getByRole('button', { name: 'Next panel' }).tap();
     await settled(page);
-    await framed(page, 'p-field');
+    await framed(page, 'p-amber');
     const page2 = await page.locator('.fx-page').innerText();
     must(page2 === '2/2', `page indicator reads ${page2}`);
   });
 
-  await check('typed text and its element survive moving between levels', async (page) => {
-    const ta = page.locator('[data-content="field"] textarea');
-    await page.locator('[data-panel="p-field"] .fx-zoom').tap();
+  await check('a block is the same element after moving between levels, and blocks differ in colour', async (page) => {
+    await page.locator('[data-panel="p-amber"] .fx-zoom').tap();
     await settled(page);
-    await ta.fill('kept across zooms');
-    await page.evaluate(() => (window.__ta = document.querySelector('[data-content="field"] textarea')));
-    await page.evaluate(() => window.__fractal.frame('p-garden-list'));
+    await page.evaluate(() => (window.__block = document.querySelector('[data-content="amber"] .block')));
+    await page.evaluate(() => window.__fractal.frame('p-teal'));
     await settled(page);
     await page.locator('.fx-bottombar').getByRole('button', { name: 'Overview', exact: true }).tap();
     await settled(page);
-    await page.evaluate(() => window.__fractal.frame('p-field'));
+    await page.evaluate(() => window.__fractal.frame('p-amber'));
     await settled(page);
-    const same = await page.evaluate(() => document.querySelector('[data-content="field"] textarea') === window.__ta);
-    must(same, 'the textarea was recreated');
-    must((await ta.inputValue()) === 'kept across zooms', 'the typed text was lost');
+    const same = await page.evaluate(() => !!window.__block && document.querySelector('[data-content="amber"] .block') === window.__block);
+    must(same, 'the block was recreated');
+    const fills = await page.evaluate(() =>
+      ['sky', 'amber', 'teal'].map((id) => getComputedStyle(document.querySelector(`[data-content="${id}"] .block`)).backgroundColor),
+    );
+    must(new Set(fills).size === 3 && !fills.some((f) => f === 'rgba(0, 0, 0, 0)' || f === 'transparent'), `block fills are ${fills.join(' | ')}`);
   });
 
-
-  await check('a pinch over a scrolling list frames the panel under the fingers; the page never zooms', async (page) => {
-    const c = await centre(page, '[data-panel="p-list"]');
-    const scroller = '[data-content="list"] .probe-list';
+  await check('a pinch over app content frames the panel under the fingers; the page never zooms', async (page) => {
+    const c = await centre(page, '[data-panel="p-sky"]');
     await twoFingers(page, chromium, { x: c.x - 25, y: c.y }, { x: c.x + 25, y: c.y }, { x: c.x - 110, y: c.y }, { x: c.x + 110, y: c.y }, 12);
     await settled(page);
-    await framed(page, 'p-list');
-    const r = await page.evaluate((s) => ({ zoom: window.visualViewport.scale, top: document.querySelector(s).scrollTop }), scroller);
-    must(r.zoom === 1, `the page zoomed to ${r.zoom}`);
-    must(r.top === 0, `the list scrolled to ${r.top} under the pinch`);
+    await framed(page, 'p-sky');
+    const zoom = await page.evaluate(() => window.visualViewport.scale);
+    must(zoom === 1, `the page zoomed to ${zoom}`);
     const prevented = await page.evaluate(() => ['gesturestart', 'gesturechange'].map((type) => {
       const e = new Event(type, { bubbles: true, cancelable: true });
       document.querySelector('.fx-content').dispatchEvent(e);
@@ -149,11 +147,11 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('a two-finger pan moves to the next page; a pinch out steps out', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-list'));
+    await page.evaluate(() => window.__fractal.frame('p-sky'));
     await settled(page);
     await twoFingers(page, chromium, { x: 300, y: 400 }, { x: 300, y: 520 }, { x: 80, y: 400 }, { x: 80, y: 520 }, 12);
     await settled(page);
-    await framed(page, 'p-field');
+    await framed(page, 'p-amber');
     await twoFingers(page, chromium, { x: 120, y: 400 }, { x: 320, y: 400 }, { x: 170, y: 400 }, { x: 270, y: 400 }, 12);
     await settled(page);
     const f = await page.locator('.fx-frame[data-framed]').count();
@@ -162,48 +160,48 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('a swipe across the top bar flips to the neighbour', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-field'));
+    await page.evaluate(() => window.__fractal.frame('p-amber'));
     await settled(page);
     const bar = await rect(page, '.fx-topbar');
     const y = bar.y + bar.h / 2;
     await oneFinger(page, chromium, { x: 120, y }, { x: 320, y }, 10);
     await settled(page);
-    await framed(page, 'p-list');
+    await framed(page, 'p-sky');
   });
 
   await check('a double-tap on a tab bar frames the panel', async (page) => {
-    const tab = await centre(page, '[data-panel="p-list"] .fx-tab');
+    const tab = await centre(page, '[data-panel="p-sky"] .fx-tab');
     await page.touchscreen.tap(tab.x, tab.y);
     await page.waitForTimeout(60);
     await page.touchscreen.tap(tab.x, tab.y);
     await settled(page);
-    await framed(page, 'p-list');
+    await framed(page, 'p-sky');
   });
 
   await check('an edge swipe goes back and forward through history', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-garden'));
+    await page.evaluate(() => window.__fractal.frame('p-group-b'));
     await settled(page);
-    await page.evaluate(() => window.__fractal.frame('p-garden-list'));
+    await page.evaluate(() => window.__fractal.frame('p-teal'));
     await settled(page);
     const vp = await rect(page, '.fx-viewport');
     const y = vp.y + vp.h / 2;
     await oneFinger(page, chromium, { x: vp.x + 4, y }, { x: vp.x + 250, y }, 12);
     await settled(page);
-    await framed(page, 'p-garden');
+    await framed(page, 'p-group-b');
     await oneFinger(page, chromium, { x: vp.x + vp.w - 4, y }, { x: vp.x + vp.w - 250, y }, 12);
     await settled(page);
-    await framed(page, 'p-garden-list');
+    await framed(page, 'p-teal');
   });
 
   await check('Esc steps out; a trackpad pinch zooms in and snaps', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-garden'));
+    await page.evaluate(() => window.__fractal.frame('p-group-b'));
     await settled(page);
     await page.keyboard.press('Escape');
     await settled(page);
-    await framed(page, 'p-home');
+    await framed(page, 'p-group-a');
     await page.keyboard.press('Escape');
     await settled(page);
-    const c = await centre(page, '[data-panel="p-list"]');
+    const c = await centre(page, '[data-panel="p-sky"]');
     await page.evaluate(([x, y]) => {
       for (let i = 0; i < 20; i++) {
         const e = new WheelEvent('wheel', { clientX: x, clientY: y, deltaY: -6, ctrlKey: true, bubbles: true, cancelable: true });
@@ -213,22 +211,22 @@ export default async function run({ browser, origin, engine }) {
     }, [c.x, c.y]);
     await page.waitForTimeout(250);
     await settled(page);
-    await framed(page, 'p-list');
+    await framed(page, 'p-sky');
   });
 
   await check('an animated framing settles exactly on the workspace', async (page) => {
-    await page.locator('[data-panel="p-garden"] .fx-zoom').tap();
+    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
     await settled(page);
-    await framed(page, 'p-garden');
+    await framed(page, 'p-group-b');
   }, { motion: true });
 
   await check('the framing survives a reload', async (page) => {
-    await page.evaluate(() => window.__fractal.frame('p-garden-counter'));
+    await page.evaluate(() => window.__fractal.frame('p-indigo'));
     await settled(page);
     await page.waitForTimeout(500); // the save is debounced
     await page.reload({ waitUntil: 'networkidle' });
     await settled(page);
-    await framed(page, 'p-garden-counter');
+    await framed(page, 'p-indigo');
   });
 
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);

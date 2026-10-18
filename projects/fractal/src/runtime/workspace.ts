@@ -15,7 +15,7 @@ import type { LayoutDoc, Rect } from '../core/types.ts';
 import { metrics, type Metrics } from '../core/metrics.ts';
 import { solve, type RestLayout } from '../core/layout.ts';
 import { indexDoc, type TreeIndex } from '../core/tree.ts';
-import { kindOf } from '../core/kinds.ts';
+import { hueOf, kindOf } from '../core/kinds.ts';
 import { tierOf, type Tier } from '../core/lod.ts';
 import { appTitle, crumbs, framePath, frames, neighbours, parentFrame, type Crumb } from '../core/nav.ts';
 import { snap, type Candidate } from '../core/snap.ts';
@@ -205,6 +205,9 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       const name = el('span', 'fx-tile-name');
       name.textContent = appTitle(doc, node.selected);
       p.tile.append(glyph, name);
+      const hue = sel ? hueOf(sel.params) : null;
+      setStyle(p.tile, '--hue', hue === null ? '' : String(hue));
+      setAttr(p.tile, 'data-hue', hue === null ? null : String(hue));
     }
     for (const [id, p] of panels) if (!livePanels.has(id)) {
       p.frame.remove();

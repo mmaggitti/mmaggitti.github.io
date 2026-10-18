@@ -14,10 +14,8 @@ export interface KindInfo {
 }
 
 export const KINDS: Record<string, KindInfo> = {
-  container: { title: 'Container', glyph: '▦', hosts: true, bandRem: 3.5, minRem: { w: 10, h: 8 } },
-  list: { title: 'List', glyph: 'L', hosts: false, bandRem: 0, minRem: { w: 16, h: 12 } },
-  field: { title: 'Field', glyph: 'F', hosts: false, bandRem: 0, minRem: { w: 14, h: 9 } },
-  counter: { title: 'Counter', glyph: 'C', hosts: false, bandRem: 0, minRem: { w: 10, h: 8 } },
+  container: { title: 'Group', glyph: '▦', hosts: true, bandRem: 3.5, minRem: { w: 10, h: 8 } },
+  block: { title: 'Block', glyph: '■', hosts: false, bandRem: 0, minRem: { w: 10, h: 8 } },
 };
 
 const UNKNOWN: KindInfo = { title: 'Unknown app', glyph: '?', hosts: false, bandRem: 0, minRem: { w: 10, h: 8 } };
@@ -28,4 +26,10 @@ export function kindOf(kind: string): KindInfo {
 
 export function isKnownKind(kind: string): boolean {
   return Object.hasOwn(KINDS, kind);
+}
+
+/** A block's colour, as an OKLCH hue in degrees, or null when its params don't give a valid one. */
+export function hueOf(params: Record<string, unknown>): number | null {
+  const h = params.hue;
+  return typeof h === 'number' && Number.isFinite(h) ? ((h % 360) + 360) % 360 : null;
 }

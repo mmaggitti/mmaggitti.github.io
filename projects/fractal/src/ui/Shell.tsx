@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { LayoutDoc } from '../core/types.ts';
 import { appTitle } from '../core/nav.ts';
-import { appsIn } from '../core/tree.ts';
+import { hueOf } from '../core/kinds.ts';
 import { createWorkspace, type Surface, type WorkspaceHandle } from '../runtime/workspace.ts';
 import { attachInput } from '../runtime/input.ts';
 import { layoutSaver } from '../platform/storage.ts';
-import { ContainerBand, ProbeCounter, ProbeField, ProbeList } from '../apps/Probe.tsx';
+import { Block, GroupBand } from '../apps/Blocks.tsx';
 import { TopBar } from './TopBar.tsx';
 import { BottomBar } from './BottomBar.tsx';
 
@@ -78,15 +78,11 @@ function AppHost({ ws, surface }: { ws: WorkspaceHandle; surface: Surface }) {
   if (!rec) return null;
   const title = appTitle(doc, surface.app);
   switch (rec.kind) {
-    case 'list':
-      return <ProbeList seed={Number(rec.params.seed) || 0} title={title} />;
-    case 'field':
-      return <ProbeField title={title} />;
-    case 'counter':
-      return <ProbeCounter title={title} />;
+    case 'block':
+      return <Block title={title} hue={hueOf(rec.params)} />;
     case 'container':
-      return <ContainerBand title={title} count={rec.dock ? appsIn(doc, rec.dock).length : 0} />;
+      return <GroupBand title={title} />;
     default:
-      return <p className="probe ds-muted">Unknown app</p>;
+      return <p className="band ds-muted">Unknown app</p>;
   }
 }
