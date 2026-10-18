@@ -328,6 +328,114 @@ export default async function run({ browser, origin, engine }) {
     must(Math.abs(e.x - (d.x + 50)) <= 2, `the divider is at ${e.x.toFixed(0)}, not ${(d.x + 50).toFixed(0)}`);
   });
 
+  await check('Arrange menu: ⋯ adds a block to the right of a panel', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const menuBtn = page.locator('[data-panel="p-violet"] .fx-zoom');
+    must((await menuBtn.textContent()) === '⋯', 'the panel button is not ⋯ in Arrange');
+    await menuBtn.tap();
+    const sheet = page.getByRole('dialog', { name: 'Panel menu' });
+    await sheet.getByRole('group', { name: 'Add block' }).getByRole('button', { name: 'Right', exact: true }).tap();
+    await settled(page);
+    must((await sheet.count()) === 0, 'the menu stayed open');
+    const tab = page.locator('.fx-tab', { hasText: 'Orange' });
+    must((await tab.count()) === 1, 'no Orange block was added');
+    const panel = await tab.evaluate((t) => t.closest('[data-panel]').dataset.panel);
+    const r = await rect(page, `[data-panel="${panel}"]`);
+    const v = await rect(page, '[data-panel="p-violet"]');
+    must(Math.abs(r.y - v.y) <= TOL && r.x > v.x + v.w, `Orange ${fmt(r)} is not right of Violet ${fmt(v)}`);
+    must(await page.locator('.fx-bottombar').getByRole('button', { name: 'Undo', exact: true }).isEnabled(), 'adding is not undoable');
+  });
+
+  await check('Arrange menu: closing a group asks first, then removes it and what it holds', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
+    const sheet = page.getByRole('dialog', { name: 'Panel menu' });
+    await sheet.getByRole('button', { name: 'Close panel', exact: true }).tap();
+    const ask = (await sheet.locator('.fx-menu-title').textContent()) ?? '';
+    must(/Group B/.test(ask) && /2 things/.test(ask), `the confirmation reads "${ask}"`);
+    must((await page.locator('[data-panel="p-group-b"]').count()) === 1, 'it closed before confirming');
+    await sheet.getByRole('button', { name: 'Close', exact: true }).tap();
+    await settled(page);
+    const gone = await page.evaluate(() => ['group-b', 'teal', 'indigo'].filter((a) => window.__fractal.getDoc().apps[a]));
+    must(gone.length === 0, `still there: ${gone}`);
+    must((await page.locator('[data-panel="p-group-b"], [data-content="teal"]').count()) === 0, 'its elements stayed');
+  });
+
+  await check('Arrange menu: move to the top level, and no group into itself', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    await page.locator('[data-panel="p-group-a"] .fx-zoom').tap();
+    const sheet = page.getByRole('dialog', { name: 'Panel menu' });
+    await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
+    must(await sheet.locator('[data-dest="group-b"]').isDisabled(), 'Group A can be moved into Group B, inside itself');
+    must(await sheet.locator('[data-dest="group-a"]').isDisabled(), 'Group A can be moved into itself');
+    await page.keyboard.press('Escape');
+    must((await sheet.count()) === 0, 'Esc did not close the menu');
+    must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'Esc did more than close the menu');
+    await page.locator('[data-panel="p-coral"] .fx-zoom').tap();
+    await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
+    await sheet.locator('[data-dest=""]').tap();
+    await settled(page);
+    const c = await rect(page, '[data-panel="p-coral"]');
+    const vp = await rect(page, '.fx-viewport');
+    const v = await rect(page, '[data-panel="p-violet"]');
+    must(Math.abs(c.y + c.h - (vp.y + vp.h)) <= TOL && c.y > v.y, `Coral ${fmt(c)} is not the new bottom row`);
+  });
+
+  await check('Arrange: dragging a group into its own dock is refused', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const before = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
+    const from = await centre(page, '[data-app="group-a"]');
+    const t = await rect(page, '[data-panel="p-teal"]');
+    // Teal's right edge: a drop any panel takes, miniature or not, so only the cycle rule refuses it.
+    await dragPath(page, chromium, [from, { x: t.x + t.w * 0.92, y: t.y + t.h * 0.6, hold: 300 }]);
+    await settled(page);
+    must(before === (await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root))), 'Group A moved into itself');
+  });
+
+  await check('Arrange: holding a drag over Back steps out, and the drop lands at the new level', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-group-b'));
+    await settled(page);
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const visits = await page.evaluate(() => window.__fractal.getDoc().nav.visits.length);
+    const tealTab = await centre(page, '[data-tab="teal"]');
+    const back = await centre(page, '.fx-bottombar [data-nav="back"]');
+    await dragPath(page, chromium, [tealTab, { x: tealTab.x + 30, y: tealTab.y + 30 }, { ...back, hold: 900 }], async () => {
+      await settled(page);
+      await framed(page, 'p-group-a');
+      const coral = await rect(page, '[data-panel="p-coral"]');
+      return [{ x: coral.x + coral.w * 0.9, y: coral.y + coral.h * 0.6, hold: 300 }];
+    });
+    await settled(page);
+    await framed(page, 'p-group-a');
+    const parent = await page.evaluate(() => {
+      const d = window.__fractal.getDoc();
+      const find = (n, id, up) => (n.kind === 'panel' ? (n.tabs.includes(id) ? up : null) : n.children.map((c) => find(c, id, n)).find(Boolean) ?? null);
+      const row = find(d.apps['group-a'].dock, 'teal', null);
+      return row ? row.children.map((c) => c.tabs?.join() ?? c.kind) : null;
+    });
+    must(parent && parent.indexOf('teal') === parent.indexOf('coral') + 1, `Teal is not right of Coral inside Group A: ${JSON.stringify(parent)}`);
+    const after = await page.evaluate(() => window.__fractal.getDoc().nav.visits.length);
+    must(after === visits + 1, `history grew by ${after - visits}, not 1 (only the drop's framing is recorded)`);
+  });
+
+  await check('an empty workspace offers Add block', async (page) => {
+    await page.evaluate(() => {
+      const d = window.__fractal.getDoc();
+      window.__fractal.setDoc({ ...d, root: null, apps: {} }, { animate: false });
+    });
+    await settled(page);
+    const add = page.locator('.fx-empty').getByRole('button', { name: 'Add block', exact: true });
+    await add.tap();
+    await settled(page);
+    must((await page.locator('.fx-frame').count()) === 1, 'no block was added');
+    must((await page.locator('.fx-empty').count()) === 0, 'the empty state stayed');
+  });
+
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);
 }
 
@@ -373,6 +481,45 @@ async function oneFinger(page, chromium, a0, a1, steps) {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await cdp.detach();
   } else await synthetic(page, [[a0, a1]], steps);
+  await page.waitForTimeout(50);
+}
+
+// A one-finger drag through points, pausing `hold` ms at any point that has one. `then` runs at the
+// end of the path (finger still down) and may return more points.
+async function dragPath(page, chromium, points, then) {
+  const segs = async (send, pts, from) => {
+    let prev = from;
+    for (const p of pts) {
+      for (let i = 1; i <= 8; i++) await send({ x: prev.x + ((p.x - prev.x) * i) / 8, y: prev.y + ((p.y - prev.y) * i) / 8 });
+      if (p.hold) await page.waitForTimeout(p.hold);
+      prev = p;
+    }
+    return prev;
+  };
+  if (chromium) {
+    const cdp = await page.context().newCDPSession(page);
+    const send = async (p) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: p.y, id: 1 }] });
+      await page.waitForTimeout(16);
+    };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: points[0].x, y: points[0].y, id: 1 }] });
+    let last = await segs(send, points.slice(1), points[0]);
+    if (then) last = await segs(send, (await then()) ?? [], last);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.evaluate((p) => {
+      window.__dragTarget = document.elementFromPoint(p.x, p.y) ?? document.body;
+      window.__dragTarget.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 9, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+    }, points[0]);
+    const send = async (p) => {
+      await page.evaluate((p) => window.__dragTarget.dispatchEvent(new PointerEvent('pointermove', { pointerId: 9, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true })), p);
+      await page.waitForTimeout(16);
+    };
+    let last = await segs(send, points.slice(1), points[0]);
+    if (then) last = await segs(send, (await then()) ?? [], last);
+    await page.evaluate((p) => window.__dragTarget.dispatchEvent(new PointerEvent('pointerup', { pointerId: 9, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true })), last);
+  }
   await page.waitForTimeout(50);
 }
 

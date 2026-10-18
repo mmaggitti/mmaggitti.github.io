@@ -48,6 +48,8 @@ export interface ViewState {
   arranging: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  /** Nothing in the workspace at all. */
+  empty: boolean;
 }
 
 export interface WorkspaceOptions {
@@ -58,6 +60,8 @@ export interface WorkspaceOptions {
   onChange?(doc: LayoutDoc): void;
   /** Reduced motion: jump instead of animating. */
   reducedMotion?(): boolean;
+  /** Arrange mode's ⋯ button on a panel. */
+  onMenu?(panel: string): void;
 }
 
 interface PanelEl {
@@ -89,11 +93,12 @@ export interface WorkspaceHandle {
   getDoc(): LayoutDoc;
   /** Replace the document (e.g. after an import), animating unless told not to. */
   setDoc(doc: LayoutDoc, opts?: { animate?: boolean }): void;
-  frame(id: string | null): void;
+  /** Frame a node. `record: false` leaves history alone (navigating in the middle of a drag). */
+  frame(id: string | null, opts?: { record?: boolean }): void;
   /** Frame a panel, or step out if it is already framed. */
   toggleFrame(id: string): void;
-  stepOut(): void;
-  neighbour(dir: -1 | 1): void;
+  stepOut(opts?: { record?: boolean }): void;
+  neighbour(dir: -1 | 1, opts?: { record?: boolean }): void;
   history(step: -1 | 1): void;
   overview(): void;
   selectTab(panel: string, app: string): void;
@@ -158,19 +163,28 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   }
 
   // ------------------------------------------------------------------ elements
+  /** ⤢ frames the panel; in Arrange the same button opens the panel's menu. */
+  function zoomLabel(b: HTMLButtonElement) {
+    b.textContent = arranging ? '⋯' : '⤢';
+    setAttr(b, 'aria-label', arranging ? 'Panel menu' : 'Zoom to this panel');
+  }
+
   function ensurePanel(id: string): PanelEl {
     let p = panels.get(id);
     if (p) return p;
     const frame = el('div', 'fx-frame', { 'data-panel': id });
     const tabbar = el('div', 'fx-tabbar');
     const tablist = el('div', 'fx-tabs', { role: 'tablist' });
-    const zoom = el('button', 'fx-zoom', { type: 'button', 'aria-label': 'Zoom to this panel' });
-    zoom.textContent = '⤢';
+    const zoom = el('button', 'fx-zoom', { type: 'button' });
+    zoomLabel(zoom);
     tabbar.append(tablist, zoom);
     const tile = el('div', 'fx-tile', { 'aria-hidden': 'true' });
     frame.append(tabbar, tile);
     layer.append(frame);
-    zoom.addEventListener('click', () => handle.toggleFrame(id));
+    zoom.addEventListener('click', () => {
+      if (arranging) opts.onMenu?.(id);
+      else handle.toggleFrame(id);
+    });
     // A tap on a panel that isn't live (a miniature or tile) frames it.
     frame.addEventListener('click', (e) => {
       const p = panels.get(id);
@@ -375,6 +389,11 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         a.controller.update({ visible: false, interactive: false });
       }
     }
+    // A group with nothing in its dock says so.
+    for (const a of rest.apps.values()) {
+      const dock = a.dock ? apps.get(a.id)?.dock : null;
+      if (dock) setAttr(dock, 'data-empty', doc.apps[a.id]?.dock ? null : '');
+    }
     drawDividers(rest);
     setAttr(host, 'data-fx-settled', '');
     view.set(viewState(true));
@@ -427,6 +446,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       arranging,
       canUndo: undoStack.past.length > 0,
       canRedo: undoStack.future.length > 0,
+      empty: doc.root === null,
     };
   }
 
@@ -681,21 +701,21 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     setDoc(next, o = {}) {
       commit(next, o.animate !== false);
     },
-    frame(id) {
-      commit(setFrame(doc, id));
+    frame(id, o = {}) {
+      commit(setFrame(doc, id, o));
     },
     toggleFrame(id) {
       if (doc.nav.frame === id) handle.stepOut();
       else handle.frame(id);
     },
-    stepOut() {
+    stepOut(o = {}) {
       if (doc.nav.frame === null) return;
-      commit(setFrame(doc, parentFrame(doc, idx, doc.nav.frame)));
+      commit(setFrame(doc, parentFrame(doc, idx, doc.nav.frame), o));
     },
-    neighbour(dir) {
+    neighbour(dir, o = {}) {
       const n = neighbours(idx, doc.nav.frame);
       const id = dir < 0 ? n.prev : n.next;
-      if (id) handle.frame(id);
+      if (id) handle.frame(id, o);
     },
     history(stepBy) {
       commit(goHistory(doc, stepBy));
@@ -725,6 +745,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       if (!on) handle.resize.end(false);
       arranging = on;
       setAttr(host, 'data-arranging', on ? '' : null);
+      for (const p of panels.values()) zoomLabel(p.zoom);
       if (!anim && !gesture) drawDividers(rest);
       view.set(viewState(!anim && !gesture));
     },

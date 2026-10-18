@@ -12,7 +12,7 @@ export function TopBar({ ws }: { ws: WorkspaceHandle }) {
   }, [v.crumbs]);
   return (
     <nav className="fx-topbar" aria-label="Where you are">
-      <button type="button" className="fx-bar-btn" aria-label="Previous panel" disabled={!v.prev} onClick={() => ws.neighbour(-1)}>
+      <button type="button" className="fx-bar-btn" aria-label="Previous panel" data-nav="prev" disabled={!v.prev} onClick={() => ws.neighbour(-1)}>
         ‹
       </button>
       <ol className="fx-crumbs" ref={list}>
@@ -23,7 +23,7 @@ export function TopBar({ ws }: { ws: WorkspaceHandle }) {
                 {c.label}
               </span>
             ) : (
-              <button type="button" className="fx-crumb" onClick={() => ws.frame(c.frame)}>
+              <button type="button" className="fx-crumb" data-nav="crumb" data-frame={c.frame ?? ''} onClick={() => ws.frame(c.frame)}>
                 {c.label}
               </button>
             )}
@@ -35,7 +35,7 @@ export function TopBar({ ws }: { ws: WorkspaceHandle }) {
           {v.page.index + 1}/{v.page.count}
         </span>
       )}
-      <button type="button" className="fx-bar-btn" aria-label="Next panel" disabled={!v.next} onClick={() => ws.neighbour(1)}>
+      <button type="button" className="fx-bar-btn" aria-label="Next panel" data-nav="next" disabled={!v.next} onClick={() => ws.neighbour(1)}>
         ›
       </button>
     </nav>

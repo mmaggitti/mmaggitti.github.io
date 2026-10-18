@@ -60,5 +60,11 @@ Arrange is in the bottom bar. While arranging the bar reads Back · Undo · Redo
 | 28 | Undo and Redo | After a few moves, Undo steps back through them and Redo forward; a reload keeps the result | ☐ |
 | 29 | Two fingers still navigate | In Arrange, pinch and two-finger pan work as before | ☐ |
 | 30 | No iOS interference | No text selection, magnifier, callout or page scroll appears during a press or a drag | ☐ |
+| 31 | The ⋯ menu | In Arrange each panel's ⤢ becomes ⋯. Add block → Right puts a new colour beside it; Add group → Below adds an empty group that says "Drop blocks here" | ☐ |
+| 32 | Close asks first | ⋯ on Group B → Close panel asks before removing it and its two blocks; Keep backs out; Undo brings it all back | ☐ |
+| 33 | Move to… | ⋯ on Coral → Move to… → Top level: Coral becomes a new bottom row. Group A's own list has Group A and Group B greyed out | ☐ |
+| 34 | Hold to step out | Frame Group B, Arrange, drag Teal's tab and hold it on Back: after half a second the view steps out to Group A (again each half second while held). Drop it beside Coral | ☐ |
+| 35 | Hold to zoom in | At the overview, drag a block and hold it on Group B's title band: after a moment the view zooms into Group B; drop it there | ☐ |
+| 36 | Crumbs and edges | While dragging, hold on a breadcrumb: that level is framed. Framed on Sky, hold at the right screen edge: the next page slides in | ☐ |
 
 Signed: ______  Date: ______  Device / iOS: ______

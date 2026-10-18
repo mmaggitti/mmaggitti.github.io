@@ -8,7 +8,7 @@ export function BottomBar({ ws }: { ws: WorkspaceHandle }) {
   const [history, setHistory] = useState(false);
   const atOverview = v.frame === null;
   const back = (
-    <button type="button" className="ds-btn" disabled={atOverview} onClick={() => ws.stepOut()}>
+    <button type="button" className="ds-btn" data-nav="back" disabled={atOverview} onClick={() => ws.stepOut()}>
       Back
     </button>
   );

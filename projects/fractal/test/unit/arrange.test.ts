@@ -152,6 +152,8 @@ test('OPS-11 move to: the top level as a new last row, or into a group', () => {
   const top = moveTo(doc, { kind: 'tab', app: 'teal' }, null)!;
   const root = top.root as Split;
   assert.deepEqual((root.children.at(-1) as Panel).tabs, ['teal']);
+  assert.equal(root.children.length, 4, 'a new row of the top-level column');
+  assert.ok(Math.abs(root.weights[3] - 1 / 4) < 0.05, `an ordinary share, not half: ${root.weights[3]}`);
   const into = moveTo(doc, { kind: 'panel', panel: 'p-violet' }, 'group-b')!;
   assert.equal(indexDoc(into).owner.get('p-violet')?.type, 'split');
   assert.equal(indexDoc(into).depth.get('p-violet'), 2);

@@ -9,6 +9,8 @@ import { createDrag } from '../runtime/drag.ts';
 import { layoutSaver } from '../platform/storage.ts';
 import { Block, GroupBand } from '../apps/Blocks.tsx';
 import { TopBar } from './TopBar.tsx';
+import { PanelMenu } from './PanelMenu.tsx';
+import { addBlock } from '../core/arrange.ts';
 import { BottomBar } from './BottomBar.tsx';
 
 declare global {
@@ -24,10 +26,11 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
   const edgeRefs = { left: useRef<HTMLDivElement>(null), right: useRef<HTMLDivElement>(null) };
   const [ws, setWs] = useState<WorkspaceHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<string | null>(null);
 
   useEffect(() => {
     const save = layoutSaver(setError);
-    const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save });
+    const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save, onMenu: setMenu });
     window.__fractal = w;
     const drag = createDrag({ ws: w, layerOf: appRef.current!, reducedMotion: () => matchMedia('(prefers-reduced-motion: reduce)').matches });
     const detach = attachInput({
@@ -57,16 +60,35 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
       )}
       <div className="fx-stage">
         <div className="fx-host" ref={viewportRef} />
-        <div className="fx-edge" data-side="left" ref={edgeRefs.left} aria-hidden="true">
+        <div className="fx-edge" data-side="left" data-nav="prev" ref={edgeRefs.left} aria-hidden="true">
           <span>‹</span>
         </div>
-        <div className="fx-edge" data-side="right" ref={edgeRefs.right} aria-hidden="true">
+        <div className="fx-edge" data-side="right" data-nav="next" ref={edgeRefs.right} aria-hidden="true">
           <span>›</span>
         </div>
+        {ws && <Overlays ws={ws} menu={menu} setMenu={setMenu} />}
       </div>
       {ws ? <BottomBar ws={ws} /> : <div className="fx-bottombar" />}
       {ws && <Portals ws={ws} />}
     </div>
+  );
+}
+
+/** The ⋯ sheet (Arrange only) and the empty workspace's Add block. */
+function Overlays({ ws, menu, setMenu }: { ws: WorkspaceHandle; menu: string | null; setMenu(p: string | null): void }) {
+  const v = useSyncExternalStore(ws.view.subscribe, ws.view.get);
+  return (
+    <>
+      {v.empty && (
+        <div className="fx-empty">
+          <p className="ds-muted">Nothing here yet.</p>
+          <button type="button" className="ds-btn ds-btn--primary" onClick={() => ws.apply(addBlock(ws.getDoc(), { kind: 'dock', host: null })?.doc ?? null)}>
+            Add block
+          </button>
+        </div>
+      )}
+      {menu && v.arranging && <PanelMenu key={menu} ws={ws} panel={menu} onClose={() => setMenu(null)} />}
+    </>
   );
 }
 

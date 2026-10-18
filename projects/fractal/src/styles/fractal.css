@@ -405,6 +405,51 @@ body {
   font-weight: 400;
 }
 
+.fx-menu {
+  flex-direction: column;
+  max-height: 70svh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fx-menu-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.fx-menu-label {
+  margin-top: var(--space-1);
+}
+.fx-menu-row {
+  display: flex;
+  gap: var(--space-2);
+}
+.fx-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  pointer-events: none;
+}
+.fx-empty .ds-btn {
+  pointer-events: auto;
+}
+.fx-dock[data-empty] {
+  display: grid;
+  place-items: center;
+}
+.fx-dock[data-empty]::after {
+  content: 'Empty group';
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.fx-viewport[data-arranging] .fx-dock[data-empty]::after {
+  content: 'Drop blocks here';
+}
+
 /* ---------------------------------------------------------------- placeholder blocks */
 /* A block is one OKLCH hue (--hue, from its params) at a fixed lightness, so every colour reads the
    same weight; dark mode drops the lightness. A tile of a block takes the same fill. */

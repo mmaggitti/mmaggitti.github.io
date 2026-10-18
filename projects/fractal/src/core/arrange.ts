@@ -345,11 +345,16 @@ export function closeCost(doc: LayoutDoc, payload: Payload, idx = indexDoc(doc))
   return apps.size - own;
 }
 
-/** "Move to…": a destination is the top level (null) or a group. Lands as a new last row, or fills
- * an empty dock. */
+/** "Move to…": a destination is the top level (null) or a group. Lands as a new last row with an
+ * ordinary share of the height (a column gains a child; anything else is split below), or fills an
+ * empty dock. */
 export function moveTo(doc: LayoutDoc, payload: Payload, host: string | null, idx = indexDoc(doc)): LayoutDoc | null {
   const top = host === null ? doc.root : doc.apps[host]?.dock;
   if (host !== null && !kindOf(doc.apps[host]?.kind ?? '').hosts) return null;
-  const target: Target = top ? { kind: 'edge', node: top.id, side: 'bottom' } : { kind: 'dock', host };
+  const target: Target = !top
+    ? { kind: 'dock', host }
+    : top.kind === 'split' && top.axis === 'y'
+      ? { kind: 'seam', split: top.id, index: top.children.length }
+      : { kind: 'edge', node: top.id, side: 'bottom' };
   return move(doc, payload, target, idx);
 }
