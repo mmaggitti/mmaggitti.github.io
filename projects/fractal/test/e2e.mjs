@@ -229,6 +229,105 @@ export default async function run({ browser, origin, engine }) {
     await framed(page, 'p-indigo');
   });
 
+  // ---------------------------------------------------------------- Arrange (P2)
+
+  await check('Arrange: content stops taking input; dividers appear with a 44px handle', async (page) => {
+    const before = await page.evaluate(() => getComputedStyle(document.querySelector('[data-content="sky"]')).pointerEvents);
+    must(before !== 'none', 'content takes no input outside Arrange');
+    must((await page.locator('.fx-divider').count()) === 0, 'dividers show outside Arrange');
+    await page.locator('.fx-bottombar').getByRole('button', { name: 'Arrange', exact: true }).tap();
+    await settled(page);
+    must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'not arranging');
+    const after = await page.evaluate(() => getComputedStyle(document.querySelector('[data-content="sky"]')).pointerEvents);
+    must(after === 'none', `content pointer-events is ${after} in Arrange`);
+    const d = await rect(page, '[data-divider="mid:0"]');
+    const sky = await rect(page, '[data-panel="p-sky"]');
+    const amber = await rect(page, '[data-panel="p-amber"]');
+    must(d.w >= 43.5 && d.h >= 43.5, `the divider handle is ${fmt(d)}`);
+    const mid = d.x + d.w / 2;
+    must(mid > sky.x + sky.w - TOL && mid < amber.x + TOL, `the divider at ${mid.toFixed(0)} is not on the seam (${(sky.x + sky.w).toFixed(0)}–${amber.x.toFixed(0)})`);
+    for (const name of ['Back', 'Undo', 'Redo', 'Done']) must(await page.locator('.fx-bottombar').getByRole('button', { name, exact: true }).isVisible(), `no ${name} button`);
+  });
+
+  await check('Arrange: drag a tab beside a panel; the same content element lands there; Undo and Redo', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    await page.evaluate(() => (window.__rose = document.querySelector('[data-content="rose"]')));
+    const a = await centre(page, '[data-tab="rose"]');
+    const sky = await rect(page, '[data-panel="p-sky"]');
+    await oneFinger(page, chromium, a, { x: sky.x + sky.w * 0.9, y: sky.y + sky.h * 0.6 }, 20);
+    await settled(page);
+    const rose = await page.evaluate(() => {
+      const d = window.__fractal.getDoc();
+      const idx = [...document.querySelectorAll('[data-panel]')].find((f) => f.querySelector('[data-tab="rose"]'));
+      return { panel: idx?.dataset.panel, amber: d.root.children[1].children.at(-1).tabs };
+    });
+    must(rose.panel && rose.panel !== 'p-amber', `Rose is still in ${rose.panel}`);
+    must(rose.amber.join() === 'amber', `Amber's panel holds ${rose.amber}`);
+    const r = await rect(page, `[data-panel="${rose.panel}"]`);
+    const s2 = await rect(page, '[data-panel="p-sky"]');
+    must(Math.abs(r.y - s2.y) <= TOL && r.x > s2.x + s2.w, `Rose's panel ${fmt(r)} is not right of Sky ${fmt(s2)}`);
+    must(await page.evaluate(() => document.querySelector('[data-content="rose"]') === window.__rose), 'the content element was recreated');
+    must((await page.locator('[data-lifted]').count()) === 0, 'something is still dimmed');
+    must((await page.locator('.fx-card, .fx-drop').count()) === 0, 'the card or outline stayed');
+    const bar = page.locator('.fx-bottombar');
+    await bar.getByRole('button', { name: 'Undo', exact: true }).tap();
+    await settled(page);
+    const undone = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    must(undone === 'amber,rose', `after Undo, Amber's tabs are ${undone}`);
+    must(await bar.getByRole('button', { name: 'Undo', exact: true }).isDisabled(), 'Undo is still enabled');
+    await bar.getByRole('button', { name: 'Redo', exact: true }).tap();
+    await settled(page);
+    const redone = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    must(redone === 'amber', `after Redo, Amber's tabs are ${redone}`);
+    await page.waitForTimeout(500); // the save is debounced
+    await page.reload({ waitUntil: 'networkidle' });
+    await settled(page);
+    const kept = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    must(kept === 'amber', `after a reload, Amber's tabs are ${kept}`);
+  });
+
+  await check('Arrange: drag a whole panel onto a tab strip merges the tabs', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const from = await centre(page, '[data-app="violet"]');
+    const strip = await rect(page, '[data-panel="p-sky"] .fx-tabbar');
+    await oneFinger(page, chromium, from, { x: strip.x + strip.w * 0.4, y: strip.y + strip.h / 2 }, 20);
+    await settled(page);
+    const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-sky"] .fx-tab')].map((t) => t.dataset.tab).join());
+    must(tabs === 'sky,violet', `Sky's strip holds ${tabs}`);
+    must((await page.locator('[data-panel="p-violet"]').count()) === 0, 'the moved panel is still there');
+    const f = await rect(page, '[data-panel="p-sky"]');
+    const vp = await rect(page, '.fx-viewport');
+    must(Math.abs(f.y + f.h - (vp.y + vp.h)) <= TOL, `the merged row should now reach the bottom (${fmt(f)}): Violet's row is gone`);
+  });
+
+  await check('Arrange: a drag released over nothing changes nothing', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const before = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
+    const a = await centre(page, '[data-tab="rose"]');
+    await oneFinger(page, chromium, a, { x: a.x, y: 30 }, 12); // the top bar: no target
+    await settled(page);
+    const after = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
+    must(before === after, 'the layout changed');
+    await page.waitForTimeout(300);
+    must((await page.locator('[data-lifted], .fx-card, .fx-drop').count()) === 0, 'the drag left something behind');
+  });
+
+  await check('Arrange: a divider drag moves the seam by the dragged amount', async (page) => {
+    await page.evaluate(() => window.__fractal.setArranging(true));
+    await settled(page);
+    const sky = await rect(page, '[data-panel="p-sky"]');
+    const d = await centre(page, '[data-divider="mid:0"]');
+    await oneFinger(page, chromium, d, { x: d.x + 50, y: d.y }, 10);
+    await settled(page);
+    const after = await rect(page, '[data-panel="p-sky"]');
+    must(Math.abs(after.w - (sky.w + 50)) <= 2, `Sky went from ${sky.w.toFixed(0)} to ${after.w.toFixed(0)} wide, not +50`);
+    const e = await centre(page, '[data-divider="mid:0"]');
+    must(Math.abs(e.x - (d.x + 50)) <= 2, `the divider is at ${e.x.toFixed(0)}, not ${(d.x + 50).toFixed(0)}`);
+  });
+
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);
 }
 

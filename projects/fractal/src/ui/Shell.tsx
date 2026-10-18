@@ -5,6 +5,7 @@ import { appTitle } from '../core/nav.ts';
 import { hueOf } from '../core/kinds.ts';
 import { createWorkspace, type Surface, type WorkspaceHandle } from '../runtime/workspace.ts';
 import { attachInput } from '../runtime/input.ts';
+import { createDrag } from '../runtime/drag.ts';
 import { layoutSaver } from '../platform/storage.ts';
 import { Block, GroupBand } from '../apps/Blocks.tsx';
 import { TopBar } from './TopBar.tsx';
@@ -28,9 +29,11 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
     const save = layoutSaver(setError);
     const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save });
     window.__fractal = w;
+    const drag = createDrag({ ws: w, layerOf: appRef.current!, reducedMotion: () => matchMedia('(prefers-reduced-motion: reduce)').matches });
     const detach = attachInput({
       app: appRef.current!,
       ws: w,
+      drag,
       onEdge(side, amount) {
         const e = edgeRefs[side].current;
         if (e) e.style.setProperty('--fx-edge', String(amount));

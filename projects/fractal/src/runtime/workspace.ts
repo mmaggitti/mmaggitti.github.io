@@ -22,6 +22,10 @@ import { snap, type Candidate } from '../core/snap.ts';
 import { canGo } from '../core/history.ts';
 import { goHistory, selectTab, setFrame, toggleOverview } from '../core/ops.ts';
 import { apply, between, fit, invert, lerpRect, step, IDENTITY, type Sim, type SpringState } from '../core/motion.ts';
+import { TAP_MIN } from '../core/metrics.ts';
+import type { Geometry } from '../core/targets.ts';
+import { equalize, resizePair } from '../core/resize.ts';
+import { EMPTY_UNDO, recordUndo, redo, undo, type UndoStack } from '../core/undo.ts';
 import { el, place, setAttr, setStyle } from './dom.ts';
 import { AppController, Store } from './controller.ts';
 
@@ -41,6 +45,9 @@ export interface ViewState {
   canBack: boolean;
   canForward: boolean;
   settled: boolean;
+  arranging: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export interface WorkspaceOptions {
@@ -104,6 +111,25 @@ export interface WorkspaceHandle {
   };
   /** One level in, toward a point (client coordinates). */
   stepIn(x: number, y: number): void;
+  /** Arrange mode: content takes no input; tabs, panels and dividers can be dragged. */
+  readonly arranging: boolean;
+  setArranging(on: boolean): void;
+  /** No transition, gesture or resize under way: the rest layout is what's on screen. */
+  readonly settled: boolean;
+  /** Commit an arrangement change (a move, an add, a close), animated, as one undo step. Returns
+   * false when there was nothing to do. */
+  apply(next: LayoutDoc | null): boolean;
+  undo(): void;
+  redo(): void;
+  /** What drop targets are computed from (workspace coordinates, at rest). */
+  geometry(): Geometry;
+  /** Dragging a divider ("split:seam"): a live preview, committed or dropped at the end. */
+  resize: {
+    start(key: string): void;
+    move(dx: number, dy: number): void;
+    end(commit: boolean): void;
+  };
+  equalize(key: string): void;
   destroy(): void;
 }
 
@@ -121,6 +147,9 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   const panels = new Map<string, PanelEl>();
   const apps = new Map<string, AppEl>();
   const surfaces = new Store<readonly Surface[]>([]);
+  let arranging = false;
+  let undoStack: UndoStack = EMPTY_UNDO;
+  const dividers = new Map<string, HTMLElement>();
   const view = new Store<ViewState>(viewState(true));
   let destroyed = false;
 
@@ -346,8 +375,41 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         a.controller.update({ visible: false, interactive: false });
       }
     }
+    drawDividers(rest);
     setAttr(host, 'data-fx-settled', '');
     view.set(viewState(true));
+  }
+
+  /** In Arrange, a 44px handle on the middle of every seam whose split can be resized here: at true
+   * size, and not sized by the framing (the pager and the splits above the frame). */
+  function drawDividers(l: RestLayout | null) {
+    const live = new Set<string>();
+    if (l && arranging) {
+      for (const sp of l.splits.values()) {
+        if (sp.pinned || sp.s < 0.999) continue;
+        sp.seams.forEach((sm, i) => {
+          const key = `${sp.id}:${i}`;
+          live.add(key);
+          let e = dividers.get(key);
+          if (!e) {
+            e = el('div', 'fx-divider', { 'data-divider': key, 'data-axis': sp.axis, role: 'separator', 'aria-label': 'Resize' });
+            e.append(el('span', 'fx-divider-pill'));
+            layer.append(e);
+            dividers.set(key, e);
+          }
+          const len = Math.min(5 * m.remPx, sp.axis === 'x' ? sm.h : sm.w);
+          const cx = sm.x + sm.w / 2;
+          const cy = sm.y + sm.h / 2;
+          const r = sp.axis === 'x' ? { x: cx - TAP_MIN / 2, y: cy - len / 2, w: TAP_MIN, h: len } : { x: cx - len / 2, y: cy - TAP_MIN / 2, w: len, h: TAP_MIN };
+          place(e, r, 1, true);
+          setStyle(e, 'z-index', String(1000 + sp.depth));
+        });
+      }
+    }
+    for (const [key, e] of dividers) if (!live.has(key)) {
+      e.remove();
+      dividers.delete(key);
+    }
   }
 
   function viewState(settled: boolean): ViewState {
@@ -362,6 +424,9 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       canBack: canGo(doc.nav, -1),
       canForward: canGo(doc.nav, 1),
       settled,
+      arranging,
+      canUndo: undoStack.past.length > 0,
+      canRedo: undoStack.future.length > 0,
     };
   }
 
@@ -405,6 +470,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     for (const [key, it] of to) from.set(key, fromItems.get(key) ?? it);
     for (const [key, it] of fromItems) if (!to.has(key)) from.set(key, it);
     sizeContent(rest);
+    drawDividers(null);
     setAttr(host, 'data-fx-settled', null);
     view.set(viewState(false));
     // Start from what's on screen now, at an identity camera.
@@ -602,6 +668,12 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     return null;
   }
 
+  let resizing: { split: string; seam: number; base: LayoutDoc; baseRest: RestLayout; next: LayoutDoc } | null = null;
+  const splitKey = (key: string): [string, string] => {
+    const at = key.lastIndexOf(':');
+    return [key.slice(0, at), key.slice(at + 1)];
+  };
+
   // ------------------------------------------------------------------ handle
   const handle: WorkspaceHandle = {
     element: host,
@@ -644,6 +716,97 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       get active() {
         return gesture !== null;
       },
+    },
+    get arranging() {
+      return arranging;
+    },
+    setArranging(on) {
+      if (on === arranging) return;
+      if (!on) handle.resize.end(false);
+      arranging = on;
+      setAttr(host, 'data-arranging', on ? '' : null);
+      if (!anim && !gesture) drawDividers(rest);
+      view.set(viewState(!anim && !gesture));
+    },
+    get settled() {
+      return !anim && !gesture && !resizing;
+    },
+    apply(next) {
+      if (!next || next === doc) return false;
+      undoStack = recordUndo(undoStack, doc);
+      commit(next);
+      return true;
+    },
+    undo() {
+      const r = undo(undoStack, doc);
+      if (!r) return;
+      undoStack = r.stack;
+      commit(r.doc);
+    },
+    redo() {
+      const r = redo(undoStack, doc);
+      if (!r) return;
+      undoStack = r.stack;
+      commit(r.doc);
+    },
+    geometry() {
+      return {
+        rest,
+        doc,
+        idx,
+        remPx: m.remPx,
+        tabEdges(panel) {
+          const node = idx.nodes.get(panel);
+          const p = panels.get(panel);
+          if (node?.kind !== 'panel' || !p) return null;
+          const origin = host.getBoundingClientRect();
+          const edges: number[] = [];
+          for (const app of node.tabs) {
+            const b = p.tabs.get(app)?.getBoundingClientRect();
+            if (!b) return null;
+            edges.push(b.left - origin.left);
+            if (app === node.tabs.at(-1)) edges.push(b.right - origin.left);
+          }
+          return edges;
+        },
+      };
+    },
+    resize: {
+      start(key) {
+        const [split, seamText] = splitKey(key);
+        if (!idx.nodes.has(split)) return;
+        if (anim) {
+          cancelAnimationFrame(raf);
+          anim = null;
+          settle();
+        }
+        resizing = { split, seam: Number(seamText), base: doc, baseRest: rest, next: doc };
+        setAttr(host, 'data-fx-settled', null);
+      },
+      move(dx, dy) {
+        if (!resizing) return;
+        const sp = resizing.baseRest.splits.get(resizing.split);
+        if (!sp) return;
+        resizing.next = resizePair(resizing.base, idx, resizing.baseRest, m, resizing.split, resizing.seam, sp.axis === 'x' ? dx : dy);
+        rest = solve(resizing.next, resizing.next.nav.frame, viewport, m, indexDoc(resizing.next));
+        sizeContent(rest);
+        drawItems(itemsOf(rest), true);
+        drawDividers(rest);
+      },
+      end(commitIt) {
+        if (!resizing) return;
+        const r = resizing;
+        resizing = null;
+        if (commitIt && r.next !== r.base) handle.apply(r.next);
+        else {
+          rest = solve(doc, doc.nav.frame, viewport, m, idx);
+          settle();
+        }
+      },
+    },
+    equalize(key) {
+      const [split, seam] = splitKey(key);
+      handle.apply(equalize(doc, idx, split, Number(seam)));
     },
     stepIn(x, y) {
       const p = local(x, y);

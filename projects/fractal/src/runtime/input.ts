@@ -12,28 +12,45 @@
 
 import { GestureMachine, type Intent, type Region } from '../core/gestures.ts';
 import type { WorkspaceHandle } from './workspace.ts';
+import type { DragController } from './drag.ts';
 
 export interface InputOptions {
   app: HTMLElement;
   ws: WorkspaceHandle;
+  /** Arrange mode's drag controller. */
+  drag?: DragController;
   /** Edge-swipe feedback: how far (0–1) a history swipe has gone, per side. */
   onEdge?(side: 'left' | 'right', amount: number): void;
 }
 
-export function attachInput({ app, ws, onEdge }: InputOptions): () => void {
+export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void {
   const machine = new GestureMachine();
   const ac = new AbortController();
   const on = <K extends keyof WindowEventMap>(target: EventTarget, type: K | string, fn: (e: any) => void, o: AddEventListenerOptions = {}) =>
     target.addEventListener(type, fn, { ...o, signal: ac.signal });
   const touchIds = new Set<number>();
 
-  const regionOf = (t: EventTarget | null): { region: Region; target: string } => {
+  const regionOf = (t: EventTarget | null): { region: Region; target: string; panel?: string } => {
     const e = t instanceof Element ? t : null;
     const edge = e?.closest('.fx-edge') as HTMLElement | null;
     if (edge) return { region: edge.dataset.side === 'right' ? 'edge-right' : 'edge-left', target: '' };
     if (e?.closest('.fx-zoom')) return { region: 'chrome', target: '' };
+    const panelOfEl = (x: Element | null | undefined) => (x?.closest('[data-panel]') as HTMLElement | null)?.dataset.panel ?? '';
+    if (ws.arranging) {
+      const divider = e?.closest('.fx-divider') as HTMLElement | null;
+      if (divider) return { region: 'divider', target: divider.dataset.divider ?? '' };
+      const tab = e?.closest('.fx-tab') as HTMLElement | null;
+      if (tab) return { region: 'tab', target: tab.dataset.tab ?? '', panel: panelOfEl(tab) };
+      const surface = e?.closest('.fx-surface') as HTMLElement | null;
+      if (surface) {
+        const panel = ws.layout().apps.get(surface.dataset.app ?? '')?.panel;
+        if (panel) return { region: 'panel', target: panel };
+      }
+      const frame = e?.closest('.fx-frame') as HTMLElement | null;
+      if (frame && !e?.closest('.fx-tabbar')) return { region: 'panel', target: frame.dataset.panel ?? '' };
+    }
     const bar = e?.closest('.fx-tabbar');
-    if (bar) return { region: 'tabbar', target: (bar.closest('[data-panel]') as HTMLElement | null)?.dataset.panel ?? '' };
+    if (bar) return { region: 'tabbar', target: panelOfEl(bar) };
     if (e?.closest('.fx-content')) return { region: 'content', target: '' };
     if (e?.closest('.fx-topbar')) return { region: 'topbar', target: '' };
     return { region: 'chrome', target: '' };
@@ -64,6 +81,34 @@ export function attachInput({ app, ws, onEdge }: InputOptions): () => void {
           onEdge?.(it.side, 0);
           if (it.commit) ws.history(it.side === 'left' ? -1 : 1);
           break;
+        case 'drag-start':
+          drag?.start(it.region, it.target, it.x, it.y);
+          break;
+        case 'drag-move':
+          drag?.move(it.x, it.y);
+          break;
+        case 'drag-end':
+          drag?.end(it.x, it.y);
+          break;
+        case 'drag-cancel':
+          drag?.cancel();
+          break;
+        case 'resize-start':
+          ws.resize.start(it.target);
+          break;
+        case 'resize-move':
+          ws.resize.move(it.dx, it.dy);
+          break;
+        case 'resize-end':
+          ws.resize.move(it.dx, it.dy);
+          ws.resize.end(true);
+          break;
+        case 'resize-cancel':
+          ws.resize.end(false);
+          break;
+        case 'equalize':
+          ws.equalize(it.target);
+          break;
       }
     }
   };
@@ -73,8 +118,11 @@ export function attachInput({ app, ws, onEdge }: InputOptions): () => void {
   on(app, 'pointerdown', (e: PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     machine.width = app.clientWidth;
-    const { region, target } = regionOf(e.target);
+    machine.arrange = ws.arranging;
+    const { region, target, panel } = regionOf(e.target);
     if (e.pointerType === 'touch') touchIds.add(e.pointerId);
+    // Arrange: no text selection or native drag from a press that may become a drag.
+    if (ws.arranging && (region === 'tab' || region === 'panel' || region === 'divider') && e.pointerType === 'mouse') e.preventDefault();
     if (region === 'edge-left' || region === 'edge-right' || region === 'topbar') {
       try {
         (e.target as Element).setPointerCapture(e.pointerId);
@@ -82,7 +130,7 @@ export function attachInput({ app, ws, onEdge }: InputOptions): () => void {
         /* synthetic pointers (tests) can't be captured */
       }
     }
-    act(machine.down(p(e), region, target));
+    act(machine.down(p(e), region, target, panel));
   }, { capture: true });
   on(window, 'pointermove', (e: PointerEvent) => act(machine.move(p(e))), { capture: true });
   on(window, 'pointerup', (e: PointerEvent) => {
@@ -149,8 +197,14 @@ export function attachInput({ app, ws, onEdge }: InputOptions): () => void {
     }, 180);
   }, { passive: false });
 
+  on(window, 'blur', () => act(machine.cancelLift()));
+
   on(window, 'keydown', (e: KeyboardEvent) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (machine.dragging) {
+      act(machine.cancelLift());
+      return;
+    }
     const t = e.target as HTMLElement | null;
     if (t?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"]')) return;
     ws.stepOut();

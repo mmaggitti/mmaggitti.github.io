@@ -300,6 +300,111 @@ body {
   background: color-mix(in srgb, var(--bg) 80%, var(--line));
 }
 
+/* ---------------------------------------------------------------- Arrange mode */
+/* Content takes no input: a press on a panel's body drags the panel, a press on a tab drags the tab. */
+.fx-viewport[data-arranging] .fx-content {
+  pointer-events: none;
+}
+.fx-viewport[data-arranging] .fx-surface {
+  cursor: grab;
+}
+.fx-viewport[data-arranging] .fx-frame {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.fx-viewport[data-arranging] .fx-tabs {
+  overflow-x: hidden;
+}
+.fx-viewport[data-arranging] .fx-tab {
+  touch-action: none;
+  cursor: grab;
+}
+[data-lifted] {
+  opacity: 0.35;
+}
+.fx-divider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  transform-origin: 0 0;
+  touch-action: none;
+  cursor: col-resize;
+}
+.fx-divider[data-axis='y'] {
+  cursor: row-resize;
+}
+.fx-divider-pill {
+  width: 0.375rem;
+  height: 3rem;
+  border-radius: 0.1875rem;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.fx-divider[data-axis='y'] .fx-divider-pill {
+  width: 3rem;
+  height: 0.375rem;
+}
+.fx-viewport:not([data-fx-settled]) .fx-divider {
+  visibility: hidden;
+}
+.fx-drop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2000;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  pointer-events: none;
+}
+.fx-drop[data-style='caret'],
+.fx-drop[data-style='bar'] {
+  border: 0;
+  background: var(--accent);
+}
+.fx-card {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 14rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), 0 0.5rem 1.5rem rgb(0 0 0 / 0.25);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  pointer-events: none;
+}
+.fx-card-swatch {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+}
+.fx-card-swatch[data-hue] {
+  background: oklch(0.72 0.12 var(--hue));
+}
+.fx-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-card-more {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 /* ---------------------------------------------------------------- placeholder blocks */
 /* A block is one OKLCH hue (--hue, from its params) at a fixed lightness, so every colour reads the
    same weight; dark mode drops the lightness. A tile of a block takes the same fill. */

@@ -45,4 +45,20 @@ shows whether the page stays put.
 | 20 | Edge swipes | Frame Group B, then Teal; swipe in from the left edge: back to Group B; from the right edge: forward again. The chevron follows your finger | ☐ |
 | 21 | Edges and content | Near the left edge of a framed block, a tab tap still works (only a sideways swipe from the very edge is history) | ☐ |
 
+## P2 — Arrange
+
+Arrange is in the bottom bar. While arranging the bar reads Back · Undo · Redo · Done.
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 22 | Arrange on and off | Tap Arrange: panels get an accent edge, dividers show a pill, and tapping a block does nothing. Done: everything back to normal | ☐ |
+| 23 | Drag a tab | Press Rose's tab and drag to the right third of Sky: a card follows just above your finger; after a moment the outline shows Sky's right half. Let go: Rose glides into its own panel there | ☐ |
+| 24 | Drag a panel | Press a block's colour and drag onto another panel's tab strip: a bar shows where the tab goes. Let go: the tabs merge | ☐ |
+| 25 | No flicker | Drag slowly across several panels: the outline only changes once you pause, and never flickers | ☐ |
+| 26 | Cancel | Drag a tab and let go over the top bar: the card flies back and nothing changes | ☐ |
+| 27 | Dividers | Drag the pill between Sky and Amber: the seam follows your finger and stops at a minimum width. Double-tap the pill: the two even out | ☐ |
+| 28 | Undo and Redo | After a few moves, Undo steps back through them and Redo forward; a reload keeps the result | ☐ |
+| 29 | Two fingers still navigate | In Arrange, pinch and two-finger pan work as before | ☐ |
+| 30 | No iOS interference | No text selection, magnifier, callout or page scroll appears during a press or a drag | ☐ |
+
 Signed: ______  Date: ______  Device / iOS: ______
