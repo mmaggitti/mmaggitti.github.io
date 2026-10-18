@@ -49,6 +49,9 @@ export interface SplitOut {
   depth: number;
   /** Children turned into viewport-sized pages (the framed node's parent). */
   pager: boolean;
+  /** Sized by the framing (the pager, or a split above the frame stretched by weights): its
+   * dividers can't be dragged at this framing. */
+  pinned: boolean;
   /** The gaps between children, in order. */
   seams: Box[];
 }
@@ -94,41 +97,7 @@ export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m:
   // A panel on the framed path shows the tab that leads to the frame, whatever it has selected.
   const forced = new Map<string, string>();
   const selectedOf = (panel: Panel) => forced.get(panel.id) ?? panel.selected;
-  const hostOf = (panel: Panel) => {
-    const id = selectedOf(panel);
-    const app = doc.apps[id];
-    return app && kindOf(app.kind).hosts ? id : null;
-  };
-
-  // ---- minimum sizes at true scale (chrome only; content scales instead) ----
-  const minCache = new Map<string, Size>();
-  const minSize = (node: Node): Size => {
-    const hit = minCache.get(node.id);
-    if (hit) return hit;
-    let size: Size;
-    if (node.kind === 'panel') {
-      const host = hostOf(node);
-      const dock = host ? doc.apps[host].dock : null;
-      if (host && dock) {
-        const inner = minSize(dock);
-        size = {
-          w: Math.max(m.panelMin.w, inner.w + 2 * m.gap),
-          h: m.tabbar + band(host) + inner.h + 2 * m.gap,
-        };
-      } else if (host) {
-        size = { w: m.panelMin.w, h: m.tabbar + band(host) + 3 * m.remPx };
-      } else size = { ...m.panelMin };
-    } else {
-      const sizes = node.children.map(minSize);
-      const gaps = (node.children.length - 1) * m.gap;
-      size =
-        node.axis === 'x'
-          ? { w: sizes.reduce((a, s) => a + s.w, 0) + gaps, h: Math.max(...sizes.map((s) => s.h)) }
-          : { w: Math.max(...sizes.map((s) => s.w)), h: sizes.reduce((a, s) => a + s.h, 0) + gaps };
-    }
-    minCache.set(node.id, size);
-    return size;
-  };
+  const minSize = minSizer(doc, m, selectedOf);
 
   // ---- pin the path from the framed node up to the root ----
   // pinned: node id → its box at true scale. Splits on the path record how their children go.
@@ -232,7 +201,7 @@ export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m:
         at += gap;
       }
     });
-    out.splits.set(node.id, { id: node.id, box, axis: node.axis, s: scale, depth, pager, seams });
+    out.splits.set(node.id, { id: node.id, box, axis: node.axis, s: scale, depth, pager, pinned: pager || weighted, seams });
   };
 
   const placePanel = (panel: Panel, frameBox: Box, s: number, depth: number) => {
@@ -272,6 +241,46 @@ export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m:
 
   place(doc.root, pinned.get(doc.root.id) ?? rootBox, 1, 0);
   return out;
+}
+
+/** Minimum sizes at true scale: chrome only, since content scales instead. `selectedOf` says which
+ * tab a panel shows (the solver forces the tabs on the framed path). Memoized per call. */
+export function minSizer(doc: LayoutDoc, m: Metrics, selectedOf: (panel: Panel) => string = (p) => p.selected): (node: Node) => Size {
+  const band = (app: string) => kindOf(doc.apps[app]?.kind ?? '').bandRem * m.remPx;
+  const hostOf = (panel: Panel) => {
+    const id = selectedOf(panel);
+    const app = doc.apps[id];
+    return app && kindOf(app.kind).hosts ? id : null;
+  };
+  const cache = new Map<string, Size>();
+  const minSize = (node: Node): Size => {
+    const hit = cache.get(node.id);
+    if (hit) return hit;
+    let size: Size;
+    if (node.kind === 'panel') {
+      const host = hostOf(node);
+      const dock = host ? doc.apps[host].dock : null;
+      if (host && dock) {
+        const inner = minSize(dock);
+        size = {
+          w: Math.max(m.panelMin.w, inner.w + 2 * m.gap),
+          h: m.tabbar + band(host) + inner.h + 2 * m.gap,
+        };
+      } else if (host) {
+        size = { w: m.panelMin.w, h: m.tabbar + band(host) + 3 * m.remPx };
+      } else size = { ...m.panelMin };
+    } else {
+      const sizes = node.children.map(minSize);
+      const gaps = (node.children.length - 1) * m.gap;
+      size =
+        node.axis === 'x'
+          ? { w: sizes.reduce((a, s) => a + s.w, 0) + gaps, h: Math.max(...sizes.map((s) => s.h)) }
+          : { w: Math.max(...sizes.map((s) => s.w)), h: sizes.reduce((a, s) => a + s.h, 0) + gaps };
+    }
+    cache.set(node.id, size);
+    return size;
+  };
+  return minSize;
 }
 
 /** Share `total` by weight, but give no child less than its minimum: children that would fall short

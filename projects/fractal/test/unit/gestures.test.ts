@@ -142,3 +142,84 @@ test('SNAP-04 every zoom-in candidate contains the focal point', () => {
   ];
   assert.equal(snap(c, { scale: 2, focal: { x: 300, y: 400 }, view: box(190, 200, 220, 400), vx: 0, vy: 0 }), 'right');
 });
+
+// ---------------------------------------------------------------- Arrange
+
+test('GEST-ARR-01 in Arrange, a tab lifts past the slop; moves follow; release drops', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  assert.deepEqual(g.down(pt(1, 100, 100, 0), 'tab', 'rose', 'p-amber'), []);
+  assert.deepEqual(g.move(pt(1, 105, 100, 10)), [], 'inside the slop');
+  const lift = g.move(pt(1, 120, 100, 20));
+  assert.deepEqual(types(lift), ['drag-start', 'drag-move']);
+  assert.ok(lift[0].type === 'drag-start' && lift[0].target === 'rose' && lift[0].region === 'tab' && lift[0].x0 === 100);
+  assert.equal(g.dragging, true);
+  assert.deepEqual(g.move(pt(1, 200, 150, 30)), [{ type: 'drag-move', x: 200, y: 150 }]);
+  assert.deepEqual(g.up(pt(1, 210, 150, 40)), [{ type: 'drag-end', x: 210, y: 150 }]);
+  assert.equal(g.dragging, false);
+});
+
+test('GEST-ARR-02 outside Arrange the same press never lifts', () => {
+  const g = new GestureMachine();
+  g.down(pt(1, 100, 100, 0), 'panel', 'p-sky');
+  assert.deepEqual(g.move(pt(1, 200, 100, 20)), []);
+  assert.deepEqual(g.up(pt(1, 200, 100, 30)), []);
+});
+
+test('GEST-ARR-03 a second finger before the lift is a camera gesture; after it, it is ignored', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  g.down(pt(1, 100, 100, 0), 'panel', 'p-sky');
+  assert.deepEqual(types(g.down(pt(2, 200, 100, 5), 'panel', 'p-sky')), ['camera-start']);
+  assert.deepEqual(types(g.move(pt(1, 60, 100, 20))), ['camera-move']);
+  g.up(pt(1, 60, 100, 30));
+  g.up(pt(2, 200, 100, 30));
+  assert.equal(g.dragging, false);
+
+  const h = new GestureMachine();
+  h.arrange = true;
+  h.down(pt(1, 100, 100, 0), 'panel', 'p-sky');
+  h.move(pt(1, 130, 100, 10));
+  assert.deepEqual(h.down(pt(2, 300, 300, 20), 'panel', 'p-sky'), []);
+  assert.deepEqual(h.move(pt(2, 350, 300, 30)), []);
+  assert.deepEqual(h.up(pt(2, 350, 300, 40)), []);
+  assert.equal(h.active, false);
+  assert.deepEqual(types(h.up(pt(1, 140, 100, 50))), ['drag-end']);
+});
+
+test('GEST-ARR-04 a divider resizes by its offset; a double-tap evens it', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  g.down(pt(1, 100, 100, 0), 'divider', 'mid:0');
+  assert.deepEqual(types(g.move(pt(1, 130, 100, 10))), ['resize-start', 'resize-move']);
+  assert.deepEqual(g.up(pt(1, 140, 102, 20)), [{ type: 'resize-end', dx: 40, dy: 2 }]);
+  g.down(pt(2, 100, 100, 500), 'divider', 'mid:0');
+  g.up(pt(2, 100, 100, 520));
+  g.down(pt(3, 102, 100, 600), 'divider', 'mid:0');
+  assert.deepEqual(g.up(pt(3, 102, 100, 620)), [{ type: 'equalize', target: 'mid:0' }]);
+});
+
+test('GEST-ARR-05 a cancelled pointer or cancelLift abandons the drag', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  g.down(pt(1, 100, 100, 0), 'tab', 'sky', 'p-sky');
+  g.move(pt(1, 140, 100, 10));
+  assert.deepEqual(g.cancel(1), [{ type: 'drag-cancel' }]);
+  assert.equal(g.dragging, false);
+  g.down(pt(2, 100, 100, 100), 'tab', 'sky', 'p-sky');
+  g.move(pt(2, 140, 100, 110));
+  assert.deepEqual(g.cancelLift(), [{ type: 'drag-cancel' }]);
+  assert.deepEqual(g.move(pt(2, 160, 100, 120)), [], 'the finger still down does nothing more');
+  assert.deepEqual(g.up(pt(2, 160, 100, 130)), []);
+});
+
+test('GEST-ARR-06 a double-tap on a tab frames its panel', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  g.down(pt(1, 100, 10, 0), 'tab', 'rose', 'p-amber');
+  g.up(pt(1, 100, 10, 40));
+  g.down(pt(2, 101, 10, 150), 'tab', 'amber', 'p-amber');
+  const out = g.up(pt(2, 101, 10, 190));
+  assert.deepEqual(types(out), ['double-tap']);
+  assert.equal(out[0].type === 'double-tap' && out[0].target, 'p-amber');
+});
