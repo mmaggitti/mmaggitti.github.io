@@ -515,6 +515,55 @@ body {
   content: 'Drop blocks here';
 }
 
+/* ---------------------------------------------------------------- looks (prototypes) */
+/* Mosaic: tiles meet edge to edge across 1px seams and nothing is rounded. A tile's caption sits on
+   a strip of its own colour, so the name reads as inside the tile; a group's edge is a bolder line. */
+.fx-viewport[data-look='mosaic'] {
+  --radius: 0;
+  background: var(--line);
+}
+.fx-viewport[data-look='mosaic'] .fx-frame::before {
+  inset: 0;
+}
+.fx-viewport[data-look='mosaic'] .fx-frame[data-hue] {
+  --fx-body: oklch(0.86 0.09 var(--hue));
+}
+.fx-viewport[data-look='mosaic'] .fx-frame[data-host] {
+  --fx-body: color-mix(in srgb, var(--text) 6%, var(--bg));
+}
+.fx-viewport[data-look='mosaic'] .fx-frame[data-host]::before {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 35%, transparent);
+}
+.fx-viewport[data-look='mosaic'] .fx-caption[data-hue] .fx-tab {
+  color: oklch(0.32 0.08 var(--hue));
+}
+@media (prefers-color-scheme: dark) {
+  .fx-viewport[data-look='mosaic'] .fx-frame[data-hue] {
+    --fx-body: oklch(0.42 0.09 var(--hue));
+  }
+  .fx-viewport[data-look='mosaic'] .fx-caption[data-hue] .fx-tab {
+    color: oklch(0.94 0.03 var(--hue));
+  }
+}
+/* Layered: every tile and group is a card raised off the one below; groups are white cards, and
+   shadows deepen with each level, so zooming in reads as lifting onto the next card. */
+.fx-viewport[data-look='layered'] .fx-frame[data-host] {
+  --fx-body: var(--surface);
+}
+.fx-viewport[data-look='layered'] .fx-frame::before {
+  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.06), 0 0.25rem 0.75rem rgb(0 0 0 / 0.08);
+}
+.fx-viewport[data-look='layered'] .fx-frame[data-depth='1']::before {
+  box-shadow: 0 0.125rem 0.25rem rgb(0 0 0 / 0.08), 0 0.5rem 1.25rem rgb(0 0 0 / 0.12);
+}
+.fx-viewport[data-look='layered'] .fx-frame[data-depth='2']::before,
+.fx-viewport[data-look='layered'] .fx-frame[data-depth='3']::before {
+  box-shadow: 0 0.1875rem 0.375rem rgb(0 0 0 / 0.1), 0 0.75rem 1.75rem rgb(0 0 0 / 0.16);
+}
+.fx-looks {
+  margin-top: var(--space-1);
+}
+
 /* ---------------------------------------------------------------- placeholder blocks */
 /* A block is one OKLCH hue (--hue, from its params) at a fixed lightness, so every colour reads the
    same weight; dark mode drops the lightness. A block's tile (too small to show it) takes the same

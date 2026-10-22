@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { WorkspaceHandle } from '../runtime/workspace.ts';
+import { LOOKS, type Look } from '../core/metrics.ts';
+import { saveLook } from '../platform/storage.ts';
+
+const LOOK_NAMES: Record<Look, string> = { bento: 'Bento', mosaic: 'Mosaic', layered: 'Layered' };
 
 /** The one piece of global chrome: a small glass pill floating in the thumb zone. ‹ goes up a level;
  * the name says where you are (dots: which page); a sideways swipe on it flips pages (input.ts); a
@@ -88,6 +92,22 @@ export function Capsule({ ws }: { ws: WorkspaceHandle }) {
           <button type="button" className="ds-btn" onClick={run(() => ws.setArranging(true))}>
             Arrange
           </button>
+          {/* Prototype looks, to compare on the phone; the choice stays on this device. */}
+          <div className="ds-seg fx-looks" role="group" aria-label="Style">
+            {LOOKS.map((l) => (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={v.look === l}
+                onClick={() => {
+                  ws.setLook(l);
+                  saveLook(l);
+                }}
+              >
+                {LOOK_NAMES[l]}
+              </button>
+            ))}
+          </div>
           <button type="button" className="ds-btn" onClick={() => setSheet(false)}>
             Close
           </button>

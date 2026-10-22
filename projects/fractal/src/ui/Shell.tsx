@@ -5,7 +5,7 @@ import { hueOf } from '../core/kinds.ts';
 import { createWorkspace, type Surface, type WorkspaceHandle } from '../runtime/workspace.ts';
 import { attachInput } from '../runtime/input.ts';
 import { createDrag } from '../runtime/drag.ts';
-import { layoutSaver } from '../platform/storage.ts';
+import { layoutSaver, loadLook } from '../platform/storage.ts';
 import { Block } from '../apps/Blocks.tsx';
 import { PanelMenu } from './PanelMenu.tsx';
 import { addBlock } from '../core/arrange.ts';
@@ -28,7 +28,7 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
 
   useEffect(() => {
     const save = layoutSaver(setError);
-    const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save, onMenu: setMenu });
+    const w = createWorkspace({ host: viewportRef.current!, doc: initial, onChange: save, onMenu: setMenu, look: loadLook() });
     window.__fractal = w;
     const drag = createDrag({ ws: w, layerOf: appRef.current!, reducedMotion: () => matchMedia('(prefers-reduced-motion: reduce)').matches });
     const detach = attachInput({

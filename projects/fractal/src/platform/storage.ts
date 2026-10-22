@@ -5,9 +5,29 @@
 // hidden or killed (Draw found WebKit drops IndexedDB writes started during unload).
 
 import type { LayoutDoc } from '../core/types.ts';
+import { LOOKS, type Look } from '../core/metrics.ts';
 import { sanitize } from '../core/sanitize.ts';
 
 const LAYOUT = 'fractal:layout';
+const LOOK = 'fractal:look';
+
+/** The look chosen on this device (Bento when none, or when what's stored isn't one). */
+export function loadLook(): Look {
+  try {
+    const v = localStorage.getItem(LOOK);
+    return (LOOKS as readonly string[]).includes(v ?? '') ? (v as Look) : 'bento';
+  } catch {
+    return 'bento';
+  }
+}
+
+export function saveLook(look: Look): void {
+  try {
+    localStorage.setItem(LOOK, look);
+  } catch {
+    // Not saved: the look still applies for this session.
+  }
+}
 const DELAY = 300;
 
 export function loadLayout(): LayoutDoc | null {

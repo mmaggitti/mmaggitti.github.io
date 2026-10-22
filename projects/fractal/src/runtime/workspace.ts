@@ -12,7 +12,7 @@
 // Ideas from Trellis's runtime/workspace.ts (flat layer, placeSurface, settle); no code copied.
 
 import type { LayoutDoc, Rect } from '../core/types.ts';
-import { metrics, type Metrics } from '../core/metrics.ts';
+import { metrics, type Look, type Metrics } from '../core/metrics.ts';
 import { solve, type RestLayout } from '../core/layout.ts';
 import { indexDoc, type TreeIndex } from '../core/tree.ts';
 import { hueOf, kindOf } from '../core/kinds.ts';
@@ -53,6 +53,7 @@ export interface ViewState {
   canRedo: boolean;
   /** Nothing in the workspace at all. */
   empty: boolean;
+  look: Look;
 }
 
 export interface WorkspaceOptions {
@@ -65,6 +66,8 @@ export interface WorkspaceOptions {
   reducedMotion?(): boolean;
   /** Arrange mode's ⋯ button on a panel. */
   onMenu?(panel: string): void;
+  /** The look to start in (default Bento). */
+  look?: Look;
 }
 
 interface PanelEl {
@@ -145,6 +148,8 @@ export interface WorkspaceHandle {
     end(commit: boolean): void;
   };
   equalize(key: string): void;
+  /** Switch the look: its metrics differ, so everything re-solves and glides there. */
+  setLook(look: Look): void;
   destroy(): void;
 }
 
@@ -156,7 +161,9 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
 
   let doc = opts.doc;
   let idx: TreeIndex = indexDoc(doc);
-  let m: Metrics = metrics(remPx());
+  let look: Look = opts.look ?? 'bento';
+  host.setAttribute('data-look', look);
+  let m: Metrics = metrics(remPx(), look);
   let viewport = { w: host.clientWidth, h: host.clientHeight };
   let arranging = false;
   const solveFor = (d: LayoutDoc, i: TreeIndex = indexDoc(d)) => solve(d, d.nav.frame, viewport, m, i, { arranging });
@@ -258,12 +265,17 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       });
       const sel = doc.apps[node.selected];
       setAttr(p.frame, 'data-host', sel && kindOf(sel.kind).hosts ? '' : null);
+      // The shown block's hue, for looks that colour a tile's whole frame (its caption included).
+      const hue = sel ? hueOf(sel.params) : null;
+      for (const e of [p.frame, p.caption]) {
+        setStyle(e, '--hue', hue === null ? '' : String(hue));
+        setAttr(e, 'data-hue', hue === null ? null : String(hue));
+      }
       p.more.textContent = `+${node.tabs.length - 1}`;
       p.tile.textContent = '';
       const name = el('span', 'fx-tile-name');
       name.textContent = appTitle(doc, node.selected);
       p.tile.append(name);
-      const hue = sel ? hueOf(sel.params) : null;
       setStyle(p.tile, '--hue', hue === null ? '' : String(hue));
       setAttr(p.tile, 'data-hue', hue === null ? null : String(hue));
     }
@@ -386,6 +398,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       pe.tier = tier;
       setAttr(pe.frame, 'data-tier', tier);
       setAttr(pe.frame, 'data-framed', rest.frame === p.id ? '' : null);
+      setAttr(pe.frame, 'data-depth', String(Math.min(p.depth, 3)));
       // Captions drawn too small to read go; the tile then names itself.
       const named = p.caption.h > 0.5 && p.s >= CAPTION_MIN_SCALE;
       setAttr(pe.caption, 'data-hidden', named ? null : '');
@@ -478,6 +491,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       canUndo: undoStack.past.length > 0,
       canRedo: undoStack.future.length > 0,
       empty: doc.root === null,
+      look,
     };
   }
 
@@ -626,7 +640,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     const h = host.clientHeight;
     if (w === viewport.w && h === viewport.h && remPx() === m.remPx) return;
     viewport = { w, h };
-    m = metrics(remPx());
+    m = metrics(remPx(), look);
     rest = solveFor(doc, idx);
     cancelAnimationFrame(raf);
     anim = null;
@@ -854,6 +868,13 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
           settle();
         }
       },
+    },
+    setLook(next) {
+      if (next === look) return;
+      look = next;
+      m = metrics(remPx(), look);
+      host.setAttribute('data-look', look);
+      commit(doc, true, true);
     },
     equalize(key) {
       const [split, seam] = splitKey(key);

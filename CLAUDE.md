@@ -228,6 +228,20 @@ copy its code.** The approved plan (phases P0–P4) is the vault's
 - **App content is mounted once and never reparented**; moving, tabbing and zooming only position it.
 - **The apps are blank coloured blocks for now** (Mark, 2026-10-18): the workspace's own concepts
   come first. A block is kind `block` with an OKLCH `hue` in its params; groups are `container`s.
+- **Calm chrome** (Mark, 2026-10-22; the vault's `_audit/2026-10-22 revision-3 fractal.md`): no bars.
+  - A panel's name is a small **caption** in the gap above its tile (tabs as "Amber · Rose"), a
+    flat-layer element above the surfaces so its 44pt touch area can overhang its 1.5rem row. The
+    shown name zooms to its panel; another name switches tab. A framed one-tab panel shows none.
+  - Groups have no band: a group is a tinted well. Blocks are pure colour.
+  - One floating **capsule** (`src/ui/Capsule.tsx`) is the only global chrome: ‹, the place's name,
+    page dots; tap the name for the sheet (levels, Overview, history, pages, Arrange, Style). The
+    workspace runs to the bottom edge; apps keep clear of `--fx-bottom-inset`.
+  - **The overview is a map**: nothing on it is live, a tap zooms one level. Holding a name (or a
+    map tile) for 500 ms turns Arrange on with it picked up.
+  - **Looks** (`metrics(remPx, look)`, `[data-look]`): Bento (default), Mosaic and Layered,
+    prototypes Mark is comparing; chosen in the sheet, saved as `fractal:look`.
+  - e2e drags end with the finger at rest: lifted at speed, Chromium starts a fling and the next
+    tap (which stops it) fires no click.
 - **Installed as a Home Screen app** (manifest + apple-touch-icon). Its storage is separate from
   Safari's. After changing `public/icon.svg`, run `npm run icons` and commit the PNGs.
 - **Device checks:** `projects/fractal/DEVICE-CHECKS.md`, signed by Mark per phase.

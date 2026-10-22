@@ -17,11 +17,19 @@ export interface Metrics {
 /** The tap floor (ds.css --tap-min): 44 CSS px at every scale. */
 export const TAP_MIN = 44;
 
-export function metrics(remPx: number): Metrics {
+/** The looks Fractal can wear: Bento (rounded tiles, small gaps) is the default; Mosaic (tiles
+ * edge to edge, hairline seams) and Layered (raised cards, wider gaps) are prototypes to compare. */
+export type Look = 'bento' | 'mosaic' | 'layered';
+export const LOOKS: readonly Look[] = ['bento', 'mosaic', 'layered'];
+
+const GAP_REM: Record<Look, number> = { bento: 0.5, mosaic: 0, layered: 0.75 };
+
+export function metrics(remPx: number, look: Look = 'bento'): Metrics {
   const caption = 1.5 * remPx;
   return {
     remPx,
-    gap: 0.5 * remPx,
+    // Mosaic's seams are a 1px hairline at every scale.
+    gap: look === 'mosaic' ? 1 : GAP_REM[look] * remPx,
     caption,
     panelMin: { w: 7.5 * remPx, h: caption + 3 * remPx },
   };

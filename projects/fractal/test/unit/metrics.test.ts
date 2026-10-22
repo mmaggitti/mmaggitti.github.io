@@ -13,3 +13,11 @@ test('METRICS-02 panel minimums scale with rem', () => {
   assert.equal(m.gap, 6);
   assert.deepEqual(m.panelMin, { w: 90, h: 54 });
 });
+
+test('METRICS-03 each look has its gap: Bento 0.5rem, Mosaic a 1px hairline, Layered 0.75rem', () => {
+  assert.equal(metrics(12, 'bento').gap, 6);
+  assert.equal(metrics(12, 'mosaic').gap, 1);
+  assert.equal(metrics(16, 'mosaic').gap, 1);
+  assert.equal(metrics(12, 'layered').gap, 9);
+  assert.equal(metrics(12).gap, metrics(12, 'bento').gap, 'Bento is the default');
+});

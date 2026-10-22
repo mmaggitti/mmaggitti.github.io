@@ -73,6 +73,27 @@ test('CAPTION-02 in Arrange every panel shows its caption, the framed one includ
   for (const p of l.panels.values()) assert.equal(p.caption.h, 18 * p.s, p.id);
 });
 
+function blockShare(look: 'bento' | 'mosaic' | 'layered') {
+  const doc = defaultLayout();
+  const vp = { w: 440, h: 956 - 62 }; // the Home Screen app, under the status bar
+  const l = solve(doc, null, vp, metrics(12, look));
+  let area = 0;
+  for (const a of l.apps.values()) {
+    if (doc.apps[a.id].kind !== 'block') continue;
+    const s = a.surface;
+    area += Math.max(0, Math.min(vp.w, s.x + s.w) - Math.max(0, s.x)) * Math.max(0, Math.min(vp.h, s.y + s.h) - Math.max(0, s.y));
+  }
+  return area / (440 * 956);
+}
+
+test('BUDGET-02 every look keeps blocks over 70% of the overview; Mosaic gives them the most', () => {
+  const b = blockShare('bento');
+  const mo = blockShare('mosaic');
+  const la = blockShare('layered');
+  for (const [name, v] of [['bento', b], ['mosaic', mo], ['layered', la]] as const) assert.ok(v >= 0.7, `${name}: ${(100 * v).toFixed(0)}%`);
+  assert.ok(mo > b && b > la, `mosaic ${mo.toFixed(2)} > bento ${b.toFixed(2)} > layered ${la.toFixed(2)}`);
+});
+
 test('BUDGET-01 at the overview, blocks cover at least 75% of a phone screen (chrome stays out of the way)', () => {
   const doc = defaultLayout();
   const vp = { w: 440, h: 956 - 62 }; // the Home Screen app, under the status bar

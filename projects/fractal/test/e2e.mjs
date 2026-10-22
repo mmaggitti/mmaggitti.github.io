@@ -541,6 +541,34 @@ export default async function run({ browser, origin, engine }) {
     must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'the held name also zoomed');
   });
 
+  // ---------------------------------------------------------------- looks (C3)
+
+  await check('Style: each look lays out soundly, as specified, and is remembered', async (page) => {
+    const spec = { mosaic: { gap: 1, round: false }, layered: { gap: 9, round: true }, bento: { gap: 6, round: true } };
+    for (const [look, want] of Object.entries(spec)) {
+      const sheet = await openSheet(page);
+      await sheet.getByRole('group', { name: 'Style' }).getByRole('button', { name: look[0].toUpperCase() + look.slice(1), exact: true }).tap();
+      await settled(page);
+      await page.keyboard.press('Escape');
+      must((await page.locator(`.fx-viewport[data-look="${look}"]`).count()) === 1, `${look}: not applied`);
+      const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      must(sideways === 0, `${look}: the page scrolls sideways by ${sideways}px`);
+      const sky = await rect(page, '[data-panel="p-sky"]');
+      const amber = await rect(page, '[data-panel="p-amber"]');
+      const gap = amber.x - (sky.x + sky.w);
+      must(Math.abs(gap - want.gap) <= 0.6, `${look}: Sky and Amber are ${gap.toFixed(1)}px apart, not ${want.gap}`);
+      const radius = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('[data-app="sky"]')).borderTopLeftRadius));
+      must(want.round ? radius > 0 : radius === 0, `${look}: Sky's corner radius is ${radius}px`);
+      const shadow = await page.evaluate(() => getComputedStyle(document.querySelector('[data-panel="p-sky"]'), '::before').boxShadow);
+      must((look === 'layered') === (shadow !== 'none'), `${look}: Sky's card shadow is ${shadow}`);
+    }
+    await (await openSheet(page)).getByRole('group', { name: 'Style' }).getByRole('button', { name: 'Mosaic', exact: true }).tap();
+    await settled(page);
+    await page.reload({ waitUntil: 'networkidle' });
+    await settled(page);
+    must((await page.locator('.fx-viewport[data-look="mosaic"]').count()) === 1, 'the look was not remembered');
+  });
+
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);
 }
 

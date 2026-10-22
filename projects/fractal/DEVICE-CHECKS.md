@@ -64,6 +64,17 @@ shows whether the page stays put.
 | 44 | Sheet | Tap the name: the sheet opens above the capsule with the levels, Overview, ← →, Previous / Next (on a page), Arrange; Esc or Close shuts it | ☐ |
 | 45 | No iOS callouts | Holding a name or a tile never shows the iOS callout, magnifier or text selection | ☐ |
 
+## C3 — Looks (prototypes to compare)
+
+Switch in the capsule's sheet → Style. The choice stays on this device.
+
+| # | Check | How | Pass |
+|---|---|---|---|
+| 46 | Bento | Rounded tiles on a calm background, names above them, groups as tinted wells: easy to read at the overview and framed | ☐ |
+| 47 | Mosaic | Tiles edge to edge with hairline seams, names inside the tiles, group edges bolder: still clear which tiles belong to which group | ☐ |
+| 48 | Layered | Groups are white cards with soft shadows that deepen per level; zooming in feels like stepping onto the next card | ☐ |
+| 49 | Pick one | Which look should stay the default? (Note it here; the others can go.) | ☐ |
+
 ## P2 — Arrange
 
 Arrange is in the capsule's sheet (or hold a name, row 41). While arranging the capsule reads ‹ · Undo · Redo · Done.
