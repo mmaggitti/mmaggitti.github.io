@@ -60,7 +60,7 @@ export function panelAt(g: Geometry, pt: { x: number; y: number }): PanelOut | n
 function edgesOf(g: Geometry, p: PanelOut, count: number): number[] {
   const measured = g.tabEdges?.(p.id);
   if (measured && measured.length === count + 1) return measured;
-  return Array.from({ length: count + 1 }, (_, i) => p.tabbar.x + (p.tabbar.w * i) / Math.max(1, count));
+  return Array.from({ length: count + 1 }, (_, i) => p.caption.x + (p.caption.w * i) / Math.max(1, count));
 }
 
 function halfOf(r: Rect, side: Side): Rect {
@@ -84,15 +84,15 @@ export function hitTest(g: Geometry, pt: { x: number; y: number }, payload: Payl
   };
   const caret = g.remPx / 4;
 
-  // 1. A tab strip at true size.
+  // 1. A caption (its tab strip) at true size.
   const panel = panelAt(g, pt);
-  if (panel && panel.s >= 0.999 && inside(pt, panel.tabbar)) {
+  if (panel && panel.s >= 0.999 && panel.caption.h > 0 && inside(pt, panel.caption)) {
     const node = g.idx.nodes.get(panel.id) as Panel;
     const edges = edgesOf(g, panel, node.tabs.length);
     let index = 0;
     for (let i = 0; i < node.tabs.length; i++) if (pt.x > (edges[i] + edges[i + 1]) / 2) index = i + 1;
     const t: Target = { kind: 'tab', panel: panel.id, index };
-    if (ok(t)) return { target: t, style: 'caret', rect: { x: edges[index] - caret / 2, y: panel.tabbar.y, w: caret, h: panel.tabbar.h } };
+    if (ok(t)) return { target: t, style: 'caret', rect: { x: edges[index] - caret / 2, y: panel.caption.y, w: caret, h: panel.caption.h } };
   }
 
   // 2. A seam of a split at true size that the framing doesn't size.

@@ -7,9 +7,10 @@ export interface Metrics {
   remPx: number;
   /** Space between panels, and around the outside. */
   gap: number;
-  /** Tab bar height: never under the 44pt tap floor. */
-  tabbar: number;
-  /** Smallest panel: room for a tab and the menu button, plus a little body. */
+  /** The caption row above a tile: its name (and tabs). Small on purpose: its touch targets reach
+   * the 44pt floor by spilling past the row (see the workspace), not by making the row tall. */
+  caption: number;
+  /** Smallest panel: a caption, plus a little body. */
   panelMin: { w: number; h: number };
 }
 
@@ -17,11 +18,11 @@ export interface Metrics {
 export const TAP_MIN = 44;
 
 export function metrics(remPx: number): Metrics {
-  const tabbar = Math.max(TAP_MIN, 3.25 * remPx);
+  const caption = 1.5 * remPx;
   return {
     remPx,
     gap: 0.5 * remPx,
-    tabbar,
-    panelMin: { w: 7.5 * remPx, h: tabbar + 3 * remPx },
+    caption,
+    panelMin: { w: 7.5 * remPx, h: caption + 3 * remPx },
   };
 }

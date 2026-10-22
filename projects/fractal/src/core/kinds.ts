@@ -14,7 +14,8 @@ export interface KindInfo {
 }
 
 export const KINDS: Record<string, KindInfo> = {
-  container: { title: 'Group', glyph: '▦', hosts: true, bandRem: 3.5, minRem: { w: 10, h: 8 } },
+  // A group has no UI of its own: no band, just its dock (drawn as a tinted well).
+  container: { title: 'Group', glyph: '▦', hosts: true, bandRem: 0, minRem: { w: 10, h: 8 } },
   block: { title: 'Block', glyph: '■', hosts: false, bandRem: 0, minRem: { w: 10, h: 8 } },
 };
 

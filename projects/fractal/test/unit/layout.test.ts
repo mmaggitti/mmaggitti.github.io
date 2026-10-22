@@ -44,14 +44,46 @@ test('LAYOUT-02 the framed node\'s siblings become viewport-sized pages, in orde
   assert.equal(l.splits.get('mid')!.pager, true);
 });
 
-test('LAYOUT-03 tab bars are 44px and a host band is exactly its rem size at full scale', () => {
+test('LAYOUT-03 captions are their rem size at full scale; a group has no band of its own', () => {
   const doc = defaultLayout();
   const l = solve(doc, 'p-group-b', PHONE, m);
-  const p = l.panels.get('p-group-b')!;
-  assert.equal(p.s, 1);
-  assert.equal(p.tabbar.h, 44);
+  assert.equal(l.panels.get('p-teal')!.s, 1);
+  assert.equal(l.panels.get('p-teal')!.caption.h, 18);
+  assert.equal(kindOf('container').bandRem, 0);
   const groupB = l.apps.get('group-b')!;
-  assert.equal(groupB.surface.h, kindOf('container').bandRem * 12);
+  assert.equal(groupB.surface.h, 0);
+  assert.equal(l.nodes.get('b-row')!.y, l.panels.get('p-group-b')!.body.y + m.gap, 'the dock starts right below the caption');
+});
+
+test('CAPTION-01 a framed panel with one tab, and the pages beside it, show no caption and fill the screen', () => {
+  const doc = defaultLayout();
+  const l = solve(doc, 'p-sky', PHONE, m);
+  const sky = l.panels.get('p-sky')!;
+  assert.equal(sky.caption.h, 0);
+  assert.ok(sameBox(sky.body, { x: 0, y: 0, ...PHONE }), 'the body is the whole screen');
+  const amber = l.panels.get('p-amber')!;
+  assert.equal(amber.caption.h, 18, 'Amber has two tabs: its caption is its tab switcher');
+  const g = solve(doc, 'p-group-b', PHONE, m).panels.get('p-group-b')!;
+  assert.equal(g.caption.h, 0, 'a framed group shows no caption either');
+});
+
+test('CAPTION-02 in Arrange every panel shows its caption, the framed one included', () => {
+  const doc = defaultLayout();
+  const l = solve(doc, 'p-sky', PHONE, m, indexDoc(doc), { arranging: true });
+  for (const p of l.panels.values()) assert.equal(p.caption.h, 18 * p.s, p.id);
+});
+
+test('BUDGET-01 at the overview, blocks cover at least 75% of a phone screen (chrome stays out of the way)', () => {
+  const doc = defaultLayout();
+  const vp = { w: 440, h: 956 - 62 }; // the Home Screen app, under the status bar
+  const l = solve(doc, null, vp, m);
+  let area = 0;
+  for (const a of l.apps.values()) {
+    if (doc.apps[a.id].kind !== 'block') continue;
+    const s = a.surface;
+    area += Math.max(0, Math.min(vp.w, s.x + s.w) - Math.max(0, s.x)) * Math.max(0, Math.min(vp.h, s.y + s.h) - Math.max(0, s.y));
+  }
+  assert.ok(area / (440 * 956) >= 0.75, `blocks cover ${(100 * area / (440 * 956)).toFixed(0)}%`);
 });
 
 test('LAYOUT-04 children tile their parent and stay inside their host\'s dock area', () => {
@@ -72,7 +104,7 @@ test('LAYOUT-04 children tile their parent and stay inside their host\'s dock ar
   }
 });
 
-test('LAYOUT-05 a framed node inside a host sits in the dock, with the band and tab bar above the screen', () => {
+test('LAYOUT-05 a framed node inside a host sits in the dock, with the host\'s caption above the screen', () => {
   const doc = defaultLayout();
   const l = solve(doc, 'p-teal', PHONE, m);
   const groupB = l.apps.get('group-b')!;

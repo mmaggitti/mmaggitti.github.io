@@ -1,21 +1,9 @@
-// Placeholder content while the workspace itself is the subject: a blank coloured block, and a
-// group's band (a hosting app's own UI, above its dock). Neither holds any state.
+// Placeholder content while the workspace itself is the subject: a blank block, pure colour. Its
+// name lives in its caption (and in the capsule when it's framed). It holds no state.
 
 import type { CSSProperties } from 'react';
 
-export function Block({ title, hue }: { title: string; hue: number | null }) {
+export function Block({ hue }: { hue: number | null }) {
   const style = hue === null ? undefined : ({ '--hue': String(hue) } as CSSProperties);
-  return (
-    <div className="block" data-hue={hue ?? undefined} style={style}>
-      <span className="block-name">{title}</span>
-    </div>
-  );
-}
-
-export function GroupBand({ title }: { title: string }) {
-  return (
-    <div className="band">
-      <strong>{title}</strong>
-    </div>
-  );
+  return <div className="block" data-hue={hue ?? undefined} style={style} />;
 }

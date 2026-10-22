@@ -184,6 +184,7 @@ body {
   transform-origin: 0 0;
 }
 .fx-frame,
+.fx-caption,
 .fx-surface,
 .fx-dock {
   position: absolute;
@@ -193,97 +194,132 @@ body {
   transform-origin: 0 0;
   visibility: hidden;
 }
+.fx-app {
+  /* A group's well: a translucent tint, so a group inside a group reads a shade deeper. */
+  --fx-well: color-mix(in srgb, var(--text) 6%, transparent);
+}
+/* A panel is a caption row (transparent: it sits in the gap) above its body. The body is the
+   frame's ::before: a group's tinted well, or the backing under a block's surface. --fx-cap is the
+   caption's height in the frame's own px, set by the workspace (0 on a bare, framed panel). */
 .fx-frame {
+  --fx-cap: 0px;
+  overflow: visible;
+}
+.fx-frame::before {
+  content: '';
+  position: absolute;
+  inset: var(--fx-cap) 0 0 0;
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 0 0 1px var(--line);
-  overflow: hidden;
+  background: var(--fx-body, transparent);
 }
-.fx-frame[data-tier='live'],
-.fx-frame[data-tier='scaled'] {
-  cursor: default;
+.fx-frame[data-host] {
+  --fx-body: var(--fx-well);
 }
-.fx-frame[data-tier='scaled'] {
+.fx-frame[data-tier='scaled'],
+.fx-viewport[data-map] .fx-frame {
   cursor: zoom-in;
 }
-.fx-tabbar {
+.fx-caption {
   display: flex;
-  align-items: stretch;
-  /* A shadow, not a border: a border would take a pixel from the 44px tap height. */
-  box-shadow: inset 0 -1px 0 var(--line);
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  box-sizing: border-box;
+  overflow: visible;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.fx-caption[data-hidden] {
+  display: none;
 }
 .fx-tabs {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
+  /* Clip sideways only: the tabs' touch areas spill above and below the row. */
+  overflow-x: clip;
 }
-.fx-tab {
+/* A name is small text in a small row, but its touch area is the full 44pt: it overhangs the row
+   into the gap above and the tile's top edge (captions stack above surfaces). */
+.fx-tab,
+.fx-tab-more,
+.fx-menu-btn {
   flex: 0 0 auto;
-  max-width: 14rem;
-  min-width: var(--tap-min);
   min-height: var(--tap-min);
-  padding: 0 var(--space-3);
+  margin-block: calc((var(--fx-cap) - var(--tap-min)) / 2);
+  padding: 0 var(--space-1);
   border: 0;
-  border-bottom: 2px solid transparent;
   background: none;
   color: var(--text-muted);
   font: inherit;
   font-size: var(--text-sm);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+.fx-tab {
+  min-width: var(--tap-min);
+  text-align: left;
 }
 .fx-tab[aria-selected='true'] {
   color: var(--text);
   font-weight: 600;
-  border-bottom-color: var(--accent);
 }
-.fx-zoom {
-  flex: 0 0 auto;
-  width: max(var(--tap-min), 3rem);
-  border: 0;
-  background: none;
+.fx-tab + .fx-tab::before {
+  content: '·';
+  margin-right: var(--space-1);
   color: var(--text-muted);
+  font-weight: 400;
+}
+/* Tabs that don't fit: show the current one and a "+n" that steps to the next. */
+.fx-tab-more,
+.fx-menu-btn {
+  display: none;
+}
+.fx-caption[data-overflow] .fx-tab:not([aria-selected='true']) {
+  display: none;
+}
+.fx-caption[data-overflow] .fx-tab-more {
+  display: block;
+}
+.fx-viewport[data-arranging] .fx-menu-btn {
+  display: block;
+  min-width: var(--tap-min);
+  margin-left: auto;
   font-size: var(--text-lg);
-  touch-action: manipulation;
+  line-height: 1;
 }
 .fx-tile {
   display: none;
 }
-.fx-frame[data-tier='tile'] .fx-tabbar {
-  display: none;
-}
 .fx-frame[data-tier='tile'] .fx-tile {
+  position: absolute;
+  inset: var(--fx-cap) 0 0 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  height: 100%;
-  cursor: zoom-in;
-}
-.fx-tile-glyph {
-  font-size: var(--text-xl);
-  font-weight: 700;
-  color: var(--accent);
+  border-radius: var(--radius);
+  background: var(--fx-body, var(--surface));
 }
 .fx-tile-name {
   max-width: 90%;
   font-size: var(--text-sm);
-  color: var(--text-muted);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A tile only names itself when its caption is gone (too small to read). */
+.fx-frame:not([data-unnamed]) .fx-tile-name {
+  display: none;
+}
 .fx-surface {
   overflow: hidden;
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--radius);
+}
+.fx-viewport[data-map] .fx-surface {
+  pointer-events: none;
 }
 .fx-surface[data-tier='scaled'],
 .fx-surface[data-tier='tile'] {
@@ -296,8 +332,7 @@ body {
   background: var(--surface);
 }
 .fx-dock {
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg) 80%, var(--line));
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------- Arrange mode */
@@ -308,11 +343,8 @@ body {
 .fx-viewport[data-arranging] .fx-surface {
   cursor: grab;
 }
-.fx-viewport[data-arranging] .fx-frame {
+.fx-viewport[data-arranging] .fx-frame::before {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-.fx-viewport[data-arranging] .fx-tabs {
-  overflow-x: hidden;
 }
 .fx-viewport[data-arranging] .fx-tab {
   touch-action: none;
@@ -452,33 +484,22 @@ body {
 
 /* ---------------------------------------------------------------- placeholder blocks */
 /* A block is one OKLCH hue (--hue, from its params) at a fixed lightness, so every colour reads the
-   same weight; dark mode drops the lightness. A tile of a block takes the same fill. */
+   same weight; dark mode drops the lightness. A block's tile (too small to show it) takes the same
+   fill. */
 .block,
-.fx-tile[data-hue] {
+.fx-frame .fx-tile[data-hue] {
   background: oklch(0.86 0.09 var(--hue));
   color: oklch(0.32 0.08 var(--hue));
 }
 @media (prefers-color-scheme: dark) {
   .block,
-  .fx-tile[data-hue] {
+  .fx-frame .fx-tile[data-hue] {
     background: oklch(0.42 0.09 var(--hue));
     color: oklch(0.94 0.03 var(--hue));
   }
 }
 .block {
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
   height: 100%;
-  padding: var(--space-3);
-}
-.block-name {
-  font-size: var(--text-lg);
-  font-weight: 600;
-}
-.fx-tile[data-hue] .fx-tile-glyph,
-.fx-tile[data-hue] .fx-tile-name {
-  color: inherit;
 }
 .band {
   display: flex;
@@ -487,7 +508,4 @@ body {
   height: 100%;
   margin: 0;
   padding: 0 var(--space-3);
-}
-.band strong {
-  font-size: var(--text-md);
 }

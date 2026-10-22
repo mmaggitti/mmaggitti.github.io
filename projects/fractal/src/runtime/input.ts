@@ -34,23 +34,25 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
     const e = t instanceof Element ? t : null;
     const edge = e?.closest('.fx-edge') as HTMLElement | null;
     if (edge) return { region: edge.dataset.side === 'right' ? 'edge-right' : 'edge-left', target: '' };
-    if (e?.closest('.fx-zoom')) return { region: 'chrome', target: '' };
-    const panelOfEl = (x: Element | null | undefined) => (x?.closest('[data-panel]') as HTMLElement | null)?.dataset.panel ?? '';
+    if (e?.closest('.fx-menu-btn')) return { region: 'chrome', target: '' };
+    const caption = e?.closest('.fx-caption') as HTMLElement | null;
+    const captionPanel = caption?.dataset.caption ?? '';
     if (ws.arranging) {
       const divider = e?.closest('.fx-divider') as HTMLElement | null;
       if (divider) return { region: 'divider', target: divider.dataset.divider ?? '' };
       const tab = e?.closest('.fx-tab') as HTMLElement | null;
-      if (tab) return { region: 'tab', target: tab.dataset.tab ?? '', panel: panelOfEl(tab) };
+      if (tab) return { region: 'tab', target: tab.dataset.tab ?? '', panel: captionPanel };
+      // The rest of a caption carries the whole panel.
+      if (caption) return { region: 'panel', target: captionPanel };
       const surface = e?.closest('.fx-surface') as HTMLElement | null;
       if (surface) {
         const panel = ws.layout().apps.get(surface.dataset.app ?? '')?.panel;
         if (panel) return { region: 'panel', target: panel };
       }
       const frame = e?.closest('.fx-frame') as HTMLElement | null;
-      if (frame && !e?.closest('.fx-tabbar')) return { region: 'panel', target: frame.dataset.panel ?? '' };
+      if (frame) return { region: 'panel', target: frame.dataset.panel ?? '' };
     }
-    const bar = e?.closest('.fx-tabbar');
-    if (bar) return { region: 'tabbar', target: panelOfEl(bar) };
+    if (caption) return { region: 'caption', target: captionPanel };
     if (e?.closest('.fx-content')) return { region: 'content', target: '' };
     if (e?.closest('.fx-topbar')) return { region: 'topbar', target: '' };
     return { region: 'chrome', target: '' };
@@ -67,9 +69,6 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
           break;
         case 'camera-end':
           ws.camera.end(it.x, it.y, it.scale, it.vx, it.vy);
-          break;
-        case 'double-tap':
-          if (it.target) ws.toggleFrame(it.target);
           break;
         case 'bar-swipe':
           ws.neighbour(it.dir);

@@ -4,14 +4,15 @@
 // - One finger in app content belongs to the app: never claimed.
 // - Two fingers anywhere move the camera (pinch and pan). The pair is claimed as soon as the second
 //   finger lands; a finger WebKit cancelled (native scroll won) is forgotten.
-// - One finger on a tab bar: a double-tap frames the panel.
+// - Captions take plain taps (the browser's click): no double-tap there, since a first tap already
+//   zooms and a second would step straight back out.
 // - One finger across the top bar: a swipe flips to the neighbour.
 // - One finger from an edge strip: a swipe walks history (left edge back, right edge forward).
 // - In Arrange mode, one finger on a tab, a panel or a divider lifts it once it moves past the slop:
 //   a drag (tab or panel) or a resize (divider). A second finger before the lift makes it a camera
 //   gesture instead; once lifted, more fingers are ignored. A double-tap on a divider evens it.
 
-export type Region = 'content' | 'chrome' | 'tabbar' | 'topbar' | 'edge-left' | 'edge-right' | 'tab' | 'panel' | 'divider';
+export type Region = 'content' | 'chrome' | 'caption' | 'topbar' | 'edge-left' | 'edge-right' | 'tab' | 'panel' | 'divider';
 
 export interface PointerIn {
   id: number;
@@ -22,7 +23,6 @@ export interface PointerIn {
 }
 
 export type Intent =
-  | { type: 'double-tap'; target: string; x: number; y: number }
   | { type: 'camera-start'; x: number; y: number }
   | { type: 'camera-move'; x: number; y: number; scale: number }
   | { type: 'camera-end'; x: number; y: number; scale: number; vx: number; vy: number }
@@ -50,7 +50,7 @@ interface Tracked {
   id: number;
   region: Region;
   target: string;
-  /** The panel a tab or tab bar belongs to (double-tap frames it). */
+  /** The panel a tab or caption belongs to. */
   panel: string;
   x0: number;
   y0: number;
@@ -214,15 +214,13 @@ export class GestureMachine {
       const flick = Math.abs(tr.vx) > SWIPE.flick && Math.abs(dx) > SWIPE.px / 2 && Math.abs(dx) > Math.abs(dy);
       return far || flick ? [{ type: 'bar-swipe', dir: dx < 0 ? 1 : -1 }] : [];
     }
-    if ((tr.region === 'tabbar' || tr.region === 'tab' || tr.region === 'divider') && !tr.moved) {
-      const key = `${tr.region === 'divider' ? 'd' : 'p'}:${tr.panel}`;
+    if (tr.region === 'divider' && !tr.moved) {
       const last = this.lastTap;
-      if (last && last.target === key && t - last.t <= DOUBLE_TAP.ms && Math.hypot(tr.x - last.x, tr.y - last.y) <= DOUBLE_TAP.px) {
+      if (last && last.target === tr.target && t - last.t <= DOUBLE_TAP.ms && Math.hypot(tr.x - last.x, tr.y - last.y) <= DOUBLE_TAP.px) {
         this.lastTap = null;
-        if (tr.region === 'divider') return [{ type: 'equalize', target: tr.target }];
-        return [{ type: 'double-tap', target: tr.panel, x: tr.x, y: tr.y }];
+        return [{ type: 'equalize', target: tr.target }];
       }
-      this.lastTap = { target: key, x: tr.x, y: tr.y, t };
+      this.lastTap = { target: tr.target, x: tr.x, y: tr.y, t };
     }
     return [];
   }

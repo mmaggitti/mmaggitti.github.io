@@ -6,24 +6,12 @@ import { snap, type Candidate } from '../../src/core/snap.ts';
 const pt = (id: number, x: number, y: number, t: number, touch = true) => ({ id, x, y, t, touch });
 const types = (xs: Intent[]) => xs.map((i) => i.type);
 
-test('GEST-01 a double-tap on a tab bar frames its panel; slow or far taps don\'t', () => {
+test('GEST-01 taps on a caption are left to the click: no double-tap (a first tap already zooms)', () => {
   const g = new GestureMachine();
-  g.down(pt(1, 100, 10, 0), 'tabbar', 'p1');
+  g.down(pt(1, 100, 10, 0), 'caption', 'p1');
   assert.deepEqual(g.up(pt(1, 100, 10, 50)), []);
-  g.down(pt(2, 104, 12, 200), 'tabbar', 'p1');
-  const out = g.up(pt(2, 104, 12, 240));
-  assert.deepEqual(types(out), ['double-tap']);
-  assert.equal(out[0].type === 'double-tap' && out[0].target, 'p1');
-  // Too slow
-  g.down(pt(3, 100, 10, 1000), 'tabbar', 'p1');
-  g.up(pt(3, 100, 10, 1050));
-  g.down(pt(4, 100, 10, 1400), 'tabbar', 'p1');
-  assert.deepEqual(g.up(pt(4, 100, 10, 1450)), []);
-  // A different panel
-  g.down(pt(5, 100, 10, 2000), 'tabbar', 'p1');
-  g.up(pt(5, 100, 10, 2050));
-  g.down(pt(6, 100, 10, 2100), 'tabbar', 'p2');
-  assert.deepEqual(g.up(pt(6, 100, 10, 2150)), []);
+  g.down(pt(2, 104, 12, 200), 'caption', 'p1');
+  assert.deepEqual(g.up(pt(2, 104, 12, 240)), []);
 });
 
 test('GEST-02 one finger in content is never claimed', () => {
@@ -213,13 +201,11 @@ test('GEST-ARR-05 a cancelled pointer or cancelLift abandons the drag', () => {
   assert.deepEqual(g.up(pt(2, 160, 100, 130)), []);
 });
 
-test('GEST-ARR-06 a double-tap on a tab frames its panel', () => {
+test('GEST-ARR-06 in Arrange a double-tap on a tab is not a gesture either', () => {
   const g = new GestureMachine();
   g.arrange = true;
   g.down(pt(1, 100, 10, 0), 'tab', 'rose', 'p-amber');
   g.up(pt(1, 100, 10, 40));
   g.down(pt(2, 101, 10, 150), 'tab', 'amber', 'p-amber');
-  const out = g.up(pt(2, 101, 10, 190));
-  assert.deepEqual(types(out), ['double-tap']);
-  assert.equal(out[0].type === 'double-tap' && out[0].target, 'p-amber');
+  assert.deepEqual(g.up(pt(2, 101, 10, 190)), []);
 });

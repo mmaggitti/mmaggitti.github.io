@@ -138,14 +138,16 @@ export function createDrag(opts: { ws: WorkspaceHandle; layerOf: HTMLElement; re
       if (!panelId || !idx.nodes.has(panelId)) return;
       const frame = host.querySelector<HTMLElement>(`[data-panel="${CSS.escape(panelId)}"]`);
       const lifted: HTMLElement[] = [];
+      const caption = host.querySelector<HTMLElement>(`[data-caption="${CSS.escape(panelId)}"]`);
       if (payload.kind === 'panel') {
         if (frame) lifted.push(frame);
+        if (caption) lifted.push(caption);
         for (const app of (idx.nodes.get(panelId) as { tabs: string[] }).tabs) {
           const s = host.querySelector<HTMLElement>(`[data-app="${CSS.escape(app)}"]`);
           if (s) lifted.push(s);
         }
       } else {
-        const tab = frame?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(payload.app)}"]`);
+        const tab = caption?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(payload.app)}"]`);
         if (tab) lifted.push(tab);
         const s = host.querySelector<HTMLElement>(`[data-app="${CSS.escape(payload.app)}"]`);
         if (s) lifted.push(s);

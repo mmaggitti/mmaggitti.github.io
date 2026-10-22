@@ -21,7 +21,8 @@ export type Box = Rect;
 export interface PanelOut {
   id: string;
   frame: Box;
-  tabbar: Box;
+  /** The caption row (its name and tabs) above the body. Zero height on a bare panel. */
+  caption: Box;
   body: Box;
   /** Draw scale: 1 at true size, below 1 inside a cramped group. */
   s: number;
@@ -86,7 +87,8 @@ export function resolveFrame(doc: LayoutDoc, idx: TreeIndex, id: string | null):
   return id;
 }
 
-export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m: Metrics, idx = indexDoc(doc)): RestLayout {
+/** `arranging`: every panel shows its caption (they are the drag handles), even the framed one. */
+export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m: Metrics, idx = indexDoc(doc), opts: { arranging?: boolean } = {}): RestLayout {
   const V: Box = { x: 0, y: 0, w: viewport.w, h: viewport.h };
   const out: RestLayout = { viewport: V, frame: null, nodes: new Map(), panels: new Map(), apps: new Map(), splits: new Map() };
   if (!doc.root) return out;
@@ -151,14 +153,27 @@ export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m:
       const b = band(owner.app);
       const box: Box = {
         x: curBox.x - m.gap,
-        y: curBox.y - m.gap - b - m.tabbar,
+        y: curBox.y - m.gap - b - m.caption,
         w: curBox.w + 2 * m.gap,
-        h: curBox.h + 2 * m.gap + b + m.tabbar,
+        h: curBox.h + 2 * m.gap + b + m.caption,
       };
       cur = panelId;
       curBox = box;
       pinned.set(cur, curBox);
       first = false;
+    }
+  }
+
+  // ---- bare panels: the framed panel and the pages beside it, when each holds one tab, show no
+  // caption (the capsule names them). A panel with several tabs keeps its caption: it is the tab
+  // switcher. In Arrange every caption shows.
+  const bare = new Set<string>();
+  if (frame !== null && !opts.arranging) {
+    const single = (n: Node | undefined) => n?.kind === 'panel' && n.tabs.length === 1;
+    if (single(idx.nodes.get(frame))) bare.add(frame);
+    for (const id of pagerOf) {
+      const split = idx.nodes.get(id);
+      if (split?.kind === 'split') for (const c of split.children) if (single(c)) bare.add(c.id);
     }
   }
 
@@ -205,10 +220,10 @@ export function solve(doc: LayoutDoc, frameId: string | null, viewport: Size, m:
   };
 
   const placePanel = (panel: Panel, frameBox: Box, s: number, depth: number) => {
-    const tb = m.tabbar * s;
-    const tabbar: Box = { x: frameBox.x, y: frameBox.y, w: frameBox.w, h: Math.min(tb, frameBox.h) };
-    const body: Box = { x: frameBox.x, y: frameBox.y + tabbar.h, w: frameBox.w, h: Math.max(0, frameBox.h - tabbar.h) };
-    out.panels.set(panel.id, { id: panel.id, frame: frameBox, tabbar, body, s, depth });
+    const ch = (bare.has(panel.id) ? 0 : m.caption) * s;
+    const caption: Box = { x: frameBox.x, y: frameBox.y, w: frameBox.w, h: Math.min(ch, frameBox.h) };
+    const body: Box = { x: frameBox.x, y: frameBox.y + caption.h, w: frameBox.w, h: Math.max(0, frameBox.h - caption.h) };
+    out.panels.set(panel.id, { id: panel.id, frame: frameBox, caption, body, s, depth });
     const id = selectedOf(panel);
     const rec = doc.apps[id];
     if (!rec) return;
@@ -264,10 +279,10 @@ export function minSizer(doc: LayoutDoc, m: Metrics, selectedOf: (panel: Panel) 
         const inner = minSize(dock);
         size = {
           w: Math.max(m.panelMin.w, inner.w + 2 * m.gap),
-          h: m.tabbar + band(host) + inner.h + 2 * m.gap,
+          h: m.caption + band(host) + inner.h + 2 * m.gap,
         };
       } else if (host) {
-        size = { w: m.panelMin.w, h: m.tabbar + band(host) + 3 * m.remPx };
+        size = { w: m.panelMin.w, h: m.caption + band(host) + 3 * m.remPx };
       } else size = { ...m.panelMin };
     } else {
       const sizes = node.children.map(minSize);

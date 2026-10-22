@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { LayoutDoc } from '../core/types.ts';
-import { appTitle } from '../core/nav.ts';
 import { hueOf } from '../core/kinds.ts';
 import { createWorkspace, type Surface, type WorkspaceHandle } from '../runtime/workspace.ts';
 import { attachInput } from '../runtime/input.ts';
 import { createDrag } from '../runtime/drag.ts';
 import { layoutSaver } from '../platform/storage.ts';
-import { Block, GroupBand } from '../apps/Blocks.tsx';
+import { Block } from '../apps/Blocks.tsx';
 import { TopBar } from './TopBar.tsx';
 import { PanelMenu } from './PanelMenu.tsx';
 import { addBlock } from '../core/arrange.ts';
@@ -101,12 +100,11 @@ function AppHost({ ws, surface }: { ws: WorkspaceHandle; surface: Surface }) {
   const doc = ws.getDoc();
   const rec = doc.apps[surface.app];
   if (!rec) return null;
-  const title = appTitle(doc, surface.app);
   switch (rec.kind) {
     case 'block':
-      return <Block title={title} hue={hueOf(rec.params)} />;
+      return <Block hue={hueOf(rec.params)} />;
     case 'container':
-      return <GroupBand title={title} />;
+      return null; // a group has no UI of its own: its dock is drawn by the workspace
     default:
       return <p className="band ds-muted">Unknown app</p>;
   }

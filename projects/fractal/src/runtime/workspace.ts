@@ -22,6 +22,9 @@ import { snap, type Candidate } from '../core/snap.ts';
 import { canGo } from '../core/history.ts';
 import { goHistory, selectTab, setFrame, toggleOverview } from '../core/ops.ts';
 import { apply, between, fit, invert, lerpRect, step, IDENTITY, type Sim, type SpringState } from '../core/motion.ts';
+
+/** Below this draw scale a caption is too small to read, so it's hidden and the tile names itself. */
+export const CAPTION_MIN_SCALE = 0.6;
 import { TAP_MIN } from '../core/metrics.ts';
 import type { Geometry } from '../core/targets.ts';
 import { equalize, resizePair } from '../core/resize.ts';
@@ -66,9 +69,14 @@ export interface WorkspaceOptions {
 
 interface PanelEl {
   frame: HTMLElement;
-  tabbar: HTMLElement;
+  /** The caption: its own layer element, stacked above surfaces so its touch targets can spill
+   * past its small row (into the gap above and over the tile's top edge) to reach 44pt. */
+  caption: HTMLElement;
   tablist: HTMLElement;
-  zoom: HTMLButtonElement;
+  /** "+2": stands in for tabs that don't fit; a tap shows the next one. */
+  more: HTMLButtonElement;
+  /** ⋯ in Arrange: the panel's menu. */
+  menu: HTMLButtonElement;
   tile: HTMLElement;
   tabs: Map<string, HTMLButtonElement>;
   tier: Tier;
@@ -86,6 +94,8 @@ interface Item {
   r: Rect;
   s: number;
   z: number;
+  /** A panel frame's caption height in its own (unscaled) px: where its body starts. */
+  cap?: number;
 }
 
 export interface WorkspaceHandle {
@@ -148,11 +158,12 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   let idx: TreeIndex = indexDoc(doc);
   let m: Metrics = metrics(remPx());
   let viewport = { w: host.clientWidth, h: host.clientHeight };
-  let rest: RestLayout = solve(doc, doc.nav.frame, viewport, m, idx);
+  let arranging = false;
+  const solveFor = (d: LayoutDoc, i: TreeIndex = indexDoc(d)) => solve(d, d.nav.frame, viewport, m, i, { arranging });
+  let rest: RestLayout = solveFor(doc, idx);
   const panels = new Map<string, PanelEl>();
   const apps = new Map<string, AppEl>();
   const surfaces = new Store<readonly Surface[]>([]);
-  let arranging = false;
   let undoStack: UndoStack = EMPTY_UNDO;
   const dividers = new Map<string, HTMLElement>();
   const view = new Store<ViewState>(viewState(true));
@@ -163,34 +174,34 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   }
 
   // ------------------------------------------------------------------ elements
-  /** ⤢ frames the panel; in Arrange the same button opens the panel's menu. */
-  function zoomLabel(b: HTMLButtonElement) {
-    b.textContent = arranging ? '⋯' : '⤢';
-    setAttr(b, 'aria-label', arranging ? 'Panel menu' : 'Zoom to this panel');
-  }
+  /** The overview is a map: nothing on it is live, and a tap zooms in. */
+  const mapMode = () => doc.nav.frame === null && !arranging;
 
   function ensurePanel(id: string): PanelEl {
     let p = panels.get(id);
     if (p) return p;
     const frame = el('div', 'fx-frame', { 'data-panel': id });
-    const tabbar = el('div', 'fx-tabbar');
-    const tablist = el('div', 'fx-tabs', { role: 'tablist' });
-    const zoom = el('button', 'fx-zoom', { type: 'button' });
-    zoomLabel(zoom);
-    tabbar.append(tablist, zoom);
     const tile = el('div', 'fx-tile', { 'aria-hidden': 'true' });
-    frame.append(tabbar, tile);
-    layer.append(frame);
-    zoom.addEventListener('click', () => {
-      if (arranging) opts.onMenu?.(id);
-      else handle.toggleFrame(id);
+    frame.append(tile);
+    const caption = el('div', 'fx-caption', { 'data-caption': id });
+    const tablist = el('div', 'fx-tabs', { role: 'tablist' });
+    const more = el('button', 'fx-tab-more', { type: 'button', 'aria-label': 'Next tab' });
+    const menu = el('button', 'fx-menu-btn', { type: 'button', 'aria-label': 'Panel menu' });
+    menu.textContent = '⋯';
+    caption.append(tablist, more, menu);
+    layer.append(frame, caption);
+    menu.addEventListener('click', () => opts.onMenu?.(id));
+    more.addEventListener('click', () => {
+      const node = idx.nodes.get(id);
+      if (node?.kind !== 'panel') return;
+      handle.selectTab(id, node.tabs[(node.tabs.indexOf(node.selected) + 1) % node.tabs.length]);
     });
-    // A tap on a panel that isn't live (a miniature or tile) frames it.
+    // A tap on a tile you can't use (the map, a miniature, a tile) zooms one level toward it.
     frame.addEventListener('click', (e) => {
       const p = panels.get(id);
-      if (p && p.tier !== 'live' && !(e.target as Element).closest('.fx-tabbar')) handle.frame(id);
+      if (p && !arranging && (mapMode() || p.tier !== 'live')) handle.stepIn(e.clientX, e.clientY);
     });
-    p = { frame, tabbar, tablist, zoom, tile, tabs: new Map(), tier: 'live' };
+    p = { frame, caption, tablist, more, menu, tile, tabs: new Map(), tier: 'live' };
     panels.set(id, p);
     return p;
   }
@@ -230,9 +241,14 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         let b = p.tabs.get(app);
         if (!b) {
           b = el('button', 'fx-tab', { type: 'button', role: 'tab', 'data-tab': app });
+          // The shown tab's name zooms straight to its panel (or back out, when it's framed);
+          // another tab's name switches to it.
           b.addEventListener('click', () => {
-            const owner = panels.get(id) && idx.panelOf.get(app);
-            if (owner) handle.selectTab(owner, app);
+            const owner = idx.panelOf.get(app);
+            const node = owner ? idx.nodes.get(owner) : undefined;
+            if (!owner || node?.kind !== 'panel') return;
+            if (!arranging && node.selected === app) handle.toggleFrame(owner);
+            else handle.selectTab(owner, app);
           });
           p.tabs.set(app, b);
         }
@@ -241,19 +257,19 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         setAttr(b, 'aria-selected', node.selected === app ? 'true' : 'false');
       });
       const sel = doc.apps[node.selected];
-      const info = kindOf(sel?.kind ?? '');
+      setAttr(p.frame, 'data-host', sel && kindOf(sel.kind).hosts ? '' : null);
+      p.more.textContent = `+${node.tabs.length - 1}`;
       p.tile.textContent = '';
-      const glyph = el('span', 'fx-tile-glyph');
-      glyph.textContent = info.glyph;
       const name = el('span', 'fx-tile-name');
       name.textContent = appTitle(doc, node.selected);
-      p.tile.append(glyph, name);
+      p.tile.append(name);
       const hue = sel ? hueOf(sel.params) : null;
       setStyle(p.tile, '--hue', hue === null ? '' : String(hue));
       setAttr(p.tile, 'data-hue', hue === null ? null : String(hue));
     }
     for (const [id, p] of panels) if (!livePanels.has(id)) {
       p.frame.remove();
+      p.caption.remove();
       panels.delete(id);
     }
     const liveApps = new Set<string>();
@@ -278,7 +294,10 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   // ------------------------------------------------------------------ layout → items
   function itemsOf(l: RestLayout): Map<string, Item> {
     const items = new Map<string, Item>();
-    for (const p of l.panels.values()) items.set(`f:${p.id}`, { r: p.frame, s: p.s, z: p.depth * 10 });
+    for (const p of l.panels.values()) {
+      items.set(`f:${p.id}`, { r: p.frame, s: p.s, z: p.depth * 10, cap: p.caption.h / p.s });
+      items.set(`c:${p.id}`, { r: p.caption, s: p.s, z: p.depth * 10 + 4 });
+    }
     for (const a of l.apps.values()) {
       items.set(`s:${a.id}`, { r: a.surface, s: a.content.scale, z: a.depth * 10 + 3 });
       if (a.dock) items.set(`d:${a.id}`, { r: a.dock, s: a.s, z: a.depth * 10 + 2 });
@@ -289,6 +308,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
   function elementOf(key: string): HTMLElement | null {
     const id = key.slice(2);
     if (key[0] === 'f') return panels.get(id)?.frame ?? null;
+    if (key[0] === 'c') return panels.get(id)?.caption ?? null;
     const a = apps.get(id);
     if (!a) return null;
     if (key[0] === 's') return a.surface;
@@ -316,6 +336,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       const onscreen = screen.x < viewport.w && screen.y < viewport.h && screen.x + screen.w > 0 && screen.y + screen.h > 0 && it.r.w > 0.5 && it.r.h > 0.5;
       setStyle(e, 'visibility', onscreen ? 'visible' : 'hidden');
       setStyle(e, 'z-index', String(it.z));
+      if (it.cap !== undefined) setStyle(e, '--fx-cap', `${it.cap}px`);
       const o = fade?.get(key);
       setStyle(e, 'opacity', o === undefined || o >= 1 ? '' : String(o));
       if (key[0] === 's') {
@@ -352,6 +373,8 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     sizeContent(rest);
     drawItems(itemsOf(rest), true);
     // Tiers, inertness and what each app may know. A tile hides its content (still mounted).
+    const map = mapMode();
+    setAttr(host, 'data-map', map ? '' : null);
     const visibleApps = new Set<string>();
     for (const p of rest.panels.values()) {
       const pe = panels.get(p.id);
@@ -363,13 +386,21 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       pe.tier = tier;
       setAttr(pe.frame, 'data-tier', tier);
       setAttr(pe.frame, 'data-framed', rest.frame === p.id ? '' : null);
-      setStyle(pe.tabbar, 'height', `${m.tabbar}px`);
+      // Captions drawn too small to read go; the tile then names itself.
+      const named = p.caption.h > 0.5 && p.s >= CAPTION_MIN_SCALE;
+      setAttr(pe.caption, 'data-hidden', named ? null : '');
+      setAttr(pe.frame, 'data-unnamed', named ? null : '');
+      setStyle(pe.caption, '--fx-cap', `${m.caption}px`);
+      if (named) {
+        pe.caption.removeAttribute('data-overflow');
+        setAttr(pe.caption, 'data-overflow', pe.tablist.scrollWidth > pe.tablist.clientWidth + 1 ? '' : null);
+      }
       if (app) {
         const a = apps.get(app.id);
         if (a) {
           setAttr(a.surface, 'data-tier', tier);
           if (tier === 'tile') setStyle(a.surface, 'visibility', 'hidden');
-          const live = tier === 'live';
+          const live = tier === 'live' && !map;
           setAttr(a.surface, 'inert', live ? null : '');
           const onscreen = app.surface.x < viewport.w && app.surface.y < viewport.h && app.surface.x + app.surface.w > 0 && app.surface.y + app.surface.h > 0;
           if (onscreen) visibleApps.add(app.id);
@@ -468,9 +499,9 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     if (changed) {
       idx = indexDoc(doc);
       sync();
-      rest = solve(doc, doc.nav.frame, viewport, m, idx);
       opts.onChange?.(doc);
     }
+    rest = solveFor(doc, idx);
     if (!animate || reduced()) {
       cancelAnimationFrame(raf);
       anim = null;
@@ -580,7 +611,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         fade.set(key, 1 - p);
         continue;
       }
-      items.set(key, { r: lerpRect(from.r, to.r, p), s: from.s + (to.s - from.s) * p, z: to.z });
+      items.set(key, { r: lerpRect(from.r, to.r, p), s: from.s + (to.s - from.s) * p, z: to.z, cap: to.cap });
     }
     drawItems(items, false, fade);
     if (r.done) {
@@ -596,7 +627,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
     if (w === viewport.w && h === viewport.h && remPx() === m.remPx) return;
     viewport = { w, h };
     m = metrics(remPx());
-    rest = solve(doc, doc.nav.frame, viewport, m, idx);
+    rest = solveFor(doc, idx);
     cancelAnimationFrame(raf);
     anim = null;
     settle();
@@ -745,9 +776,8 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       if (!on) handle.resize.end(false);
       arranging = on;
       setAttr(host, 'data-arranging', on ? '' : null);
-      for (const p of panels.values()) zoomLabel(p.zoom);
-      if (!anim && !gesture) drawDividers(rest);
-      view.set(viewState(!anim && !gesture));
+      // Captions come and go with Arrange (the framed panel's included): re-solve and glide there.
+      commit(doc, true, true);
     },
     get settled() {
       return !anim && !gesture && !resizing;
@@ -809,7 +839,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         const sp = resizing.baseRest.splits.get(resizing.split);
         if (!sp) return;
         resizing.next = resizePair(resizing.base, idx, resizing.baseRest, m, resizing.split, resizing.seam, sp.axis === 'x' ? dx : dy);
-        rest = solve(resizing.next, resizing.next.nav.frame, viewport, m, indexDoc(resizing.next));
+        rest = solveFor(resizing.next);
         sizeContent(rest);
         drawItems(itemsOf(rest), true);
         drawDividers(rest);
@@ -820,7 +850,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
         resizing = null;
         if (commitIt && r.next !== r.base) handle.apply(r.next);
         else {
-          rest = solve(doc, doc.nav.frame, viewport, m, idx);
+          rest = solveFor(doc, idx);
           settle();
         }
       },
@@ -842,6 +872,11 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
       host.classList.remove('fx-viewport');
     },
   };
+
+  // Long presses on chrome (captions, tiles) mustn't raise iOS callouts; content keeps its own.
+  host.addEventListener('contextmenu', (e) => {
+    if (!(e.target as Element | null)?.closest?.('.fx-content') || arranging || mapMode()) e.preventDefault();
+  });
 
   sync();
   settle();

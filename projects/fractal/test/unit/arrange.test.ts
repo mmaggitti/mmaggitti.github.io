@@ -197,14 +197,14 @@ const centreOf = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.
 test('DROP-01 over a tab strip: a tab at the index under the point, with a caret', () => {
   const g = geo(defaultLayout(), 'p-amber');
   const p = g.rest.panels.get('p-amber')!;
-  const left = hitTest(g, { x: p.tabbar.x + 5, y: p.tabbar.y + 10 }, { kind: 'tab', app: 'sky' });
+  const left = hitTest(g, { x: p.caption.x + 5, y: p.caption.y + 10 }, { kind: 'tab', app: 'sky' });
   assert.deepEqual(left?.target, { kind: 'tab', panel: 'p-amber', index: 0 });
   assert.equal(left?.style, 'caret');
-  const right = hitTest(g, { x: p.tabbar.x + p.tabbar.w - 5, y: p.tabbar.y + 10 }, { kind: 'tab', app: 'sky' });
+  const right = hitTest(g, { x: p.caption.x + p.caption.w - 5, y: p.caption.y + 10 }, { kind: 'tab', app: 'sky' });
   assert.deepEqual(right?.target, { kind: 'tab', panel: 'p-amber', index: 2 });
   // Measured edges win over equal shares.
   const g2 = { ...g, tabEdges: () => [0, 60, 120] };
-  assert.deepEqual(hitTest(g2, { x: 100, y: p.tabbar.y + 10 }, { kind: 'tab', app: 'sky' })?.target, { kind: 'tab', panel: 'p-amber', index: 2 });
+  assert.deepEqual(hitTest(g2, { x: 100, y: p.caption.y + 10 }, { kind: 'tab', app: 'sky' })?.target, { kind: 'tab', panel: 'p-amber', index: 2 });
 });
 
 test('DROP-02 the outer 28% of a panel splits it on that side; the centre adds a tab', () => {

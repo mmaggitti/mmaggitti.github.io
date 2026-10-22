@@ -3,7 +3,7 @@
 // one CI run shows all of them.
 //
 // Geometry is asserted, not just presence: a framed panel must fill the workspace, nested panels
-// must sit inside their host's dock below its band, the next page must sit exactly one workspace
+// must sit inside their host's dock below its caption, the next page must sit exactly one workspace
 // width plus a gap to the right, and app content must be the same element after moves.
 
 const TOL = 1; // px
@@ -41,44 +41,78 @@ export default async function run({ browser, origin, engine }) {
     must(sideways === 0, `page scrolls sideways by ${sideways}px`);
     const small = await page.evaluate(() => {
       const out = [];
-      const sel = '.fx-tab, .fx-zoom, .fx-bar-btn, .fx-crumbs button, .fx-bottombar button';
+      const sel = '.fx-caption .fx-tab, .fx-bar-btn, .fx-crumbs button, .fx-bottombar button';
       for (const e of document.querySelectorAll(sel)) {
-        const frame = e.closest('.fx-frame');
-        if (frame && (getComputedStyle(frame).visibility === 'hidden' || frame.dataset.tier === 'tile')) continue;
+        const cap = e.closest('.fx-caption');
+        if (cap && (getComputedStyle(cap).visibility === 'hidden' || getComputedStyle(cap).display === 'none')) continue;
         const r = e.getBoundingClientRect();
-        // Chrome inside a group drawn smaller is a miniature: tapping it frames the group instead.
-        const scale = frame ? r.height / e.offsetHeight : 1;
+        // A caption drawn smaller is on a miniature: tapping the miniature zooms instead.
+        const scale = cap ? r.height / e.offsetHeight : 1;
         if (scale < 0.999) continue;
         if (r.height < 43.5 || r.width < 43.5) out.push(`${e.className} ${e.textContent.trim().slice(0, 20)} ${r.width.toFixed(0)}×${r.height.toFixed(0)}`);
       }
       return out;
     });
     must(!small.length, `targets under 44px: ${small.join(', ')}`);
+    // ...while the caption rows themselves stay small: no bars.
+    const rows = await page.evaluate(() => [...document.querySelectorAll('.fx-caption')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.getBoundingClientRect().height));
+    must(rows.length > 0 && rows.every((h) => h <= 20), `caption rows are ${rows.map((h) => h.toFixed(0)).join(', ')}px tall`);
   });
 
-  await check('the zoom button frames a nested host; it fills the workspace and its apps sit in its dock', async (page) => {
-    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
+  await check('a caption frames a nested group: it fills the workspace, bare, and its tiles sit in its dock', async (page) => {
+    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap();
     await settled(page);
     await framed(page, 'p-group-b');
+    must((await page.locator('[data-caption="p-group-b"]').isVisible()) === false, 'the framed group still shows its caption');
     const g = await page.evaluate(() => {
       const box = (s) => {
         const r = document.querySelector(s).getBoundingClientRect();
         return { x: r.x, y: r.y, w: r.width, h: r.height };
       };
       return {
-        tabbar: box('[data-panel="p-group-b"] .fx-tabbar'),
-        band: box('[data-app="group-b"]'),
         dock: box('[data-dock="group-b"]'),
         kids: [box('[data-panel="p-teal"]'), box('[data-panel="p-indigo"]')],
+        caps: [box('[data-caption="p-teal"]'), box('[data-caption="p-indigo"]')],
       };
     });
-    must(Math.abs(g.tabbar.h - 44) <= TOL, `tab bar is ${g.tabbar.h}px tall`);
-    for (const k of g.kids) {
+    g.kids.forEach((k, i) => {
       must(inside(k, g.dock), `nested panel ${fmt(k)} is outside the dock ${fmt(g.dock)}`);
-      must(k.y >= g.band.y + g.band.h - TOL, `nested panel ${fmt(k)} overlaps the band ${fmt(g.band)}`);
-    }
+      must(Math.abs(g.caps[i].y - k.y) <= TOL && Math.abs(g.caps[i].h - 18) <= TOL, `caption ${fmt(g.caps[i])} doesn't head its tile ${fmt(k)}`);
+    });
     const crumbs = (await page.locator('.fx-crumbs li').allTextContents()).map((t) => t.trim()); // not innerText: WebKit's includes the ::before separators
     must(crumbs.join('/') === 'Home/Group A/Group B', `crumbs read ${crumbs.join(' › ')}`);
+  });
+
+  await check('the overview is a map: a tap on a tile zooms one level toward it; inside, full-size tiles are live', async (page) => {
+    must(await page.evaluate(() => document.querySelector('[data-app="sky"]').hasAttribute('inert')), 'Sky takes input at the overview');
+    let c = await centre(page, '[data-app="teal"]');
+    await page.touchscreen.tap(c.x, c.y);
+    await settled(page);
+    await framed(page, 'p-group-a');
+    c = await centre(page, '[data-app="teal"]');
+    await page.touchscreen.tap(c.x, c.y); // a miniature at this framing: one more level
+    await settled(page);
+    await framed(page, 'p-group-b');
+    must(!(await page.evaluate(() => document.querySelector('[data-app="teal"]').hasAttribute('inert'))), 'Teal is not live at full size');
+    c = await centre(page, '[data-app="teal"]');
+    await page.touchscreen.tap(c.x, c.y); // live: the tap is the app's
+    await page.waitForTimeout(400);
+    await settled(page);
+    await framed(page, 'p-group-b');
+  });
+
+  await check('caption taps: another name switches tab, the shown name zooms, and again steps out', async (page) => {
+    await page.locator('[data-tab="rose"]').tap();
+    await settled(page);
+    must((await page.locator('[data-tab="rose"][aria-selected="true"]').count()) === 1, 'Rose was not selected');
+    must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'switching a tab zoomed');
+    await page.locator('[data-tab="rose"]').tap();
+    await settled(page);
+    await framed(page, 'p-amber');
+    must(await page.locator('[data-caption="p-amber"]').isVisible(), 'a framed panel with two tabs lost its tab switcher');
+    await page.locator('[data-tab="rose"]').tap();
+    await settled(page);
+    must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'tapping the framed name did not step out');
   });
 
   await check('Back steps out one level, through the host, to the overview', async (page) => {
@@ -100,7 +134,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('neighbours are pages one workspace width apart, reached with ›', async (page) => {
-    await page.locator('[data-panel="p-sky"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-sky"] [data-tab="sky"]').tap();
     await settled(page);
     await framed(page, 'p-sky');
     const vp = await rect(page, '.fx-viewport');
@@ -114,7 +148,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('a block is the same element after moving between levels, and blocks differ in colour', async (page) => {
-    await page.locator('[data-panel="p-amber"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-amber"] [data-tab="amber"]').tap();
     await settled(page);
     await page.evaluate(() => (window.__block = document.querySelector('[data-content="amber"] .block')));
     await page.evaluate(() => window.__fractal.frame('p-teal'));
@@ -169,15 +203,6 @@ export default async function run({ browser, origin, engine }) {
     await framed(page, 'p-sky');
   });
 
-  await check('a double-tap on a tab bar frames the panel', async (page) => {
-    const tab = await centre(page, '[data-panel="p-sky"] .fx-tab');
-    await page.touchscreen.tap(tab.x, tab.y);
-    await page.waitForTimeout(60);
-    await page.touchscreen.tap(tab.x, tab.y);
-    await settled(page);
-    await framed(page, 'p-sky');
-  });
-
   await check('an edge swipe goes back and forward through history', async (page) => {
     await page.evaluate(() => window.__fractal.frame('p-group-b'));
     await settled(page);
@@ -215,7 +240,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('an animated framing settles exactly on the workspace', async (page) => {
-    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap();
     await settled(page);
     await framed(page, 'p-group-b');
   }, { motion: true });
@@ -232,8 +257,12 @@ export default async function run({ browser, origin, engine }) {
   // ---------------------------------------------------------------- Arrange (P2)
 
   await check('Arrange: content stops taking input; dividers appear with a 44px handle', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-sky'));
+    await settled(page);
     const before = await page.evaluate(() => getComputedStyle(document.querySelector('[data-content="sky"]')).pointerEvents);
-    must(before !== 'none', 'content takes no input outside Arrange');
+    must(before !== 'none', 'framed content takes no input outside Arrange');
+    await page.evaluate(() => window.__fractal.frame(null));
+    await settled(page);
     must((await page.locator('.fx-divider').count()) === 0, 'dividers show outside Arrange');
     await page.locator('.fx-bottombar').getByRole('button', { name: 'Arrange', exact: true }).tap();
     await settled(page);
@@ -259,8 +288,8 @@ export default async function run({ browser, origin, engine }) {
     await settled(page);
     const rose = await page.evaluate(() => {
       const d = window.__fractal.getDoc();
-      const idx = [...document.querySelectorAll('[data-panel]')].find((f) => f.querySelector('[data-tab="rose"]'));
-      return { panel: idx?.dataset.panel, amber: d.root.children[1].children.at(-1).tabs };
+      const cap = document.querySelector('[data-tab="rose"]')?.closest('[data-caption]');
+      return { panel: cap?.dataset.caption, amber: d.root.children[1].children.at(-1).tabs };
     });
     must(rose.panel && rose.panel !== 'p-amber', `Rose is still in ${rose.panel}`);
     must(rose.amber.join() === 'amber', `Amber's panel holds ${rose.amber}`);
@@ -273,17 +302,17 @@ export default async function run({ browser, origin, engine }) {
     const bar = page.locator('.fx-bottombar');
     await bar.getByRole('button', { name: 'Undo', exact: true }).tap();
     await settled(page);
-    const undone = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    const undone = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
     must(undone === 'amber,rose', `after Undo, Amber's tabs are ${undone}`);
     must(await bar.getByRole('button', { name: 'Undo', exact: true }).isDisabled(), 'Undo is still enabled');
     await bar.getByRole('button', { name: 'Redo', exact: true }).tap();
     await settled(page);
-    const redone = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    const redone = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
     must(redone === 'amber', `after Redo, Amber's tabs are ${redone}`);
     await page.waitForTimeout(500); // the save is debounced
     await page.reload({ waitUntil: 'networkidle' });
     await settled(page);
-    const kept = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    const kept = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
     must(kept === 'amber', `after a reload, Amber's tabs are ${kept}`);
   });
 
@@ -291,10 +320,10 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
     const from = await centre(page, '[data-app="violet"]');
-    const strip = await rect(page, '[data-panel="p-sky"] .fx-tabbar');
+    const strip = await rect(page, '[data-caption="p-sky"]');
     await oneFinger(page, chromium, from, { x: strip.x + strip.w * 0.4, y: strip.y + strip.h / 2 }, 20);
     await settled(page);
-    const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-panel="p-sky"] .fx-tab')].map((t) => t.dataset.tab).join());
+    const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-sky"] .fx-tab')].map((t) => t.dataset.tab).join());
     must(tabs === 'sky,violet', `Sky's strip holds ${tabs}`);
     must((await page.locator('[data-panel="p-violet"]').count()) === 0, 'the moved panel is still there');
     const f = await rect(page, '[data-panel="p-sky"]');
@@ -331,7 +360,7 @@ export default async function run({ browser, origin, engine }) {
   await check('Arrange menu: ⋯ adds a block to the right of a panel', async (page) => {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
-    const menuBtn = page.locator('[data-panel="p-violet"] .fx-zoom');
+    const menuBtn = page.locator('[data-caption="p-violet"] .fx-menu-btn');
     must((await menuBtn.textContent()) === '⋯', 'the panel button is not ⋯ in Arrange');
     await menuBtn.tap();
     const sheet = page.getByRole('dialog', { name: 'Panel menu' });
@@ -340,7 +369,7 @@ export default async function run({ browser, origin, engine }) {
     must((await sheet.count()) === 0, 'the menu stayed open');
     const tab = page.locator('.fx-tab', { hasText: 'Orange' });
     must((await tab.count()) === 1, 'no Orange block was added');
-    const panel = await tab.evaluate((t) => t.closest('[data-panel]').dataset.panel);
+    const panel = await tab.evaluate((t) => t.closest('[data-caption]').dataset.caption);
     const r = await rect(page, `[data-panel="${panel}"]`);
     const v = await rect(page, '[data-panel="p-violet"]');
     must(Math.abs(r.y - v.y) <= TOL && r.x > v.x + v.w, `Orange ${fmt(r)} is not right of Violet ${fmt(v)}`);
@@ -350,7 +379,7 @@ export default async function run({ browser, origin, engine }) {
   await check('Arrange menu: closing a group asks first, then removes it and what it holds', async (page) => {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
-    await page.locator('[data-panel="p-group-b"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-group-b"] .fx-menu-btn').tap();
     const sheet = page.getByRole('dialog', { name: 'Panel menu' });
     await sheet.getByRole('button', { name: 'Close panel', exact: true }).tap();
     const ask = (await sheet.locator('.fx-menu-title').textContent()) ?? '';
@@ -366,7 +395,7 @@ export default async function run({ browser, origin, engine }) {
   await check('Arrange menu: move to the top level, and no group into itself', async (page) => {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
-    await page.locator('[data-panel="p-group-a"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-group-a"] .fx-menu-btn').tap();
     const sheet = page.getByRole('dialog', { name: 'Panel menu' });
     await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
     must(await sheet.locator('[data-dest="group-b"]').isDisabled(), 'Group A can be moved into Group B, inside itself');
@@ -374,7 +403,7 @@ export default async function run({ browser, origin, engine }) {
     await page.keyboard.press('Escape');
     must((await sheet.count()) === 0, 'Esc did not close the menu');
     must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'Esc did more than close the menu');
-    await page.locator('[data-panel="p-coral"] .fx-zoom').tap();
+    await page.locator('[data-caption="p-coral"] .fx-menu-btn').tap();
     await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
     await sheet.locator('[data-dest=""]').tap();
     await settled(page);
@@ -388,7 +417,7 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
     const before = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
-    const from = await centre(page, '[data-app="group-a"]');
+    const from = await centre(page, '[data-tab="group-a"]');
     const t = await rect(page, '[data-panel="p-teal"]');
     // Teal's right edge: a drop any panel takes, miniature or not, so only the cycle rule refuses it.
     await dragPath(page, chromium, [from, { x: t.x + t.w * 0.92, y: t.y + t.h * 0.6, hold: 300 }]);
