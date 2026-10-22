@@ -227,7 +227,9 @@ export function createDrag(opts: { ws: WorkspaceHandle; layerOf: HTMLElement; re
     place(x, y);
     hover(x, y);
     let hit: Hit | null = null;
-    if (ws.settled) {
+    // Nothing drops onto the capsule or its sheet, whatever tile lies beneath them.
+    const overChrome = !!document.elementFromPoint(x, y)?.closest('.fx-capsule, .fx-sheet');
+    if (ws.settled && !overChrome) {
       const o = host.getBoundingClientRect();
       const pt = { x: x - o.left, y: y - o.top };
       const g = ws.geometry();

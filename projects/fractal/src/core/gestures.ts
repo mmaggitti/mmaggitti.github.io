@@ -6,13 +6,13 @@
 //   finger lands; a finger WebKit cancelled (native scroll won) is forgotten.
 // - Captions take plain taps (the browser's click): no double-tap there, since a first tap already
 //   zooms and a second would step straight back out.
-// - One finger across the top bar: a swipe flips to the neighbour.
+// - One finger across the capsule: a swipe flips to the neighbour.
 // - One finger from an edge strip: a swipe walks history (left edge back, right edge forward).
 // - In Arrange mode, one finger on a tab, a panel or a divider lifts it once it moves past the slop:
 //   a drag (tab or panel) or a resize (divider). A second finger before the lift makes it a camera
 //   gesture instead; once lifted, more fingers are ignored. A double-tap on a divider evens it.
 
-export type Region = 'content' | 'chrome' | 'caption' | 'topbar' | 'edge-left' | 'edge-right' | 'tab' | 'panel' | 'divider';
+export type Region = 'content' | 'chrome' | 'caption' | 'capsule' | 'edge-left' | 'edge-right' | 'tab' | 'panel' | 'divider';
 
 export interface PointerIn {
   id: number;
@@ -29,6 +29,8 @@ export type Intent =
   | { type: 'edge-move'; side: 'left' | 'right'; dx: number }
   | { type: 'edge-end'; side: 'left' | 'right'; commit: boolean }
   | { type: 'bar-swipe'; dir: -1 | 1 }
+  /** A long press picked something up outside Arrange: Arrange turns on (a drag-start follows). */
+  | { type: 'arrange-on' }
   /** A tab (target: the app) or a panel (target: the panel) lifted; x0, y0 is where it was pressed. */
   | { type: 'drag-start'; region: 'tab' | 'panel'; target: string; x0: number; y0: number; x: number; y: number }
   | { type: 'drag-move'; x: number; y: number }
@@ -45,6 +47,8 @@ export const SLOP = { touch: 10, mouse: 4 };
 export const DOUBLE_TAP = { ms: 300, px: 24 };
 export const SWIPE = { px: 40, ratio: 1.5, flick: 0.5 };
 export const EDGE_COMMIT = 0.3;
+/** How long a still press on a caption name or a map tile takes to pick it up. */
+export const HOLD_MS = 500;
 
 interface Tracked {
   id: number;
@@ -191,6 +195,19 @@ export class GestureMachine {
     return out;
   }
 
+  /** The runtime's HOLD_MS timer for a press: a single, still press on a tab (a caption name) or a
+   * panel (a tile you can't use) picks it up, turning Arrange on. The iOS Home Screen idiom. */
+  hold(id: number): Intent[] {
+    const tr = this.pointers.get(id);
+    if (!tr || tr.moved || this.pointers.size !== 1 || this.camera || this.lifted || this.spent) return [];
+    if (tr.region !== 'tab' && tr.region !== 'panel') return [];
+    this.lifted = { id, kind: 'drag' };
+    const out: Intent[] = this.arrange ? [] : [{ type: 'arrange-on' }];
+    this.arrange = true;
+    out.push({ type: 'drag-start', region: tr.region, target: tr.target, x0: tr.x0, y0: tr.y0, x: tr.x, y: tr.y });
+    return out;
+  }
+
   /** Abandon a drag or resize (Esc, blur, leaving Arrange). */
   cancelLift(): Intent[] {
     if (!this.lifted) return [];
@@ -209,7 +226,7 @@ export class GestureMachine {
       const v = side === 'left' ? tr.vx : -tr.vx;
       return [{ type: 'edge-end', side, commit: along > EDGE_COMMIT * this.width || (along > SWIPE.px && v > SWIPE.flick) }];
     }
-    if (tr.region === 'topbar') {
+    if (tr.region === 'capsule') {
       const far = Math.abs(dx) > SWIPE.px && Math.abs(dx) > SWIPE.ratio * Math.abs(dy);
       const flick = Math.abs(tr.vx) > SWIPE.flick && Math.abs(dx) > SWIPE.px / 2 && Math.abs(dx) > Math.abs(dy);
       return far || flick ? [{ type: 'bar-swipe', dir: dx < 0 ? 1 : -1 }] : [];

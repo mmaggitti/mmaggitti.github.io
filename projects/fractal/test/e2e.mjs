@@ -7,6 +7,9 @@
 // width plus a gap to the right, and app content must be the same element after moves.
 
 const TOL = 1; // px
+// Tap a caption control on its glyph: a caption's 44pt touch box overhangs its small row, so the top
+// row's box starts above the screen, and the centre of its visible part would land on the row below.
+const GLYPH = { position: { x: 22, y: 22 } };
 const GAP = 6; // 0.5rem at the site's 75% scale
 
 export default async function run({ browser, origin, engine }) {
@@ -41,8 +44,9 @@ export default async function run({ browser, origin, engine }) {
     must(sideways === 0, `page scrolls sideways by ${sideways}px`);
     const small = await page.evaluate(() => {
       const out = [];
-      const sel = '.fx-caption .fx-tab, .fx-bar-btn, .fx-crumbs button, .fx-bottombar button';
+      const sel = '.fx-caption .fx-tab, .fx-capsule button';
       for (const e of document.querySelectorAll(sel)) {
+        if (getComputedStyle(e).display === 'none') continue;
         const cap = e.closest('.fx-caption');
         if (cap && (getComputedStyle(cap).visibility === 'hidden' || getComputedStyle(cap).display === 'none')) continue;
         const r = e.getBoundingClientRect();
@@ -79,8 +83,9 @@ export default async function run({ browser, origin, engine }) {
       must(inside(k, g.dock), `nested panel ${fmt(k)} is outside the dock ${fmt(g.dock)}`);
       must(Math.abs(g.caps[i].y - k.y) <= TOL && Math.abs(g.caps[i].h - 18) <= TOL, `caption ${fmt(g.caps[i])} doesn't head its tile ${fmt(k)}`);
     });
-    const crumbs = (await page.locator('.fx-crumbs li').allTextContents()).map((t) => t.trim()); // not innerText: WebKit's includes the ::before separators
-    must(crumbs.join('/') === 'Home/Group A/Group B', `crumbs read ${crumbs.join(' › ')}`);
+    const trail = await levels(page);
+    must(trail.join('/') === 'Home/Group A/Group B', `the levels read ${trail.join(' › ')}`);
+    must((await page.locator('.fx-capsule-here').textContent()) === 'Group B', 'the capsule does not name Group B');
   });
 
   await check('the overview is a map: a tap on a tile zooms one level toward it; inside, full-size tiles are live', async (page) => {
@@ -119,7 +124,7 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => window.__fractal.frame('p-teal'));
     await settled(page);
     await framed(page, 'p-teal');
-    const back = page.locator('.fx-bottombar').getByRole('button', { name: 'Back', exact: true });
+    const back = page.locator('.fx-capsule [data-nav="back"]');
     await back.tap();
     await settled(page);
     await framed(page, 'p-group-b');
@@ -140,11 +145,12 @@ export default async function run({ browser, origin, engine }) {
     const vp = await rect(page, '.fx-viewport');
     const next = await rect(page, '[data-panel="p-amber"]');
     must(Math.abs(next.x - (vp.x + vp.w + GAP)) <= TOL && Math.abs(next.w - vp.w) <= TOL, `next page is at ${fmt(next)}, viewport ${fmt(vp)}`);
-    await page.getByRole('button', { name: 'Next panel' }).tap();
+    must((await page.locator('.fx-dots').getAttribute('aria-label')) === 'Panel 1 of 2', 'the dots do not say page 1 of 2');
+    await (await openSheet(page)).getByRole('button', { name: 'Next ›' }).tap();
     await settled(page);
     await framed(page, 'p-amber');
-    const page2 = await page.locator('.fx-page').innerText();
-    must(page2 === '2/2', `page indicator reads ${page2}`);
+    const page2 = await page.locator('.fx-dots').getAttribute('aria-label');
+    must(page2 === 'Panel 2 of 2', `the dots say ${page2}`);
   });
 
   await check('a block is the same element after moving between levels, and blocks differ in colour', async (page) => {
@@ -153,7 +159,7 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => (window.__block = document.querySelector('[data-content="amber"] .block')));
     await page.evaluate(() => window.__fractal.frame('p-teal'));
     await settled(page);
-    await page.locator('.fx-bottombar').getByRole('button', { name: 'Overview', exact: true }).tap();
+    await (await openSheet(page)).getByRole('button', { name: 'Overview', exact: true }).tap();
     await settled(page);
     await page.evaluate(() => window.__fractal.frame('p-amber'));
     await settled(page);
@@ -189,18 +195,18 @@ export default async function run({ browser, origin, engine }) {
     await twoFingers(page, chromium, { x: 120, y: 400 }, { x: 320, y: 400 }, { x: 170, y: 400 }, { x: 270, y: 400 }, 12);
     await settled(page);
     const f = await page.locator('.fx-frame[data-framed]').count();
-    const crumbs = await page.locator('.fx-crumbs li').count();
-    must(crumbs === 2 && f === 0, `after pinching out: ${crumbs} crumbs, ${f} framed panels (expected the row, one level up)`);
+    const trail = await levels(page);
+    must(trail.length === 2 && f === 0, `after pinching out: ${trail.length} levels, ${f} framed panels (expected the row, one level up)`);
   });
 
-  await check('a swipe across the top bar flips to the neighbour', async (page) => {
+  await check('a swipe across the capsule flips to the neighbour, without opening the sheet', async (page) => {
     await page.evaluate(() => window.__fractal.frame('p-amber'));
     await settled(page);
-    const bar = await rect(page, '.fx-topbar');
-    const y = bar.y + bar.h / 2;
-    await oneFinger(page, chromium, { x: 120, y }, { x: 320, y }, 10);
+    const c = await centre(page, '.fx-capsule-name');
+    await oneFinger(page, chromium, { x: c.x - 40, y: c.y }, { x: c.x + 160, y: c.y }, 10);
     await settled(page);
     await framed(page, 'p-sky');
+    must((await page.getByRole('dialog', { name: 'Places and actions' }).count()) === 0, 'the swipe opened the sheet');
   });
 
   await check('an edge swipe goes back and forward through history', async (page) => {
@@ -264,7 +270,7 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => window.__fractal.frame(null));
     await settled(page);
     must((await page.locator('.fx-divider').count()) === 0, 'dividers show outside Arrange');
-    await page.locator('.fx-bottombar').getByRole('button', { name: 'Arrange', exact: true }).tap();
+    await (await openSheet(page)).getByRole('button', { name: 'Arrange', exact: true }).tap();
     await settled(page);
     must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'not arranging');
     const after = await page.evaluate(() => getComputedStyle(document.querySelector('[data-content="sky"]')).pointerEvents);
@@ -275,7 +281,8 @@ export default async function run({ browser, origin, engine }) {
     must(d.w >= 43.5 && d.h >= 43.5, `the divider handle is ${fmt(d)}`);
     const mid = d.x + d.w / 2;
     must(mid > sky.x + sky.w - TOL && mid < amber.x + TOL, `the divider at ${mid.toFixed(0)} is not on the seam (${(sky.x + sky.w).toFixed(0)}–${amber.x.toFixed(0)})`);
-    for (const name of ['Back', 'Undo', 'Redo', 'Done']) must(await page.locator('.fx-bottombar').getByRole('button', { name, exact: true }).isVisible(), `no ${name} button`);
+    for (const name of ['Undo', 'Redo', 'Done']) must(await page.locator('.fx-capsule').getByRole('button', { name, exact: true }).isVisible(), `no ${name} button`);
+    must((await page.locator('.fx-capsule [data-nav="back"]').count()) === 1, 'no ‹ in the Arrange capsule');
   });
 
   await check('Arrange: drag a tab beside a panel; the same content element lands there; Undo and Redo', async (page) => {
@@ -284,7 +291,7 @@ export default async function run({ browser, origin, engine }) {
     await page.evaluate(() => (window.__rose = document.querySelector('[data-content="rose"]')));
     const a = await centre(page, '[data-tab="rose"]');
     const sky = await rect(page, '[data-panel="p-sky"]');
-    await oneFinger(page, chromium, a, { x: sky.x + sky.w * 0.9, y: sky.y + sky.h * 0.6 }, 20);
+    await dragPath(page, chromium, [a, { x: sky.x + sky.w * 0.9, y: sky.y + sky.h * 0.6, hold: 200 }]);
     await settled(page);
     const rose = await page.evaluate(() => {
       const d = window.__fractal.getDoc();
@@ -299,7 +306,7 @@ export default async function run({ browser, origin, engine }) {
     must(await page.evaluate(() => document.querySelector('[data-content="rose"]') === window.__rose), 'the content element was recreated');
     must((await page.locator('[data-lifted]').count()) === 0, 'something is still dimmed');
     must((await page.locator('.fx-card, .fx-drop').count()) === 0, 'the card or outline stayed');
-    const bar = page.locator('.fx-bottombar');
+    const bar = page.locator('.fx-capsule');
     await bar.getByRole('button', { name: 'Undo', exact: true }).tap();
     await settled(page);
     const undone = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
@@ -321,7 +328,7 @@ export default async function run({ browser, origin, engine }) {
     await settled(page);
     const from = await centre(page, '[data-app="violet"]');
     const strip = await rect(page, '[data-caption="p-sky"]');
-    await oneFinger(page, chromium, from, { x: strip.x + strip.w * 0.4, y: strip.y + strip.h / 2 }, 20);
+    await dragPath(page, chromium, [from, { x: strip.x + strip.w * 0.4, y: strip.y + strip.h / 2, hold: 200 }]);
     await settled(page);
     const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-sky"] .fx-tab')].map((t) => t.dataset.tab).join());
     must(tabs === 'sky,violet', `Sky's strip holds ${tabs}`);
@@ -336,7 +343,8 @@ export default async function run({ browser, origin, engine }) {
     await settled(page);
     const before = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
     const a = await centre(page, '[data-tab="rose"]');
-    await oneFinger(page, chromium, a, { x: a.x, y: 30 }, 12); // the top bar: no target
+    const pill = await centre(page, '.fx-capsule');
+    await dragPath(page, chromium, [a, { ...pill, hold: 200 }]); // nothing drops onto the capsule
     await settled(page);
     const after = await page.evaluate(() => JSON.stringify(window.__fractal.getDoc().root));
     must(before === after, 'the layout changed');
@@ -349,7 +357,7 @@ export default async function run({ browser, origin, engine }) {
     await settled(page);
     const sky = await rect(page, '[data-panel="p-sky"]');
     const d = await centre(page, '[data-divider="mid:0"]');
-    await oneFinger(page, chromium, d, { x: d.x + 50, y: d.y }, 10);
+    await dragPath(page, chromium, [d, { x: d.x + 50, y: d.y, hold: 200 }]);
     await settled(page);
     const after = await rect(page, '[data-panel="p-sky"]');
     must(Math.abs(after.w - (sky.w + 50)) <= 2, `Sky went from ${sky.w.toFixed(0)} to ${after.w.toFixed(0)} wide, not +50`);
@@ -373,13 +381,13 @@ export default async function run({ browser, origin, engine }) {
     const r = await rect(page, `[data-panel="${panel}"]`);
     const v = await rect(page, '[data-panel="p-violet"]');
     must(Math.abs(r.y - v.y) <= TOL && r.x > v.x + v.w, `Orange ${fmt(r)} is not right of Violet ${fmt(v)}`);
-    must(await page.locator('.fx-bottombar').getByRole('button', { name: 'Undo', exact: true }).isEnabled(), 'adding is not undoable');
+    must(await page.locator('.fx-capsule').getByRole('button', { name: 'Undo', exact: true }).isEnabled(), 'adding is not undoable');
   });
 
   await check('Arrange menu: closing a group asks first, then removes it and what it holds', async (page) => {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
-    await page.locator('[data-caption="p-group-b"] .fx-menu-btn').tap();
+    await page.locator('[data-caption="p-group-b"] .fx-menu-btn').tap(GLYPH);
     const sheet = page.getByRole('dialog', { name: 'Panel menu' });
     await sheet.getByRole('button', { name: 'Close panel', exact: true }).tap();
     const ask = (await sheet.locator('.fx-menu-title').textContent()) ?? '';
@@ -395,7 +403,7 @@ export default async function run({ browser, origin, engine }) {
   await check('Arrange menu: move to the top level, and no group into itself', async (page) => {
     await page.evaluate(() => window.__fractal.setArranging(true));
     await settled(page);
-    await page.locator('[data-caption="p-group-a"] .fx-menu-btn').tap();
+    await page.locator('[data-caption="p-group-a"] .fx-menu-btn').tap(GLYPH);
     const sheet = page.getByRole('dialog', { name: 'Panel menu' });
     await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
     must(await sheet.locator('[data-dest="group-b"]').isDisabled(), 'Group A can be moved into Group B, inside itself');
@@ -403,7 +411,7 @@ export default async function run({ browser, origin, engine }) {
     await page.keyboard.press('Escape');
     must((await sheet.count()) === 0, 'Esc did not close the menu');
     must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'Esc did more than close the menu');
-    await page.locator('[data-caption="p-coral"] .fx-menu-btn').tap();
+    await page.locator('[data-caption="p-coral"] .fx-menu-btn').tap(GLYPH);
     await sheet.getByRole('button', { name: 'Move to…', exact: true }).tap();
     await sheet.locator('[data-dest=""]').tap();
     await settled(page);
@@ -432,7 +440,7 @@ export default async function run({ browser, origin, engine }) {
     await settled(page);
     const visits = await page.evaluate(() => window.__fractal.getDoc().nav.visits.length);
     const tealTab = await centre(page, '[data-tab="teal"]');
-    const back = await centre(page, '.fx-bottombar [data-nav="back"]');
+    const back = await centre(page, '.fx-capsule [data-nav="back"]');
     await dragPath(page, chromium, [tealTab, { x: tealTab.x + 30, y: tealTab.y + 30 }, { ...back, hold: 900 }], async () => {
       await settled(page);
       await framed(page, 'p-group-a');
@@ -465,7 +473,91 @@ export default async function run({ browser, origin, engine }) {
     must((await page.locator('.fx-empty').count()) === 0, 'the empty state stayed');
   });
 
+  // ---------------------------------------------------------------- the capsule (C2)
+
+  await check('no bars: the workspace runs to the bottom edge under a small floating capsule', async (page) => {
+    must((await page.locator('.fx-topbar, .fx-bottombar').count()) === 0, 'an old bar is still there');
+    await page.evaluate(() => window.__fractal.frame('p-sky'));
+    await settled(page);
+    const vp = await rect(page, '.fx-viewport');
+    const h = await page.evaluate(() => window.innerHeight);
+    must(Math.abs(vp.y + vp.h - h) <= TOL, `the workspace ends at ${(vp.y + vp.h).toFixed(0)}, the screen at ${h}`);
+    const cap = await rect(page, '.fx-capsule');
+    const sky = await rect(page, '[data-panel="p-sky"]');
+    must(cap.h >= 43.5 && cap.h <= 52, `the capsule is ${cap.h.toFixed(0)}px tall`);
+    must(cap.w < 300 && Math.abs(cap.x + cap.w / 2 - 220) <= 1, `the capsule is ${fmt(cap)}`);
+    must(inside(cap, sky), `the capsule ${fmt(cap)} doesn't float over the framed tile ${fmt(sky)}`);
+    must((await page.locator('.fx-capsule-here').textContent()) === 'Sky', 'the capsule does not name Sky');
+  });
+
+  await check('a mouse drag across the capsule name pages without also opening the sheet', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-amber'));
+    await settled(page);
+    const n = await rect(page, '.fx-capsule-name');
+    must(n.w >= 60, `the name button is only ${n.w.toFixed(0)}px wide`);
+    const y = n.y + n.h / 2;
+    await page.mouse.move(n.x + 5, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(n.x + 5 + i * 9, y);
+    await page.mouse.up(); // still on the name: the browser clicks it
+    await settled(page);
+    await framed(page, 'p-sky');
+    must((await page.getByRole('dialog', { name: 'Places and actions' }).count()) === 0, 'the swipe also opened the sheet');
+  });
+
+  await check('the capsule sheet: jump to a level, Overview, history back', async (page) => {
+    await page.evaluate(() => window.__fractal.frame('p-teal'));
+    await settled(page);
+    await (await openSheet(page)).getByRole('button', { name: 'Group A', exact: true }).tap();
+    await settled(page);
+    await framed(page, 'p-group-a');
+    await (await openSheet(page)).getByRole('button', { name: 'Overview', exact: true }).tap();
+    await settled(page);
+    must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'Overview did not show everything');
+    await (await openSheet(page)).getByRole('button', { name: 'Back in history' }).tap();
+    await settled(page);
+    await framed(page, 'p-group-a');
+  });
+
+  await check('long-press a name: Arrange turns on and the drag carries on in one motion', async (page) => {
+    const a = await centre(page, '[data-tab="rose"]');
+    const sky = await rect(page, '[data-panel="p-sky"]');
+    await dragPath(page, chromium, [a, { x: a.x + 2, y: a.y + 1, hold: 800 }, { x: sky.x + sky.w * 0.9, y: sky.y + sky.h * 0.6, hold: 250 }]);
+    await settled(page);
+    must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'the hold did not turn Arrange on');
+    const amber = await page.evaluate(() => [...document.querySelectorAll('[data-caption="p-amber"] .fx-tab')].map((t) => t.dataset.tab).join());
+    must(amber === 'amber', `Rose didn't move: Amber holds ${amber}`);
+  });
+
+  await check('a long-press that ends where it began picks up and drops, and never zooms', async (page) => {
+    const a = await centre(page, '[data-tab="sky"]');
+    await dragPath(page, chromium, [a, { x: a.x + 1, y: a.y, hold: 800 }]);
+    // Neither engine here fires a click after a long press, but a browser may: deliver one. Arrange
+    // is on by then, where a name's click only selects, so it must not zoom.
+    await page.locator('[data-tab="sky"]').dispatchEvent('click');
+    await page.waitForTimeout(300);
+    await settled(page);
+    must((await page.locator('.fx-viewport[data-arranging]').count()) === 1, 'the hold did not turn Arrange on');
+    must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'the held name also zoomed');
+  });
+
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);
+}
+
+/** Open the capsule's sheet; returns it. */
+async function openSheet(page) {
+  await page.locator('.fx-capsule-name').tap();
+  const sheet = page.getByRole('dialog', { name: 'Places and actions' });
+  await sheet.waitFor();
+  return sheet;
+}
+
+/** The level trail, as the capsule's sheet lists it. */
+async function levels(page) {
+  const sheet = await openSheet(page);
+  const out = (await sheet.locator('.fx-levels button').allTextContents()).map((t) => t.trim());
+  await sheet.getByRole('button', { name: 'Close', exact: true }).tap();
+  return out;
 }
 
 async function settled(page) {
@@ -514,7 +606,9 @@ async function oneFinger(page, chromium, a0, a1, steps) {
 }
 
 // A one-finger drag through points, pausing `hold` ms at any point that has one. `then` runs at the
-// end of the path (finger still down) and may return more points.
+// end of the path (finger still down) and may return more points. Drops end with a hold, the finger
+// at rest, as a real one does: a drag lifted at speed makes Chromium start a fling, and the next
+// tap (stopping that fling) then fires no click.
 async function dragPath(page, chromium, points, then) {
   const segs = async (send, pts, from) => {
     let prev = from;

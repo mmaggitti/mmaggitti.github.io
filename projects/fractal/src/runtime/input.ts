@@ -10,7 +10,7 @@
 //   the page never zooms. Their scale drives the camera only when no touch pointer is down: the Mac
 //   trackpad.
 
-import { GestureMachine, type Intent, type Region } from '../core/gestures.ts';
+import { GestureMachine, HOLD_MS, type Intent, type Region } from '../core/gestures.ts';
 import type { WorkspaceHandle } from './workspace.ts';
 import type { DragController } from './drag.ts';
 
@@ -52,9 +52,15 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
       const frame = e?.closest('.fx-frame') as HTMLElement | null;
       if (frame) return { region: 'panel', target: frame.dataset.panel ?? '' };
     }
+    // Outside Arrange a caption name or a tile you can't use (only those let events reach the
+    // frame) can still be held to pick it up.
+    const tab = e?.closest('.fx-tab') as HTMLElement | null;
+    if (tab && caption) return { region: 'tab', target: tab.dataset.tab ?? '', panel: captionPanel };
     if (caption) return { region: 'caption', target: captionPanel };
     if (e?.closest('.fx-content')) return { region: 'content', target: '' };
-    if (e?.closest('.fx-topbar')) return { region: 'topbar', target: '' };
+    const frame = e?.closest('.fx-frame') as HTMLElement | null;
+    if (frame) return { region: 'panel', target: frame.dataset.panel ?? '' };
+    if (e?.closest('.fx-capsule')) return { region: 'capsule', target: '' };
     return { region: 'chrome', target: '' };
   };
 
@@ -79,6 +85,9 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
         case 'edge-end':
           onEdge?.(it.side, 0);
           if (it.commit) ws.history(it.side === 'left' ? -1 : 1);
+          break;
+        case 'arrange-on':
+          ws.setArranging(true);
           break;
         case 'drag-start':
           drag?.start(it.region, it.target, it.x, it.y);
@@ -114,15 +123,20 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
 
   const p = (e: PointerEvent) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, touch: e.pointerType === 'touch' });
 
+  // Long press: a timer per press; the machine decides whether it still counts. (A click the press
+  // may end with can't zoom: Arrange is on by then, and there a name's click only selects.)
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+
   on(app, 'pointerdown', (e: PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     machine.width = app.clientWidth;
     machine.arrange = ws.arranging;
+    clearTimeout(holdTimer);
     const { region, target, panel } = regionOf(e.target);
     if (e.pointerType === 'touch') touchIds.add(e.pointerId);
     // Arrange: no text selection or native drag from a press that may become a drag.
     if (ws.arranging && (region === 'tab' || region === 'panel' || region === 'divider') && e.pointerType === 'mouse') e.preventDefault();
-    if (region === 'edge-left' || region === 'edge-right' || region === 'topbar') {
+    if (region === 'edge-left' || region === 'edge-right' || region === 'capsule') {
       try {
         (e.target as Element).setPointerCapture(e.pointerId);
       } catch {
@@ -130,13 +144,19 @@ export function attachInput({ app, ws, drag, onEdge }: InputOptions): () => void
       }
     }
     act(machine.down(p(e), region, target, panel));
+    if (region === 'tab' || region === 'panel') {
+      const id = e.pointerId;
+      holdTimer = setTimeout(() => act(machine.hold(id)), HOLD_MS);
+    }
   }, { capture: true });
   on(window, 'pointermove', (e: PointerEvent) => act(machine.move(p(e))), { capture: true });
   on(window, 'pointerup', (e: PointerEvent) => {
+    clearTimeout(holdTimer);
     touchIds.delete(e.pointerId);
     act(machine.up(p(e)));
   }, { capture: true });
   on(window, 'pointercancel', (e: PointerEvent) => {
+    clearTimeout(holdTimer);
     touchIds.delete(e.pointerId);
     act(machine.cancel(e.pointerId));
   }, { capture: true });

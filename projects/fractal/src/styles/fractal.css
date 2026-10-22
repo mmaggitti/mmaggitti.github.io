@@ -19,84 +19,121 @@ body {
   font-family: var(--font-ui);
 }
 
-/* ---------------------------------------------------------------- bars */
-.fx-topbar {
+/* ---------------------------------------------------------------- the capsule */
+/* The only global chrome: a glass pill floating in the thumb zone, over a workspace that runs to
+   the bottom edge. Apps keep anything important above --fx-bottom-inset. */
+.fx-app {
+  --fx-bottom-inset: calc(var(--tap-min) + 2 * var(--space-2) + env(safe-area-inset-bottom));
+}
+.fx-capsule {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + var(--space-2));
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  min-height: max(var(--tap-min), 3.5rem);
+  max-width: calc(100% - 2 * var(--space-3));
   padding: 0 var(--space-1);
+  border-radius: 100rem;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(1.25rem) saturate(1.6);
+  backdrop-filter: blur(1.25rem) saturate(1.6);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent), 0 0.5rem 1.5rem rgb(0 0 0 / 0.18);
+  transform: translateX(-50%);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.fx-crumbs {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  /* Not a scroller: a native scroll would claim the bar's swipe. TopBar keeps the end in view. */
-  overflow: hidden;
+.fx-capsule * {
+  touch-action: none;
 }
-.fx-crumbs li {
+.fx-capsule-btn {
   display: flex;
   align-items: center;
-  white-space: nowrap;
-}
-.fx-crumbs li + li::before {
-  content: '›';
-  color: var(--text-muted);
-  margin-right: var(--space-1);
-}
-.fx-crumb {
-  min-height: var(--tap-min);
-  padding: 0 var(--space-1);
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: var(--text-sm);
-  touch-action: manipulation;
-}
-.fx-crumb--here {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text);
-  font-weight: 600;
-}
-.fx-bar-btn {
+  justify-content: center;
   min-width: var(--tap-min);
   min-height: var(--tap-min);
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
-  font-size: var(--text-lg);
-  touch-action: manipulation;
-}
-.fx-bar-btn:disabled {
-  color: var(--line);
-}
-.fx-page {
+  font: inherit;
+  font-size: var(--text-md);
   white-space: nowrap;
 }
-.fx-bottombar {
-  display: flex;
+.fx-capsule-btn:disabled {
+  color: color-mix(in srgb, var(--text) 30%, transparent);
+}
+.fx-capsule-back {
+  font-size: var(--text-lg);
+}
+.fx-capsule-back:disabled {
+  display: none;
+}
+.fx-capsule-name {
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  min-width: 8rem;
+  font-weight: 600;
+}
+.fx-capsule-here {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fx-capsule-done {
+  color: var(--accent);
+  font-weight: 600;
+}
+.fx-dots {
+  display: flex;
+  gap: 0.25rem;
+}
+.fx-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 25%, transparent);
+}
+.fx-dot[data-on] {
+  background: var(--text);
 }
 .fx-sheet {
   position: fixed;
   left: var(--space-2);
   right: var(--space-2);
-  bottom: calc(var(--control-h) + var(--space-6) + env(safe-area-inset-bottom));
-  z-index: 10;
+  bottom: calc(env(safe-area-inset-bottom) + var(--tap-min) + 2 * var(--space-2));
+  z-index: 21;
   display: flex;
   gap: var(--space-2);
   padding: var(--space-2);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: 0 0 0 1px var(--line), 0 0.5rem 2rem rgb(0 0 0 / 0.2);
+}
+.fx-capsule-sheet {
+  flex-direction: column;
+  max-height: 70svh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fx-levels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fx-levels .ds-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.fx-levels .ds-btn[aria-current] {
+  font-weight: 700;
+}
+.fx-menu-row > .ds-btn {
+  flex: 1;
 }
 .fx-error {
   margin: 0 var(--space-2);
@@ -118,10 +155,6 @@ body {
 .fx-content,
 .fx-content * {
   touch-action: pan-x pan-y;
-}
-.fx-topbar,
-.fx-topbar * {
-  touch-action: none;
 }
 /* History edge strips: only where fingers are, so a mouse never loses the edges. */
 .fx-edge {

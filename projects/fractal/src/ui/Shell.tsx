@@ -7,10 +7,9 @@ import { attachInput } from '../runtime/input.ts';
 import { createDrag } from '../runtime/drag.ts';
 import { layoutSaver } from '../platform/storage.ts';
 import { Block } from '../apps/Blocks.tsx';
-import { TopBar } from './TopBar.tsx';
 import { PanelMenu } from './PanelMenu.tsx';
 import { addBlock } from '../core/arrange.ts';
-import { BottomBar } from './BottomBar.tsx';
+import { Capsule } from './Capsule.tsx';
 
 declare global {
   interface Window {
@@ -51,7 +50,6 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
 
   return (
     <div className="fx-app" ref={appRef}>
-      {ws ? <TopBar ws={ws} /> : <div className="fx-topbar" />}
       {error && (
         <p className="fx-error" role="alert">
           {error}
@@ -67,7 +65,7 @@ export function Shell({ initial }: { initial: LayoutDoc }) {
         </div>
         {ws && <Overlays ws={ws} menu={menu} setMenu={setMenu} />}
       </div>
-      {ws ? <BottomBar ws={ws} /> : <div className="fx-bottombar" />}
+      {ws && <Capsule ws={ws} />}
       {ws && <Portals ws={ws} />}
     </div>
   );

@@ -49,13 +49,13 @@ test('GEST-04 a cancelled pointer is forgotten; a cancelled pair ends the camera
 
 test('GEST-05 a top-bar swipe flips to a neighbour; a short or vertical drag doesn\'t', () => {
   const g = new GestureMachine();
-  g.down(pt(1, 300, 20, 0), 'topbar');
+  g.down(pt(1, 300, 20, 0), 'capsule');
   g.move(pt(1, 200, 24, 200));
   assert.deepEqual(g.up(pt(1, 200, 24, 400)), [{ type: 'bar-swipe', dir: 1 }]);
-  g.down(pt(2, 100, 20, 1000), 'topbar');
+  g.down(pt(2, 100, 20, 1000), 'capsule');
   g.move(pt(2, 120, 20, 1300));
   assert.deepEqual(g.up(pt(2, 120, 20, 1600)), []);
-  g.down(pt(3, 100, 20, 2000), 'topbar');
+  g.down(pt(3, 100, 20, 2000), 'capsule');
   g.move(pt(3, 160, 120, 2300));
   assert.deepEqual(g.up(pt(3, 160, 120, 2600)), []);
 });
@@ -208,4 +208,44 @@ test('GEST-ARR-06 in Arrange a double-tap on a tab is not a gesture either', () 
   g.up(pt(1, 100, 10, 40));
   g.down(pt(2, 101, 10, 150), 'tab', 'amber', 'p-amber');
   assert.deepEqual(g.up(pt(2, 101, 10, 190)), []);
+});
+
+// ---------------------------------------------------------------- long press
+
+test('GEST-HOLD-01 a still press on a caption name, held, turns Arrange on and lifts it in one motion', () => {
+  const g = new GestureMachine();
+  g.down(pt(1, 100, 10, 0), 'tab', 'rose', 'p-amber');
+  g.move(pt(1, 103, 11, 200)); // inside the slop
+  const out = g.hold(1);
+  assert.deepEqual(types(out), ['arrange-on', 'drag-start']);
+  assert.ok(out[1].type === 'drag-start' && out[1].region === 'tab' && out[1].target === 'rose');
+  assert.equal(g.arrange, true);
+  assert.deepEqual(types(g.move(pt(1, 160, 80, 600))), ['drag-move']);
+  assert.deepEqual(types(g.up(pt(1, 160, 80, 650))), ['drag-end']);
+});
+
+test('GEST-HOLD-02 a hold does nothing once the finger moved, on live content, with two fingers, or after release', () => {
+  const g = new GestureMachine();
+  g.down(pt(1, 100, 10, 0), 'tab', 'rose', 'p-amber');
+  g.move(pt(1, 130, 10, 100));
+  assert.deepEqual(g.hold(1), [], 'moved past the slop');
+  g.up(pt(1, 130, 10, 150));
+  g.down(pt(2, 100, 300, 1000), 'content');
+  assert.deepEqual(g.hold(2), [], 'content belongs to the app');
+  g.up(pt(2, 100, 300, 1050));
+  g.down(pt(3, 100, 300, 2000), 'panel', 'p-sky');
+  g.down(pt(4, 200, 300, 2010), 'panel', 'p-sky');
+  assert.deepEqual(g.hold(3), [], 'a second finger made it a camera gesture');
+  g.up(pt(3, 100, 300, 2100));
+  g.up(pt(4, 200, 300, 2100));
+  g.down(pt(5, 100, 300, 3000), 'panel', 'p-sky');
+  g.up(pt(5, 100, 300, 3050));
+  assert.deepEqual(g.hold(5), [], 'already released');
+});
+
+test('GEST-HOLD-03 in Arrange a hold lifts without turning Arrange on again', () => {
+  const g = new GestureMachine();
+  g.arrange = true;
+  g.down(pt(1, 100, 300, 0), 'panel', 'p-sky');
+  assert.deepEqual(types(g.hold(1)), ['drag-start']);
 });
