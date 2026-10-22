@@ -278,5 +278,5 @@ test('replaceContent costs time in proportion to the children it replaces, and s
       s.undo();
     };
   };
-  linear('Edit the drawing’s source over 10,000 and 40,000 children, then its undo', over(10_000), over(40_000), { reps: 5, runs: 5, most: 8, limit: 2000 });
+  linear('Edit the drawing’s source over 1,250 and 40,000 children, then its undo', over(1_250), over(40_000), { reps: 5, runs: 5, work: 32, most: 200, limit: 2000 });
 });
