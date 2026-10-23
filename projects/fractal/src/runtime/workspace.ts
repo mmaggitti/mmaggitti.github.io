@@ -12,7 +12,7 @@
 // Ideas from Trellis's runtime/workspace.ts (flat layer, placeSurface, settle); no code copied.
 
 import type { LayoutDoc, Rect } from '../core/types.ts';
-import { metrics, type Look, type Metrics } from '../core/metrics.ts';
+import { DEFAULT_LOOK, metrics, type Look, type Metrics } from '../core/metrics.ts';
 import { solve, type RestLayout } from '../core/layout.ts';
 import { indexDoc, type TreeIndex } from '../core/tree.ts';
 import { hueOf, kindOf } from '../core/kinds.ts';
@@ -66,7 +66,7 @@ export interface WorkspaceOptions {
   reducedMotion?(): boolean;
   /** Arrange mode's ⋯ button on a panel. */
   onMenu?(panel: string): void;
-  /** The look to start in (default Bento). */
+  /** The look to start in (default Mosaic). */
   look?: Look;
 }
 
@@ -161,7 +161,7 @@ export function createWorkspace(opts: WorkspaceOptions): WorkspaceHandle {
 
   let doc = opts.doc;
   let idx: TreeIndex = indexDoc(doc);
-  let look: Look = opts.look ?? 'bento';
+  let look: Look = opts.look ?? DEFAULT_LOOK;
   host.setAttribute('data-look', look);
   let m: Metrics = metrics(remPx(), look);
   let viewport = { w: host.clientWidth, h: host.clientHeight };

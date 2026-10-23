@@ -7,10 +7,10 @@
 // width plus a gap to the right, and app content must be the same element after moves.
 
 const TOL = 1; // px
-// Tap a caption control on its glyph: a caption's 44pt touch box overhangs its small row, so the top
-// row's box starts above the screen, and the centre of its visible part would land on the row below.
-const GLYPH = { position: { x: 22, y: 22 } };
-const GAP = 6; // 0.5rem at the site's 75% scale
+// Tap a caption control on its glyph, in its own row: its 44pt touch box hangs down over what's below,
+// so the box's centre can lie under a nested caption that's stacked above it.
+const GLYPH = { position: { x: 22, y: 9 } };
+const GAP = 1; // Mosaic, the default look: a 1px seam
 
 export default async function run({ browser, origin, engine }) {
   const chromium = engine !== 'webkit';
@@ -23,6 +23,7 @@ export default async function run({ browser, origin, engine }) {
       hasTouch: true,
       reducedMotion: opts.motion ? 'no-preference' : 'reduce',
     });
+    if (opts.look) await context.addInitScript((l) => localStorage.setItem('fractal:look', l), opts.look);
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(`uncaught: ${e.message}`));
@@ -64,7 +65,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('a caption frames a nested group: it fills the workspace, bare, and its tiles sit in its dock', async (page) => {
-    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap();
+    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap(GLYPH);
     await settled(page);
     await framed(page, 'p-group-b');
     must((await page.locator('[data-caption="p-group-b"]').isVisible()) === false, 'the framed group still shows its caption');
@@ -104,18 +105,18 @@ export default async function run({ browser, origin, engine }) {
     await page.waitForTimeout(400);
     await settled(page);
     await framed(page, 'p-group-b');
-  });
+   }, { look: 'bento' }); // Bento: at Group A, Teal is a miniature (Mosaic's 1px seams leave it live)
 
   await check('caption taps: another name switches tab, the shown name zooms, and again steps out', async (page) => {
-    await page.locator('[data-tab="rose"]').tap();
+    await page.locator('[data-tab="rose"]').tap(GLYPH);
     await settled(page);
     must((await page.locator('[data-tab="rose"][aria-selected="true"]').count()) === 1, 'Rose was not selected');
     must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'switching a tab zoomed');
-    await page.locator('[data-tab="rose"]').tap();
+    await page.locator('[data-tab="rose"]').tap(GLYPH);
     await settled(page);
     await framed(page, 'p-amber');
     must(await page.locator('[data-caption="p-amber"]').isVisible(), 'a framed panel with two tabs lost its tab switcher');
-    await page.locator('[data-tab="rose"]').tap();
+    await page.locator('[data-tab="rose"]').tap(GLYPH);
     await settled(page);
     must((await page.locator('.fx-frame[data-framed]').count()) === 0, 'tapping the framed name did not step out');
   });
@@ -139,7 +140,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('neighbours are pages one workspace width apart, reached with ›', async (page) => {
-    await page.locator('[data-caption="p-sky"] [data-tab="sky"]').tap();
+    await page.locator('[data-caption="p-sky"] [data-tab="sky"]').tap(GLYPH);
     await settled(page);
     await framed(page, 'p-sky');
     const vp = await rect(page, '.fx-viewport');
@@ -154,7 +155,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('a block is the same element after moving between levels, and blocks differ in colour', async (page) => {
-    await page.locator('[data-caption="p-amber"] [data-tab="amber"]').tap();
+    await page.locator('[data-caption="p-amber"] [data-tab="amber"]').tap(GLYPH);
     await settled(page);
     await page.evaluate(() => (window.__block = document.querySelector('[data-content="amber"] .block')));
     await page.evaluate(() => window.__fractal.frame('p-teal'));
@@ -246,7 +247,7 @@ export default async function run({ browser, origin, engine }) {
   });
 
   await check('an animated framing settles exactly on the workspace', async (page) => {
-    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap();
+    await page.locator('[data-caption="p-group-b"] [data-tab="group-b"]').tap(GLYPH);
     await settled(page);
     await framed(page, 'p-group-b');
   }, { motion: true });
@@ -567,6 +568,37 @@ export default async function run({ browser, origin, engine }) {
     await page.reload({ waitUntil: 'networkidle' });
     await settled(page);
     must((await page.locator('.fx-viewport[data-look="mosaic"]').count()) === 1, 'the look was not remembered');
+  });
+
+  // ---------------------------------------------------------------- Mosaic default; no selection
+
+  await check('Mosaic is the default look', async (page) => {
+    must((await page.locator('.fx-viewport[data-look="mosaic"]').count()) === 1, `the look is ${await page.locator('.fx-viewport').getAttribute('data-look')}`);
+  });
+
+  await check('holding or dragging on tiles never selects text', async (page) => {
+    const sel = () => page.evaluate(() => ({ type: getSelection().type, text: getSelection().toString() }));
+    const teal = await centre(page, '[data-app="teal"]');
+    await dragPath(page, chromium, [teal, { x: teal.x + 1, y: teal.y, hold: 900 }]); // a long press
+    await page.waitForTimeout(200);
+    let s = await sel();
+    must(s.type !== 'Range' && s.type !== 'Caret' && !s.text, `a long press left a ${s.type} selection "${s.text}"`);
+    await page.mouse.move(teal.x, teal.y);
+    await page.mouse.down();
+    await page.mouse.move(teal.x + 300, teal.y + 400, { steps: 10 });
+    await page.mouse.up();
+    s = await sel();
+    must(s.type !== 'Range' && !s.text, `a drag across tiles selected "${s.text}"`);
+  });
+
+  await check('a group\'s name stays tappable just above its first tile\'s name', async (page) => {
+    const hits = await page.evaluate(() => ['group-a', 'group-b', 'teal'].map((id) => {
+      const t = document.querySelector(`[data-tab="${id}"]`);
+      const cap = t.closest('.fx-caption').getBoundingClientRect();
+      const r = t.getBoundingClientRect();
+      return [id, document.elementFromPoint(r.x + 12, cap.y + cap.height / 2)?.closest('[data-tab]')?.dataset.tab];
+    }));
+    for (const [id, got] of hits) must(got === id, `a tap on "${id}" lands on ${got}`);
   });
 
   if (failures.length) throw new Error(`fractal e2e: ${failures.length} failure(s)\n  - ${failures.join('\n  - ')}`);

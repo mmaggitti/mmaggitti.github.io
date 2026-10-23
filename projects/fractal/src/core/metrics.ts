@@ -17,10 +17,12 @@ export interface Metrics {
 /** The tap floor (ds.css --tap-min): 44 CSS px at every scale. */
 export const TAP_MIN = 44;
 
-/** The looks Fractal can wear: Bento (rounded tiles, small gaps) is the default; Mosaic (tiles
- * edge to edge, hairline seams) and Layered (raised cards, wider gaps) are prototypes to compare. */
+/** The looks Fractal can wear: Mosaic (tiles edge to edge, hairline seams) is the default, Mark's
+ * pick (2026-10-22); Bento (rounded tiles, small gaps) and Layered (raised cards, wider gaps) stay
+ * selectable. `metrics()` itself defaults to Bento's spacing, which the unit tests are written in. */
 export type Look = 'bento' | 'mosaic' | 'layered';
-export const LOOKS: readonly Look[] = ['bento', 'mosaic', 'layered'];
+export const LOOKS: readonly Look[] = ['mosaic', 'bento', 'layered'];
+export const DEFAULT_LOOK: Look = 'mosaic';
 
 const GAP_REM: Record<Look, number> = { bento: 0.5, mosaic: 0, layered: 0.75 };
 

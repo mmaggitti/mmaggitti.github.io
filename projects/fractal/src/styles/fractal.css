@@ -6,6 +6,12 @@ body {
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
+  /* No native text selection or callout anywhere: on iOS a press on any tile, text or not, would
+     otherwise start one (WebKit walks out from the press to the nearest text). An app that needs
+     selectable text opts back in on its own content. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .fx-app {
@@ -273,15 +279,20 @@ body {
   /* Clip sideways only: the tabs' touch areas spill above and below the row. */
   overflow-x: clip;
 }
-/* A name is small text in a small row, but its touch area is the full 44pt: it overhangs the row
-   into the gap above and the tile's top edge (captions stack above surfaces). */
+/* A name is small text in a small row, but its touch area is the full 44pt: it hangs down from the
+   row over the tile's top edge (captions stack above surfaces). Only down: a group's caption sits
+   just above its first child's (1px apart in Mosaic), and an upward overhang from the child would
+   cover the group's name. */
 .fx-tab,
 .fx-tab-more,
 .fx-menu-btn {
   flex: 0 0 auto;
+  align-self: flex-start;
   min-height: var(--tap-min);
-  margin-block: calc((var(--fx-cap) - var(--tap-min)) / 2);
-  padding: 0 var(--space-1);
+  margin-bottom: calc(var(--fx-cap) - var(--tap-min));
+  padding-bottom: calc(var(--tap-min) - var(--fx-cap));
+  padding-left: var(--space-1);
+  padding-right: var(--space-1);
   border: 0;
   background: none;
   color: var(--text-muted);

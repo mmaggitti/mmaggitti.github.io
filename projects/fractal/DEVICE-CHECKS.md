@@ -73,7 +73,9 @@ Switch in the capsule's sheet → Style. The choice stays on this device.
 | 46 | Bento | Rounded tiles on a calm background, names above them, groups as tinted wells: easy to read at the overview and framed | ☐ |
 | 47 | Mosaic | Tiles edge to edge with hairline seams, names inside the tiles, group edges bolder: still clear which tiles belong to which group | ☐ |
 | 48 | Layered | Groups are white cards with soft shadows that deepen per level; zooming in feels like stepping onto the next card | ☐ |
-| 49 | Pick one | Which look should stay the default? (Note it here; the others can go.) | ☐ |
+| 49 | Pick one | Mosaic (Mark, 2026-10-22): it's now the default for a device that hasn't chosen | ☑ |
+| 50 | No text selection | Hold anywhere on a tile, a well or a gap for a second or more: no selection handles, magnifier, callout or highlighted text, at the overview, inside a group, and in Arrange | ☐ |
+| 51 | Stacked names | In Mosaic, tap "Group B" right above "Teal": Group B is framed, not Teal | ☐ |
 
 ## P2 — Arrange
 
