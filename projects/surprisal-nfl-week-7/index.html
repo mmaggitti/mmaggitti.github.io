@@ -1,0 +1,877 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Surprisal NFL Week 7: every completed NFL Week 7 final of 2026, scored in bits against its
+  pregame betting line.
+  Copyright (C) 2026 Mark Maggitti
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  This page is free software: you can redistribute it and/or modify it under the terms of the
+  GNU General Public License as published by the Free Software Foundation, either version 3 of
+  the License, or (at your option) any later version. It is distributed in the hope that it will
+  be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE. You should have received a copy of the license with it
+  (LICENSE.txt in this folder); if not, see <https://www.gnu.org/licenses/>.
+
+  The license covers this page's code, text and charts. Game scores (Sportradar) and betting
+  lines (VegasInsider consensus) are facts and are not covered. The fonts in fonts/ (Barlow,
+  Barlow Condensed and JetBrains Mono) are under the SIL Open Font License 1.1; their license
+  files are beside them.
+-->
+<title>Surprisal NFL Week 7</title>
+<meta name="launcher-label" content="Surprisal">
+<meta name="description" content="Every completed NFL Week 7 game of 2026, ranked by how hard each final contradicted its pregame betting line, in bits.">
+<meta name="theme-color" content="#F2F4F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<!-- No /ds/ds.css on purpose: this page keeps its own look, sized in rem against the default 16px
+     root. The site sheet's 75% root would shrink every size here, and its --bg/--line/--accent
+     would collide with the page's own. The fonts are self-hosted in fonts/ (SIL OFL 1.1). -->
+<style>
+@font-face { font-family: "Barlow"; src: url(fonts/barlow-latin-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url(fonts/barlow-latin-600.woff2) format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url(fonts/barlow-latin-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Barlow Condensed"; src: url(fonts/barlow-condensed-latin-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+@font-face {
+  font-family: "JetBrains Mono"; src: url(fonts/jetbrains-mono-latin-400.woff2) format("woff2"); font-weight: 400; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono"; src: url(fonts/jetbrains-mono-latin-600.woff2) format("woff2"); font-weight: 600; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono"; src: url(fonts/jetbrains-mono-greek-400.woff2) format("woff2"); font-weight: 400; font-display: swap;
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: "JetBrains Mono"; src: url(fonts/jetbrains-mono-greek-600.woff2) format("woff2"); font-weight: 600; font-display: swap;
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+/* Layout: one long scoreboard page for a single NFL week. Hero with the week's two headline
+   finals, a two-pane feed (controls and slate summary beside the ranked cards), two worked-example
+   screens split into story and chart columns, then a single reading column for the method.
+   Collapses to the phone app's single column below 900px (56.25em). Day colors in light mode,
+   the night scoreboard in dark mode. */
+:root {
+  --page: #F2F4F7;      /* ground */
+  --card: #FFFFFF;      /* panels */
+  --inset: #E6EAF0;     /* wells, tracks, chips */
+  --line: #D2D9E1;      /* hairlines, axes */
+  --ink: #0F151C;       /* primary text */
+  --ink-hi: #000000;    /* links under the pointer */
+  --ink-2: #46515E;     /* secondary text */
+  --muted: #5A6572;     /* tertiary text, losers */
+  --other: #87919D;     /* outcomes that did not happen */
+  --hit: #C2410C;       /* what happened */
+  --expect: #2563EB;    /* what the line expected */
+  --display: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', system-ui, sans-serif;
+  --body: Barlow, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-card: 1.125rem;
+  --r-inset: 0.75rem;
+  --head-h: 3.5rem;
+  --tap-min: 44px; /* px-ok: physical tap floor, never scaled */
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0E1116; --card: #161B22; --inset: #1E252F; --line: #2A323D; --ink: #EAEFF4; --ink-hi: #FFFFFF;
+    --ink-2: #A9B4C0; --muted: #8E99A6; --other: #66717F; --hit: #E2701F; --expect: #4C88DD; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0E1116; --card: #161B22; --inset: #1E252F; --line: #2A323D; --ink: #EAEFF4; --ink-hi: #FFFFFF;
+  --ink-2: #A9B4C0; --muted: #8E99A6; --other: #66717F; --hit: #E2701F; --expect: #4C88DD; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html {
+  scroll-padding-top: calc(var(--head-h) + env(safe-area-inset-top, 0px) + 0.5rem);
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--page);
+}
+a { color: var(--ink); }
+a:hover { color: var(--ink-hi); }
+a, button { touch-action: manipulation; } /* no double-tap zoom delay */
+:focus-visible { outline: 2px solid var(--expect); outline-offset: 2px; border-radius: 0.375rem; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.ink { color: var(--ink); }
+
+.wrap {
+  max-width: 70rem; margin-inline: auto;
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+}
+.label {
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2);
+}
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--page);
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  backdrop-filter: blur(0.5rem); -webkit-backdrop-filter: blur(0.5rem);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-in { display: flex; align-items: center; gap: 0.75rem; min-height: var(--head-h); }
+.brand {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; text-decoration: none;
+  min-height: var(--tap-min); min-width: var(--tap-min);
+}
+.brand-word { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.06em; }
+.topnav { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.topnav a {
+  display: inline-flex; align-items: center; min-height: var(--tap-min); padding: 0 0.625rem; border-radius: 1.375rem;
+  text-decoration: none; color: var(--ink-2); font-weight: 600; font-size: 0.875rem;
+}
+.topnav a:hover { color: var(--ink); background: var(--card); }
+.nav-short { display: none; }
+@media (max-width: 37.5em) {
+  .brand-word { display: none; }
+  .nav-long { display: none; }
+  .nav-short { display: inline; }
+  .topnav a { padding: 0 0.5rem; }
+}
+
+/* ---------- hero ---------- */
+.hero { padding-block: 2.5rem 0.5rem; }
+.hero-text { max-width: 41.25rem; display: flex; flex-direction: column; gap: 0.625rem; }
+.hero h1 { font-family: var(--display); font-weight: 700; font-size: clamp(2.75rem, 8vw, 4.5rem); line-height: 0.98; letter-spacing: 0.01em; }
+.lede { font-size: clamp(1rem, 2.2vw, 1.1875rem); color: var(--ink-2); max-width: 60ch; }
+.lede, .bit-note p { text-wrap: pretty; }
+.meta { font-size: 0.8125rem; color: var(--muted); }
+/* What a bit is: the one explainer the page needs before its first number. */
+.bit-note { margin-top: 0.5rem; padding: 0.875rem 1rem; border-radius: var(--r-inset); border: 1px solid var(--line); }
+.bit-note h2 { color: var(--hit); }
+.bit-note p { margin-top: 0.375rem; font-size: 1rem; color: var(--ink); max-width: 60ch; }
+.headliners { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1.75rem; }
+@media (max-width: 43.75em) { .headliners { grid-template-columns: minmax(0, 1fr); } }
+.headliner {
+  display: flex; flex-direction: column; gap: 0.375rem; padding: 1.125rem; border-radius: var(--r-card);
+  background: var(--card); text-decoration: none; color: var(--ink); border: 1px solid transparent;
+}
+.headliner:hover { border-color: var(--line); color: var(--ink); }
+.headliner .match { font-family: var(--display); font-weight: 700; font-size: 1.5rem; line-height: 1.1; }
+.headliner .big { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 2px; }
+.headliner .big b { font-family: var(--mono); font-weight: 600; font-size: 3rem; line-height: 1.05; }
+.headliner .big span { font-size: 1.0625rem; color: var(--ink-2); }
+.headliner .why { font-size: 0.875rem; color: var(--ink-2); }
+.headliner .go { margin-top: 0.375rem; display: inline-flex; align-items: center; gap: 0.25rem; font-weight: 600; font-size: 0.875rem; }
+
+/* ---------- sections ---------- */
+.section { padding-block: 3.5rem 0.5rem; }
+.sec-head { display: flex; flex-direction: column; gap: 0.375rem; margin-bottom: 1.25rem; max-width: 42.5rem; }
+.sec-head h2 { font-family: var(--display); font-weight: 700; font-size: clamp(2rem, 5vw, 2.75rem); line-height: 1.02; }
+.sec-head p { color: var(--ink-2); font-size: 0.9375rem; }
+.eyebrow { color: var(--hit); }
+
+.card { background: var(--card); border-radius: var(--r-card); padding: 1rem; }
+.card h3 { font-family: var(--display); font-weight: 700; font-size: 1.375rem; line-height: 1.15; }
+.card p { font-size: 0.875rem; color: var(--ink-2); }
+.well { background: var(--inset); border-radius: var(--r-inset); padding: 0.75rem 0.875rem; }
+.stack { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+
+/* ---------- feed ---------- */
+.feed { display: grid; grid-template-columns: minmax(0, 22.5rem) minmax(0, 36.25rem); gap: 1.5rem; justify-content: start; align-items: start; }
+.feed-side { position: sticky; top: calc(var(--head-h) + env(safe-area-inset-top, 0px) + 0.75rem); }
+@media (max-width: 56.25em) {
+  .feed { grid-template-columns: minmax(0, 1fr); }
+  .feed-side { position: static; }
+}
+.seg { display: grid; gap: 0.25rem; padding: 0.25rem; background: var(--card); border-radius: 0.875rem; }
+.seg-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.seg button {
+  min-height: var(--tap-min); border: 0; border-radius: 0.625rem; background: transparent; color: var(--ink-2);
+  font: 600 0.9375rem/1 var(--body); cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+.seg button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+.hint { font-size: 0.8125rem; color: var(--muted); margin-top: 0.5rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.chips button {
+  min-height: var(--tap-min); padding: 0 1rem; border-radius: 1.375rem; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink-2); font: 600 0.875rem/1 var(--body); cursor: pointer;
+}
+.chips button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--page); }
+.chips button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+.slate-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.slate-n { font-size: 0.8125rem; color: var(--muted); }
+.slate-big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.625rem; margin-top: 0.25rem; }
+.slate-big b { font-family: var(--mono); font-weight: 600; font-size: 2.75rem; line-height: 1.1; }
+.slate-big span { font-size: 0.9375rem; color: var(--ink-2); }
+.bars { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+.bar-row { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) 4.75rem; align-items: center; gap: 0.625rem; }
+.bar-row > span:first-child { font-size: 0.8125rem; color: var(--ink-2); }
+.bar-row > span:last-child { text-align: right; font-size: 0.8125rem; }
+.track { height: 0.625rem; background: var(--inset); border-radius: 0.3125rem; }
+.track > i { display: block; height: 0.625rem; border-radius: 0.3125rem; transition: width 0.25s ease; }
+@media (prefers-reduced-motion: reduce) { .track > i { transition: none; } }
+.fill-hit { background: var(--hit); }
+.fill-exp { background: var(--expect); }
+.slate .fact { margin-top: 0.75rem; font-size: 0.8125rem; }
+
+.pending {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.75rem; margin-bottom: 0.625rem;
+  border-radius: var(--r-inset); border: 1px dashed var(--line); color: var(--ink-2); font-size: 0.8125rem;
+}
+.empty { color: var(--ink-2); font-size: 0.875rem; padding: 0.75rem 2px; }
+.games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.625rem; }
+.game { background: var(--card); border-radius: var(--r-card); padding: 0.75rem 0.875rem 0.875rem; }
+.g-head { display: flex; align-items: center; gap: 0.5rem; }
+.g-rank { font-family: var(--mono); font-size: 0.8125rem; color: var(--ink-2); min-width: 1.875rem; }
+.g-lg { font-size: 0.703125rem; font-weight: 700; letter-spacing: 0.08em; padding: 3px 0.4375rem; border-radius: 0.375rem; background: var(--inset); color: var(--ink-2); }
+.g-day { font-size: 0.75rem; color: var(--muted); }
+.g-bits { margin-left: auto; display: flex; align-items: baseline; gap: 0.25rem; }
+.g-bits b { font-family: var(--mono); font-weight: 600; font-size: 1.5rem; }
+.g-bits span { font-size: 0.75rem; color: var(--muted); }
+.g-teams { display: flex; flex-direction: column; gap: 2px; margin-top: 0.375rem; }
+.g-team { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; align-items: baseline; gap: 0.625rem; color: var(--muted); }
+.g-team.won { color: var(--ink); }
+.g-team .ab { font-family: var(--display); font-weight: 700; font-size: 1.25rem; }
+.g-team .nm { font-size: 0.875rem; min-width: 0; }
+.g-team .sc { font-family: var(--mono); font-size: 1.125rem; font-variant-numeric: tabular-nums; }
+.g-team.won .sc { font-weight: 700; }
+.g-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 0.5rem; margin-top: 0.5rem; }
+.g-line .ln { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-2); }
+.g-line .ot { font-family: var(--mono); font-size: 0.703125rem; color: var(--muted); margin-left: auto; }
+.segs { display: flex; gap: 2px; height: 0.625rem; margin-top: 0.625rem; }
+.segs i { display: block; min-width: 0.25rem; height: 0.625rem; border-radius: 0.25rem; background: var(--other); }
+.segs i.hit { background: var(--hit); }
+.g-cap { margin-top: 0.375rem; font-size: 0.8125rem; color: var(--ink); }
+.zrow { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.625rem; }
+.ztrack { position: relative; flex: 1; height: 0.625rem; background: var(--inset); border-radius: 0.3125rem; overflow: hidden; }
+.ztrack > i { position: absolute; left: 0; top: 0; height: 0.625rem; background: var(--hit); border-radius: 0.3125rem; }
+.ztrack > u { position: absolute; top: 0; width: 2px; height: 0.625rem; background: var(--card); }
+.ztxt { font-family: var(--mono); font-size: 0.8125rem; min-width: 4.75rem; text-align: right; }
+.g-link {
+  display: flex; align-items: center; justify-content: space-between; min-height: var(--tap-min); margin-top: 0.625rem;
+  padding: 0 0.75rem; border-radius: var(--r-inset); background: var(--inset); text-decoration: none;
+  font-weight: 600; font-size: 0.875rem;
+}
+
+/* ---------- worked examples ---------- */
+.screen { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; align-items: start; }
+@media (max-width: 56.25em) { .screen { grid-template-columns: minmax(0, 1fr); } }
+.where { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
+.where .label { color: var(--ink-2); }
+.where span:last-child { font-size: 0.8125rem; color: var(--muted); }
+.score { padding: 0.875rem 1rem; }
+.score-row { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; align-items: baseline; gap: 0.75rem; color: var(--muted); }
+.score-row.won { color: var(--ink); }
+.score-row .ab { font-family: var(--display); font-weight: 700; font-size: 1.625rem; }
+.score-row .nm { font-size: 1rem; }
+.score-row .pts { font-family: var(--mono); font-size: 1.875rem; font-variant-numeric: tabular-nums; }
+.score-row.won .pts { font-weight: 600; }
+.score .label { margin-top: 0.375rem; }
+.hero-num { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.25rem; }
+.hero-num b { font-family: var(--mono); font-weight: 600; font-size: 3.5rem; line-height: 1.05; }
+.hero-num span { font-size: 1.125rem; color: var(--ink-2); }
+.gauge { margin-top: 0.625rem; }
+.gauge-scale { display: flex; justify-content: space-between; margin-top: 0.25rem; font-family: var(--mono); font-size: 0.703125rem; color: var(--muted); }
+.prices { margin-top: 0.5rem; font-family: var(--mono); font-size: 0.8125rem; color: var(--ink-2); line-height: 1.6; }
+.strip { display: flex; gap: 2px; height: 0.875rem; margin-top: 0.75rem; }
+.strip i { display: block; border-radius: 0.25rem; background: var(--other); min-width: 0.25rem; }
+.strip i.hit { background: var(--hit); }
+.outcomes { display: grid; gap: 0.5rem; margin-top: 0.625rem; }
+.outcomes-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.key { display: flex; align-items: center; gap: 0.375rem; font-size: 0.8125rem; color: var(--ink-2); }
+.sw { width: 0.625rem; height: 0.625rem; border-radius: 2px; background: var(--other); flex: none; }
+.sw.hit { background: var(--hit); }
+.pct { font-family: var(--mono); font-size: 1.0625rem; margin-top: 2px; }
+.formula { margin-top: 0.625rem; font-family: var(--mono); font-size: 0.875rem; line-height: 1.7; color: var(--ink); }
+.card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.card-top .mono { font-size: 0.9375rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.875rem; margin-top: 0.625rem; font-size: 0.75rem; color: var(--ink-2); }
+.legend > span { display: inline-flex; align-items: center; gap: 0.375rem; }
+.solid-exp { width: 0.875rem; border-top: 2px solid var(--expect); }
+.solid-hit { width: 0.875rem; border-top: 2px solid var(--hit); }
+.tick-hit { width: 3px; height: 0.75rem; border-radius: 1px; background: var(--hit); }
+.swatch-exp { width: 0.875rem; height: 0.625rem; border-radius: 2px; background: var(--expect); }
+/* Chart text sizes are SVG user units (font-size attributes on each chart), so they scale with it. */
+.chart { display: block; width: 100%; max-width: 27.5rem; height: auto; margin: 0.5rem auto 0; }
+.chart text { font-family: var(--mono); fill: var(--muted); }
+.chart text.on { fill: var(--ink); }
+.chart text.mid { text-anchor: middle; }
+.chart text.end { text-anchor: end; }
+.chart text.sans { font-family: var(--body); }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart .curve { fill: none; stroke: var(--expect); stroke-width: 2; stroke-linejoin: round; }
+.chart .curve.hit { stroke: var(--hit); }
+.chart .area { fill: var(--expect); fill-opacity: 0.22; }
+.chart .final { stroke: var(--hit); stroke-width: 2; }
+.chart .dot { fill: var(--hit); stroke: var(--card); stroke-width: 2; }
+.chart .bracket { stroke: var(--ink-2); stroke-width: 1; }
+.axis-cap { font-size: 0.75rem; color: var(--muted); text-align: center; margin-top: 2px; }
+.ranks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; }
+.ranks .card { padding: 0.875rem 1rem; }
+.ranks b { font-family: var(--mono); font-weight: 600; font-size: 1.625rem; }
+.ranks b small { font-size: 0.875rem; color: var(--muted); font-weight: 400; }
+.ranks p { font-size: 0.8125rem; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; margin-top: 0.75rem; }
+.tiles .well b { font-family: var(--mono); font-weight: 600; font-size: 1.375rem; display: block; }
+.tiles .well span { font-size: 0.75rem; color: var(--ink-2); }
+.source { font-size: 0.75rem; color: var(--muted); line-height: 1.5; padding: 0.25rem 2px 0; }
+
+/* ---------- method ---------- */
+.method { max-width: 42.5rem; margin-inline: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+.step-n { font-family: var(--mono); font-size: 0.8125rem; color: var(--hit); }
+.method .card h3 { font-size: 1.5rem; margin-top: 2px; }
+.method .card > p { margin-top: 0.375rem; }
+.method .well { margin-top: 0.625rem; font-family: var(--mono); font-size: 0.8125rem; line-height: 1.75; color: var(--ink); }
+.method .well.big { font-size: 0.9375rem; line-height: 1.5; }
+.kv { display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.kv.dim { color: var(--ink-2); }
+.kv.strong { font-weight: 600; }
+.halvings { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.375rem; margin-top: 0.75rem; text-align: center; }
+.halvings div { padding: 0.5rem 2px; border-radius: 0.625rem; background: var(--inset); }
+.halvings span { display: block; font-size: 0.75rem; color: var(--ink-2); }
+.halvings b { display: block; font-family: var(--mono); font-weight: 400; font-size: 0.9375rem; margin-top: 2px; }
+.aside-box { margin-top: 0.875rem; padding: 0.75rem 0.875rem; border-radius: var(--r-inset); border: 1px solid var(--line); }
+.aside-box p { margin-top: 0.375rem; color: var(--ink); }
+.note { border: 1px solid var(--line); background: transparent; }
+.note p { margin-top: 0.375rem; font-size: 0.8125rem; line-height: 1.55; }
+
+.foot { padding-block: 2.5rem 3rem; color: var(--muted); font-size: 0.75rem; }
+.foot .wrap { border-top: 1px solid var(--line); padding-top: 1rem; }
+.foot p + p { margin-top: 0.25rem; }
+/* A 44pt-tall tap area that leaves the line height alone: the padding reaches past the text, the
+   negative margin takes it back out of the layout. */
+.foot a { display: inline-block; padding-block: 0.875rem; margin-block: -0.875rem; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="#top" aria-label="Surprisal, back to top">
+      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--hit); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;"><path d="M2 16 H8 L10 13 L12 16 L14 4 L16 16 H22"></path></svg>
+      <span class="brand-word">SURPRISAL</span>
+    </a>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#feed">Feed</a>
+      <a href="#nyg-hou"><span class="nav-long">Giants–Texans</span><span class="nav-short">NYG–HOU</span></a>
+      <a href="#tb-car"><span class="nav-long">Bucs–Panthers</span><span class="nav-short">TB–CAR</span></a>
+      <a href="#method"><span class="nav-long">How scoring works</span><span class="nav-short">Method</span></a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero wrap" id="top">
+  <div class="hero-text">
+    <p class="label eyebrow">NFL Week 7 · 13 finals · Oct 22–25, 2026</p>
+    <h1>Biggest updates</h1>
+    <p class="lede">Every completed Week 7 game, each next to its pregame betting line, ranked by how hard the final contradicted that line.</p>
+    <p class="meta">Snapshot Mon Oct 26, 8:00 AM ET · Cowboys at Eagles plays Monday night</p>
+    <section class="bit-note" aria-labelledby="bit-h">
+      <h2 class="label" id="bit-h">What’s a bit?</h2>
+      <p>A bit measures surprise. A coin landing heads, a 1-in-2 chance, is 1 bit. Each extra bit halves the chance: 2 bits is 1 in 4, 3 bits is 1 in 8, and a sure thing is 0 bits. The chances here come from each game’s pregame betting line. The line gave the Giants about a 1-in-5 chance, so their win scores 2.35 bits.</p>
+    </section>
+  </div>
+  <div class="headliners">
+    <a class="headliner" href="#nyg-hou">
+      <span class="label">Biggest result surprise</span>
+      <span class="match">Giants 27–21 Texans</span>
+      <span class="big"><b>2.35</b><span>bits</span></span>
+      <span class="why">A 10-point underdog won in overtime.</span>
+      <span class="go">See the math <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;"><path d="M9 6 L15 12 L9 18"></path></svg></span>
+    </a>
+    <a class="headliner" href="#tb-car">
+      <span class="label">Biggest margin surprise</span>
+      <span class="match">Buccaneers 43–13 Panthers</span>
+      <span class="big"><b>6.11</b><span>bits</span></span>
+      <span class="why">A 3-point underdog won by 30.</span>
+      <span class="go">See the math <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;"><path d="M9 6 L15 12 L9 18"></path></svg></span>
+    </a>
+  </div>
+</section>
+
+<!-- ======================================================= FEED -->
+<section class="section" id="feed" aria-labelledby="feed-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label eyebrow">The feed</p>
+      <h2 id="feed-h">Every Week 7 final, ranked</h2>
+      <p>Rank by the result or by the margin, and narrow it to one kickoff window.</p>
+    </div>
+    <div class="feed">
+      <div class="feed-side stack">
+        <section class="card slate" aria-label="Week summary">
+          <div class="slate-top">
+            <span class="label" id="chaos-label">RESULT CHAOS · WEEK 7</span>
+            <span class="slate-n" id="n-label">13 finals</span>
+          </div>
+          <div class="slate-big" aria-live="polite">
+            <b id="chaos">—</b>
+            <span id="chaos-word"></span>
+          </div>
+          <div class="bars">
+            <div class="bar-row">
+              <span>Happened</span>
+              <div class="track" aria-hidden="true"><i class="fill-hit" id="real-bar" style="width: 0%;"></i></div>
+              <span class="mono" id="real-txt"></span>
+            </div>
+            <div class="bar-row">
+              <span>Lines expected</span>
+              <div class="track" aria-hidden="true"><i class="fill-exp" id="exp-bar" style="width: 0%;"></i></div>
+              <span class="mono" id="exp-txt"></span>
+            </div>
+          </div>
+          <p class="fact" id="fact"></p>
+        </section>
+
+        <div>
+          <div class="label" style="margin: 0 0 0.375rem 2px;">Rank by</div>
+          <div class="seg seg-2" role="group" aria-label="Rank by" id="lenses">
+            <button type="button" id="lens-result" data-lens="result" aria-pressed="true">Result</button>
+            <button type="button" id="lens-margin" data-lens="margin" aria-pressed="false">Margin</button>
+          </div>
+          <p class="hint" id="lens-hint">Bits = −log₂ of the market’s no-vig chance of what happened.</p>
+        </div>
+
+        <div>
+          <div class="label" style="margin: 0 0 0.375rem 2px;">Kickoff window</div>
+          <div class="chips" role="group" aria-label="Kickoff window" id="windows">
+            <button type="button" id="win-all" data-win="all" aria-pressed="true">All</button>
+            <button type="button" id="win-thu" data-win="thu" aria-pressed="false">TNF</button>
+            <button type="button" id="win-early" data-win="early" aria-pressed="false">Sun early</button>
+            <button type="button" id="win-late" data-win="late" aria-pressed="false">Sun late</button>
+            <button type="button" id="win-snf" data-win="snf" aria-pressed="false">SNF</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="feed-main">
+        <div class="pending" id="pending">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; fill: none; stroke: var(--ink-2); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;"><circle cx="12" cy="12" r="9"></circle><path d="M12 7 V12 L15 14"></path></svg>
+          <span>Cowboys at Eagles (Mon 8:15 PM ET, DAL −4.5) ranks once final.</span>
+        </div>
+        <p class="empty" id="empty" hidden>No completed games in this window.</p>
+        <ol class="games" id="rows" aria-label="Games ranked by surprise"></ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= GIANTS – TEXANS -->
+<section class="section" id="nyg-hou" aria-labelledby="nyg-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label eyebrow">Worked example · the result</p>
+      <h2 id="nyg-h">Giants 27–21 Texans</h2>
+      <p>The biggest result surprise of the week: a double-digit underdog won in overtime.</p>
+    </div>
+    <div class="screen">
+      <div class="stack">
+        <div class="where">
+          <span class="label">NFL · Week 7</span>
+          <span>Sun Oct 25, 1:00 PM ET · NRG Stadium, Houston</span>
+        </div>
+        <section class="card score" aria-label="Final score">
+          <div class="score-row won"><span class="ab">NYG</span><span class="nm">New York Giants</span><span class="pts">27</span></div>
+          <div class="score-row"><span class="ab">HOU</span><span class="nm">Houston Texans</span><span class="pts">21</span></div>
+          <div class="label">Final/OT</div>
+        </section>
+        <section class="card" aria-label="Result surprise">
+          <div class="label">Result surprise · #1 of 13 this week</div>
+          <div class="hero-num"><b>2.35</b><span>bits</span></div>
+          <div class="gauge">
+            <div class="track" aria-hidden="true"><i class="fill-hit" style="width: 14.7%;"></i></div>
+            <div class="gauge-scale" aria-hidden="true"><span>0</span><span>16 bits</span></div>
+          </div>
+          <p style="margin-top: 0.625rem;">A 1-in-5.1 outcome, between calling 2 and 3 fair coin flips in a row.</p>
+        </section>
+        <section class="card" aria-labelledby="nyg-line-h">
+          <h3 id="nyg-line-h">The pregame line</h3>
+          <div class="prices">
+            <div>Giants +390 · Texans −520</div>
+            <div>Spread HOU −10 · total 43.5</div>
+          </div>
+          <div class="strip" aria-hidden="true">
+            <i class="hit" style="flex: 19.6 1 0px;"></i><i style="flex: 80.4 1 0px;"></i>
+          </div>
+          <div class="outcomes outcomes-2">
+            <div><div class="key"><span class="sw hit"></span>Giants · happened</div><div class="pct">19.6%</div></div>
+            <div><div class="key"><span class="sw"></span>Texans</div><div class="pct">80.4%</div></div>
+          </div>
+          <p style="margin-top: 0.75rem; font-size: 0.8125rem;">The two prices imply 104.3%. The extra 4.3% is the book’s margin, removed by scaling to 100%. This line’s expected surprise (its entropy) is <span class="mono ink">0.71 bits</span>.</p>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="card" aria-labelledby="nyg-what-h">
+          <h3 id="nyg-what-h">What happened</h3>
+          <p style="margin-top: 0.5rem;">The Giants won 27–21 in overtime. Once the result is known, the market’s 19.6% collapses to certainty, so the Bayesian surprise equals the surprisal:</p>
+          <div class="well formula">−log₂ p(Giants win)<br>= −log₂ 0.196<br>= 2.35 bits</div>
+          <p style="margin-top: 0.625rem;">That is 1.64 bits above what this line expected.</p>
+        </section>
+        <section class="card" aria-labelledby="nyg-margin-h">
+          <div class="card-top">
+            <h3 id="nyg-margin-h">The margin</h3>
+            <span class="mono">2.08 bits</span>
+          </div>
+          <div class="legend">
+            <span><span class="swatch-exp"></span>Line’s expectation: HOU by 10, σ 13.5</span>
+            <span><span class="tick-hit"></span>Final: NYG by 6</span>
+          </div>
+          <svg class="chart" viewBox="0 0 326 176" font-size="11" role="img" aria-label="Normal curve of likely Giants margins centered on Houston by 10 with a 13.5-point spread. The final, Giants by 6, sits 1.2 standard deviations from the expectation.">
+<g transform="translate(0 16)">
+<path class="area" d="M16.0,126 L16.0,125.1 L20.9,124.8 L25.8,124.4 L30.7,123.8 L35.6,123.1 L40.5,122.2 L45.4,121.1 L50.3,119.7 L55.2,118.0 L60.1,115.9 L65.0,113.5 L69.9,110.6 L74.8,107.2 L79.7,103.3 L84.6,99.0 L89.5,94.1 L94.4,88.8 L99.3,83.0 L104.2,76.9 L109.1,70.4 L114.0,63.9 L118.9,57.2 L123.8,50.7 L128.7,44.4 L133.6,38.5 L138.5,33.2 L143.4,28.7 L148.3,25.0 L153.2,22.2 L158.1,20.6 L163.0,20.0 L167.9,20.6 L172.8,22.2 L177.7,25.0 L182.6,28.7 L187.5,33.2 L192.4,38.5 L197.3,44.4 L202.2,50.7 L207.1,57.2 L212.0,63.9 L216.9,70.4 L221.8,76.9 L226.7,83.0 L231.6,88.8 L236.5,94.1 L241.4,99.0 L246.3,103.3 L251.2,107.2 L256.1,110.6 L261.0,113.5 L265.9,115.9 L270.8,118.0 L275.7,119.7 L280.6,121.1 L285.5,122.2 L290.4,123.1 L295.3,123.8 L300.2,124.4 L305.1,124.8 L310.0,125.1 L310.0,126 Z"></path>
+<path class="curve" d="M16.0,125.1 L20.9,124.8 L25.8,124.4 L30.7,123.8 L35.6,123.1 L40.5,122.2 L45.4,121.1 L50.3,119.7 L55.2,118.0 L60.1,115.9 L65.0,113.5 L69.9,110.6 L74.8,107.2 L79.7,103.3 L84.6,99.0 L89.5,94.1 L94.4,88.8 L99.3,83.0 L104.2,76.9 L109.1,70.4 L114.0,63.9 L118.9,57.2 L123.8,50.7 L128.7,44.4 L133.6,38.5 L138.5,33.2 L143.4,28.7 L148.3,25.0 L153.2,22.2 L158.1,20.6 L163.0,20.0 L167.9,20.6 L172.8,22.2 L177.7,25.0 L182.6,28.7 L187.5,33.2 L192.4,38.5 L197.3,44.4 L202.2,50.7 L207.1,57.2 L212.0,63.9 L216.9,70.4 L221.8,76.9 L226.7,83.0 L231.6,88.8 L236.5,94.1 L241.4,99.0 L246.3,103.3 L251.2,107.2 L256.1,110.6 L261.0,113.5 L265.9,115.9 L270.8,118.0 L275.7,119.7 L280.6,121.1 L285.5,122.2 L290.4,123.1 L295.3,123.8 L300.2,124.4 L305.1,124.8 L310.0,125.1"></path>
+<line class="axis" x1="16" y1="126" x2="310" y2="126"></line>
+<line class="final" x1="219.2" y1="2" x2="219.2" y2="126"></line>
+<circle class="dot" cx="219.2" cy="126" r="5"></circle>
+<text class="on" x="225.2" y="56">final NYG +6</text>
+</g>
+<line class="bracket" x1="163.0" y1="18" x2="219.2" y2="18"></line>
+<line class="bracket" x1="163.0" y1="18" x2="163.0" y2="26"></line>
+<text class="mid on" x="191.1" y="12">off by 16 pts = 1.2σ</text>
+<text class="mid" x="40.1" y="158">−45</text>
+<text class="mid" x="92.7" y="158">−30</text>
+<text class="mid" x="145.4" y="158">−15</text>
+<text class="mid" x="198.1" y="158">0</text>
+<text class="mid" x="250.8" y="158">+15</text>
+<text class="mid" x="303.5" y="158">+30</text>
+</svg>
+          <div class="axis-cap">Giants margin, points</div>
+          <p style="margin-top: 0.75rem;">NFL finals scatter around the spread with an SD of about 13.5 points. Missing it by 16 or more happens about 24% of the time, so the margin surprise is 2.08 bits, the third largest this week.</p>
+        </section>
+        <section class="ranks" aria-label="Rank">
+          <div class="card"><b>#1<small> of 13</small></b><p>by result</p></div>
+          <div class="card"><b>#3<small> of 13</small></b><p>by margin</p></div>
+        </section>
+        <p class="source">Line: VegasInsider consensus, page updated Sun Oct 25, 11:42 PM ET. Final score: Sportradar.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= BUCCANEERS – PANTHERS -->
+<section class="section" id="tb-car" aria-labelledby="tb-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label eyebrow">Worked example · the margin</p>
+      <h2 id="tb-h">Buccaneers 43–13 Panthers</h2>
+      <p>The biggest margin surprise of the week: a small road underdog won by 30.</p>
+    </div>
+    <div class="screen">
+      <div class="stack">
+        <div class="where">
+          <span class="label">NFL · Week 7</span>
+          <span>Sun Oct 25, 1:00 PM ET · Bank of America Stadium, Charlotte</span>
+        </div>
+        <section class="card score" aria-label="Final score">
+          <div class="score-row won"><span class="ab">TB</span><span class="nm">Tampa Bay Buccaneers</span><span class="pts">43</span></div>
+          <div class="score-row"><span class="ab">CAR</span><span class="nm">Carolina Panthers</span><span class="pts">13</span></div>
+          <div class="label">Final</div>
+        </section>
+        <section class="card" aria-label="Margin surprise">
+          <div class="label">Margin surprise · #1 of 13 this week</div>
+          <div class="hero-num"><b>6.11</b><span>bits</span></div>
+          <div class="gauge">
+            <div class="track" aria-hidden="true"><i class="fill-hit" style="width: 38.2%;"></i></div>
+            <div class="gauge-scale" aria-hidden="true"><span>0</span><span>16 bits</span></div>
+          </div>
+          <p style="margin-top: 0.625rem;">The result itself was a mild upset (1.34 bits): Tampa Bay was a 3-point underdog. The size of the win is the story.</p>
+        </section>
+        <section class="card" aria-labelledby="tb-line-h">
+          <h3 id="tb-line-h">The pregame line</h3>
+          <div class="prices">
+            <div>Buccaneers +142 · Panthers −170</div>
+            <div>Spread CAR −3 · total 44.5</div>
+          </div>
+          <div class="strip" aria-hidden="true">
+            <i class="hit" style="flex: 39.6 1 0px;"></i><i style="flex: 60.4 1 0px;"></i>
+          </div>
+          <div class="outcomes outcomes-2">
+            <div><div class="key"><span class="sw hit"></span>Buccaneers · happened</div><div class="pct">39.6%</div></div>
+            <div><div class="key"><span class="sw"></span>Panthers</div><div class="pct">60.4%</div></div>
+          </div>
+          <p style="margin-top: 0.75rem; font-size: 0.8125rem;">The two prices imply 104.3%; the 4.3% book margin is removed. The total missed too: 56 points against a line of 44.5.</p>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="card" aria-labelledby="tb-margin-h">
+          <div class="card-top">
+            <h3 id="tb-margin-h">The margin</h3>
+            <span class="mono">6.11 bits</span>
+          </div>
+          <div class="legend">
+            <span><span class="swatch-exp"></span>Line’s expectation: CAR by 3, σ 13.5</span>
+            <span><span class="tick-hit"></span>Final: TB by 30</span>
+          </div>
+          <svg class="chart" viewBox="0 0 326 176" font-size="11" role="img" aria-label="Normal curve of likely Buccaneers margins centered on Carolina by 3 with a 13.5-point spread. The final, Tampa Bay by 30, sits 2.4 standard deviations out.">
+<g transform="translate(0 16)">
+<path class="area" d="M16.0,126 L16.0,125.1 L20.9,124.8 L25.8,124.4 L30.7,123.8 L35.6,123.1 L40.5,122.2 L45.4,121.1 L50.3,119.7 L55.2,118.0 L60.1,115.9 L65.0,113.5 L69.9,110.6 L74.8,107.2 L79.7,103.3 L84.6,99.0 L89.5,94.1 L94.4,88.8 L99.3,83.0 L104.2,76.9 L109.1,70.4 L114.0,63.9 L118.9,57.2 L123.8,50.7 L128.7,44.4 L133.6,38.5 L138.5,33.2 L143.4,28.7 L148.3,25.0 L153.2,22.2 L158.1,20.6 L163.0,20.0 L167.9,20.6 L172.8,22.2 L177.7,25.0 L182.6,28.7 L187.5,33.2 L192.4,38.5 L197.3,44.4 L202.2,50.7 L207.1,57.2 L212.0,63.9 L216.9,70.4 L221.8,76.9 L226.7,83.0 L231.6,88.8 L236.5,94.1 L241.4,99.0 L246.3,103.3 L251.2,107.2 L256.1,110.6 L261.0,113.5 L265.9,115.9 L270.8,118.0 L275.7,119.7 L280.6,121.1 L285.5,122.2 L290.4,123.1 L295.3,123.8 L300.2,124.4 L305.1,124.8 L310.0,125.1 L310.0,126 Z"></path>
+<path class="curve" d="M16.0,125.1 L20.9,124.8 L25.8,124.4 L30.7,123.8 L35.6,123.1 L40.5,122.2 L45.4,121.1 L50.3,119.7 L55.2,118.0 L60.1,115.9 L65.0,113.5 L69.9,110.6 L74.8,107.2 L79.7,103.3 L84.6,99.0 L89.5,94.1 L94.4,88.8 L99.3,83.0 L104.2,76.9 L109.1,70.4 L114.0,63.9 L118.9,57.2 L123.8,50.7 L128.7,44.4 L133.6,38.5 L138.5,33.2 L143.4,28.7 L148.3,25.0 L153.2,22.2 L158.1,20.6 L163.0,20.0 L167.9,20.6 L172.8,22.2 L177.7,25.0 L182.6,28.7 L187.5,33.2 L192.4,38.5 L197.3,44.4 L202.2,50.7 L207.1,57.2 L212.0,63.9 L216.9,70.4 L221.8,76.9 L226.7,83.0 L231.6,88.8 L236.5,94.1 L241.4,99.0 L246.3,103.3 L251.2,107.2 L256.1,110.6 L261.0,113.5 L265.9,115.9 L270.8,118.0 L275.7,119.7 L280.6,121.1 L285.5,122.2 L290.4,123.1 L295.3,123.8 L300.2,124.4 L305.1,124.8 L310.0,125.1"></path>
+<line class="axis" x1="16" y1="126" x2="310" y2="126"></line>
+<line class="final" x1="278.9" y1="2" x2="278.9" y2="126"></line>
+<circle class="dot" cx="278.9" cy="126" r="5"></circle>
+<text class="end on" x="272.9" y="33">final TB +30</text>
+</g>
+<line class="bracket" x1="163.0" y1="18" x2="278.9" y2="18"></line>
+<line class="bracket" x1="163.0" y1="18" x2="163.0" y2="26"></line>
+<text class="mid on" x="221.0" y="12">off by 33 pts = 2.4σ</text>
+<text class="mid" x="68.2" y="158">−30</text>
+<text class="mid" x="120.8" y="158">−15</text>
+<text class="mid" x="173.5" y="158">0</text>
+<text class="mid" x="226.2" y="158">+15</text>
+<text class="mid" x="278.9" y="158">+30</text>
+</svg>
+          <div class="axis-cap">Buccaneers margin, points</div>
+          <p style="margin-top: 0.75rem;">NFL finals scatter around the spread with an SD of about 13.5 points. Missing it by 33 or more happens about once in <span class="mono ink">69</span> games, so the margin surprise is −log₂ of that chance: 6.11 bits.</p>
+        </section>
+        <section class="card" aria-labelledby="tb-move-h">
+          <h3 id="tb-move-h">How much should it move you?</h3>
+          <p style="margin-top: 0.5rem;">Treat the line as a prior on the true gap between these teams, then update on the 30-point final.</p>
+          <div class="legend">
+            <span><span class="solid-exp"></span>Before: CAR +3.0 ± 3.0</span>
+            <span><span class="solid-hit"></span>After: CAR +1.4 ± 2.9</span>
+          </div>
+          <svg class="chart" viewBox="0 0 326 132" font-size="11" role="img" aria-label="Two bell curves for the true Buccaneers edge: before the game centered on Carolina by 3, after the game centered on Carolina by 1.4, nearly the same width.">
+<line class="axis" x1="16" y1="104" x2="310" y2="104"></line>
+<path class="curve" d="M16.0,103.8 L22.1,103.7 L28.2,103.5 L34.4,103.1 L40.5,102.6 L46.6,101.9 L52.7,100.8 L58.9,99.3 L65.0,97.2 L71.1,94.4 L77.2,90.9 L83.4,86.4 L89.5,81.1 L95.6,74.8 L101.7,67.7 L107.9,60.0 L114.0,52.0 L120.1,43.9 L126.3,36.3 L132.4,29.7 L138.5,24.3 L144.6,20.6 L150.8,18.8 L156.9,19.1 L163.0,21.5 L169.1,25.8 L175.2,31.6 L181.4,38.6 L187.5,46.4 L193.6,54.4 L199.8,62.4 L205.9,69.9 L212.0,76.8 L218.1,82.8 L224.2,87.9 L230.4,92.0 L236.5,95.3 L242.6,97.9 L248.8,99.8 L254.9,101.2 L261.0,102.1 L267.1,102.8 L273.2,103.3 L279.4,103.5 L285.5,103.7 L291.6,103.8 L297.8,103.9 L303.9,104.0 L310.0,104.0"></path>
+<path class="curve hit" d="M16.0,104.0 L22.1,104.0 L28.2,103.9 L34.4,103.9 L40.5,103.8 L46.6,103.6 L52.7,103.4 L58.9,103.0 L65.0,102.4 L71.1,101.5 L77.2,100.3 L83.4,98.5 L89.5,96.1 L95.6,92.9 L101.7,88.8 L107.9,83.7 L114.0,77.7 L120.1,70.7 L126.3,62.9 L132.4,54.6 L138.5,46.1 L144.6,37.9 L150.8,30.4 L156.9,24.2 L163.0,19.6 L169.1,17.1 L175.2,16.8 L181.4,18.6 L187.5,22.6 L193.6,28.4 L199.8,35.5 L205.9,43.5 L212.0,52.0 L218.1,60.4 L224.2,68.4 L230.4,75.6 L236.5,82.0 L242.6,87.3 L248.8,91.7 L254.9,95.2 L261.0,97.8 L267.1,99.8 L273.2,101.2 L279.4,102.2 L285.5,102.9 L291.6,103.3 L297.8,103.6 L303.9,103.8 L310.0,103.9"></path>
+<text class="end sans" x="100" y="62" font-size="12" style="fill: var(--ink-2);">before</text>
+<text class="on sans" x="225" y="51" font-size="12">after</text>
+<text class="mid" x="61.6" y="120">−10</text>
+<text class="mid" x="126.8" y="120">−5</text>
+<text class="mid" x="192.0" y="120">0</text>
+<text class="mid" x="257.2" y="120">+5</text>
+</svg>
+          <div class="axis-cap">True Buccaneers edge over the Panthers, points</div>
+          <div class="tiles">
+            <div class="well"><b>+1.6</b><span>pts shift toward TB</span></div>
+            <div class="well"><b>0.19</b><span>bits of Bayesian surprise</span></div>
+          </div>
+          <p style="margin-top: 0.75rem;">Surprisal says how unlikely the result was (6.11 bits). Bayesian surprise, KL(after ‖ before), says how much it should change your beliefs. One game is noisy (σ ≈ 13.5) next to how well the market already knew these teams (τ = 3, a placeholder prior), so even a 30-point rout moves the true gap only 1.6 points.</p>
+        </section>
+        <section class="ranks" aria-label="Rank">
+          <div class="card"><b>#1<small> of 13</small></b><p>by margin</p></div>
+          <div class="card"><b>#3<small> of 13</small></b><p>by result</p></div>
+        </section>
+        <p class="source">Line: VegasInsider consensus, page updated Sun Oct 25, 11:42 PM ET. Final score: Sportradar.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= METHOD -->
+<section class="section" id="method" aria-labelledby="method-h">
+  <div class="wrap">
+    <div class="method">
+      <div class="sec-head" style="margin-bottom: 0.5rem;">
+        <p class="label eyebrow">Method</p>
+        <h2 id="method-h">How scoring works</h2>
+        <p>Every final gets two scores, both in bits. Bits have no units, so a moneyline upset and a blowout against the spread land on the same scale.</p>
+      </div>
+
+      <section class="card" aria-labelledby="m1">
+        <div class="step-n">01</div>
+        <h3 id="m1">Start from the line</h3>
+        <p>Turn each price into a probability, then strip the book’s margin. Thursday’s Patriots–Bears line:</p>
+        <div class="well">
+          <div class="kv"><span>Bears −148</span><span>148 ÷ 248 = 59.7%</span></div>
+          <div class="kv"><span>Patriots +124</span><span>100 ÷ 224 = 44.6%</span></div>
+          <div class="kv dim"><span>sum</span><span>104.3% → scale to 100%</span></div>
+          <div class="kv strong"><span>no-vig</span><span>Bears 57.2% · Pats 42.8%</span></div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="m2">
+        <div class="step-n">02</div>
+        <h3 id="m2">Result surprise</h3>
+        <div class="well big">surprise = −log₂ p(what happened)</div>
+        <p style="margin-top: 0.625rem;">The Bears won: −log₂ 0.572 = <span class="mono ink">0.81 bits</span>. A Patriots win would have scored 1.22. Each halving of the probability adds one bit:</p>
+        <div class="halvings">
+          <div><span>50%</span><b>1.00</b></div>
+          <div><span>25%</span><b>2.00</b></div>
+          <div><span>10%</span><b>3.32</b></div>
+          <div><span>5%</span><b>4.32</b></div>
+          <div><span>1%</span><b>6.64</b></div>
+        </div>
+        <div class="aside-box">
+          <div class="label">Why this is Bayesian surprise</div>
+          <p>Bayesian surprise is the KL divergence from your beliefs before to your beliefs after. Once the final settles who won, “after” is certain, and that KL collapses to −log₂ p. For win/loss, the two are the same number.</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="m3">
+        <div class="step-n">03</div>
+        <h3 id="m3">Margin surprise</h3>
+        <p>The spread sets an expected margin, and NFL finals scatter around it with a steady SD of about 13.5 points (Stern, 1991, and later replications).</p>
+        <div class="well big">margin = −log₂ P(miss ≥ observed)</div>
+        <p style="margin-top: 0.625rem;">Panthers −3, lost by 30: a 2.4σ miss with P ≈ 1.5%, so <span class="mono ink">6.11 bits</span>. This lens catches blowouts that the result lens scores as only mildly surprising.</p>
+      </section>
+
+      <section class="card" aria-labelledby="m4">
+        <div class="step-n">04</div>
+        <h3 id="m4">Chaos index</h3>
+        <p>A line’s expected surprise is its entropy: what a calibrated market should average. Divide what happened by what the lines expected. For the 13 finals of Week 7:</p>
+        <div class="well">
+          <div class="kv"><span>result</span><span>12.7 ÷ 12.1 bits = <b>1.05×</b></span></div>
+          <div class="kv"><span>margin</span><span>17.5 ÷ 18.8 bits = <b>0.93×</b></span></div>
+        </div>
+        <p style="margin-top: 0.625rem;">For margins the expectation is 1.44 bits a game under a normal model: if the line is calibrated, the chance of a bigger miss is uniform between 0 and 1, and the average of −log₂ of a uniform draw is 1/ln 2. By both measures, Week 7 went about as the lines expected. A few games carried most of the surprise.</p>
+      </section>
+
+      <section class="card" aria-labelledby="m5">
+        <div class="step-n">05</div>
+        <h3 id="m5">Updating team strength</h3>
+        <p>Add a prior on each matchup’s true gap (τ) next to game-to-game noise (σ), and the KL update measures how much a final should change your view of the teams. Within one sport it ranks games exactly like the margin lens. The size depends on τ, which you would fit from how lines move week to week.</p>
+        <p style="margin-top: 0.625rem;">With τ = 3 and σ = 13.5, the Buccaneers’ rout moved the gap 1.6 points: <span class="mono ink">0.19 bits</span>. Single games are weak evidence.</p>
+      </section>
+
+      <section class="card note" aria-labelledby="m6">
+        <div class="label" id="m6">About this page’s data</div>
+        <p>Finals: Sportradar, read Mon Oct 26, 8:00 AM ET. Lines: the VegasInsider consensus for each game (moneylines, spread and total), from its Week 7 odds page as updated Sun Oct 25, 11:42 PM ET. The consensus is close to, but not exactly, a true closing line. Cowboys at Eagles on Monday night is left out until it is final.</p>
+      </section>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Surprisal is a design concept, not a live product. NFL Week 7, 2026 · data as of Mon Oct 26, 8:00 AM ET.</p>
+    <p>The page’s code, text and charts are free software under the <a href="LICENSE.txt">GPL-3.0-or-later</a>. Scores and betting lines are facts and are not covered. Fonts: SIL Open Font License 1.1.</p>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // NFL Week 7 finals (Sportradar) vs. VegasInsider consensus lines; scores computed offline.
+  // rb/mb = result/margin surprise bits at full precision (rbs/mbs = display, rounded once),
+  // H = line entropy, mx = expected margin bits, z = miss in sigma units (zs = display),
+  // fw = favorite won, pf = favorite's no-vig chance.
+  const G = [
+    {"tag":"TNF","day":"Thu Oct 22","note":"","win":"thu","t":["NE","Patriots",24,0],"b":["CHI","Bears",30,1],"line":"NE +124 · CHI −148 · CHI −3","seg":[["NE",42.8,0],["CHI",57.2,1]],"cap":"Market gave CHI 57.2% · 1 in 1.7","rb":0.805763,"rbs":"0.81","mb":0.279037,"mbs":"0.28","H":0.984965,"mx":1.442695,"z":0.2222,"zs":"0.2","exp":"CHI by 3","act":"CHI by 6","fw":1,"pf":0.5721,"href":""},
+    {"tag":"9:30 AM","day":"Sun Oct 25","note":"Paris","win":"early","t":["PIT","Steelers",16,1],"b":["NO","Saints",10,0],"line":"PIT −162 · NO +136 · PIT −3","seg":[["PIT",59.3,1],["NO",40.7,0]],"cap":"Market gave PIT 59.3% · 1 in 1.7","rb":0.752997,"rbs":"0.75","mb":0.279037,"mbs":"0.28","H":0.974697,"mx":1.442695,"z":0.2222,"zs":"0.2","exp":"PIT by 3","act":"PIT by 6","fw":1,"pf":0.5934,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["IND","Colts",10,0],"b":["MIN","Vikings",16,1],"line":"IND +270 · MIN −340 · MIN −6.5","seg":[["IND",25.9,0],["MIN",74.1,1]],"cap":"Market gave MIN 74.1% · 1 in 1.3","rb":0.432705,"rbs":"0.43","mb":0.043266,"mbs":"0.04","H":0.825428,"mx":1.442695,"z":0.037,"zs":"0.0","exp":"MIN by 6.5","act":"MIN by 6","fw":1,"pf":0.7409,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["MIA","Dolphins",28,1],"b":["NYJ","Jets",25,0],"line":"MIA +180 · NYJ −218 · NYJ −3.5","seg":[["MIA",34.3,1],["NYJ",65.7,0]],"cap":"Market gave MIA 34.3% · 1 in 2.9","rb":1.54572,"rbs":"1.55","mb":0.666177,"mbs":"0.67","H":0.927214,"mx":1.442695,"z":0.4815,"zs":"0.5","exp":"NYJ by 3.5","act":"MIA by 3","fw":0,"pf":0.6575,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["CIN","Bengals",35,1],"b":["BAL","Ravens",13,0],"line":"CIN −162 · BAL +136 · CIN −3","seg":[["CIN",59.3,1],["BAL",40.7,0]],"cap":"Market gave CIN 59.3% · 1 in 1.7","rb":0.752997,"rbs":"0.75","mb":2.650122,"mbs":"2.65","H":0.974697,"mx":1.442695,"z":1.4074,"zs":"1.4","exp":"CIN by 3","act":"CIN by 22","fw":1,"pf":0.5934,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["CLE","Browns",27,1],"b":["TEN","Titans",24,0],"line":"CLE −135 · TEN +114 · CLE −2.5","seg":[["CLE",55.1,1],["TEN",44.9,0]],"cap":"Market gave CLE 55.1% · 1 in 1.8","rb":0.858721,"rbs":"0.86","mb":0.043266,"mbs":"0.04","H":0.992351,"mx":1.442695,"z":0.037,"zs":"0.0","exp":"CLE by 2.5","act":"CLE by 3","fw":1,"pf":0.5514,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["TB","Buccaneers",43,1],"b":["CAR","Panthers",13,0],"line":"TB +142 · CAR −170 · CAR −3","seg":[["TB",39.6,1],["CAR",60.4,0]],"cap":"Market gave TB 39.6% · 1 in 2.5","rb":1.335543,"rbs":"1.34","mb":6.107053,"mbs":"6.11","H":0.96871,"mx":1.442695,"z":2.4444,"zs":"2.4","exp":"CAR by 3","act":"TB by 30","fw":0,"pf":0.6038,"href":"#tb-car"},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"","win":"early","t":["SF","49ers",20,0],"b":["ATL","Falcons",29,1],"line":"SF −142 · ATL +120 · SF −2.5","seg":[["SF",56.3,0],["ATL",43.7,1]],"cap":"Market gave ATL 43.7% · 1 in 2.3","rb":1.19592,"rbs":"1.20","mb":1.342648,"mbs":"1.34","H":0.988337,"mx":1.442695,"z":0.8519,"zs":"0.9","exp":"SF by 2.5","act":"ATL by 9","fw":0,"pf":0.5635,"href":""},
+    {"tag":"1 PM","day":"Sun Oct 25","note":"OT","win":"early","t":["NYG","Giants",27,1],"b":["HOU","Texans",21,0],"line":"NYG +390 · HOU −520 · HOU −10","seg":[["NYG",19.6,1],["HOU",80.4,0]],"cap":"Market gave NYG 19.6% · 1 in 5.1","rb":2.353232,"rbs":"2.35","mb":2.083482,"mbs":"2.08","H":0.713259,"mx":1.442695,"z":1.1852,"zs":"1.2","exp":"HOU by 10","act":"NYG by 6","fw":0,"pf":0.8043,"href":"#nyg-hou"},
+    {"tag":"4:05 PM","day":"Sun Oct 25","note":"","win":"late","t":["DEN","Broncos",30,1],"b":["ARI","Cardinals",16,0],"line":"DEN −238 · ARI +195 · DEN −4.5","seg":[["DEN",67.5,1],["ARI",32.5,0]],"cap":"Market gave DEN 67.5% · 1 in 1.5","rb":0.566974,"rbs":"0.57","mb":1.054041,"mbs":"1.05","H":0.909703,"mx":1.442695,"z":0.7037,"zs":"0.7","exp":"DEN by 4.5","act":"DEN by 14","fw":1,"pf":0.675,"href":""},
+    {"tag":"4:25 PM","day":"Sun Oct 25","note":"","win":"late","t":["LAR","Rams",35,1],"b":["LV","Raiders",21,0],"line":"LAR −192 · LV +160 · LAR −3.5","seg":[["LAR",63.1,1],["LV",36.9,0]],"cap":"Market gave LAR 63.1% · 1 in 1.6","rb":0.664424,"rbs":"0.66","mb":1.195285,"mbs":"1.20","H":0.949947,"mx":1.442695,"z":0.7778,"zs":"0.8","exp":"LAR by 3.5","act":"LAR by 14","fw":1,"pf":0.6309,"href":""},
+    {"tag":"4:25 PM","day":"Sun Oct 25","note":"","win":"late","t":["GB","Packers",17,0],"b":["DET","Lions",20,1],"line":"GB +160 · DET −192 · DET −3.5","seg":[["GB",36.9,0],["DET",63.1,1]],"cap":"Market gave DET 63.1% · 1 in 1.6","rb":0.664424,"rbs":"0.66","mb":0.043266,"mbs":"0.04","H":0.949947,"mx":1.442695,"z":0.037,"zs":"0.0","exp":"DET by 3.5","act":"DET by 3","fw":1,"pf":0.6309,"href":""},
+    {"tag":"SNF","day":"Sun Oct 25","note":"","win":"snf","t":["KC","Chiefs",3,0],"b":["SEA","Seahawks",20,1],"line":"KC +136 · SEA −162 · SEA −3","seg":[["KC",40.7,0],["SEA",59.3,1]],"cap":"Market gave SEA 59.3% · 1 in 1.7","rb":0.752997,"rbs":"0.75","mb":1.738319,"mbs":"1.74","H":0.974697,"mx":1.442695,"z":1.037,"zs":"1.0","exp":"SEA by 3","act":"SEA by 17","fw":1,"pf":0.5934,"href":""}
+  ];
+  // <pure>
+  const WINDOWS = { all: 'All', thu: 'TNF', early: 'Sun early', late: 'Sun late', snf: 'SNF' };
+  const total = (list, key) => list.reduce((s, g) => s + g[key], 0);
+
+  function view(st) {
+    const isR = st.lens !== 'margin';
+    const pool = G.filter((g) => st.win === 'all' || g.win === st.win);
+    const key = isR ? 'rb' : 'mb';
+    const sorted = pool.slice().sort((a, b) => b[key] - a[key]);
+    const n = pool.length;
+    const real = total(pool, key);
+    const expd = total(pool, isR ? 'H' : 'mx');
+    const ratio = expd > 0 ? real / expd : 0;
+    const hi = Math.max(real, expd) || 1;
+    let word = 'about what the lines implied';
+    if (ratio > 1.05) word = isR ? 'more upsets than the lines implied' : 'wilder margins than the lines implied';
+    if (ratio < 0.95) word = isR ? 'chalkier than the lines implied' : 'tighter margins than the lines implied';
+    const fw = total(pool, 'fw'), pf = total(pool, 'pf');
+    const avgZ = n ? total(pool, 'z') / n : 0;
+    let fact = isR
+      ? 'Favorites won ' + fw + ' of ' + n + ' (lines expected ' + pf.toFixed(1) + ')'
+      : 'Average miss ' + avgZ.toFixed(2) + 'σ; a well-calibrated line averages about 0.8σ';
+    if (n === 0) fact = '';
+    const rows = sorted.map((g, i) => ({
+      rank: i + 1, tag: g.tag, day: g.day + (g.note ? ' · ' + g.note : ''), line: g.line,
+      big: isR ? g.rbs : g.mbs,
+      otherLabel: isR ? 'margin' : 'result',
+      other: isR ? g.mbs : g.rbs,
+      teams: [g.t, g.b],
+      segs: g.seg, cap: g.cap,
+      zW: Math.min(g.z / 4, 1) * 100, zTxt: g.zs + 'σ off',
+      mcap: 'Expected ' + g.exp + ' · final ' + g.act,
+      href: g.href
+    }));
+    return {
+      isR, n, rows, fact,
+      chaosLabel: (isR ? 'RESULT CHAOS' : 'MARGIN CHAOS') + ' · WEEK 7' + (st.win === 'all' ? '' : ' · ' + WINDOWS[st.win].toUpperCase()),
+      nLabel: n + (n === 1 ? ' final' : ' finals'),
+      chaos: n ? ratio.toFixed(2) + '×' : '—',
+      chaosWord: n ? word : 'no completed games in this window',
+      realW: (real / hi) * 100, expW: (expd / hi) * 100,
+      realTxt: real.toFixed(1) + ' bits', expTxt: expd.toFixed(1) + ' bits',
+      hint: isR ? 'Bits = −log₂ of the market’s no-vig chance of what happened.'
+                : 'Bits = −log₂ of the chance of missing the spread by this much or more.',
+      pending: st.win === 'all'
+    };
+  }
+  // </pure>
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const $ = (id) => document.getElementById(id);
+  const state = { lens: 'result', win: 'all' };
+  const chev = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;"><path d="M9 6 L15 12 L9 18"></path></svg>';
+
+  function gameHTML(r, isR) {
+    const team = (t) => '<div class="g-team' + (t[3] ? ' won' : '') + '"><span class="ab">' + esc(t[0]) + '</span><span class="nm">' + esc(t[1]) + '</span><span class="sc">' + esc(t[2]) + '</span></div>';
+    const lens = isR
+      ? '<div class="segs" aria-hidden="true">' + r.segs.map((s) => '<i' + (s[2] ? ' class="hit"' : '') + ' style="flex: ' + s[1] + ' 1 0px;"></i>').join('') + '</div><p class="g-cap">' + esc(r.cap) + '</p>'
+      : '<div class="zrow"><div class="ztrack" aria-hidden="true"><i style="width: ' + r.zW.toFixed(1) + '%;"></i><u style="left: 25%;"></u><u style="left: 50%;"></u><u style="left: 75%;"></u></div><span class="ztxt">' + esc(r.zTxt) + '</span></div><p class="g-cap">' + esc(r.mcap) + '</p>';
+    const link = r.href ? '<a class="g-link" href="' + r.href + '"><span>See the math</span>' + chev + '</a>' : '';
+    return '<li class="game"><div class="g-head"><span class="g-rank">#' + r.rank + '</span><span class="g-lg">' + esc(r.tag) + '</span><span class="g-day">' + esc(r.day) + '</span><span class="g-bits"><b>' + esc(r.big) + '</b><span>bits</span></span></div>'
+      + '<div class="g-teams">' + team(r.teams[0]) + team(r.teams[1]) + '</div>'
+      + '<div class="g-line"><span class="ln">' + esc(r.line) + '</span><span class="ot">' + r.otherLabel + ' ' + esc(r.other) + '</span></div>'
+      + lens + link + '</li>';
+  }
+
+  function render() {
+    const v = view(state);
+    $('chaos-label').textContent = v.chaosLabel;
+    $('n-label').textContent = v.nLabel;
+    $('chaos').textContent = v.chaos;
+    $('chaos-word').textContent = v.chaosWord;
+    $('real-bar').style.width = v.realW.toFixed(1) + '%';
+    $('exp-bar').style.width = v.expW.toFixed(1) + '%';
+    $('real-txt').textContent = v.realTxt;
+    $('exp-txt').textContent = v.expTxt;
+    $('fact').textContent = v.fact;
+    $('lens-hint').textContent = v.hint;
+    $('pending').hidden = !v.pending;
+    $('empty').hidden = v.n !== 0;
+    $('rows').innerHTML = v.rows.map((r) => gameHTML(r, v.isR)).join('');
+    document.querySelectorAll('#lenses button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lens === state.lens)));
+    document.querySelectorAll('#windows button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.win === state.win)));
+  }
+
+  $('lenses').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.lens = b.dataset.lens; render(); } });
+  $('windows').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.win = b.dataset.win; render(); } });
+  render();
+})();
+</script>
+</body>
+</html>
