@@ -2,8 +2,8 @@
 // (Chromium in the cloud container, WebKit in CI). Throws on the first failure.
 //
 // The page is the built app only: its source lives in Mark's vault. This walks a first study day
-// into the second. On the first card, the map icon opens the whole map with that card ringed and
-// nothing written on it, and the card is unchanged when the map closes. Then it checks the Map tree:
+// into the second. On the first card, the map icon opens the whole map with only that card filled
+// (one blue, no progress shown), ringed, and nothing written on it, and the card is unchanged when the map closes. Then it checks the Map tree:
 // every card drawn inside the frame, the legend agreeing with the drawn colours, and a tap on a
 // rectangle opening that card. Then the Map's JSON view: View JSON from that card lands on its node,
 // search opens the path to a node, and Save hands over the deck file, canonical and without progress.
@@ -219,6 +219,12 @@ async function mapSheet(page, hidden, where) {
   must(near.indexOf(Math.min(...near)) === hidden && near[hidden] < 2,
     `${where}: the ring is ${near[hidden].toFixed(1)}px from group ${hidden + 1}, nearest group ${near.indexOf(Math.min(...near)) + 1}`);
   must(g.text === '', `${where}: the map shows text: "${g.text.slice(0, 60)}"`);
+  // No progress: every other card and every link is drawn alike, and only this card is filled, in
+  // the same blue whatever its status (the top card is placing, the definition intro defining).
+  must(g.here === 1 && g.plain === 1295, `${where}: ${g.here} blue cards and ${g.plain} plain ones, not 1 and 1295`);
+  must(g.linkKinds.join() === 'pm-links--hidden', `${where}: links drawn as ${g.linkKinds.join()}`);
+  must(Math.hypot(g.hereAt.x - g.ring.x, g.hereAt.y - g.ring.y) < 2, `${where}: the blue card isn't the ringed one`);
+  must(g.hereFill === 'rgb(37, 99, 235)', `${where}: the card is filled ${g.hereFill}, not the blue`);
   must(!overlaps(g.zoom, g.svg), `${where}: the zoom buttons cover the map (${JSON.stringify(g.zoom)} over ${JSON.stringify(g.svg)})`);
   must(g.scroll[0] === 0 && g.scroll[1] === 0, `${where}: the map sheet scrolls by ${g.scroll}`);
   must(g.ctm < 1, `${where}: the svg's screen transform is off by ${g.ctm.toFixed(2)}px, so pinch and drag would miss`);
@@ -256,6 +262,11 @@ async function sheetGeometry(page) {
       ring: mid(d.querySelector('.pm-sel')),
       mid: mid(svg),
       groups,
+      here: d.querySelectorAll('rect.pm-n--here').length,
+      plain: d.querySelectorAll('rect.pm-n.pm-n--hidden').length,
+      linkKinds: [...new Set([...d.querySelectorAll('path.pm-links')].map((e) => [...e.classList].find((c) => c.startsWith('pm-links--'))))],
+      hereAt: d.querySelector('rect.pm-n--here') ? mid(d.querySelector('rect.pm-n--here')) : { x: NaN, y: NaN },
+      hereFill: d.querySelector('rect.pm-n--here') ? getComputedStyle(d.querySelector('rect.pm-n--here')).fill : 'none',
       text: bare.textContent.trim(),
       svg: box(svg),
       zoom: box(d.querySelector('.pm-zoom')),
